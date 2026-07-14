@@ -10,8 +10,9 @@ instructions, current worktree, and any existing design note in `scratch/`.
 
 - Acknowledge the current directive with the exact command in the session seed
   before editing.
-- Keep the design to this Task's one worktree and one PR. Do not select backlog
-  work, start another Task Session, or create a second worktree.
+- Keep the design to this Task's one worktree and ordered serial PRs.
+  Do not select backlog work, start another Task Session, or create a second
+  worktree. The Task may require several PRs.
 - Write or tighten the single Task design note only when the change is not yet
   computable. Preserve a clear existing design.
 - Resolve reversible ambiguity with the simpler path. Request a durable

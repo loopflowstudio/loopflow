@@ -162,7 +162,7 @@ struct WaveChatTranscriptTests {
     /// Decisions and reports are conversation; lifecycle churn is not.
     @Test func decisionsStayAndChurnGoes() {
         #expect(isConversational(childActivity(.decisionRequired)))
-        #expect(isConversational(childActivity(.pullRequestOpened)))
+        #expect(isConversational(childActivity(.prOpened)))
         #expect(isConversational(childActivity(.failed)))
         #expect(isConversational(childActivity(.completed)))
         #expect(!isConversational(childActivity(.stateChanged)))

@@ -208,7 +208,7 @@ fn child_activity_line(activity: &ChildControlActivity) -> Option<String> {
         ChildActivityKind::ControlUncertain
         | ChildActivityKind::DecisionRequired
         | ChildActivityKind::DecisionResolved
-        | ChildActivityKind::PullRequestOpened
+        | ChildActivityKind::PrOpened
         | ChildActivityKind::Completed
         | ChildActivityKind::Failed => {}
     }
@@ -455,7 +455,7 @@ mod tests {
 
         let opened = activity_turn_json(
             "turn-2",
-            "pull_request_opened",
+            "pr_opened",
             "Opened PR #877",
             "https://github.com/loopflowstudio/loopflow/pull/877",
         );

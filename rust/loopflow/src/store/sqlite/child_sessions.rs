@@ -28,7 +28,8 @@ use crate::session_context::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    PullRequestRef, TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+    AfterMerge, GithubPr, PrPhase, PrPublication, TaskEvent, TaskEventKind, TaskPr, TaskPrId,
+    TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 use super::SqliteStore;
@@ -37,28 +38,10 @@ impl SqliteStore {
     // Durable task sessions: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
-    pub fn insert_task_session(&self, session: &TaskSession) -> StoreResult<()> {
-        validate_task_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        validate_task_project_session(&conn, session)?;
-        let parameters = task_session_params(session);
-        conn.execute(
-            TASK_SESSION_INSERT,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        Ok(())
-    }
-
-    pub fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
-        validate_task_session(session)?;
+    pub fn insert_task_session(&self, session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project_session(&transaction, session)?;
-        let parameters = task_session_params(session);
-        transaction.execute(
-            TASK_SESSION_INSERT,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
+        insert_initial_task(&transaction, session, pr)?;
         transaction.commit()?;
         Ok(())
     }
@@ -66,18 +49,13 @@ impl SqliteStore {
     pub fn reserve_task_session_with_directive(
         &self,
         session: &TaskSession,
+        pr: &TaskPr,
         directive: &ChildDirective,
     ) -> StoreResult<()> {
-        validate_task_session(session)?;
         ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project_session(&transaction, session)?;
-        let parameters = task_session_params(session);
-        transaction.execute(
-            TASK_SESSION_INSERT,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
+        insert_initial_task(&transaction, session, pr)?;
         insert_child_directive(&transaction, directive)?;
         transaction.commit()?;
         Ok(())
@@ -95,6 +73,52 @@ impl SqliteStore {
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        Ok(())
+    }
+
+    pub fn complete_task_session(
+        &self,
+        session: &TaskSession,
+        skipped_pr: Option<&TaskPr>,
+    ) -> StoreResult<()> {
+        validate_task_session(session)?;
+        if session.status != TaskSessionStatus::Completed {
+            return Err(StoreError::InvalidData(
+                "Task completion transaction requires a Completed Session".to_string(),
+            ));
+        }
+        if let Some(pr) = skipped_pr {
+            validate_task_pr(pr)?;
+            if pr.task_session_id != session.id || pr.phase() != PrPhase::Working {
+                return Err(StoreError::InvalidData(
+                    "empty completion requires an unpublished Working Task PR".to_string(),
+                ));
+            }
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project_session(&transaction, session)?;
+        if let Some(pr) = skipped_pr {
+            if transaction.execute(
+                "DELETE FROM task_prs
+                 WHERE id=?1 AND task_session_id=?2
+                   AND publication_requested_at IS NULL
+                   AND merge_commit IS NULL AND abandoned_at IS NULL",
+                params![pr.id.as_str(), pr.task_session_id.as_str()],
+            )? == 0
+            {
+                return Err(StoreError::NotFound);
+            }
+        }
+        let parameters = task_session_params(session);
+        if transaction.execute(
+            TASK_SESSION_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -210,6 +234,118 @@ impl SqliteStore {
             }
         }
         Ok(sessions)
+    }
+
+    pub fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
+        validate_task_pr(pr)?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = update_task_pr(&conn, pr)?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn task_prs(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskPr>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "{TASK_PR_COLUMNS} WHERE task_session_id=?1 ORDER BY sequence"
+        ))?;
+        let rows = statement.query_map(params![session_id.as_str()], map_task_pr_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = format!(
+            "{TASK_PR_COLUMNS}
+             WHERE task_session_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL"
+        );
+        conn.query_row(&query, params![session_id.as_str()], map_task_pr_row)
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    pub fn settle_task_pr(&self, settled: &TaskPr, next: Option<&TaskPr>) -> StoreResult<()> {
+        validate_task_pr(settled)?;
+        if !settled.is_settled() {
+            return Err(StoreError::InvalidData(
+                "Task PR transition requires a settled PR".to_string(),
+            ));
+        }
+        if let Some(next) = next {
+            validate_task_pr(next)?;
+            if next.task_session_id != settled.task_session_id
+                || next.sequence != settled.sequence + 1
+                || next.phase() != PrPhase::Working
+            {
+                return Err(StoreError::InvalidData(
+                    "next Task PR must be the following Working PR for the same Task".to_string(),
+                ));
+            }
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        settle_task_pr_on(&transaction, settled)?;
+        if let Some(next) = next {
+            let existing = {
+                let query = format!("{TASK_PR_COLUMNS} WHERE task_session_id=?1 AND sequence=?2");
+                transaction
+                    .query_row(
+                        &query,
+                        params![next.task_session_id.as_str(), i64::from(next.sequence)],
+                        map_task_pr_row,
+                    )
+                    .optional()?
+            };
+            match existing {
+                Some(existing) if same_task_pr(&existing, next) => {}
+                Some(existing) => {
+                    return Err(StoreError::InvalidData(format!(
+                        "Task PR sequence {} already belongs to {}",
+                        next.sequence, existing.id
+                    )))
+                }
+                None => insert_task_pr(&transaction, next)?,
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn complete_task_session_after_pr(
+        &self,
+        session: &TaskSession,
+        pr: &TaskPr,
+    ) -> StoreResult<()> {
+        validate_task_session(session)?;
+        validate_task_pr(pr)?;
+        if session.status != TaskSessionStatus::Completed
+            || pr.task_session_id != session.id
+            || pr.phase() != PrPhase::Merged
+            || pr
+                .publication
+                .as_ref()
+                .is_none_or(|publication| publication.after_merge != AfterMerge::CompleteTask)
+        {
+            return Err(StoreError::InvalidData(
+                "Task completion after merge requires its merged CompleteTask PR".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project_session(&transaction, session)?;
+        settle_task_pr_on(&transaction, pr)?;
+        let parameters = task_session_params(session);
+        if transaction.execute(
+            TASK_SESSION_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn insert_child_command(&self, command: &ChildCommand) -> StoreResult<()> {
@@ -1223,6 +1359,33 @@ fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
+fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
+    pr.validate()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
+fn validate_initial_task_pr(session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
+    validate_task_pr(pr)?;
+    if pr.task_session_id != session.id || pr.sequence != 1 || pr.phase() != PrPhase::Working {
+        return Err(StoreError::InvalidData(
+            "Task Session requires its sequence-1 Working PR".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn insert_initial_task(conn: &Connection, session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
+    validate_task_session(session)?;
+    validate_initial_task_pr(session, pr)?;
+    validate_task_project_session(conn, session)?;
+    let parameters = task_session_params(session);
+    conn.execute(
+        TASK_SESSION_INSERT,
+        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+    )?;
+    insert_task_pr(conn, pr)
+}
+
 fn validate_task_project_session(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
     let owner = conn
         .query_row(
@@ -1255,25 +1418,25 @@ fn validate_project_session(session: &ProjectSession) -> StoreResult<()> {
 const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_prompt_context, wave_id,
-    status, status_reason, status_at, worktree, branch, base_commit,
+    status, status_reason, status_at, worktree, workspace_slug,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at, pm_snapshot_synced_at,
+    process_tmux_name, process_started_at, created_at, updated_at,
+    pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-    ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
+    ?28, ?29, ?30, ?31, ?32, ?33, ?34
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_prompt_context, wave_id,
-    status, status_reason, status_at, worktree, branch, base_commit,
+    status, status_reason, status_at, worktree, workspace_slug,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at, pm_snapshot_synced_at,
+    process_tmux_name, process_started_at, created_at, updated_at,
+    pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
@@ -1281,10 +1444,10 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_prompt_context, wave_id,
-    status, status_reason, status_at, worktree, branch, base_commit,
+    status, status_reason, status_at, worktree, workspace_slug,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at, pm_snapshot_synced_at,
+    process_tmux_name, process_started_at, created_at, updated_at,
+    pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
@@ -1293,17 +1456,27 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
     project_id=?6, project_slug=?7, project_name=?8, project_prompt_context=?9,
     wave_id=?10, status=?11, status_reason=?12, status_at=?13,
-    worktree=?14, branch=?15, base_commit=?16, agent=?17, provider=?18,
-    provider_session_id=?19, process_generation=?20, process_pid=?21,
-    process_tmux_name=?22, process_started_at=?23, pr_number=?24,
-    pr_url=?25, created_at=?26, updated_at=?27,
-    pm_snapshot_synced_at=?28, pm_writeback_json=?29,
-    project_session_id=?30,
-    current_directive_version=MAX(current_directive_version, ?31),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?32),
-    lf_bin=?33, db_path=?34, lf_home=?35,
-    abandon_requested_at=?36, abandon_reason=?37
+    worktree=?14, workspace_slug=?15, agent=?16, provider=?17,
+    provider_session_id=?18, process_generation=?19, process_pid=?20,
+    process_tmux_name=?21, process_started_at=?22,
+    created_at=?23, updated_at=?24,
+    pm_snapshot_synced_at=?25, pm_writeback_json=?26,
+    project_session_id=?27,
+    current_directive_version=MAX(current_directive_version, ?28),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?29),
+    lf_bin=?30, db_path=?31, lf_home=?32,
+    abandon_requested_at=?33, abandon_reason=?34
     WHERE id=?1";
+const TASK_PR_COLUMNS: &str = "SELECT
+    id, task_session_id, sequence, slug, branch, base_commit,
+    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    merge_commit, abandoned_at, created_at, updated_at
+    FROM task_prs";
+const TASK_PR_SELECT: &str = "SELECT
+    id, task_session_id, sequence, slug, branch, base_commit,
+    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    merge_commit, abandoned_at, created_at, updated_at
+    FROM task_prs WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
     claimed_by_generation, accepted_at, state, effect, error
@@ -1506,8 +1679,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.status_reason.clone()),
         Box::new(session.status_at.unix_timestamp()),
         Box::new(session.worktree.display().to_string()),
-        Box::new(session.branch.clone()),
-        Box::new(session.base_commit.clone()),
+        Box::new(session.workspace_slug.clone()),
         Box::new(session.agent.clone()),
         Box::new(session.provider.clone()),
         Box::new(session.provider_session_id.clone()),
@@ -1534,18 +1706,6 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
                 .latest_process
                 .as_ref()
                 .map(|process| process.started_at.unix_timestamp()),
-        ),
-        Box::new(
-            session
-                .pull_request
-                .as_ref()
-                .map(|pull_request| i64::from(pull_request.number)),
-        ),
-        Box::new(
-            session
-                .pull_request
-                .as_ref()
-                .map(|pull_request| pull_request.url.clone()),
         ),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
@@ -1590,6 +1750,103 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     ]
 }
 
+fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
+    validate_task_pr(pr)?;
+    let publication = pr.publication.as_ref();
+    let github = publication.and_then(|publication| publication.github.as_ref());
+    conn.execute(
+        "INSERT INTO task_prs (
+            id, task_session_id, sequence, slug, branch, base_commit,
+            publication_requested_at, after_merge, next_slug,
+            github_number, github_url, merge_commit, abandoned_at,
+            created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        params![
+            pr.id.as_str(),
+            pr.task_session_id.as_str(),
+            i64::from(pr.sequence),
+            pr.slug,
+            pr.branch,
+            pr.base_commit,
+            publication.map(|publication| publication.requested_at.unix_timestamp()),
+            publication.map(|publication| publication.after_merge.as_str()),
+            publication.and_then(|publication| publication.next_slug.as_deref()),
+            github.map(|github| i64::from(github.number)),
+            github.map(|github| github.url.as_str()),
+            pr.merge_commit,
+            pr.abandoned_at.map(OffsetDateTime::unix_timestamp),
+            pr.created_at.unix_timestamp(),
+            pr.updated_at.unix_timestamp(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
+    validate_task_pr(pr)?;
+    let publication = pr.publication.as_ref();
+    let github = publication.and_then(|publication| publication.github.as_ref());
+    conn.execute(
+        "UPDATE task_prs SET
+            publication_requested_at=?7, after_merge=?8, next_slug=?9,
+            github_number=?10, github_url=?11, merge_commit=?12,
+            abandoned_at=?13, updated_at=?15
+         WHERE id=?1 AND task_session_id=?2 AND sequence=?3 AND slug=?4
+           AND branch=?5 AND base_commit=?6 AND created_at=?14",
+        params![
+            pr.id.as_str(),
+            pr.task_session_id.as_str(),
+            i64::from(pr.sequence),
+            pr.slug,
+            pr.branch,
+            pr.base_commit,
+            publication.map(|publication| publication.requested_at.unix_timestamp()),
+            publication.map(|publication| publication.after_merge.as_str()),
+            publication.and_then(|publication| publication.next_slug.as_deref()),
+            github.map(|github| i64::from(github.number)),
+            github.map(|github| github.url.as_str()),
+            pr.merge_commit,
+            pr.abandoned_at.map(OffsetDateTime::unix_timestamp),
+            pr.created_at.unix_timestamp(),
+            pr.updated_at.unix_timestamp(),
+        ],
+    )
+    .map_err(StoreError::from)
+}
+
+fn task_pr_on(conn: &Connection, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
+    conn.query_row(TASK_PR_SELECT, params![pr_id.as_str()], map_task_pr_row)
+        .optional()
+        .map_err(StoreError::from)
+}
+
+fn settle_task_pr_on(conn: &Connection, settled: &TaskPr) -> StoreResult<()> {
+    let current = task_pr_on(conn, &settled.id)?.ok_or(StoreError::NotFound)?;
+    if current.is_settled() {
+        if !same_task_pr(&current, settled) {
+            return Err(StoreError::InvalidData(format!(
+                "Task PR {} is already settled differently",
+                settled.id
+            )));
+        }
+    } else if update_task_pr(conn, settled)? == 0 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+fn same_task_pr(left: &TaskPr, right: &TaskPr) -> bool {
+    left.id == right.id
+        && left.task_session_id == right.task_session_id
+        && left.sequence == right.sequence
+        && left.slug == right.slug
+        && left.branch == right.branch
+        && left.base_commit == right.base_commit
+        && left.publication == right.publication
+        && left.merge_commit == right.merge_commit
+        && left.abandoned_at == right.abandoned_at
+}
+
 fn invalid_column(
     index: usize,
     error: impl std::error::Error + Send + Sync + 'static,
@@ -1607,30 +1864,21 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
     let status = status_text
         .parse()
         .map_err(|error| invalid_column(10, error))?;
-    let process_generation: Option<i64> = row.get(19)?;
-    let process_started_at: Option<i64> = row.get(22)?;
+    let process_generation: Option<i64> = row.get(18)?;
+    let process_started_at: Option<i64> = row.get(21)?;
     let process = match (process_generation, process_started_at) {
         (Some(generation), Some(started_at)) => Some(ChildProcessGeneration {
             generation: generation as u32,
-            pid: row.get::<_, Option<i64>>(20)?.map(|pid| pid as u32),
-            tmux_name: row.get::<_, Option<String>>(21)?.unwrap_or_default(),
+            pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
+            tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
             started_at: crate::store::rows::unix_to_datetime(started_at),
         }),
         _ => None,
     };
-    let pr_number: Option<i64> = row.get(23)?;
-    let pr_url: Option<String> = row.get(24)?;
-    let pull_request = match (pr_number, pr_url) {
-        (Some(number), Some(url)) => Some(PullRequestRef {
-            number: number as u32,
-            url,
-        }),
-        _ => None,
-    };
-    let execution = execution_context(row, 32, 33, 34)?;
+    let execution = execution_context(row, 29, 30, 31)?;
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(35)?,
-        row.get::<_, Option<String>>(36)?,
+        row.get::<_, Option<i64>>(32)?,
+        row.get::<_, Option<String>>(33)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -1653,30 +1901,86 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
                 name: row.get(7)?,
                 prompt_context: row.get(8)?,
             },
-            pm_snapshot_synced_at: row.get(27)?,
+            pm_snapshot_synced_at: row.get(24)?,
         },
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(28)?)
-            .map_err(|error| invalid_column(28, error))?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(25)?)
+            .map_err(|error| invalid_column(25, error))?,
         wave_id: row.get(9)?,
-        project_session_id: ProjectSessionId::from_raw(row.get::<_, String>(29)?),
-        current_directive_version: row.get::<_, i64>(30)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(31)? as u32,
+        project_session_id: ProjectSessionId::from_raw(row.get::<_, String>(26)?),
+        current_directive_version: row.get::<_, i64>(27)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(28)? as u32,
         status,
         status_reason: row.get(11)?,
         status_at: crate::store::rows::unix_to_datetime(row.get(12)?),
         worktree: PathBuf::from(row.get::<_, String>(13)?),
-        branch: row.get(14)?,
-        base_commit: row.get(15)?,
-        agent: row.get(16)?,
-        provider: row.get(17)?,
-        provider_session_id: row.get(18)?,
+        workspace_slug: row.get(14)?,
+        agent: row.get(15)?,
+        provider: row.get(16)?,
+        provider_session_id: row.get(17)?,
         latest_process: process,
-        pull_request,
         execution,
         abandon_intent,
-        created_at: crate::store::rows::unix_to_datetime(row.get(25)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(26)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
     })
+}
+
+fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
+    let publication_requested_at = row.get::<_, Option<i64>>(6)?;
+    let after_merge = row
+        .get::<_, Option<String>>(7)?
+        .map(|value| value.parse())
+        .transpose()
+        .map_err(|error| invalid_column(7, error))?;
+    let github_number = row.get::<_, Option<i64>>(9)?.map(|number| number as u32);
+    let github_url = row.get::<_, Option<String>>(10)?;
+    let publication = match (publication_requested_at, after_merge) {
+        (Some(requested_at), Some(after_merge)) => Some(PrPublication {
+            requested_at: crate::store::rows::unix_to_datetime(requested_at),
+            after_merge,
+            next_slug: row.get(8)?,
+            github: match (github_number, github_url) {
+                (Some(number), Some(url)) => Some(GithubPr { number, url }),
+                (None, None) => None,
+                _ => {
+                    return Err(invalid_column(
+                        9,
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "GitHub PR number and URL must both be present or absent",
+                        ),
+                    ))
+                }
+            },
+        }),
+        (None, None) => None,
+        _ => {
+            return Err(invalid_column(
+                6,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "PR publication timestamp and disposition must both be present or absent",
+                ),
+            ))
+        }
+    };
+    let pr = TaskPr {
+        id: TaskPrId::from_raw(row.get::<_, String>(0)?),
+        task_session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
+        sequence: row.get::<_, i64>(2)? as u32,
+        slug: row.get(3)?,
+        branch: row.get(4)?,
+        base_commit: row.get(5)?,
+        publication,
+        merge_commit: row.get(11)?,
+        abandoned_at: row
+            .get::<_, Option<i64>>(12)?
+            .map(crate::store::rows::unix_to_datetime),
+        created_at: crate::store::rows::unix_to_datetime(row.get(13)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(14)?),
+    };
+    pr.validate().map_err(|error| invalid_column(6, error))?;
+    Ok(pr)
 }
 
 fn map_child_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildCommand> {

@@ -24,7 +24,7 @@ public enum ChildActivityKind: String, Codable, Sendable, Hashable {
     case incorporated
     case decisionRequired = "decision_required"
     case decisionResolved = "decision_resolved"
-    case pullRequestOpened = "pull_request_opened"
+    case prOpened = "pr_opened"
     case completed
     case failed
 }

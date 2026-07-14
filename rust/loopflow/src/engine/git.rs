@@ -147,6 +147,24 @@ pub fn checkout_new_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Create and checkout a new branch from an explicit ref.
+pub fn checkout_new_branch_from(
+    repo: &Path,
+    branch: &str,
+    start_point: &str,
+) -> Result<(), GitError> {
+    git_stdout(repo, &["checkout", "-b", branch, start_point])?;
+    Ok(())
+}
+
+pub fn ref_exists(repo: &Path, ref_name: &str) -> Result<bool, GitError> {
+    Ok(
+        run_git(repo, &["rev-parse", "--verify", "--quiet", ref_name])?
+            .status
+            .success(),
+    )
+}
+
 /// Push and set upstream tracking.
 pub fn push_with_upstream(repo: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
     let output = run_git(repo, &["push", "-u", remote, branch])?;
@@ -1205,6 +1223,20 @@ mod tests {
             current_branch(repo.path()).unwrap(),
             Some("main".to_string())
         );
+    }
+
+    #[test]
+    fn git_checkout_new_branch_from_ignores_current_head() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        let main = rev_parse(repo.path(), "main").unwrap();
+        checkout_new_branch(repo.path(), "first-delivery").unwrap();
+        commit_file(repo.path(), "delivery.txt", "shipped");
+
+        checkout_new_branch_from(repo.path(), "second-delivery", "main").unwrap();
+
+        assert_eq!(rev_parse(repo.path(), "HEAD").unwrap(), main);
+        assert!(!repo.path().join("delivery.txt").exists());
     }
 
     #[test]

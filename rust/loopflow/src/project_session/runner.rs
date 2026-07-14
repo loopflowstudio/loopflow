@@ -665,7 +665,7 @@ async fn inspect_outcome(
     })
     .await
     .map_err(|error| anyhow!(error.to_string()))??;
-    let tasks = store
+    let mut tasks = store
         .list_task_sessions(Some(&session.wave_id))
         .await?
         .into_iter()
@@ -674,6 +674,29 @@ async fn inspect_outcome(
                 && task.project_session_id == session.id
         })
         .collect::<Vec<_>>();
+    for task in &mut tasks {
+        if task.status.is_terminal() {
+            continue;
+        }
+        let observed = crate::ops::task::reconcile_task_pr(store, task)
+            .await
+            .map_err(|error| anyhow!(error.to_string()))?;
+        crate::ops::task::reconcile_process_liveness(store, task)
+            .await
+            .map_err(|error| anyhow!(error.to_string()))?;
+        let settled = observed.as_ref().is_some_and(|pr| pr.is_settled())
+            || (observed.is_none() && store.active_task_pr(&task.id).await?.is_none());
+        if settled && !task.status.is_terminal() {
+            crate::ops::task::ensure_working_pr(store, task)
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?;
+            if !task.status.is_process_active() {
+                crate::ops::task::relaunch_inactive_process(store, task)
+                    .await
+                    .map_err(|error| anyhow!(error.to_string()))?;
+            }
+        }
+    }
     let pm_tasks = resolved
         .snapshot
         .items
@@ -693,15 +716,23 @@ async fn inspect_outcome(
             fingerprint,
         });
     }
-    if tasks.iter().any(|task| {
-        matches!(
-            task.status,
-            TaskSessionStatus::Created
-                | TaskSessionStatus::Starting
-                | TaskSessionStatus::Running
-                | TaskSessionStatus::Submitted
-        )
-    }) {
+    let mut has_open_pr = false;
+    for task in &tasks {
+        has_open_pr |= store
+            .active_task_pr(&task.id)
+            .await?
+            .is_some_and(|pr| pr.phase() == crate::task::PrPhase::Open);
+    }
+    if has_open_pr
+        || tasks.iter().any(|task| {
+            matches!(
+                task.status,
+                TaskSessionStatus::Created
+                    | TaskSessionStatus::Starting
+                    | TaskSessionStatus::Running
+            )
+        })
+    {
         return Ok(ProjectOutcome {
             status: ProjectSessionStatus::Waiting,
             reason: "supervised Tasks are active; waiting for typed Task observations".to_string(),
@@ -1167,7 +1198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attached_project_direction_is_versioned_before_delivery() {
+    async fn attached_project_direction_is_versioned_before_provider_input() {
         let (store, session) = session("codex").await;
 
         handle_attachment(&store, &session, "pursue the parser first".to_string())

@@ -568,8 +568,8 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 }
 
 fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyhow::Result<()> {
+    let snapshot = loopflow::ops::task::task_snapshot(session)?;
     if json {
-        let snapshot = loopflow::ops::task::task_snapshot(session)?;
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
         let pm_writeback = match &session.pm_writeback {
@@ -578,6 +578,12 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
                 format!("pending: {error}")
             }
         };
+        let branch = snapshot
+            .active_pr
+            .as_ref()
+            .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
+            .map(|pr| pr.branch.as_str())
+            .unwrap_or("none");
         println!(
             "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.launch.issue.identifier,
@@ -585,10 +591,23 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             session.provider,
             session.id,
             session.worktree.display(),
-            session.branch,
+            branch,
             pm_writeback,
             session.status_reason,
         );
+        for pr in &snapshot.prs {
+            let provider = pr
+                .github()
+                .map(|github| format!("GitHub #{}", github.number))
+                .unwrap_or_else(|| "not opened on GitHub".to_string());
+            println!(
+                "  PR {}: {}  {}  {}",
+                pr.sequence,
+                pr.phase().as_str(),
+                provider,
+                pr.branch
+            );
+        }
     }
     Ok(())
 }
@@ -832,15 +851,18 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run {
             issue,
+            name,
             directive,
             json,
         } => {
-            let session = loopflow::ops::task::task_run(repo, issue, directive.clone())?;
+            let session =
+                loopflow::ops::task::task_run(repo, issue, name.clone(), directive.clone())?;
             print_task_session(&session, *json)
         }
         TaskCommand::Start {
             title,
             project_id,
+            name,
             directive,
             json,
         } => {
@@ -848,6 +870,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 title.clone(),
                 project_id,
+                name.clone(),
                 directive.clone(),
             )?;
             print_task_session(&session, *json)
@@ -907,6 +930,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 }
             }
             Ok(())
+        }
+        TaskCommand::Complete {
+            issue,
+            summary,
+            json,
+        } => {
+            let session = loopflow::ops::task::task_complete(issue, summary.clone())?;
+            print_task_session(&session, *json)
         }
         TaskCommand::FollowUp {
             issue,
@@ -1010,7 +1041,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             json,
         } => {
             let until = if until == "submitted" {
-                loopflow::ops::task::TaskWaitUntil::Submitted
+                loopflow::ops::task::TaskWaitUntil::Open
             } else {
                 loopflow::ops::task::TaskWaitUntil::Terminal
             };

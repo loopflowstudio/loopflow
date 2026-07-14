@@ -3,7 +3,20 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
+use loopflow::child_session::{ChildExecutionContext, ChildProcessGeneration};
+use loopflow::id::WaveId;
+use loopflow::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+use loopflow::session_context::{
+    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+    ProjectLaunchReceipt, TaskLaunchReceipt,
+};
+use loopflow::store::{open_store, StorageConfig, Store};
+use loopflow::task::{
+    PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+};
+use loopflow::wave::Wave;
 use tempfile::TempDir;
+use time::OffsetDateTime;
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -47,6 +60,8 @@ pub struct EnvGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_path: Option<String>,
     previous_home: Option<String>,
+    previous_lf_home: Option<OsString>,
+    restore_lf_home: bool,
     _temp: TempDir,
     _home: Option<HomeOverride>,
 }
@@ -78,9 +93,20 @@ impl EnvGuard {
             _lock: lock,
             previous_path,
             previous_home,
+            previous_lf_home: None,
+            restore_lf_home: false,
             _temp: temp,
             _home: None,
         }
+    }
+
+    #[allow(dead_code)] // Shared helper used by tests that exercise the local registry.
+    pub fn with_lf_home(entries: &[(&str, &str)], home: &Path) -> Self {
+        let mut guard = Self::with_home(entries, None);
+        guard.previous_lf_home = env::var_os("LF_HOME");
+        guard.restore_lf_home = true;
+        env::set_var("LF_HOME", home);
+        guard
     }
 }
 
@@ -96,7 +122,135 @@ impl Drop for EnvGuard {
         } else {
             env::remove_var("HOME");
         }
+        if self.restore_lf_home {
+            match &self.previous_lf_home {
+                Some(prev) => env::set_var("LF_HOME", prev),
+                None => env::remove_var("LF_HOME"),
+            }
+        }
     }
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
+pub struct RegisteredTask {
+    pub store: Store,
+    pub session: TaskSession,
+    pub pr: TaskPr,
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
+pub fn register_task(
+    home: &Path,
+    worktree: &Path,
+    branch: &str,
+    base_commit: &str,
+) -> RegisteredTask {
+    let db_path = home.join("loopflow.db");
+    let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
+    let store = runtime
+        .block_on(open_store(&StorageConfig::sqlite(db_path.clone())))
+        .expect("open task test store");
+    let now = OffsetDateTime::now_utc();
+    let wave = Wave::new(
+        WaveId::new(),
+        "task-pr-tests".to_string(),
+        worktree.display().to_string(),
+    );
+    let execution = ChildExecutionContext {
+        lf_bin: std::path::PathBuf::from("/usr/bin/false"),
+        db_path,
+        lf_home: home.to_path_buf(),
+    };
+    let project = ProjectSession {
+        id: ProjectSessionId::new(),
+        launch: ProjectLaunchReceipt {
+            project: LinearProjectSnapshot {
+                id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+                slug: "task-pr-tests".to_string(),
+                name: "Task PR tests".to_string(),
+                prompt_context: "Keep Task PR transitions durable.".to_string(),
+            },
+            pm_snapshot_synced_at: now.unix_timestamp(),
+        },
+        wave_id: wave.id().clone(),
+        current_directive_version: 0,
+        incorporated_directive_version: 0,
+        status: ProjectSessionStatus::Running,
+        status_reason: "test project is running".to_string(),
+        status_at: now,
+        iteration: 1,
+        observation_cursor: 0,
+        last_state_fingerprint: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: Some("task-pr-project".to_string()),
+        latest_process: Some(ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            tmux_name: "task-pr-project".to_string(),
+            started_at: now,
+        }),
+        execution: Some(execution.clone()),
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let session = TaskSession {
+        id: TaskSessionId::new(),
+        launch: TaskLaunchReceipt {
+            issue: LinearIssueSnapshot {
+                id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+                identifier: "INF-123".to_string(),
+                title: "Prove Task PR transitions".to_string(),
+                description: "Exercise the persisted lifecycle.".to_string(),
+            },
+            project: project.launch.project.clone(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
+        },
+        pm_writeback: PmWritebackState::Current,
+        wave_id: wave.id().clone(),
+        project_session_id: project.id.clone(),
+        current_directive_version: 0,
+        incorporated_directive_version: 0,
+        status: TaskSessionStatus::Waiting,
+        status_reason: "test Task is waiting".to_string(),
+        status_at: now,
+        worktree: worktree.to_path_buf(),
+        workspace_slug: "task-pr-proof".to_string(),
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        latest_process: None,
+        execution: Some(execution),
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let pr = TaskPr {
+        id: TaskPrId::new(),
+        task_session_id: session.id.clone(),
+        sequence: 1,
+        slug: session.workspace_slug.clone(),
+        branch: branch.to_string(),
+        base_commit: base_commit.to_string(),
+        publication: None,
+        merge_commit: None,
+        abandoned_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+    runtime.block_on(async {
+        store.create_wave(&wave).await.expect("create test wave");
+        store
+            .create_project_session(&project)
+            .await
+            .expect("create test project");
+        store
+            .create_task_session(&session, &pr)
+            .await
+            .expect("create test Task");
+    });
+    RegisteredTask { store, session, pr }
 }
 
 fn write_executable(dir: &Path, name: &str, content: &str) {

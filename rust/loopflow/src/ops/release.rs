@@ -454,6 +454,8 @@ fn prepare_release_in_worktree(
             strict: true,
             local: false,
             create_pr: false,
+            complete: false,
+            next_slug: None,
             worktree: None,
             commit_message: None,
             pr_title: Some(pr_copy.title),

@@ -10,23 +10,18 @@ use crate::project_session::{
     ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession, ProjectSessionId,
     ProjectSessionStatus,
 };
-use crate::task::{TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
+use crate::task::{
+    TaskEvent, TaskEventKind, TaskPr, TaskSession, TaskSessionId, TaskSessionStatus,
+};
 
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn create_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+    pub async fn create_task_session(&self, session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
         let session = session.clone();
+        let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_session(&session)
-        })
-        .await
-    }
-
-    pub async fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
-        let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session(&session)
+            store.insert_task_session(&session, &pr)
         })
         .await
     }
@@ -34,12 +29,14 @@ impl Store {
     pub async fn reserve_task_session_with_directive(
         &self,
         session: &TaskSession,
+        pr: &TaskPr,
         directive: &ChildDirective,
     ) -> StoreResult<()> {
         let session = session.clone();
+        let pr = pr.clone();
         let directive = directive.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session_with_directive(&session, &directive)
+            store.reserve_task_session_with_directive(&session, &pr, &directive)
         })
         .await
     }
@@ -48,6 +45,19 @@ impl Store {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.update_task_session(&session)
+        })
+        .await
+    }
+
+    pub async fn complete_task_session(
+        &self,
+        session: &TaskSession,
+        skipped_pr: Option<&TaskPr>,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let skipped_pr = skipped_pr.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_task_session(&session, skipped_pr.as_ref())
         })
         .await
     }
@@ -87,6 +97,43 @@ impl Store {
         let wave_id = wave_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
             store.list_task_sessions(wave_id.as_ref())
+        })
+        .await
+    }
+
+    pub async fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
+        let pr = pr.clone();
+        run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
+    }
+
+    pub async fn task_prs(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskPr>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_prs(&session_id)).await
+    }
+
+    pub async fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.active_task_pr(&session_id)).await
+    }
+
+    pub async fn settle_task_pr(&self, settled: &TaskPr, next: Option<&TaskPr>) -> StoreResult<()> {
+        let settled = settled.clone();
+        let next = next.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.settle_task_pr(&settled, next.as_ref())
+        })
+        .await
+    }
+
+    pub async fn complete_task_session_after_pr(
+        &self,
+        session: &TaskSession,
+        pr: &TaskPr,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let pr = pr.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_task_session_after_pr(&session, &pr)
         })
         .await
     }

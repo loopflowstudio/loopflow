@@ -84,6 +84,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "session_execution_context",
         sql: include_str!("migrations/0.10.002_session_execution_context.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 1,
+        },
+        name: "task_prs",
+        sql: include_str!("migrations/0.11.001_task_prs.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -117,18 +126,42 @@ pub fn active_namespace() -> (u32, u32) {
 // -- Applying -----------------------------------------------------------------
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
-    conn.execute_batch("BEGIN EXCLUSIVE")?;
-    let result = apply_set(conn, MIGRATIONS);
-    match result {
+    let foreign_keys_enabled: bool =
+        conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let migration_result = match conn.execute_batch("BEGIN EXCLUSIVE") {
         Ok(()) => {
-            conn.execute_batch("COMMIT")?;
-            Ok(())
+            let result = apply_set(conn, MIGRATIONS).and_then(|()| validate_foreign_keys(conn));
+            match result {
+                Ok(()) => conn.execute_batch("COMMIT").map_err(StoreError::from),
+                Err(error) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    Err(error)
+                }
+            }
         }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            Err(error)
-        }
+        Err(error) => Err(StoreError::from(error)),
+    };
+    let restore_result = if foreign_keys_enabled {
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(StoreError::from)
+    } else {
+        Ok(())
+    };
+    match migration_result {
+        Err(error) => Err(error),
+        Ok(()) => restore_result,
     }
+}
+
+fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
+    let mut statement = conn.prepare("PRAGMA foreign_key_check")?;
+    if statement.query([])?.next()?.is_some() {
+        return Err(StoreError::InvalidData(
+            "migration produced invalid foreign keys".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Apply every migration in `set` the database has not seen, in id order, exactly
@@ -304,6 +337,7 @@ mod tests {
         active_namespace, applied_versions, apply_set, apply_sqlite, latest_version_sqlite,
         product_schema, validate_set, Migration, MigrationId, MIGRATIONS,
     };
+    use crate::task::TaskEventKind;
 
     /// Stand-ins for the releases that have not happened yet: one more migration
     /// in the baseline's minor, and the first of the next minor.
@@ -388,10 +422,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_sqlite(&conn).unwrap();
 
-        assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            "0.10.002_session_execution_context"
-        );
+        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.001_task_prs");
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
@@ -402,7 +433,8 @@ mod tests {
             applied_versions(&conn).unwrap(),
             vec![
                 "0.10.001_initial".to_string(),
-                "0.10.002_session_execution_context".to_string()
+                "0.10.002_session_execution_context".to_string(),
+                "0.11.001_task_prs".to_string()
             ]
         );
     }
@@ -444,6 +476,133 @@ mod tests {
             })
             .unwrap();
         assert_eq!(name, "infra");
+    }
+
+    #[test]
+    fn existing_task_rows_become_sequence_one_prs_without_losing_events() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, &MIGRATIONS[..2]).unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('wave-1', 'runtime', '/repo', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_sessions (
+                id, project_id, project_slug, project_name, project_prompt_context,
+                wave_id, pm_snapshot_synced_at, status, status_reason, status_at,
+                iteration, observation_cursor, agent, provider, created_at, updated_at,
+                current_directive_version, incorporated_directive_version
+             ) VALUES (
+                'ps_legacy', 'project-1', 'runtime', 'Runtime', 'Definition',
+                'wave-1', 9, 'running', 'active', 10, 1, 0, 'codex', 'codex',
+                10, 20, 1, 1
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_sessions (
+                id, issue_id, issue_identifier, issue_title, issue_description,
+                project_id, project_slug, project_name, project_prompt_context, wave_id,
+                status, status_reason, status_at, worktree, branch, base_commit,
+                agent, provider, pr_number, pr_url, created_at, updated_at,
+                pm_snapshot_synced_at, pm_writeback_json, project_session_id,
+                current_directive_version, incorporated_directive_version
+             ) VALUES (
+                'ts_legacy', 'issue-1', 'INF-123', 'Ship it', '',
+                'project-1', 'runtime', 'Runtime', 'Definition', 'wave-1',
+                'merged', 'pull request merged', 10, '/repo.inf-123',
+                'jack/inf-123', 'base-sha', 'codex', 'codex', 101,
+                'https://github.com/loopflowstudio/loopflow/pull/101', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_legacy', 1, 1
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_events (session_id, kind_json, created_at)
+             VALUES
+                ('ts_legacy', '{\"kind\":\"started\"}', 11),
+                ('ts_legacy', '{\"kind\":\"pull_request_opened\",\"number\":101,\"url\":\"https://github.com/loopflowstudio/loopflow/pull/101\"}', 12),
+                ('ts_legacy', '{\"kind\":\"status_changed\",\"from\":\"submitted\",\"to\":\"merged\",\"reason\":\"merged\"}', 13)",
+            [],
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        let session: (String, String) = conn
+            .query_row(
+                "SELECT status, workspace_slug FROM task_sessions WHERE id='ts_legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(session, ("completed".to_string(), "inf-123".to_string()));
+        let pr: (i64, String, i64, String, i64, String, String, Option<i64>) = conn
+            .query_row(
+                "SELECT sequence, branch, publication_requested_at, after_merge,
+                        github_number, github_url, merge_commit, abandoned_at
+                 FROM task_prs WHERE task_session_id='ts_legacy'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            pr,
+            (
+                1,
+                "jack/inf-123".to_string(),
+                20,
+                "complete_task".to_string(),
+                101,
+                "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+                "legacy-unknown".to_string(),
+                None,
+            )
+        );
+        let events: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_events WHERE session_id='ts_legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(events, 3);
+        let event_shape: (String, String, String, String) = conn
+            .query_row(
+                "SELECT
+                    kind_json,
+                    json_extract(kind_json, '$.pr_id'),
+                    (SELECT json_extract(kind_json, '$.from') FROM task_events
+                     WHERE json_extract(kind_json, '$.kind')='status_changed'),
+                    (SELECT json_extract(kind_json, '$.to') FROM task_events
+                     WHERE json_extract(kind_json, '$.kind')='status_changed')
+                 FROM task_events
+                 WHERE json_extract(kind_json, '$.kind')='pr_opened'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        let event: TaskEventKind = serde_json::from_str(&event_shape.0).unwrap();
+        assert!(matches!(event, TaskEventKind::PrOpened { sequence: 1, .. }));
+        assert!(event_shape.1.starts_with("pr_"));
+        assert_eq!(event_shape.2, "waiting");
+        assert_eq!(event_shape.3, "completed");
     }
 
     #[test]
@@ -559,10 +718,7 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_sqlite(&conn).unwrap();
-        assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            "0.10.002_session_execution_context"
-        );
+        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.001_task_prs");
     }
 
     #[test]

@@ -8,12 +8,14 @@ Concrete file-writing work leaves the canonical main control plane through a
 Linear-backed Task Session:
 
 ```bash
-lf task run INF-123 --directive "fix the parser before the docs"
+lf task run INF-123 --name parser-recovery --directive "fix the parser before the docs"
 lf task steer INF-123 "also rename the flag"
 lf task receipt COMMAND_ID --until incorporated --timeout 30s
 lf task wait INF-123
 ```
 
-Each Task Session owns one immutable sibling worktree, provider transcript,
-and pull request to `main`. A Project Session owns the bounded KR-pursuit
-process that creates and supervises Tasks, but no worktree, branch, or PR.
+Each Task Session owns one stable sibling worktree and provider transcript.
+Ordered PRs own its serial branches; a merge settles one PR, while only
+`lf pr land -c` or `lf task complete` completes the Task.
+A Project Session owns the bounded KR-pursuit process that creates and
+supervises Tasks, but no worktree, branch, or PR.

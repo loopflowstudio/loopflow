@@ -19,7 +19,7 @@ use crate::child_session::{
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
+use crate::task::{PrPhase, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
@@ -249,6 +249,20 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 .get_task_session(&session.id)
                                 .await?
                                 .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
+                            if latest.status.is_terminal() {
+                                let _ = harness.stop().await;
+                                if !summary.is_empty() {
+                                    store
+                                        .append_task_event(
+                                            &session.id,
+                                            &TaskEventKind::Progress {
+                                                summary: summary.clone(),
+                                            },
+                                        )
+                                        .await?;
+                                }
+                                return Ok(());
+                            }
                             session.current_directive_version = latest.current_directive_version;
                             session.incorporated_directive_version =
                                 latest.incorporated_directive_version;
@@ -256,9 +270,34 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 session.current_directive_version,
                                 session.incorporated_directive_version,
                             );
-                            let observed_pr = crate::ops::current_or_merged_pr(&session.worktree)
-                                .ok()
-                                .flatten();
+                            let observed_pr =
+                                crate::ops::task::reconcile_task_pr(&store, &mut session)
+                                    .await
+                                    .map_err(|error| anyhow!(error.to_string()))?;
+                            if session.status == TaskSessionStatus::Completed {
+                                let _ = harness.stop().await;
+                                if !summary.is_empty() {
+                                    store
+                                        .append_task_event(
+                                            &session.id,
+                                            &TaskEventKind::Progress {
+                                                summary: summary.clone(),
+                                            },
+                                        )
+                                        .await?;
+                                }
+                                return Ok(());
+                            }
+                            let needs_rotation = if observed_pr
+                                .as_ref()
+                                .is_some_and(|pr| pr.is_settled())
+                            {
+                                true
+                            } else if observed_pr.is_none() {
+                                store.active_task_pr(&session.id).await?.is_none()
+                            } else {
+                                false
+                            };
                             let (stopped_status, stopped_reason) = if let Some(version) = pending_directive {
                                 (
                                     TaskSessionStatus::Blocked,
@@ -271,25 +310,43 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     TaskSessionStatus::Waiting,
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
-                            } else if let Some(pr) = observed_pr {
-                                let pull_request = crate::task::PullRequestRef {
-                                    number: pr.number as u32,
-                                    url: pr.url.clone(),
-                                };
-                                session.pull_request = Some(pull_request);
-                                if pr.state == "merged" {
-                                    crate::ops::task::reconcile_pm_writeback(&store, &mut session)
-                                        .await;
-                                    (
-                                        TaskSessionStatus::Merged,
-                                        format!("pull request #{} merged", pr.number),
-                                    )
-                                } else {
-                                    (
-                                        TaskSessionStatus::Submitted,
-                                        format!("pull request #{} is open for review", pr.number),
-                                    )
-                                }
+                            } else if needs_rotation {
+                                crate::ops::task::ensure_working_pr(&store, &mut session)
+                                    .await
+                                    .map_err(|error| anyhow!(error.to_string()))?;
+                                session.status_reason =
+                                    "Task PR settled; starting the next PR".to_string();
+                                store.update_task_session(&session).await?;
+                                let prepared = prepare_task_flow_step(
+                                    &store,
+                                    &mut session,
+                                    wave.name(),
+                                    &flow,
+                                )
+                                .await?;
+                                start_task_flow_turn(
+                                    &store,
+                                    &mut session,
+                                    harness.as_mut(),
+                                    &mut flow,
+                                    prepared,
+                                )
+                                .await?;
+                                flow_turn_active = true;
+                                last_text.clear();
+                                continue 'runner;
+                            } else if let Some(pr) = observed_pr
+                                .as_ref()
+                                .filter(|pr| pr.phase() == PrPhase::Open)
+                            {
+                                let number = pr
+                                    .github()
+                                    .expect("open Task PR requires a GitHub receipt")
+                                    .number;
+                                (
+                                    TaskSessionStatus::Waiting,
+                                    format!("pull request #{number} is open for review"),
+                                )
                             } else {
                                 let next_fingerprint = task_state_fingerprint(&session)?;
                                 if next_fingerprint != state_fingerprint {
@@ -349,24 +406,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                             },
                                         ).await?;
                                     }
-                                    if let Some(pull_request) = session.pull_request.clone() {
-                                        if session.status == TaskSessionStatus::Merged {
-                                            store.append_task_event(
-                                                &session.id,
-                                                &TaskEventKind::Completed {
-                                                    pull_request,
-                                                    summary,
-                                                },
-                                            ).await?;
-                                        } else {
-                                            store.append_task_event(
-                                                &session.id,
-                                                &TaskEventKind::PullRequestOpened {
-                                                    number: pull_request.number,
-                                                    url: pull_request.url,
-                                                },
-                                            ).await?;
-                                        }
+                                    if session.status == TaskSessionStatus::Completed {
+                                        store.append_task_event(
+                                            &session.id,
+                                            &TaskEventKind::Completed { summary },
+                                        ).await?;
                                     }
                                     store.append_task_event(
                                         &session.id,
@@ -485,7 +529,11 @@ async fn prepare_task_flow_step(
         step.step
     );
     store.update_task_session(session).await?;
-    let seed = task_seed(session, wave_name, directive);
+    let pr = store
+        .active_task_pr(&session.id)
+        .await?
+        .ok_or_else(|| anyhow!("Task Session {} has no active PR", session.id))?;
+    let seed = task_seed(session, &pr, wave_name, directive);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
@@ -859,9 +907,14 @@ async fn finish_command_stop(
     }
 }
 
-fn task_seed(session: &TaskSession, wave_name: &str, directive: &ChildDirective) -> String {
+fn task_seed(
+    session: &TaskSession,
+    pr: &crate::task::TaskPr,
+    wave_name: &str,
+    directive: &ChildDirective,
+) -> String {
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. The runner plays clarify, pursue, and mutate through this same provider session, then decides whether the whole Task flow repeats. Opening the PR submits the task; completion is merge or explicit abandonment.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` completes the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` completes clean work that needs no PR. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,
@@ -875,7 +928,9 @@ fn task_seed(session: &TaskSession, wave_name: &str, directive: &ChildDirective)
         wave = wave_name,
         session_id = session.id,
         worktree = session.worktree.display(),
-        base_commit = session.base_commit,
+        pr_sequence = pr.sequence,
+        pr_branch = pr.branch,
+        base_commit = pr.base_commit,
     )
 }
 
@@ -915,7 +970,8 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        PmWritebackState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+        PmWritebackState, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId,
+        TaskSessionStatus,
     };
     use crate::wave::Wave;
 
@@ -1040,8 +1096,7 @@ mod tests {
             status_reason: "provider active".to_string(),
             status_at: now,
             worktree: PathBuf::from(format!("/repo.{provider}")),
-            branch: format!("test/{provider}"),
-            base_commit: "deadbeef".to_string(),
+            workspace_slug: format!("test-{provider}"),
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
@@ -1051,13 +1106,25 @@ mod tests {
                 tmux_name: format!("task-{provider}"),
                 started_at: now,
             }),
-            pull_request: None,
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
-        store.create_task_session(&session).await.unwrap();
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: session.workspace_slug.clone(),
+            branch: format!("test/{provider}"),
+            base_commit: "deadbeef".to_string(),
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_task_session(&session, &pr).await.unwrap();
         (store, session)
     }
 
@@ -1069,7 +1136,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attached_task_direction_is_versioned_before_delivery() {
+    async fn attached_task_direction_is_versioned_before_provider_input() {
         let (store, session) = conformance_session("codex").await;
 
         handle_attachment(&store, &session, "fix the parser first".to_string())

@@ -160,7 +160,12 @@ pub fn create_and_load_task(
     resolve_task(repo, &result.id, PmRefresh::Never)
 }
 
-pub async fn complete_task(repo: &Path, wave: &str, item_id: &str, pr: &str) -> OpsResult<()> {
+pub async fn complete_task(
+    repo: &Path,
+    wave: &str,
+    item_id: &str,
+    pr: Option<&str>,
+) -> OpsResult<()> {
     // main's `pm_update_async` completes the Linear mutation and refreshes the
     // snapshot in one call, returning `Err` if either step fails; a successful
     // return means the write-back is reconciled.
@@ -173,7 +178,7 @@ pub async fn complete_task(repo: &Path, wave: &str, item_id: &str, pr: &str) -> 
             title: None,
             notes: None,
             status: Some("done".to_string()),
-            pr: Some(pr.to_string()),
+            pr: pr.map(str::to_string),
         },
         &crate::ops::NullProgress,
     )
@@ -185,7 +190,7 @@ pub async fn retry_complete_task(
     repo: &Path,
     wave: &str,
     item_id: &str,
-    pr: &str,
+    pr: Option<&str>,
 ) -> OpsResult<()> {
     let snapshot = load_wave_async(repo, wave, PmRefresh::Force).await?;
     let item = snapshot

@@ -89,8 +89,8 @@ lf task wait INF-123
 ```
 
 The Linear task exists before its worktree. One durable Task Session retains
-that immutable sibling worktree and provider history through review, CI repair,
-and merge. Every Task PR targets `main`.
+that stable sibling worktree and provider history through serial PRs, review,
+CI repair, and explicit completion. Every Task PR targets `main`.
 
 Task Sessions inherit the Wave objective, curated memory, Project definition,
 and KRs. Typed, idempotent Task observations keep the Wave informed without
@@ -121,8 +121,15 @@ lf project steer <linear-project-id> "prioritize the CLI path"
 lf project acknowledge <linear-project-id> --directive 2 --summary "CLI proof is first"
 lf project wait <linear-project-id> --until waiting
 
-lf task run INF-123
+lf task run INF-123 --name release-scoped-migrations
+# work
+lf pr land -c
 ```
+
+The Task keeps one worktree and an ordered PR history. Each serial PR owns one
+branch. Use bare `lf pr land --next <slug>` when another PR
+follows; use `-c` only when this merge completes the Task. Finish clean
+investigation work without a PR using `lf task complete INF-123 --summary "..."`.
 
 Launch persists directive v1 before the provider starts. `steer` and an
 interrupt with replacement advance the version; `follow-up` does not replace
@@ -394,7 +401,7 @@ Install the Rust binaries directly with cargo.
 
 ```bash
 lf wave engbot        # start the Wave (Ctrl-C to stop)
-lf task run ENG-123   # start the Linear task in its own worktree
+lf task run ENG-123 --name parser-recovery   # stable semantic worktree
 tmux ls              # list detached Wave, Project, and Task processes
 lf task attach ENG-123    # writable audited control prompt
 ```

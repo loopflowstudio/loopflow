@@ -229,8 +229,9 @@ fn orchestration_discipline(wave: &str) -> String {
          file-writing work. Start it with `lf task run <issue-id>`. Never \
          delegate anonymous work or the whole wave objective.\n\
          - Supervise durable Task Sessions with `lf task status`, `follow-up`, \
-         `steer`, `interrupt`, `wait`, and `resume`. Each task owns one immutable \
-         worktree and one PR to main; keep the Wave home free of shipping edits.\n\
+         `steer`, `interrupt`, `wait`, and `resume`. Each task owns one stable \
+         worktree; ordered PRs own its serial branches to main. \
+         Keep the Wave home free of shipping edits.\n\
          - Keep turns centered on selection, direct progress, sequencing, and \
          authored reports.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\

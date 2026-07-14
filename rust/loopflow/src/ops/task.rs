@@ -9,7 +9,11 @@ use crate::child_session::{
     ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
-use crate::engine::git::{get_default_branch, rev_parse};
+use crate::engine::git::{
+    checkout_new_branch_from, current_branch, fetch, get_default_branch, is_clean,
+    push_with_upstream, ref_exists, rev_parse,
+};
+use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::{start_lf_session_with_env, tmux_session_exists, tmux_session_slug};
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
@@ -21,7 +25,8 @@ use crate::session_context::{
 };
 use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::task::{
-    PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionStatus,
+    AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
+    TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionStatus,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -30,7 +35,7 @@ use super::ChildReceiptUntil;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskWaitUntil {
-    Submitted,
+    Open,
     Terminal,
 }
 
@@ -101,14 +106,14 @@ pub struct TaskSessionSnapshot {
     pub status_reason: String,
     pub status_at: time::OffsetDateTime,
     pub worktree: String,
-    pub branch: String,
-    pub base_commit: String,
+    pub workspace_slug: String,
+    pub prs: Vec<TaskPr>,
+    pub active_pr: Option<TaskPrId>,
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
     pub latest_process: Option<ChildProcessGeneration>,
-    pub pull_request: Option<crate::task::PullRequestRef>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -161,15 +166,27 @@ struct TaskWorkspace<'a> {
     base_commit: &'a str,
 }
 
-impl<'a> From<&'a TaskSession> for TaskWorkspace<'a> {
-    fn from(session: &'a TaskSession) -> Self {
+impl<'a> TaskWorkspace<'a> {
+    fn new(session: &'a TaskSession, pr: &'a TaskPr) -> Self {
         Self {
             issue_identifier: &session.launch.issue.identifier,
             session_id: &session.id,
             worktree: &session.worktree,
-            base_commit: &session.base_commit,
+            base_commit: &pr.base_commit,
         }
     }
+}
+
+fn active_pr(session: &TaskSession) -> OpsResult<TaskPr> {
+    let session_id = session.id.clone();
+    block_on_task(async move {
+        task_store()
+            .await?
+            .active_task_pr(&session_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .ok_or_else(|| task_error("Task Session has no active PR"))
+    })
 }
 
 fn task_error(message: impl Into<String>) -> OpsError {
@@ -244,7 +261,12 @@ fn command_source_for_wave(
     }
 }
 
-pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResult<TaskSession> {
+pub fn task_run(
+    repo: &Path,
+    issue: &str,
+    name: Option<String>,
+    directive: Option<String>,
+) -> OpsResult<TaskSession> {
     let directive = directive
         .map(|directive| {
             let directive = directive.trim().to_string();
@@ -262,6 +284,15 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
         if let Some(session) = &existing {
+            if let Some(requested) = name.as_deref() {
+                let requested = parse_workspace_slug(requested)?;
+                if requested.as_str() != session.workspace_slug {
+                    return Err(task_error(format!(
+                        "Task {} already uses workspace name {:?}",
+                        session.launch.issue.identifier, session.workspace_slug
+                    )));
+                }
+            }
             if let Some(requested) = directive.as_deref() {
                 let current = store
                     .child_directives(&ChildRef::Task(session.id.clone()))
@@ -282,15 +313,18 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
         }
         Ok(existing)
     })? {
-        return Ok(existing);
+        return task_status(existing.launch.issue.id.as_str());
     }
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
     let resolved =
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
-    let segment = WorktreeSegment::parse(&resolved.item.identifier)
-        .map_err(|error| task_error(error.to_string()))?;
-    let plan = plan_placement(&main_repo, segment)
+    let segment = match name.as_deref() {
+        Some(name) => parse_workspace_slug(name)?,
+        None => derive_workspace_slug(&resolved.item.name)?,
+    };
+    let workspace_slug = segment.as_str().to_string();
+    let mut plan = plan_placement(&main_repo, segment)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     if plan.strategy != PlacementStrategy::Create {
         return Err(task_error(format!(
@@ -301,7 +335,11 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
     }
     let default_branch =
         get_default_branch(&main_repo).map_err(|error| task_error(error.to_string()))?;
-    let base_commit = rev_parse(&main_repo, &default_branch)
+    fetch(&main_repo, "origin", &default_branch)
+        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    let base_ref = format!("origin/{default_branch}");
+    plan.base_ref = base_ref.clone();
+    let base_commit = rev_parse(&main_repo, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve task base: {error}")))?;
     let project_session = crate::ops::project::ensure_project_session_for_task(
         &main_repo,
@@ -361,18 +399,29 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             status_reason: "Linear task reserved before placement".to_string(),
             status_at: now,
             worktree: plan.worktree_path.clone(),
-            branch: plan.branch.clone(),
-            base_commit,
+            workspace_slug: workspace_slug.clone(),
             agent,
             provider,
             provider_session_id: None,
             latest_process: None,
-            pull_request: None,
             execution: Some(
                 crate::engine::process::pinned_execution_context()
                     .map_err(|error| task_error(error.to_string()))?,
             ),
             abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: workspace_slug,
+            branch: plan.branch.clone(),
+            base_commit,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
             created_at: now,
             updated_at: now,
         };
@@ -383,7 +432,7 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             command_source(&session)?,
         );
         match store
-            .reserve_task_session_with_directive(&session, &initial)
+            .reserve_task_session_with_directive(&session, &pr, &initial)
             .await
         {
             Ok(()) => {}
@@ -403,6 +452,19 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             }
             Err(error) => return Err(task_error(format!("failed to reserve task: {error}"))),
         }
+
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::PrStarted {
+                    pr_id: pr.id,
+                    sequence: pr.sequence,
+                    branch: pr.branch,
+                    base_commit: pr.base_commit,
+                },
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
 
         store
             .append_task_event(
@@ -474,6 +536,7 @@ pub fn task_start(
     repo: &Path,
     title: String,
     project_id: &str,
+    name: Option<String>,
     directive: Option<String>,
 ) -> OpsResult<TaskSession> {
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
@@ -495,7 +558,340 @@ pub fn task_start(
         &title,
         &marker,
     )?;
-    task_run(&main, &created.item.id, directive)
+    task_run(&main, &created.item.id, name, directive)
+}
+
+fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
+    let value = value.trim();
+    let words = value.split('-').filter(|word| !word.is_empty()).count();
+    if sanitize_for_branch(value) != value
+        || value.contains(['.', '_', '/'])
+        || !(2..=5).contains(&words)
+    {
+        return Err(task_error(
+            "workspace name must be 2-5 lowercase kebab-case words",
+        ));
+    }
+    WorktreeSegment::parse(value).map_err(|error| task_error(error.to_string()))
+}
+
+fn derive_workspace_slug(title: &str) -> OpsResult<WorktreeSegment> {
+    let sanitized = sanitize_for_branch(title);
+    let mut words = sanitized
+        .split('-')
+        .filter(|word| !word.is_empty())
+        .take(5)
+        .collect::<Vec<_>>();
+    if words.len() == 1 {
+        words.push("task");
+    }
+    parse_workspace_slug(&words.join("-"))
+}
+
+fn parse_pr_slug(value: &str) -> OpsResult<String> {
+    let value = value.trim();
+    let words = value.split('-').filter(|word| !word.is_empty()).count();
+    if sanitize_for_branch(value) != value
+        || value.contains(['.', '_', '/'])
+        || !(1..=5).contains(&words)
+    {
+        return Err(task_error(
+            "next PR name must be 1-5 lowercase kebab-case words",
+        ));
+    }
+    Ok(value.to_string())
+}
+
+async fn task_for_worktree(store: &SharedStore, repo: &Path) -> OpsResult<Option<TaskSession>> {
+    let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    if let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") {
+        let value = value
+            .into_string()
+            .map_err(|_| task_error("ambient Task Session id is not valid UTF-8"))?;
+        let id = crate::task::TaskSessionId::parse(&value)
+            .map_err(|error| task_error(format!("invalid ambient Task Session id: {error}")))?;
+        let session = store
+            .get_task_session(&id)
+            .await
+            .map_err(|error| task_error(format!("failed to read ambient Task Session: {error}")))?
+            .ok_or_else(|| task_error(format!("ambient Task Session {id} is not registered")))?;
+        let worktree = session
+            .worktree
+            .canonicalize()
+            .unwrap_or_else(|_| session.worktree.clone());
+        if checkout != worktree {
+            return Err(task_error(format!(
+                "ambient Task Session {id} owns {}, not {}",
+                session.worktree.display(),
+                repo.display()
+            )));
+        }
+        return Ok(Some(session));
+    }
+
+    let mut matches = store
+        .list_task_sessions(None)
+        .await
+        .map_err(|error| task_error(format!("failed to inspect Task Sessions: {error}")))?
+        .into_iter()
+        .filter(|session| {
+            session
+                .worktree
+                .canonicalize()
+                .unwrap_or_else(|_| session.worktree.clone())
+                == checkout
+        });
+    let found = matches.next();
+    if matches.next().is_some() {
+        return Err(task_error(format!(
+            "multiple Task Sessions claim worktree {}",
+            repo.display()
+        )));
+    }
+    Ok(found)
+}
+
+pub(crate) fn request_task_pr_publication(
+    repo: &Path,
+    after_merge: AfterMerge,
+    next_slug: Option<&str>,
+) -> OpsResult<bool> {
+    let next_slug = next_slug.map(parse_pr_slug).transpose()?;
+    if after_merge == AfterMerge::CompleteTask && next_slug.is_some() {
+        return Err(task_error("--complete and --next cannot be used together"));
+    }
+    block_on_task(async move {
+        let Some(store) = open_existing_store().await.map(Arc::new) else {
+            return Ok(false);
+        };
+        let Some(session) = task_for_worktree(&store, repo).await? else {
+            return Ok(false);
+        };
+        let mut pr = store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .ok_or_else(|| {
+                task_error(format!(
+                    "Task {} has no active PR",
+                    session.launch.issue.identifier
+                ))
+            })?;
+        let branch = crate::engine::git::current_branch(repo)?
+            .ok_or_else(|| task_error("Task worktree is not on a branch"))?;
+        if pr.branch != branch {
+            return Err(task_error(format!(
+                "Task {} active PR expects branch {:?}, but the worktree is on another branch",
+                session.launch.issue.identifier, pr.branch
+            )));
+        }
+        if pr.github().is_none() && !task_pr_has_changes(repo)? {
+            return Err(task_error(
+                "Task PR has no changes to publish; complete the Task directly if the work is done",
+            ));
+        }
+        let now = time::OffsetDateTime::now_utc();
+        pr.publication = Some(PrPublication {
+            requested_at: pr
+                .publication
+                .as_ref()
+                .map_or(now, |publication| publication.requested_at),
+            after_merge,
+            next_slug,
+            github: pr.github().cloned(),
+        });
+        pr.updated_at = now;
+        store
+            .update_task_pr(&pr)
+            .await
+            .map_err(|error| task_error(format!("failed to request PR publication: {error}")))?;
+        Ok(true)
+    })
+}
+
+pub(crate) fn attach_task_github_pr(
+    repo: &Path,
+    github_pr: Option<&crate::ops::pr::PrInfo>,
+) -> OpsResult<bool> {
+    block_on_task(async move {
+        let Some(store) = open_existing_store().await.map(Arc::new) else {
+            return Ok(false);
+        };
+        let Some(session) = task_for_worktree(&store, repo).await? else {
+            return Ok(false);
+        };
+        let mut pr = store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .ok_or_else(|| {
+                task_error(format!(
+                    "Task {} has no active PR",
+                    session.launch.issue.identifier
+                ))
+            })?;
+        let github_pr = github_pr.ok_or_else(|| {
+            task_error(format!(
+                "GitHub PR for Task {} could not be read after creation or update",
+                session.launch.issue.identifier
+            ))
+        })?;
+        if github_pr.branch != pr.branch {
+            return Err(task_error(format!(
+                "Task {} active PR expects branch {:?}, but GitHub reported {:?}",
+                session.launch.issue.identifier, pr.branch, github_pr.branch
+            )));
+        }
+        let number = u32::try_from(github_pr.number).map_err(|_| {
+            task_error(format!(
+                "pull request #{} exceeds supported range",
+                github_pr.number
+            ))
+        })?;
+        let url = github_pr.url.clone();
+        let opened = pr
+            .github()
+            .is_none_or(|github| github.number != number || github.url != url);
+        let publication = pr.publication.as_mut().ok_or_else(|| {
+            task_error(format!(
+                "Task {} has no durable PR publication request",
+                session.launch.issue.identifier
+            ))
+        })?;
+        publication.github = Some(GithubPr {
+            number,
+            url: url.clone(),
+        });
+        pr.updated_at = time::OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&pr)
+            .await
+            .map_err(|error| task_error(format!("failed to attach GitHub PR: {error}")))?;
+        if opened {
+            store
+                .append_task_event(
+                    &session.id,
+                    &TaskEventKind::PrOpened {
+                        pr_id: pr.id,
+                        sequence: pr.sequence,
+                        number,
+                        url,
+                    },
+                )
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        Ok(true)
+    })
+}
+
+fn task_pr_has_changes(repo: &Path) -> OpsResult<bool> {
+    if !is_clean(repo)? {
+        return Err(task_error(
+            "Task worktree still has uncommitted changes; commit them before publishing the PR",
+        ));
+    }
+    let default_branch = get_default_branch(repo)?;
+    let base = format!("origin/{default_branch}...HEAD");
+    let status = Command::new("git")
+        .args(["diff", "--quiet", &base])
+        .current_dir(repo)
+        .status()?;
+    match status.code() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(task_error(format!("failed to compare Task PR with {base}"))),
+    }
+}
+
+pub(crate) fn abandon_task_pr(
+    repo: &Path,
+    force: bool,
+    progress: &impl crate::ops::progress::Progress,
+) -> OpsResult<bool> {
+    block_on_task(async move {
+        let Some(store) = open_existing_store().await.map(Arc::new) else {
+            return Ok(false);
+        };
+        let Some(mut session) = task_for_worktree(&store, repo).await? else {
+            return Ok(false);
+        };
+        let mut pr = store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .ok_or_else(|| {
+                task_error(format!(
+                    "Task {} has no active PR to abandon",
+                    session.launch.issue.identifier
+                ))
+            })?;
+        let branch =
+            current_branch(repo)?.ok_or_else(|| task_error("Task worktree is not on a branch"))?;
+        if branch != pr.branch {
+            return Err(task_error(format!(
+                "Task {} active PR expects branch {:?}, but the worktree is on {:?}",
+                session.launch.issue.identifier, pr.branch, branch
+            )));
+        }
+        let dirty = !is_clean(repo)?;
+        if dirty && !force {
+            return Err(task_error("uncommitted changes; use --force"));
+        }
+        if dirty {
+            progress.status("Discarding uncommitted Task PR changes...");
+            for args in [
+                ["reset", "--hard", "HEAD"].as_slice(),
+                ["clean", "-fd"].as_slice(),
+            ] {
+                let output = Command::new("git").args(args).current_dir(repo).output()?;
+                if !output.status.success() {
+                    return Err(task_error(format!(
+                        "failed to discard Task PR changes with `git {}`: {}",
+                        args.join(" "),
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+            }
+        }
+        progress.status("Closing Task PR...");
+        let _ = Command::new("gh")
+            .args(["pr", "close", &branch])
+            .current_dir(repo)
+            .status();
+        let now = time::OffsetDateTime::now_utc();
+        pr.abandoned_at = Some(now);
+        pr.updated_at = now;
+        store
+            .settle_task_pr(&pr, None)
+            .await
+            .map_err(|error| task_error(format!("failed to settle Task PR: {error}")))?;
+        if !session.status.is_process_active() {
+            let from = session.status;
+            session.set_status(
+                TaskSessionStatus::Waiting,
+                format!("PR branch {branch:?} was abandoned; another PR may follow"),
+            );
+            store
+                .update_task_session(&session)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            if from != session.status {
+                store
+                    .append_task_event(
+                        &session.id,
+                        &TaskEventKind::StatusChanged {
+                            from,
+                            to: session.status,
+                            reason: session.status_reason.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+            }
+        }
+        Ok(true)
+    })
 }
 
 /// Record a Task Session's transition into `Failed`: set the status, persist it,
@@ -542,6 +938,13 @@ pub(crate) async fn relaunch_inactive_process(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<()> {
+    let Some(_) = ensure_working_pr(store, session).await? else {
+        return Err(task_error(format!(
+            "Task {} is {}; terminal Task Sessions cannot start a process",
+            session.launch.issue.identifier,
+            session.status.as_str()
+        )));
+    };
     launch_task_process(store, session).await
 }
 
@@ -676,7 +1079,7 @@ async fn wait_until_running(
     }
 }
 
-async fn reconcile_process_liveness(
+pub(crate) async fn reconcile_process_liveness(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<()> {
@@ -692,8 +1095,382 @@ async fn reconcile_process_liveness(
     if alive {
         return Ok(());
     }
+    let active = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?;
+    if active.as_ref().is_none_or(|pr| pr.phase() == PrPhase::Open) {
+        let from = session.status;
+        session.set_status(
+            TaskSessionStatus::Waiting,
+            match active {
+                Some(pr) => format!("PR {} is open; waiting for review", pr.sequence),
+                None => "the previous PR settled; another PR may follow".to_string(),
+            },
+        );
+        store
+            .update_task_session(session)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::StatusChanged {
+                    from,
+                    to: session.status,
+                    reason: session.status_reason.clone(),
+                },
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        return Ok(());
+    }
     let reason = "task process is missing; resume the same Task Session with `lf task resume`";
     record_task_failure(store, session, reason, reason.to_string()).await
+}
+
+pub(crate) async fn reconcile_task_pr(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<Option<TaskPr>> {
+    let Some(mut pr) = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+    else {
+        return Ok(None);
+    };
+    let Some(github_pr) =
+        crate::ops::pr::current_or_merged_pr_for_branch(&session.worktree, &pr.branch)?
+    else {
+        return Ok(Some(pr));
+    };
+    let number = u32::try_from(github_pr.number).map_err(|_| {
+        task_error(format!(
+            "pull request #{} exceeds supported range",
+            github_pr.number
+        ))
+    })?;
+    let url = github_pr.url.clone();
+    let previous = pr.clone();
+    let previous_phase = previous.phase();
+    let previous_github = previous.github().cloned();
+    let previous_session_status = session.status;
+    let now = time::OffsetDateTime::now_utc();
+    let publication = pr.publication.get_or_insert(PrPublication {
+        requested_at: now,
+        after_merge: AfterMerge::Review,
+        next_slug: None,
+        github: None,
+    });
+    publication.github = Some(GithubPr {
+        number,
+        url: url.clone(),
+    });
+
+    let pr_event = match github_pr.state.as_str() {
+        "merged" => {
+            let merge_commit = github_pr.merge_commit.clone().ok_or_else(|| {
+                task_error(format!(
+                    "GitHub reports pull request #{} merged without a merge commit",
+                    github_pr.number
+                ))
+            })?;
+            pr.merge_commit = Some(merge_commit.clone());
+            if pr
+                .publication
+                .as_ref()
+                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+            {
+                session.set_status(
+                    TaskSessionStatus::Completed,
+                    format!(
+                        "pull request #{} merged and completed the Task",
+                        github_pr.number
+                    ),
+                );
+                reconcile_pm_writeback(store, session, Some(&url)).await;
+            } else if !session.status.is_process_active() {
+                session.set_status(
+                    TaskSessionStatus::Waiting,
+                    format!(
+                        "pull request #{} merged; another PR may follow",
+                        github_pr.number
+                    ),
+                );
+            }
+            Some(TaskEventKind::PrMerged {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                number,
+                url: url.clone(),
+                merge_commit,
+            })
+        }
+        "closed" => {
+            pr.abandoned_at = Some(now);
+            if !session.status.is_process_active() {
+                session.set_status(
+                    TaskSessionStatus::Waiting,
+                    format!("pull request #{} closed without merge", github_pr.number),
+                );
+            }
+            None
+        }
+        _ => {
+            if !session.status.is_process_active() {
+                session.set_status(
+                    TaskSessionStatus::Waiting,
+                    format!("pull request #{} is open for review", github_pr.number),
+                );
+            }
+            Some(TaskEventKind::PrOpened {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                number,
+                url: url.clone(),
+            })
+        }
+    };
+
+    let pr_changed = pr != previous;
+    let completes_task = pr.phase() == PrPhase::Merged
+        && session.status == TaskSessionStatus::Completed
+        && pr
+            .publication
+            .as_ref()
+            .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask);
+    let mut session_saved_with_pr = false;
+    if pr_changed {
+        pr.updated_at = now;
+        if completes_task {
+            store
+                .complete_task_session_after_pr(session, &pr)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            session_saved_with_pr = true;
+        } else if pr.is_settled() {
+            store
+                .settle_task_pr(&pr, None)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        } else {
+            store
+                .update_task_pr(&pr)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+    }
+    if !session_saved_with_pr
+        && (session.status != previous_session_status
+            || session.pm_writeback != PmWritebackState::Current)
+    {
+        store
+            .update_task_session(session)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    if session.status != previous_session_status {
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::StatusChanged {
+                    from: previous_session_status,
+                    to: session.status,
+                    reason: session.status_reason.clone(),
+                },
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    if pr_changed {
+        if let Some(event) = pr_event {
+            let should_append = match &event {
+                TaskEventKind::PrOpened { .. } => previous_github.as_ref() != pr.github(),
+                TaskEventKind::PrMerged { .. } => previous_phase != PrPhase::Merged,
+                _ => true,
+            };
+            if should_append {
+                store
+                    .append_task_event(&session.id, &event)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+            }
+        }
+    }
+    if previous_session_status != TaskSessionStatus::Completed
+        && session.status == TaskSessionStatus::Completed
+    {
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::Completed {
+                    summary: "pull request merge completed the Task".to_string(),
+                },
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    Ok(Some(pr))
+}
+
+pub(crate) async fn ensure_working_pr(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<Option<TaskPr>> {
+    reconcile_task_pr(store, session).await?;
+    if session.status.is_terminal() {
+        return Ok(None);
+    }
+    if let Some(active) = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+    {
+        return Ok(Some(active));
+    }
+
+    let prs = store
+        .task_prs(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    let settled = prs
+        .last()
+        .cloned()
+        .ok_or_else(|| task_error("Task Session has no PR history"))?;
+    if !settled.is_settled() {
+        return Err(task_error(format!(
+            "Task PR {} is neither active nor settled",
+            settled.id
+        )));
+    }
+    let sequence = settled.sequence + 1;
+    let slug = settled
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.next_slug.clone())
+        .unwrap_or_else(|| sequence.to_string());
+    let author = settled
+        .branch
+        .split_once('/')
+        .map(|(author, _)| author)
+        .ok_or_else(|| {
+            task_error(format!(
+                "Task PR branch {:?} has no author prefix",
+                settled.branch
+            ))
+        })?;
+    let branch = format!("{author}/{}-{slug}", session.workspace_slug);
+    let default_branch = get_default_branch(&session.worktree)
+        .map_err(|error| task_error(format!("failed to resolve default branch: {error}")))?;
+    fetch(&session.worktree, "origin", &default_branch)
+        .map_err(|error| task_error(format!("failed to fetch next PR base: {error}")))?;
+    let base_ref = format!("origin/{default_branch}");
+    let base_commit = rev_parse(&session.worktree, &base_ref)
+        .map_err(|error| task_error(format!("failed to resolve next PR base: {error}")))?;
+    if !is_clean(&session.worktree)
+        .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+    {
+        return Err(task_error(format!(
+            "Task {} cannot rotate PRs while {} has uncommitted changes",
+            session.launch.issue.identifier,
+            session.worktree.display()
+        )));
+    }
+    let current = current_branch(&session.worktree)
+        .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
+        .ok_or_else(|| task_error("Task worktree is detached"))?;
+    if current != branch {
+        if current != settled.branch {
+            return Err(task_error(format!(
+                "Task {} expected settled branch {:?} or recovery branch {:?}, but {} is on {:?}",
+                session.launch.issue.identifier,
+                settled.branch,
+                branch,
+                session.worktree.display(),
+                current
+            )));
+        }
+        let local_ref = format!("refs/heads/{branch}");
+        let remote_ref = format!("refs/remotes/origin/{branch}");
+        let collision = ref_exists(&session.worktree, &local_ref)
+            .map_err(|error| task_error(format!("failed to inspect branch collision: {error}")))?
+            || ref_exists(&session.worktree, &remote_ref).map_err(|error| {
+                task_error(format!("failed to inspect branch collision: {error}"))
+            })?;
+        if collision {
+            return Err(task_error(format!(
+                "next PR branch {branch:?} already exists; retry the settling command with a clearer --next name"
+            )));
+        }
+        if let Err(error) = checkout_new_branch_from(&session.worktree, &branch, &base_ref) {
+            let recovered = current_branch(&session.worktree)
+                .map_err(|read_error| {
+                    task_error(format!("failed to inspect recovery branch: {read_error}"))
+                })?
+                .as_deref()
+                == Some(branch.as_str());
+            if !recovered {
+                return Err(task_error(format!(
+                    "failed to rotate Task worktree: {error}"
+                )));
+            }
+        }
+    }
+    push_with_upstream(&session.worktree, "origin", &branch)
+        .map_err(|error| task_error(format!("failed to push next PR branch: {error}")))?;
+
+    let now = time::OffsetDateTime::now_utc();
+    let next = TaskPr {
+        id: TaskPrId::new(),
+        task_session_id: session.id.clone(),
+        sequence,
+        slug,
+        branch,
+        base_commit,
+        publication: None,
+        merge_commit: None,
+        abandoned_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+    match store.settle_task_pr(&settled, Some(&next)).await {
+        Ok(()) => {
+            store
+                .append_task_event(
+                    &session.id,
+                    &TaskEventKind::PrStarted {
+                        pr_id: next.id.clone(),
+                        sequence: next.sequence,
+                        branch: next.branch.clone(),
+                        base_commit: next.base_commit.clone(),
+                    },
+                )
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            Ok(Some(next))
+        }
+        Err(error) => {
+            let recovered = store
+                .task_prs(&session.id)
+                .await
+                .map_err(|read_error| task_error(read_error.to_string()))?
+                .into_iter()
+                .find(|pr| pr.sequence == sequence);
+            match recovered {
+                Some(pr)
+                    if pr.branch == next.branch
+                        && pr.base_commit == next.base_commit
+                        && pr.phase() == PrPhase::Working =>
+                {
+                    Ok(Some(pr))
+                }
+                _ => Err(task_error(format!(
+                    "failed to record next Task PR after branch rotation: {error}"
+                ))),
+            }
+        }
+    }
 }
 
 pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
@@ -704,11 +1481,9 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
             .await
             .map_err(|error| task_error(format!("failed to read task status: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
         reconcile_process_liveness(&store, &mut session).await?;
-        if session.status == TaskSessionStatus::Failed {
-            return Ok(session);
-        }
-        if session.status == TaskSessionStatus::Merged
+        if session.status == TaskSessionStatus::Completed
             && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
         {
             retry_pm_writeback(&store, &mut session).await;
@@ -718,57 +1493,82 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
                 .map_err(|error| task_error(error.to_string()))?;
             return Ok(session);
         }
-        if !session.status.is_process_active() && !session.status.is_terminal() {
-            if let Some(pr) = crate::ops::current_or_merged_pr(&session.worktree)? {
-                let from = session.status;
-                let pull_request = crate::task::PullRequestRef {
-                    number: pr.number as u32,
-                    url: pr.url.clone(),
-                };
-                session.pull_request = Some(pull_request.clone());
-                let event = if pr.state == "merged" {
-                    session.set_status(
-                        TaskSessionStatus::Merged,
-                        format!("pull request #{} merged", pr.number),
-                    );
-                    reconcile_pm_writeback(&store, &mut session).await;
-                    TaskEventKind::Completed {
-                        pull_request,
-                        summary: "merge observed by task status".to_string(),
-                    }
-                } else {
-                    session.set_status(
-                        TaskSessionStatus::Submitted,
-                        format!("pull request #{} is open for review", pr.number),
-                    );
-                    TaskEventKind::PullRequestOpened {
-                        number: pr.number as u32,
-                        url: pr.url,
-                    }
-                };
-                store
-                    .update_task_session(&session)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                if from != session.status {
-                    store
-                        .append_task_event(
-                            &session.id,
-                            &TaskEventKind::StatusChanged {
-                                from,
-                                to: session.status,
-                                reason: session.status_reason.clone(),
-                            },
-                        )
-                        .await
-                        .map_err(|error| task_error(error.to_string()))?;
-                    store
-                        .append_task_event(&session.id, &event)
-                        .await
-                        .map_err(|error| task_error(error.to_string()))?;
-                }
-            }
+        Ok(session)
+    })
+}
+
+pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return Err(task_error("completion summary cannot be empty"));
+    }
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
+        if session.status == TaskSessionStatus::Completed {
+            return Ok(session);
         }
+        if session.status == TaskSessionStatus::Abandoned {
+            return Err(task_error(format!(
+                "Task {} is abandoned and cannot be completed",
+                session.launch.issue.identifier
+            )));
+        }
+        if !is_clean(&session.worktree)
+            .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+        {
+            return Err(task_error(
+                "Task worktree has uncommitted changes; publish or explicitly abandon them first",
+            ));
+        }
+        let skipped_pr = if let Some(pr) = store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        {
+            if pr.publication.is_some() {
+                return Err(task_error(
+                    "Task has an open pull request; merge it or run `lf pr abandon` first",
+                ));
+            }
+            let head = rev_parse(&session.worktree, "HEAD")
+                .map_err(|error| task_error(format!("failed to inspect Task HEAD: {error}")))?;
+            if head != pr.base_commit {
+                return Err(task_error(
+                    "Task PR has unmerged commits; publish it or run `lf pr abandon` first",
+                ));
+            }
+            Some(pr)
+        } else {
+            None
+        };
+        let from = session.status;
+        session.set_status(TaskSessionStatus::Completed, summary.clone());
+        reconcile_pm_writeback(&store, &mut session, None).await;
+        store
+            .complete_task_session(&session, skipped_pr.as_ref())
+            .await
+            .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::StatusChanged {
+                    from,
+                    to: TaskSessionStatus::Completed,
+                    reason: session.status_reason.clone(),
+                },
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        store
+            .append_task_event(&session.id, &TaskEventKind::Completed { summary })
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
         Ok(session)
     })
 }
@@ -783,10 +1583,11 @@ fn writeback_state(result: OpsResult<()>) -> PmWritebackState {
     }
 }
 
-pub(crate) async fn reconcile_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
-    let Some(pull_request) = session.pull_request.as_ref() else {
-        return;
-    };
+pub(crate) async fn reconcile_pm_writeback(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    pr_url: Option<&str>,
+) {
     let Ok(wave) = owning_wave(store, session).await else {
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
@@ -799,16 +1600,20 @@ pub(crate) async fn reconcile_pm_writeback(store: &SharedStore, session: &mut Ta
             &session.worktree,
             wave.name(),
             session.launch.issue.id.as_str(),
-            &pull_request.url,
+            pr_url,
         )
         .await,
     );
 }
 
 async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
-    let Some(pull_request) = session.pull_request.as_ref() else {
+    let Ok(prs) = store.task_prs(&session.id).await else {
         return;
     };
+    let pr_url = prs
+        .iter()
+        .rev()
+        .find_map(|pr| pr.github().map(|github| github.url.as_str()));
     let Ok(wave) = owning_wave(store, session).await else {
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
@@ -821,7 +1626,7 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
             &session.worktree,
             wave.name(),
             session.launch.issue.id.as_str(),
-            &pull_request.url,
+            pr_url,
         )
         .await,
     );
@@ -849,6 +1654,11 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .map_err(|error| task_error(format!("failed to read task events: {error}")))?
             .into_iter()
             .last();
+        let prs = store
+            .task_prs(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+        let active_pr = prs.iter().find(|pr| pr.is_active()).map(|pr| pr.id.clone());
         Ok(TaskSessionSnapshot {
             issue_id: session.launch.issue.id.as_str().to_string(),
             issue_identifier: session.launch.issue.identifier,
@@ -865,14 +1675,14 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             status_reason: session.status_reason,
             status_at: session.status_at,
             worktree: session.worktree.display().to_string(),
-            branch: session.branch,
-            base_commit: session.base_commit,
+            workspace_slug: session.workspace_slug,
+            prs,
+            active_pr,
             agent: session.agent,
             provider: session.provider,
             provider_session_id: session.provider_session_id,
             process_alive,
             latest_process: session.latest_process,
-            pull_request: session.pull_request,
             latest_event,
             created_at: session.created_at,
             updated_at: session.updated_at,
@@ -882,7 +1692,8 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
 
 pub fn task_changes(issue: &str) -> OpsResult<TaskChangesSnapshot> {
     let session = task_status(issue)?;
-    changes_snapshot(TaskWorkspace::from(&session))
+    let pr = active_pr(&session)?;
+    changes_snapshot(TaskWorkspace::new(&session, &pr))
 }
 
 fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapshot> {
@@ -930,7 +1741,8 @@ fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapsh
 
 pub fn task_diff(issue: &str, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
     let session = task_status(issue)?;
-    diff_snapshot(TaskWorkspace::from(&session), path)
+    let pr = active_pr(&session)?;
+    diff_snapshot(TaskWorkspace::new(&session, &pr), path)
 }
 
 fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
@@ -986,7 +1798,8 @@ fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<
 
 pub fn task_file(issue: &str, path: &str) -> OpsResult<TaskFileSnapshot> {
     let session = task_status(issue)?;
-    file_snapshot(TaskWorkspace::from(&session), path)
+    let pr = active_pr(&session)?;
+    file_snapshot(TaskWorkspace::new(&session, &pr), path)
 }
 
 fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFileSnapshot> {
@@ -1126,6 +1939,7 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
         reconcile_process_liveness(&store, &mut session).await?;
         let issue_id = session.launch.issue.identifier.clone();
         let source = command_source(&session)?;
@@ -1394,9 +2208,9 @@ pub fn task_wait(
     loop {
         let session = task_status(issue)?;
         let reached = match until {
-            TaskWaitUntil::Submitted => {
-                matches!(session.status, TaskSessionStatus::Submitted)
-                    || session.status.is_terminal()
+            TaskWaitUntil::Open => {
+                session.status.is_terminal()
+                    || active_pr(&session).is_ok_and(|pr| pr.phase() == PrPhase::Open)
             }
             TaskWaitUntil::Terminal => session.status.is_terminal(),
         };
@@ -1436,14 +2250,29 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 mod tests {
     use std::path::Path;
     use std::process::Command;
+    use std::sync::Arc;
 
     use super::{
-        changes_snapshot, command_source_for_wave, diff_snapshot, file_snapshot, project_context,
+        changes_snapshot, command_source_for_wave, derive_workspace_slug, diff_snapshot,
+        ensure_working_pr, file_snapshot, parse_pr_slug, parse_workspace_slug, project_context,
         TaskControlResult, TaskWorkspace,
     };
-    use crate::child_session::ChildCommandSource;
+    use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
+    use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
-    use crate::task::TaskSessionId;
+    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+        ProjectLaunchReceipt, TaskLaunchReceipt,
+    };
+    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::task::{
+        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskPr, TaskPrId,
+        TaskSession, TaskSessionId, TaskSessionStatus,
+    };
+    use crate::wave::Wave;
+    use loopflow_test_support::TestRepo;
+    use time::OffsetDateTime;
 
     fn git(repo: &Path, args: &[&str]) -> String {
         let output = Command::new("git")
@@ -1485,12 +2314,126 @@ mod tests {
         (repo, base, TaskSessionId::new())
     }
 
+    async fn rotation_task(
+        repo: &TestRepo,
+        branch: &str,
+        base_commit: &str,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
+        let home = tempfile::tempdir().expect("task home");
+        let db_path = home.path().join("loopflow.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path.clone()))
+                .await
+                .expect("open store"),
+        );
+        let now = OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            WaveId::new(),
+            "task-pr-rotation".to_string(),
+            repo.path().display().to_string(),
+        );
+        let execution = ChildExecutionContext {
+            lf_bin: std::path::PathBuf::from("/usr/bin/false"),
+            db_path,
+            lf_home: home.path().to_path_buf(),
+        };
+        let project = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(format!("project-{}", WaveId::new()))
+                        .expect("project id"),
+                    slug: "task-pr-rotation".to_string(),
+                    name: "Task PR rotation".to_string(),
+                    prompt_context: "Keep one stable worktree.".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Running,
+            status_reason: "test project is running".to_string(),
+            status_at: now,
+            iteration: 1,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("task-pr-rotation".to_string()),
+            latest_process: Some(ChildProcessGeneration {
+                generation: 1,
+                pid: None,
+                tmux_name: "task-pr-rotation".to_string(),
+                started_at: now,
+            }),
+            execution: Some(execution.clone()),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let session = TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+                    identifier: "INF-ROTATE".to_string(),
+                    title: "Rotate Task PRs".to_string(),
+                    description: "Keep the worktree stable.".to_string(),
+                },
+                project: project.launch.project.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_session_id: project.id.clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Waiting,
+            status_reason: "first PR settled".to_string(),
+            status_at: now,
+            worktree: repo.path().to_path_buf(),
+            workspace_slug: "task-pr-proof".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            execution: Some(execution),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: session.workspace_slug.clone(),
+            branch: branch.to_string(),
+            base_commit: base_commit.to_string(),
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_wave(&wave).await.expect("create wave");
+        store
+            .create_project_session(&project)
+            .await
+            .expect("create project");
+        store
+            .create_task_session(&session, &pr)
+            .await
+            .expect("create Task");
+        (home, store, session, pr)
+    }
+
     #[test]
     fn task_context_captures_project_definition_and_kr_state() {
         let project = PmProject {
             id: "project-1".to_string(),
-            slug: "delivery".to_string(),
-            name: "Delivery".to_string(),
+            slug: "pr".to_string(),
+            name: "PR".to_string(),
             summary: "Ship reliably".to_string(),
             definition: "Every task has one durable session.".to_string(),
             krs: vec![
@@ -1510,6 +2453,74 @@ mod tests {
             project_context(&project),
             "Definition:\nEvery task has one durable session.\n\nKRs:\n- [x] Review resumes the same session\n- [ ] Merge wakes the Wave"
         );
+    }
+
+    #[test]
+    fn readable_task_names_are_semantic_and_bounded() {
+        assert_eq!(
+            derive_workspace_slug("Release scoped migrations across every target")
+                .unwrap()
+                .as_str(),
+            "release-scoped-migrations-across-every"
+        );
+        assert_eq!(
+            derive_workspace_slug("Investigate").unwrap().as_str(),
+            "investigate-task"
+        );
+        assert!(parse_workspace_slug("one").is_err());
+        assert!(parse_workspace_slug("release_scoped-migrations").is_err());
+        assert_eq!(
+            parse_pr_slug("released-upgrade-proof").unwrap(),
+            "released-upgrade-proof"
+        );
+        assert!(parse_pr_slug("released/upgrade").is_err());
+    }
+
+    #[tokio::test]
+    async fn settled_pr_rotates_the_same_worktree_from_fetched_main() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, mut session, mut first) =
+            rotation_task(&repo, first_branch, &base).await;
+        first.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: Some("follow-up-proof".to_string()),
+            github: Some(GithubPr {
+                number: 911,
+                url: "https://example.com/pr/911".to_string(),
+            }),
+        });
+        first.merge_commit = Some("merge-911".to_string());
+        first.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&first, None)
+            .await
+            .expect("settle first PR");
+
+        let second = ensure_working_pr(&store, &mut session)
+            .await
+            .expect("rotate PR")
+            .expect("working PR");
+
+        assert_eq!(session.worktree, repo.path());
+        assert_eq!(second.sequence, 2);
+        assert_eq!(second.branch, "jack/task-pr-proof-follow-up-proof");
+        assert_eq!(second.base_commit, base);
+        assert_eq!(second.phase(), PrPhase::Working);
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            second.branch
+        );
+        let prs = store.task_prs(&session.id).await.expect("read PR history");
+        assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(prs[0].phase(), PrPhase::Merged);
+        assert_eq!(prs[1].id, second.id);
     }
 
     #[test]

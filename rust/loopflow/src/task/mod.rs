@@ -1,8 +1,8 @@
-//! Durable delivery of one Linear Task.
+//! Durable execution of one Linear Task.
 //!
-//! A Task Session is the sole domain owner of its immutable worktree, branch,
-//! provider transcript, one PR to main, and review-through-merge lifecycle.
-//! Process generations may stop and resume without changing Task identity.
+//! A Task Session owns one durable worktree and provider transcript. Ordered PRs
+//! own the serial branches that advance the Task. Publication intent is recorded
+//! before GitHub is called, then the GitHub receipt is attached to that intent.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -38,6 +38,8 @@ prefixed_uuid_id!(
     TaskDataError::InvalidId
 );
 
+prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -46,10 +48,9 @@ pub enum TaskSessionStatus {
     Starting,
     Running,
     Waiting,
-    Submitted,
     Blocked,
     Failed,
-    Merged,
+    Completed,
     Abandoned,
 }
 
@@ -60,16 +61,15 @@ impl TaskSessionStatus {
             Self::Starting => "starting",
             Self::Running => "running",
             Self::Waiting => "waiting",
-            Self::Submitted => "submitted",
             Self::Blocked => "blocked",
             Self::Failed => "failed",
-            Self::Merged => "merged",
+            Self::Completed => "completed",
             Self::Abandoned => "abandoned",
         }
     }
 
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Merged | Self::Abandoned)
+        matches!(self, Self::Completed | Self::Abandoned)
     }
 
     pub fn is_process_active(self) -> bool {
@@ -86,10 +86,9 @@ impl FromStr for TaskSessionStatus {
             "starting" => Ok(Self::Starting),
             "running" => Ok(Self::Running),
             "waiting" => Ok(Self::Waiting),
-            "submitted" => Ok(Self::Submitted),
             "blocked" => Ok(Self::Blocked),
             "failed" => Ok(Self::Failed),
-            "merged" => Ok(Self::Merged),
+            "completed" => Ok(Self::Completed),
             "abandoned" => Ok(Self::Abandoned),
             _ => Err(TaskDataError::InvalidStatus(value.to_string())),
         }
@@ -97,9 +96,184 @@ impl FromStr for TaskSessionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PullRequestRef {
+pub struct GithubPr {
     pub number: u32,
     pub url: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PrPhase {
+    Working,
+    Publishing,
+    Open,
+    Merged,
+    Abandoned,
+}
+
+impl PrPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Publishing => "publishing",
+            Self::Open => "open",
+            Self::Merged => "merged",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Working | Self::Publishing | Self::Open)
+    }
+
+    pub fn is_settled(self) -> bool {
+        matches!(self, Self::Merged | Self::Abandoned)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AfterMerge {
+    Review,
+    CompleteTask,
+}
+
+impl AfterMerge {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::CompleteTask => "complete_task",
+        }
+    }
+}
+
+impl FromStr for AfterMerge {
+    type Err = TaskDataError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "review" => Ok(Self::Review),
+            "complete_task" => Ok(Self::CompleteTask),
+            _ => Err(TaskDataError::InvalidInvariant(format!(
+                "invalid after-merge disposition: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrPublication {
+    pub requested_at: OffsetDateTime,
+    pub after_merge: AfterMerge,
+    pub next_slug: Option<String>,
+    pub github: Option<GithubPr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskPr {
+    pub id: TaskPrId,
+    pub task_session_id: TaskSessionId,
+    pub sequence: u32,
+    pub slug: String,
+    pub branch: String,
+    pub base_commit: String,
+    pub publication: Option<PrPublication>,
+    pub merge_commit: Option<String>,
+    pub abandoned_at: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+impl TaskPr {
+    pub fn phase(&self) -> PrPhase {
+        if self.abandoned_at.is_some() {
+            PrPhase::Abandoned
+        } else if self.merge_commit.is_some() {
+            PrPhase::Merged
+        } else if self
+            .publication
+            .as_ref()
+            .is_some_and(|publication| publication.github.is_some())
+        {
+            PrPhase::Open
+        } else if self.publication.is_some() {
+            PrPhase::Publishing
+        } else {
+            PrPhase::Working
+        }
+    }
+
+    pub fn github(&self) -> Option<&GithubPr> {
+        self.publication
+            .as_ref()
+            .and_then(|publication| publication.github.as_ref())
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.phase().is_active()
+    }
+
+    pub fn is_settled(&self) -> bool {
+        self.phase().is_settled()
+    }
+
+    pub fn validate(&self) -> Result<(), TaskDataError> {
+        if self.sequence == 0 {
+            return Err(TaskDataError::InvalidInvariant(
+                "task pull request sequence starts at 1".to_string(),
+            ));
+        }
+        if self.slug.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(
+                "task PR slug cannot be empty".to_string(),
+            ));
+        }
+        if self.branch.trim().is_empty() || self.base_commit.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(
+                "task PR requires a branch and base commit".to_string(),
+            ));
+        }
+        if let Some(publication) = &self.publication {
+            if publication.next_slug.as_deref().is_some_and(|slug| {
+                slug.split('-').any(|word| {
+                    word.is_empty()
+                        || !word
+                            .bytes()
+                            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+                })
+            }) {
+                return Err(TaskDataError::InvalidInvariant(
+                    "next branch slug must be lowercase kebab-case".to_string(),
+                ));
+            }
+            if publication.after_merge == AfterMerge::CompleteTask
+                && publication.next_slug.is_some()
+            {
+                return Err(TaskDataError::InvalidInvariant(
+                    "a completing pull request cannot name a next branch".to_string(),
+                ));
+            }
+            if let Some(github) = &publication.github {
+                if github.number == 0 || github.url.trim().is_empty() {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "GitHub PR number and URL cannot be empty".to_string(),
+                    ));
+                }
+            }
+        }
+        if self.merge_commit.is_some() && self.github().is_none() {
+            return Err(TaskDataError::InvalidInvariant(
+                "merged PR requires a GitHub PR".to_string(),
+            ));
+        }
+        if self.merge_commit.is_some() && self.abandoned_at.is_some() {
+            return Err(TaskDataError::InvalidInvariant(
+                "a PR cannot be both merged and abandoned".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,15 +309,13 @@ pub struct TaskSession {
     pub status_reason: String,
     pub status_at: OffsetDateTime,
     pub worktree: PathBuf,
-    pub branch: String,
-    pub base_commit: String,
+    pub workspace_slug: String,
     /// Provider/model selection captured when the session is reserved.
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
     /// Latest launch generation, retained after that process exits.
     pub latest_process: Option<ChildProcessGeneration>,
-    pub pull_request: Option<PullRequestRef>,
     /// The binary and store every generation of this Session relaunches with.
     /// `None` only for a Session created before the context was pinned: nothing
     /// recorded which `lf` spawned it, so it refuses to launch rather than let
@@ -162,21 +334,22 @@ impl TaskSession {
     /// Three intents are terminal for *automatic* restart, and only the first is
     /// terminal for the Session itself:
     ///
-    /// - the Session is `Merged` or `Abandoned` — the work is over;
+    /// - the Session is `Completed` or `Abandoned` — the work is over;
     /// - abandonment has been *requested* — the runner has not consumed the
     ///   command yet, but the decision is made;
-    /// - the PR is open and the Session is `Submitted` — the work is delivered
+    /// - the active PR is `Publishing` or `Open` — publication was requested
+    ///   and the work must not restart from clarification
     ///   and belongs to review.
     ///
-    /// The third was the 2026-07-14 W2-129 failure: `Submitted` is not terminal
+    /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
     /// and carries no live process, so it reads exactly like a Session that
     /// merely stopped. A wake therefore launched generation 2, which reopened
     /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
-    /// already open for review. Delivery is not an invitation to start over.
+    /// already open for review. An open PR is not an invitation to start over.
     ///
     /// A human may still `lf task resume` a submitted Session to answer review;
     /// this bars the supervisor, not the operator.
-    pub fn supervisor_restart_bar(&self) -> Option<String> {
+    pub fn supervisor_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if self.status.is_terminal() {
             return Some(format!(
                 "Task {} is {}; terminal Task Sessions do not restart",
@@ -190,13 +363,24 @@ impl TaskSession {
                 self.launch.issue.identifier, intent.reason
             ));
         }
-        if let Some(pull_request) = &self.pull_request {
-            if self.status == TaskSessionStatus::Submitted {
-                return Some(format!(
-                    "Task {} submitted pull request #{} and is awaiting review; \
-                     resume it explicitly with `lf task resume {}` to answer review",
-                    self.launch.issue.identifier, pull_request.number, self.launch.issue.identifier,
-                ));
+        if let Some(pr) = active_pr {
+            match pr.phase() {
+                PrPhase::Publishing => {
+                    return Some(format!(
+                        "Task {} requested PR publication but has no GitHub receipt; \
+                         resume it explicitly with `lf task resume {}` to retry publication",
+                        self.launch.issue.identifier, self.launch.issue.identifier,
+                    ));
+                }
+                PrPhase::Open => {
+                    let number = pr.github().expect("open Task PR passed validation").number;
+                    return Some(format!(
+                        "Task {} submitted pull request #{} and is awaiting review; \
+                         resume it explicitly with `lf task resume {}` to answer review",
+                        self.launch.issue.identifier, number, self.launch.issue.identifier,
+                    ));
+                }
+                PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
             }
         }
         None
@@ -209,21 +393,17 @@ impl TaskSession {
                 self.status.as_str()
             )));
         }
-        if matches!(
-            self.status,
-            TaskSessionStatus::Submitted | TaskSessionStatus::Merged
-        ) && self.pull_request.is_none()
-        {
+        if self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
-                "{} requires a pull request",
-                self.status.as_str()
+                "Task Session {} requires a workspace slug",
+                self.id
             )));
         }
         if matches!(self.pm_writeback, PmWritebackState::Pending { .. })
-            && self.status != TaskSessionStatus::Merged
+            && self.status != TaskSessionStatus::Completed
         {
             return Err(TaskDataError::InvalidInvariant(
-                "pending PM completion is valid only after merge".to_string(),
+                "pending PM completion is valid only for a completed Task".to_string(),
             ));
         }
         if self.incorporated_directive_version > self.current_directive_version {
@@ -297,12 +477,26 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
-    PullRequestOpened {
+    PrStarted {
+        pr_id: TaskPrId,
+        sequence: u32,
+        branch: String,
+        base_commit: String,
+    },
+    PrOpened {
+        pr_id: TaskPrId,
+        sequence: u32,
         number: u32,
         url: String,
     },
+    PrMerged {
+        pr_id: TaskPrId,
+        sequence: u32,
+        number: u32,
+        url: String,
+        merge_commit: String,
+    },
     Completed {
-        pull_request: PullRequestRef,
         summary: String,
     },
     Failed {
@@ -371,8 +565,9 @@ impl TaskObservation {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState, PullRequestRef,
-        TaskEventKind, TaskObservation, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, ChildCommandId, ChildCommandState, GithubPr, PmWritebackOperation,
+        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskObservation, TaskPr, TaskPrId,
+        TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::child_session::ChildDecisionId;
     use crate::session_context::{
@@ -408,13 +603,11 @@ mod tests {
             status_reason: "created".to_string(),
             status_at: now,
             worktree: "/tmp/task".into(),
-            branch: "task/inf-123".to_string(),
-            base_commit: "abc".to_string(),
+            workspace_slug: "ship-it".to_string(),
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
-            pull_request: None,
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
@@ -426,6 +619,8 @@ mod tests {
     fn task_ids_are_prefixed_and_round_trip() {
         let session = TaskSessionId::new();
         assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
+        let pr = TaskPrId::new();
+        assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
     }
 
     #[test]
@@ -447,10 +642,10 @@ mod tests {
     }
 
     #[test]
-    fn only_merged_and_abandoned_are_terminal() {
-        assert!(TaskSessionStatus::Merged.is_terminal());
+    fn only_completed_and_abandoned_tasks_are_terminal() {
+        assert!(TaskSessionStatus::Completed.is_terminal());
         assert!(TaskSessionStatus::Abandoned.is_terminal());
-        assert!(!TaskSessionStatus::Submitted.is_terminal());
+        assert!(!TaskSessionStatus::Waiting.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
     }
 
@@ -513,23 +708,78 @@ mod tests {
     }
 
     #[test]
-    fn submitted_and_merged_tasks_require_their_one_pull_request() {
-        let mut session = task_session();
-        session.status = TaskSessionStatus::Submitted;
-        assert!(session.validate().is_err());
+    fn pr_phase_is_derived_from_durable_evidence() {
+        let now = time::OffsetDateTime::now_utc();
+        let mut pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(pr.phase(), PrPhase::Working);
 
-        session.pull_request = Some(PullRequestRef {
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: None,
+        });
+        assert_eq!(pr.phase(), PrPhase::Publishing);
+
+        pr.publication.as_mut().unwrap().github = Some(GithubPr {
             number: 872,
             url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
         });
-        assert!(session.validate().is_ok());
+        assert_eq!(pr.phase(), PrPhase::Open);
 
-        session.status = TaskSessionStatus::Merged;
-        session.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: "Linear is offline".to_string(),
+        pr.merge_commit = Some("def".to_string());
+        assert_eq!(pr.phase(), PrPhase::Merged);
+        assert!(pr.validate().is_ok());
+
+        pr.abandoned_at = Some(now);
+        assert_eq!(pr.phase(), PrPhase::Abandoned);
+        assert!(pr.validate().is_err());
+    }
+
+    #[test]
+    fn publication_contains_its_github_receipt_and_disposition() {
+        let now = time::OffsetDateTime::now_utc();
+        let mut pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: Some("released_upgrade".to_string()),
+                github: Some(GithubPr {
+                    number: 872,
+                    url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
         };
-        assert!(session.validate().is_ok());
+        assert!(pr.validate().is_err());
+
+        let publication = pr.publication.as_mut().unwrap();
+        publication.next_slug = Some("released-upgrade".to_string());
+        assert!(pr.validate().is_ok());
+
+        pr.publication.as_mut().unwrap().after_merge = AfterMerge::CompleteTask;
+        assert!(pr.validate().is_err());
     }
 
     #[test]
@@ -544,5 +794,8 @@ mod tests {
             error: "too early".to_string(),
         };
         assert!(session.validate().is_err());
+
+        session.status = TaskSessionStatus::Completed;
+        assert!(session.validate().is_ok());
     }
 }

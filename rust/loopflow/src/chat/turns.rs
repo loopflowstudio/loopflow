@@ -44,7 +44,7 @@ pub enum ChildActivityKind {
     Incorporated,
     DecisionRequired,
     DecisionResolved,
-    PullRequestOpened,
+    PrOpened,
     Completed,
     Failed,
 }
@@ -346,9 +346,21 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
-        TaskEventKind::PullRequestOpened { number, url } => activity(
-            ChildActivityKind::PullRequestOpened,
+        TaskEventKind::PrStarted {
+            sequence, branch, ..
+        } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Started PR {sequence}"),
+            branch,
+        ),
+        TaskEventKind::PrOpened { number, url, .. } => activity(
+            ChildActivityKind::PrOpened,
             &format!("Opened PR #{number}"),
+            url,
+        ),
+        TaskEventKind::PrMerged { number, url, .. } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Merged PR #{number}"),
             url,
         ),
         TaskEventKind::Completed { summary, .. } => {

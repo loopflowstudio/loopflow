@@ -668,6 +668,8 @@ pub enum TaskCommand {
     Run {
         issue: String,
         #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
         directive: Option<String>,
         #[arg(long)]
         json: bool,
@@ -677,6 +679,8 @@ pub enum TaskCommand {
         title: String,
         #[arg(short = 'p', long = "project")]
         project_id: String,
+        #[arg(long)]
+        name: Option<String>,
         #[arg(long)]
         directive: Option<String>,
         #[arg(long)]
@@ -705,6 +709,14 @@ pub enum TaskCommand {
     File {
         issue: String,
         path: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Complete a Task without requiring another pull request
+    Complete {
+        issue: String,
+        #[arg(long)]
+        summary: String,
         #[arg(long)]
         json: bool,
     },
@@ -820,8 +832,12 @@ pub enum PrCommand {
     Submit {
         #[arg(long)]
         strict: bool,
-        #[arg(short = 'c', long = "create-pr")]
+        #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
+        #[arg(short = 'c', long)]
+        complete: bool,
+        #[arg(long = "next")]
+        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -837,8 +853,12 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
-        #[arg(short = 'c', long = "create-pr")]
+        #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
+        #[arg(short = 'c', long)]
+        complete: bool,
+        #[arg(long = "next")]
+        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -1199,16 +1219,74 @@ mod tests {
 
     #[test]
     fn task_run_accepts_linear_identifier_and_json() {
-        let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--json"])
-            .expect("parse task run");
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "run",
+            "INF-123",
+            "--name",
+            "release-scoped-migrations",
+            "--json",
+        ])
+        .expect("parse task run");
         let Some(Commands::Task {
-            cmd: TaskCommand::Run { issue, json, .. },
+            cmd: TaskCommand::Run {
+                issue, name, json, ..
+            },
         }) = cli.command
         else {
             panic!("expected task run command");
         };
         assert_eq!(issue, "INF-123");
+        assert_eq!(name.as_deref(), Some("release-scoped-migrations"));
         assert!(json);
+    }
+
+    #[test]
+    fn task_completion_and_pr_dispositions_parse() {
+        let complete = Cli::try_parse_from([
+            "lf",
+            "task",
+            "complete",
+            "INF-123",
+            "--summary",
+            "Root cause recorded",
+        ])
+        .expect("parse task complete");
+        assert!(matches!(
+            complete.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Complete { issue, summary, .. }
+            }) if issue == "INF-123" && summary == "Root cause recorded"
+        ));
+
+        let land =
+            Cli::try_parse_from(["lf", "pr", "land", "-c", "-p"]).expect("parse completing land");
+        assert!(matches!(
+            land.command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Land {
+                    complete: true,
+                    create_pr: true,
+                    next: None,
+                    ..
+                })
+            })
+        ));
+
+        let submit =
+            Cli::try_parse_from(["lf", "pr", "submit", "--next", "released-upgrade-proof"])
+                .expect("parse continuation submit");
+        assert!(matches!(
+            submit.command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Submit {
+                    complete: false,
+                    next: Some(next),
+                    ..
+                })
+            }) if next == "released-upgrade-proof"
+        ));
     }
 
     #[test]

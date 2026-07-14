@@ -33,12 +33,13 @@ lf task run INF-123
 lf task follow-up INF-123 "also audit retry callers"
 ```
 
-A Task Session runs in one immutable worktree, opens one PR to `main`, and
-reports linked events to its Wave. It inherits the Wave's `GOAL.md` and
-`MEMORY.md` plus its Project definition and KRs.
+A Task Session runs in one stable worktree, advances through zero or more serial
+PRs to `main`, and reports linked events to its Wave. It inherits the Wave's
+`GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
 
-Each Task Session gets a sibling worktree off `main`, with its own branch and
-PR:
+Each Task Session gets a sibling worktree. Its active PR owns the current branch;
+after merge or abandonment, Loopflow rotates that worktree onto the next branch
+from fetched `origin/main`:
 
 ```bash
 lf task status INF-123
@@ -47,6 +48,9 @@ lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
 lf task acknowledge INF-123 --directive 2 --summary "the smaller approach is active"
 lf task decide INF-123 DECISION_ID approve
 lf task wait INF-123
+lf pr land --next parser-proof  # merge this PR, then rotate
+lf pr land -c                   # merge this PR, then complete the Task
+lf task complete INF-124 --summary "investigation recorded"  # no PR needed
 ```
 
 The Wave stays directly steerable while several independent tasks run. Task

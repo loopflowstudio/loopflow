@@ -26,8 +26,12 @@ re-derive what these already record.
 `lf pr submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge.
 
 ```
-lf pr submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
+lf pr submit [--create-pr] [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
 ```
+
+Inside a Task, bare submit leaves the Task open. Use `--next <slug>` when
+another serial PR follows, or `-c` when this merge completes the Task.
+Do not combine them; a retry before merge may change the disposition.
 
 **Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.
 

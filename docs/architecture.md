@@ -19,7 +19,6 @@ Authoring layer
   .lf/directions/*.md
   wave/<name>/GOAL.md
   wave/<name>/MEMORY.md
-  wave/<name>/*.md
         |
         v
 Execution engine
@@ -38,7 +37,7 @@ Local CLI                 Daemon
         |                        |
         v                        v
 Git/PR/PM ops             Clients
-                            lf CLI
+                            HTTP readers
                             Loopflow Swift app
                             webhooks
 ```
@@ -94,23 +93,26 @@ is gone; self-hosted operations are SSH-first.
 
 ## Clients
 
-`lf` and Loopflow read lfd state; webhooks push events in. The Python package
-is a library of wire models only.
+`lf` reads the shared registry directly. Loopflow invokes its bundled `lf` for
+repository, Wave, Project, and Task snapshots, then connects to the selected
+Wave's local chat endpoint for replay and live turns. `lfd` exposes the same
+registry to HTTP readers and accepts verified webhooks; the app does not depend
+on it. The Python package is a library of wire models only.
 
 Important paths:
 
 - `python/loopflow/models.py`
 
 Loopflow is the Swift app. It reads the native Wave → Project → Task snapshot,
-renders the work map beside the one Wave conversation, and provides native
-surfaces for attention, terminal workspaces, provider auth, and live output.
+renders the work map beside the one Wave conversation, and exposes a separate
+local telemetry window. It owns no generic execution, terminal workspace,
+provider-auth, or remote-session lifecycle.
 
 Important paths:
 
 - `swift/Loopflow/Models/`
-- `swift/Loopflow/State/`
 - `swift/Loopflow/Services/`
-- `swift/Loopflow/Views/`
+- `swift/LoopflowMac/Views/`
 
 ## Wave Loop
 
@@ -157,8 +159,9 @@ Loopflow integrates with:
 
 - Context assembly: every agent session depends on it, and the sources span
   docs, prompts, skills, wave memory, scratch notes, and command arguments.
-- Child control: SQLite, Loopflow, tmux, and external agents must agree on the
-  current directive, its provider effect, incorporation, state, and next move.
+- Child control: SQLite, the Project/Task runners, and provider harnesses must
+  agree on the current directive, its provider effect, incorporation, state,
+  and next move. Tmux only owns process lifetime.
 - DTO parity: Rust, Python, Swift, and fixtures can drift unless changes are
   made as one contract update.
 - Product continuity: backend, CLI, UI, docs, tests, and release notes often

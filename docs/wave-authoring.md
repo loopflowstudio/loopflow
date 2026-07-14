@@ -250,8 +250,8 @@ When a task ships, its context — what was learned, what changed, what downstre
 
 ```bash
 lf serve mywave              # start the wave agent (Ctrl-C to stop)
-tmux ls                     # live Wave, Project, and Task Sessions
-tmux attach -r -t <name>    # inspect one; agent output lives here
+lf project attach <id>      # audited Project control prompt
+lf task attach INF-123      # audited Task control prompt
 ```
 
 In **Loopflow**, a wave's detail view renders its native Project → Task work
@@ -260,7 +260,9 @@ anything needing attention.
 
 ### Crons
 
-Crons live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
+Crons live in `GOAL.md` frontmatter; the Wave's resident opens each due
+schedule as a system turn. `workers: 0` is valid for a Wave that coordinates
+without starting Task Sessions:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->

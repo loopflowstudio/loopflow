@@ -21,9 +21,9 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | I want to... | Start here |
 |---|---|
 | Try loopflow from terminal | `lf init` |
-| Run autonomous waves | `lf init` → `lfd install` |
-| Use the visual app (macOS) | Download Loopflow (handles the rest) |
-| Connect from iPhone | Loopflow iOS → discovers your lfd |
+| Run autonomous waves | `lf init` → `lf serve <name>` |
+| Use Wave Chat (macOS) | Download Loopflow and open a repository |
+| Receive GitHub webhooks | `lfd install` |
 | Set up remote dev server | SSH into the host and run native `lf`/`lfd` there |
 
 ---
@@ -164,24 +164,22 @@ The Wave creates or selects a Linear task, starts it with `lf task run
 worktree. CI failures and review feedback return to the same session; linked
 events land in the Wave thread.
 
-**Loopflow** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
+**Loopflow** (macOS) is the native Wave experience. Select a repository and a
+Wave to open its persistent conversation beside the Linear-backed Project →
+Task work map. The app queries local state through its bundled `lf` and starts
+the selected Wave's `lf serve` process when needed; it does not require a local
+`lfd` service.
 
-Sessions are plain tmux:
+Detached processes use named tmux sessions:
 
 ```bash
 tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Stop a wave with Ctrl-C in its `lf serve` session.
-
-### Browse flows
-
-1. Open **Flows** in Loopflow.
-2. Expand `build` → `build`.
-3. Click `gate` to see every parent flow that reaches it.
-
-`lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/skills/*.md` overrides in the repo.
+Use `lf project attach <project>` or `lf task attach <issue>` for a writable,
+audited control prompt. Stop a foreground Wave with Ctrl-C or run
+`lf stop <name>`.
 
 You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf serve <name>` runs them and Loopflow picks them up.
 
@@ -192,7 +190,8 @@ You can draft wave content with `lf design` locally, or write it by hand. Once `
 ## Go Remote
 
 Run agents while you sleep. SSH into a server, install Loopflow, and run native
-`lf`/`lfd` there.
+`lf serve` processes there. Add `lfd` when the host needs webhooks, HTTP reads,
+or background credential refresh.
 
 ```bash
 mkdir -p ~/.lf

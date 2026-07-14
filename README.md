@@ -1,6 +1,9 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it coordinates Linear-backed Project and Task Sessions, remembers what it learns, and shows you every live session.
+Loopflow helps you create and run **Waves** — persistent agents that work toward
+an outcome. Write a Wave's goal once; it coordinates Linear-backed Projects and
+Tasks, remembers what it learns, and keeps one steerable conversation beside
+the live work map.
 
 Start a wave by hand and steer it interactively. As it earns trust, let it loop — selecting Projects, directing Tasks, and reacting to changes on its own.
 
@@ -21,9 +24,9 @@ workers: 2
 
 ## Objective
 
-Keep the design system coherent. Each loop: read the Linear tasks, pick the next
-useful design move, execute its local blocker, spin off independent work only
-when parallelism earns it, and fold what changed into memory.
+Keep the design system coherent. Each wake: read the Linear Projects and Tasks,
+direct the Project with the highest-leverage open KR, start a concrete Task only
+after it has a Linear issue, and fold what changed into memory.
 
 ## Measures
 
@@ -44,9 +47,10 @@ lf memory add "buttons: variants unified" # curate what it knows
 lf stop designer              # stop its listener and resident gracefully
 ```
 
-Sessions are plain tmux — `tmux ls` to see the Wave, Project, and Task
-Sessions. Use `lf project attach <project>` or `lf task attach <issue-id>` for
-an audited writable control prompt.
+Detached Wave, Project, and Task processes use named tmux sessions. Use
+`lf project attach <project>` or `lf task attach <issue-id>` for an audited
+writable control prompt; tmux is process lifetime and inspection, not the
+steering protocol.
 
 `lf serve <name>` starts a long-lived server and resident at the repo's clean
 canonical main checkout. Wave turns coordinate there; Task Sessions own every
@@ -129,7 +133,9 @@ and provider-reported history.
 
 ### Crons
 
-Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass. `workers: 0` is valid for a cron-only wave.
+Crons schedule supplementary Wave wakes. They live in `GOAL.md` frontmatter;
+the Wave resident opens one system turn when a schedule is due. `workers: 0`
+is valid when the Wave coordinates without starting Task Sessions.
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
@@ -311,15 +317,6 @@ find release -maxdepth 2 -type f | sort
 
 Interactive runs append to `release/unreleased/DECISIONS.md` when they make a durable product or process decision. Headless runs do not. If the ledger exists, `lf release run` promotes `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative release notes, and archives the generated root notes to `release/v<version>/NOTES.md`. If the ledger is absent, release notes fall back to merged PR history.
 
-### Browse the catalog
-
-```bash
-lfd serve
-curl -s "http://127.0.0.1:2486/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
-```
-
-Open **Flows** in Loopflow to browse the same catalog visually. The left pane groups flows and skills by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or skill.
-
 ### Branches (xor)
 
 Branches route a flow based on an agent's assessment of the current state. Exactly one path runs.
@@ -363,7 +360,7 @@ lf research -d ceo
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 ```
 
-Or grab the desktop app: download [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg) and drag **Loopflow** to Applications. The app bundles `lf` and `lfd`.
+Or grab the desktop app: download [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg) and drag **Loopflow** to Applications. The app bundles `lf`; install `lfd` separately when you need its webhook and host-automation service.
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
@@ -376,7 +373,12 @@ uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.a
 uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd, sync skills
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`.
+`install.py` is the local entry point. `local --use` builds this worktree's
+`lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that
+build. The app bundle carries only `lf`; `lfd` remains a standalone binary.
+`refresh` is the fast CLI-only path: pull the default branch, rebuild/install
+`lf` and `lfd`, and sync Loopflow skills into `~/.claude/skills` and
+`~/.agents/skills`.
 
 Built-in skills and flows included. `lf init` sets up your coding agent and preferences.
 
@@ -390,7 +392,7 @@ Install the Rust binaries directly with cargo.
 ```bash
 lf serve engbot       # start the wave agent (Ctrl-C to stop)
 lf task run ENG-123   # start the Linear task in its own worktree
-tmux ls              # list live Wave, Project, and Task Sessions
+tmux ls              # list detached Wave, Project, and Task processes
 lf task attach ENG-123    # writable audited control prompt
 ```
 

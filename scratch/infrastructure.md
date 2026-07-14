@@ -651,3 +651,25 @@ inside `Loopflow.app` and tests cited the already-deleted
 optional gatekeeper binary; bundle only `lf`, which the app actually invokes
 for registry snapshots and status. All three app build paths should now have
 the same Contents/MacOS contract.
+
+## Current reduction: documentation is part of the product boundary
+
+The guides still described the architecture removed above: the app depended on
+an embedded daemon, browsed a Flow catalog, owned generic terminal sessions,
+and treated `WAITING` as a PR-limit failure. Those instructions were more than
+stale prose; they offered bypasses around the Wave → Project → Task hierarchy
+and made the surviving product look incomplete.
+
+Teach the one live path instead:
+
+- humans open and steer Waves through Wave Chat;
+- Waves coordinate Linear-backed Projects and Tasks;
+- Project and Task controls are durable, audited commands, never tmux input;
+- only Tasks own file-writing worktrees;
+- waiting means the child has deliberately stopped its provider process until
+  a decision, child observation, review, CI, or merge changes the answer;
+- `lfd` is an optional webhook/HTTP/host service, not an app prerequisite.
+
+Documentation should now fail the same architecture test as code: if an
+example can start untracked file-writing work, create a fourth product Session
+kind, or imply a second state owner, delete or rewrite it.

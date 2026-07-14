@@ -21,7 +21,7 @@ one durable Task Session; and folds the linked result back into memory.
 
 ```bash
 lf serve shipper            # start the wave agent
-tmux ls                    # live Wave, Project, and Task Sessions
+tmux ls                    # detached Wave, Project, and Task processes
 lf task attach INF-123     # audited writable task control prompt
 ```
 
@@ -85,7 +85,8 @@ Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
 
-Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
+Use `workers: 0` in `GOAL.md` for Waves that coordinate without starting Task
+Sessions, including cron-only observers:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
@@ -106,17 +107,19 @@ Keep governance checks current and actionable.
 ## Quick Start
 
 ```bash
-lfd install                      # one-time: install daemon
+lf serve <name>
 ```
 
-Or run manually: `lfd serve`. Watch progress in Loopflow.
+Open the repository in Loopflow to see the Wave conversation and Project →
+Task work map. Install `lfd` only when you need webhook ingress, HTTP registry
+reads, or host-level credential refresh.
 
 ## Managing Waves
 
 ```bash
 lf serve <name>          # start the wave agent (Ctrl-C to stop)
-tmux ls                 # live Wave, Project, and Task Sessions
-tmux attach -r -t <name>   # inspect one; stdin stays closed
+lf project attach <id>  # audited Project control prompt
+lf task attach INF-123  # audited Task control prompt
 ```
 
 To remove a wave, stop it, then delete `wave/<name>/`.

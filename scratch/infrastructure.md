@@ -363,7 +363,7 @@ opens PRs, and merges code, so it requires an explicit human-authorized run.
 Until that gate runs, keep the provider acceptance window and live UX quality
 as evidence gaps—not reasons to invent more architecture.
 
-## Current reduction: one concrete store
+## Current reduction: persistence follows the product boundary
 
 Project and Task events now nudge the same durable outbox drain. The live Wave
 receives both immediately; a stopped Wave catches up on serve. No child may
@@ -377,16 +377,19 @@ inherent method calls its own trait method, which then copies owned arguments
 and calls SQLite. This doubles the API surface and hides the actual owner
 without providing substitution, isolation, or a test seam.
 
-Collapse it:
+The single-implementation traits are now gone. `Store` is the one asynchronous
+registry API, and its methods cross the blocking SQLite boundary directly.
 
-- keep `Store` as the one asynchronous registry API;
-- move each `spawn_blocking` SQLite call into the corresponding inherent
-  method;
-- expose the one trait-only operation (`list_orphaned_fork_runs`) directly;
-- delete six traits, six impl blocks, and five unused trait-object accessors;
-- retain `SqliteStore` as the synchronous implementation detail and preserve
-  every transaction boundary and query unchanged.
+Use the same ownership boundary to split the oversized implementation:
 
-This reduction is intentionally orthogonal to Wave/Project/Task persistence.
-It removes an abstraction with no second implementation before splitting the
-remaining modules by real ownership.
+- `lfdb/child_sessions.rs` owns the async Project/Task session, command,
+  directive, event, and outbox facade;
+- `lfdb/sqlite/child_sessions.rs` owns their synchronous queries, row maps,
+  and transactions;
+- the parent modules retain Wave/run/repo/token/trace persistence;
+- no generic child store trait or backend interface is introduced;
+- transaction bodies and SQL remain byte-for-byte moves.
+
+This makes the central persistence files smaller without pretending Project
+and Task are the same domain. They share a durable command/outbox mechanism;
+their event and session types remain distinct.

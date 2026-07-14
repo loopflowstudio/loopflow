@@ -609,3 +609,10 @@ still downloads its binary framework and links terminal-only dependencies.
 Remove the debug terminal, Ghostty package, no-op beta toggle, unused CLI
 installer, and the Flow/Skill/generic Session models that have no rendered or
 runtime consumer. The Mac app should compile from the same nouns it exposes.
+
+Apply the same rule to the Wave row model. Swift still carries triggers, crons,
+areas, directions, agent overrides, metrics, and iteration helpers from retired
+daemon/workspace screens. The registry DTO may decode its complete wire shape,
+but the app's `Wave` projection should contain only what a live view owns:
+identity, repository, goal kind, and rolled-up status. Project/KR context stays
+in `WavePlan`; live child state stays in the work map.

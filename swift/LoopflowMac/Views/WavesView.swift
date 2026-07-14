@@ -85,6 +85,7 @@ struct WavesView: View {
             id: "\(Self.authoredIdPrefix)\(repoPath)#\(snapshot.name)",
             name: snapshot.name,
             repo: repoPath,
+            goal: "wave",
             status: snapshot.status
         ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)])
     }

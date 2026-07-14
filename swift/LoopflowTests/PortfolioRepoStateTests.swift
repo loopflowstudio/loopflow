@@ -153,11 +153,8 @@ struct PortfolioRepoStateTests {
             id: id,
             name: id,
             repo: repoPath,
-            direction: [],
-            area: ["."],
-            triggers: [],
-            status: status,
-            iteration: 0
+            goal: "wave",
+            status: status
         )
     }
 }

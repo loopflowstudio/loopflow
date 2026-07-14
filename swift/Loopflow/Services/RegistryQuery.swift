@@ -222,20 +222,14 @@ struct WaveSnapshot: Decodable {
         case parentWaveId = "parent_wave_id"
     }
 
-    /// Map the registry snapshot to the app `Wave`. `lf ls` carries the durable
-    /// identity + rolled-up status; the rich per-run and on-disk detail
-    /// (direction, area, active run object, diff) is loaded separately when a
-    /// wave is opened, so those stay empty here.
+    /// Map the registry snapshot to the app's deliberately small Wave row.
     func toWave() -> Wave {
         Wave(
             id: id,
             name: name,
             repo: repo,
             goal: goal,
-            status: WaveStatus(rawValue: status) ?? .idle,
-            iteration: iteration,
-            createdAt: RegistrySnapshotDate.parse(createdAt),
-            parentWaveId: parentWaveId
+            status: WaveStatus(rawValue: status) ?? .idle
         )
     }
 }

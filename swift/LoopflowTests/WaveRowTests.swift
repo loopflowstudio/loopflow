@@ -11,8 +11,6 @@ import ViewInspector
 struct WaveRowViewTests {
     private func makeWave(
         name: String = "swift-falcon",
-        area: [String] = ["src/"],
-        triggers: [Trigger] = [],
         status: WaveStatus = .idle
     ) -> WaveViewModel {
         WaveViewModel(
@@ -20,10 +18,8 @@ struct WaveRowViewTests {
                 id: "test-wave-id",
                 name: name,
                 repo: "/tmp/repo",
-                area: area,
-                triggers: triggers,
-                status: status,
-                iteration: 0
+                goal: "wave",
+                status: status
             )
         )
     }

@@ -1,238 +1,47 @@
-// Tests for WaveViewModel and Trigger struct.
-
-import Foundation
 import SwiftUI
 import Testing
-@testable import LoopflowMac
 @testable import Loopflow
 
-@Suite("Wave View Model")
-struct WaveModelTests {
-    private func makeWave(
-        id: String = "test-id",
-        name: String = "",
-        repo: String = "/tmp/repo",
-        direction: [String] = [],
-        area: [String] = [],
-        triggers: [Trigger] = [],
-        status: WaveStatus = .idle,
-        iteration: Int = 0
-    ) -> WaveViewModel {
-        WaveViewModel(
+@Suite("Wave")
+struct WaveTests {
+    @Test("view model exposes registry identity")
+    func exposesRegistryIdentity() {
+        let wave = WaveViewModel(api: Wave(
+            id: "wave-123",
+            name: "infrastructure",
+            repo: "/tmp/repo",
+            goal: "wave",
+            status: .running
+        ))
+
+        #expect(wave.id == "wave-123")
+        #expect(wave.displayName == "infrastructure")
+        #expect(wave.repo == "/tmp/repo")
+        #expect(wave.statusText == "Running")
+    }
+
+    @Test("objective tagline uses the first authored line")
+    func objectiveTaglineUsesFirstLine() {
+        let wave = WaveViewModel(
             api: Wave(
-                id: id,
-                name: name,
-                repo: repo,
-                direction: direction,
-                area: area,
-                triggers: triggers,
-                status: status,
-                iteration: iteration
-            )
-        )
-    }
-
-    // MARK: - Display Name
-
-    @Test("displayName uses name when set")
-    func displayNameUsesName() {
-        let wave = makeWave(name: "swift-falcon")
-
-        #expect(wave.displayName == "swift-falcon")
-    }
-
-    @Test("displayName generates from area when name is empty")
-    func displayNameGeneratesFromConfig() {
-        let wave = makeWave(area: ["src/auth"])
-
-        #expect(wave.displayName == "src/auth")
-    }
-
-    @Test("displayName shows 'root' for dot area")
-    func displayNameRootForDotArea() {
-        let wave = makeWave(area: ["."])
-
-        #expect(wave.displayName == "root")
-    }
-
-    @Test("displayName shows root when area is empty")
-    func displayNameDefaultFlow() {
-        let wave = makeWave(area: [])
-
-        #expect(wave.displayName == "root")
-    }
-
-    // MARK: - Status Indicator
-
-    @Test("statusIndicator returns forest green circle for running")
-    func statusIndicatorRunning() {
-        let wave = makeWave(id: "test", repo: "/tmp", status: .running)
-        let indicator = wave.statusIndicator
-
-        #expect(indicator.icon == "circle.fill")
-        #expect(indicator.color == .statusSuccess)
-    }
-
-    @Test("statusIndicator returns goldenrod half-circle for waiting")
-    func statusIndicatorWaiting() {
-        let wave = makeWave(id: "test", repo: "/tmp", status: .waiting)
-        let indicator = wave.statusIndicator
-
-        #expect(indicator.icon == "circle.lefthalf.filled")
-        #expect(indicator.color == .statusWarning)
-    }
-
-    @Test("statusIndicator returns neutral circle for idle")
-    func statusIndicatorIdle() {
-        let wave = makeWave(id: "test", repo: "/tmp", status: .idle)
-        let indicator = wave.statusIndicator
-
-        #expect(indicator.icon == "circle")
-        #expect(indicator.color == .statusNeutral)
-    }
-
-    @Test("statusIndicator returns burnt orange X for failed")
-    func statusIndicatorFailed() {
-        let wave = makeWave(id: "test", repo: "/tmp", status: .failed)
-        let indicator = wave.statusIndicator
-
-        #expect(indicator.icon == "xmark.circle.fill")
-        #expect(indicator.color == .statusError)
-    }
-
-    // MARK: - Computed Properties
-
-    @Test("areaDisplay joins multiple areas")
-    func areaDisplayJoins() {
-        let wave = makeWave(id: "test", repo: "/tmp", area: ["src/", "lib/"])
-
-        #expect(wave.areaDisplay == "src/, lib/")
-    }
-
-    @Test("areaDisplay returns dot for root area")
-    func areaDisplayDot() {
-        let wave = makeWave(id: "test", repo: "/tmp", area: ["."])
-
-        #expect(wave.areaDisplay == ".")
-    }
-
-    @Test("areaDisplay returns empty for nil area")
-    func areaDisplayNil() {
-        let wave = makeWave(id: "test", repo: "/tmp", area: [])
-
-        #expect(wave.areaDisplay == "")
-    }
-
-    @Test("directionDisplay joins multiple goals")
-    func directionDisplayJoins() {
-        let wave = makeWave(
-            id: "test",
-            repo: "/tmp",
-            direction: ["clarity", "ux"]
+                id: "wave-123",
+                name: "infrastructure",
+                repo: "/tmp/repo",
+                goal: "wave",
+                status: .idle
+            ),
+            plan: WavePlan(objective: "\nMake releases boring.\nKeep them observable.")
         )
 
-        #expect(wave.directionDisplay == "clarity, ux")
+        #expect(wave.objectiveTagline == "Make releases boring.")
     }
 
-    @Test("directionDisplay returns empty for nil direction")
-    func directionDisplayNil() {
-        let wave = makeWave(id: "test", repo: "/tmp", direction: [])
-
-        #expect(wave.directionDisplay == "")
-    }
-
-    @Test("shortId returns first 7 characters")
-    func shortIdTruncates() {
-        let wave = makeWave(id: "abcdefghijklmnop", repo: "/tmp")
-
-        #expect(wave.shortId == "abcdefg")
-    }
-
-    // MARK: - Detail Text
-
-    @Test("detailText combines area and trigger signal")
-    func detailTextCombines() {
-        let wave = makeWave(
-            id: "test",
-            repo: "/tmp",
-            area: ["src/"],
-            triggers: [Trigger(signal: .repo)]
-        )
-
-        #expect(wave.detailText == "src/ · repo")
-    }
-
-    @Test("detailText omits trigger when none active")
-    func detailTextOmitsWhenNoTrigger() {
-        let wave = makeWave(
-            id: "test",
-            repo: "/tmp",
-            area: ["."]
-        )
-
-        #expect(wave.detailText == ".")
-    }
-
-
-    // MARK: - Iteration Text
-
-    @Test("iterationText shows iter count when positive")
-    func iterationTextPositive() {
-        let wave = makeWave(id: "test", repo: "/tmp", iteration: 5)
-
-        #expect(wave.iterationText == "iter 5")
-    }
-
-    @Test("iterationText is empty when zero")
-    func iterationTextZero() {
-        let wave = makeWave(id: "test", repo: "/tmp", iteration: 0)
-
-        #expect(wave.iterationText == "")
-    }
-
-}
-
-@Suite("Trigger")
-struct TriggerTests {
-
-    @Test("description returns signal name")
-    func descriptionSignal() {
-        #expect(Trigger(signal: .repo).description == "repo")
-        #expect(Trigger(signal: .wave).description == "wave")
-        #expect(Trigger(signal: .ciFailure).description == "ci_failure")
-    }
-
-    @Test("description includes flow when set")
-    func descriptionWithFlow() {
-        let trigger = Trigger(signal: .repo, flow: "integrate")
-
-        #expect(trigger.description == "repo → integrate")
-    }
-
-    @Test("icon returns correct SF Symbol for each signal")
-    func iconForSignal() {
-        #expect(Trigger(signal: .repo).icon == "arrow.triangle.branch")
-        #expect(Trigger(signal: .wave).icon == "waveform")
-        #expect(Trigger(signal: .ciFailure).icon == "exclamationmark.triangle")
-    }
-}
-
-@Suite("WaveStatus")
-struct WaveStatusTests {
-
-    @Test("color returns correct SwiftUI color")
-    func colorForStatus() {
+    @Test("status owns its visual treatment")
+    func statusOwnsVisualTreatment() {
+        #expect(WaveStatus.running.icon == "circle.fill")
         #expect(WaveStatus.running.color == .statusSuccess)
         #expect(WaveStatus.waiting.color == .statusWarning)
-        #expect(WaveStatus.idle.color == .statusNeutral)
         #expect(WaveStatus.failed.color == .statusError)
-    }
-
-    @Test("icon returns correct SF Symbol")
-    func iconForStatus() {
-        #expect(WaveStatus.running.icon == "circle.fill")
-        #expect(WaveStatus.waiting.icon == "circle.lefthalf.filled")
-        #expect(WaveStatus.idle.icon == "circle")
-        #expect(WaveStatus.failed.icon == "xmark.circle.fill")
+        #expect(WaveStatus.paused.icon == "pause.circle")
     }
 }

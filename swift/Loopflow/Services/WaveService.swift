@@ -97,12 +97,6 @@ public struct WaveService: @unchecked Sendable {
         throw unsupported("Wave deletion is not available through the retired lfd HTTP API.")
     }
 
-    public func getWaveAgentTree(waveId: String, activeOnly: Bool = true) async throws -> WaveAgentTree {
-        _ = waveId
-        _ = activeOnly
-        throw unsupported("Wave agent-tree reads are not available through the retired lfd HTTP API.")
-    }
-
     public func addTrigger(_ waveId: String, signal: Trigger.Signal, flow: String? = nil) async throws -> Trigger {
         _ = waveId
         _ = signal
@@ -114,22 +108,6 @@ public struct WaveService: @unchecked Sendable {
         _ = waveId
         _ = triggerId
         throw unsupported("Trigger mutation is not available through the retired lfd HTTP API.")
-    }
-
-    public func createSession(
-        harness: String,
-        runId: String?,
-        config: AgentSessionConfig
-    ) async throws -> AgentSession {
-        _ = harness
-        _ = runId
-        _ = config
-        throw unsupported("Agent sessions are launched by lf, not the retired lfd HTTP API.")
-    }
-
-    public func getSession(_ id: String) async throws -> AgentSession {
-        _ = id
-        throw unsupported("Agent session lookup is not available through the retired lfd HTTP API.")
     }
 
     public func stop(_ id: String) async throws {
@@ -150,45 +128,6 @@ public struct WaveService: @unchecked Sendable {
     public func markAttentionViewed(_ id: String) async throws -> AttentionItem {
         _ = id
         throw unsupported("Attention mutation is not available through the retired lfd HTTP API.")
-    }
-
-    public func listSessions(repo: RepoTarget, activeOnly: Bool = true) async throws -> [Session] {
-        _ = repo
-        _ = activeOnly
-        return []
-    }
-
-    public func createSession(
-        waveId: String,
-        flow: String,
-        worktree: String,
-        agent: String
-    ) async throws -> SessionLaunchResponse {
-        _ = waveId
-        _ = flow
-        _ = worktree
-        _ = agent
-        throw unsupported("Terminal session launch is not available through the retired lfd HTTP API.")
-    }
-
-    public func getSession(_ id: String) async throws -> Session {
-        _ = id
-        throw unsupported("Terminal session lookup is not available through the retired lfd HTTP API.")
-    }
-
-    public func attachSession(_ id: String) async throws -> SessionConnectionInfo {
-        _ = id
-        throw unsupported("Terminal attach must use the lf-owned session path; the old lfd HTTP API is retired.")
-    }
-
-    public func startSession(_ id: String) async throws -> Session {
-        _ = id
-        throw unsupported("Terminal session start is not available through the retired lfd HTTP API.")
-    }
-
-    public func cancelSession(_ id: String) async throws -> Session {
-        _ = id
-        throw unsupported("Terminal session cancel is not available through the retired lfd HTTP API.")
     }
 
     public func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult {

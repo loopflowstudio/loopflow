@@ -518,3 +518,28 @@ Do not recreate the old session path to make the affordance look alive:
 
 That last item is an actual product question. Removing a broken control is not
 the mobile Wave Chat design; it makes the missing design visible.
+
+## Current reduction: process sessions are not product sessions
+
+Removing the broken mobile chat exposed an entire second app architecture that
+no production view could reach: `SessionState` created generic provider chats,
+`TerminalWorkspaceStore` projected generic lfd processes into a selectable
+workspace, and `MultiplexerStore` persisted arbitrary terminal/markdown/diff
+pane trees. Their only remaining server methods either returned an empty list
+or threw “retired API”; tests and previews kept the graph looking alive.
+
+Delete that application layer:
+
+- Wave Chat is the only human conversation state;
+- Project and Task Sessions are the only child runtime state shown in the work
+  map;
+- terminal/process rows remain a low-level lfd wire DTO and telemetry concern,
+  not a fourth app hierarchy;
+- `RepoState` discovers Waves, attention, worktrees, and authored context but
+  no longer creates, attaches, starts, cancels, focuses, or multiplexes generic
+  sessions;
+- tests for unreachable stores and controls go with their implementations.
+
+Keep the Swift terminal `Session` DTO mirror because Rust and Python still
+publish that lfd contract. The important boundary is behavioral: a technical
+process record does not imply a user-facing Session lifecycle.

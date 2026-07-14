@@ -80,12 +80,7 @@ public final class RepoState {
         }
     }
 
-    public var currentRepo: URL? {
-        didSet {
-            terminalWorkspaceStore.configure(repoKey: currentRepo?.path())
-            multiplexerStore.configure(repoKey: currentRepo?.path())
-        }
-    }
+    public var currentRepo: URL?
     public var repoTarget: RepoTarget?
     public var flows: [Flow] = []
     public var availableDirections: [String] = []
@@ -94,13 +89,7 @@ public final class RepoState {
     public let waveStore = WaveStore()
     public let attentionStore = AttentionStore()
     public let worktreeStore = WorktreeStore()
-    public let terminalWorkspaceStore = TerminalWorkspaceStore()
-    public let multiplexerStore = MultiplexerStore()
     public let authProviderStore = AuthProviderStore()
-    private var sessionStates: [String: SessionState] = [:]
-    private var waitingSessionIds: [String: String] = [:]
-    private var optimisticInteractiveWaveIds: Set<String> = []
-    private var autoPresentTerminalWaveIds: Set<String> = []
 
     public var waves: [WaveViewModel] { waveStore.ordered }
     public var waveGroups: WaveGroups { waveStore.groups }
@@ -127,84 +116,8 @@ public final class RepoState {
         set { selectedWaveId = newValue?.id }
     }
 
-    public func sessionState(for waveId: String, joinSessionId: String? = nil) -> SessionState {
-        if let state = sessionStates[waveId] {
-            if let joinSessionId {
-                state.joinSession(joinSessionId)
-            }
-            return state
-        }
-        let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
-        let wave = waveStore.wave(for: waveId)
-        let state = SessionState(
-            waveId: waveId,
-            sessionConfig: AgentSessionConfig(
-                skill: "design",
-                repoRoot: repoRoot,
-                directions: wave?.direction ?? [],
-                area: wave?.area.first,
-                wave: {
-                    guard let name = wave?.name, !name.isEmpty else { return nil }
-                    return name
-                }(),
-                clientHasUI: true
-            ),
-            waveService: waveService
-        )
-        if let joinSessionId {
-            state.joinSession(joinSessionId)
-        }
-        sessionStates[waveId] = state
-        return state
-    }
-
-    public func interactiveSessionId(for waveId: String) -> String? {
-        if let sessionId = waitingSessionIds[waveId] {
-            return sessionId
-        }
-        guard waveStore.wave(for: waveId)?.status == .waiting else {
-            return nil
-        }
-        return UserDefaults.standard.string(forKey: "session.\(waveId)")
-    }
-
-    public func isOptimisticallyStartingInteractiveSession(for waveId: String) -> Bool {
-        optimisticInteractiveWaveIds.contains(waveId)
-    }
-
-    public func shouldShowInteractiveSession(for wave: WaveViewModel) -> Bool {
-        isOptimisticallyStartingInteractiveSession(for: wave.id)
-            || interactiveSessionId(for: wave.id) != nil
-            || wave.status == .waiting
-    }
-
-    func setOptimisticInteractiveSessionStart(for waveId: String, isStarting: Bool) {
-        if isStarting {
-            optimisticInteractiveWaveIds.insert(waveId)
-            sessionState(for: waveId).setAwaitingSession(true)
-            return
-        }
-        optimisticInteractiveWaveIds.remove(waveId)
-        sessionStates[waveId]?.setAwaitingSession(false)
-    }
-
-    public func markAutoPresentTerminal(for waveId: String) {
-        autoPresentTerminalWaveIds.insert(waveId)
-    }
-
-    public func consumeAutoPresentTerminal(for waveId: String) -> Bool {
-        autoPresentTerminalWaveIds.remove(waveId) != nil
-    }
-
-    private func resetTransientWaveState(includeSessionStates: Bool = true) {
-        if includeSessionStates {
-            sessionStates.removeAll()
-        }
-        waitingSessionIds.removeAll()
+    private func resetTransientWaveState() {
         attentionStore.removeAll()
-        terminalWorkspaceStore.setAll([])
-        optimisticInteractiveWaveIds.removeAll()
-        autoPresentTerminalWaveIds.removeAll()
     }
 
     // In-flight actions (land) — buttons disable while pending
@@ -366,9 +279,6 @@ public final class RepoState {
     public func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         let canonicalURL = canonicalRepoURL(url)
-        if currentRepo?.path() != canonicalURL.path() {
-            cancelTrackedSessions()
-        }
 
         resetTransientWaveState()
         hasCompletedInitialLoad = false
@@ -393,7 +303,6 @@ public final class RepoState {
     }
 
     public func closeRepo() {
-        cancelTrackedSessions()
         snapshotTask?.cancel()
         snapshotTask = nil
         resetTransientWaveState()
@@ -418,7 +327,6 @@ public final class RepoState {
         await refreshRegistrySnapshot()
         preloadWaveContent(for: waves)
         await refreshAttention()
-        await refreshSessions()
         await refreshWorktrees()
         hasCompletedInitialLoad = true
         await refreshFlowsAsync()
@@ -521,90 +429,6 @@ public final class RepoState {
         }
     }
 
-    public func refreshSessions() async {
-        guard let repo = repoTarget else {
-            terminalWorkspaceStore.setAll([])
-            return
-        }
-        do {
-            let sessions = try await waveService.listSessions(repo: repo, activeOnly: true)
-            terminalWorkspaceStore.setAll(sessions)
-        } catch {
-            LoggingService.model("refreshSessions: error=\(error.localizedDescription)")
-        }
-    }
-
-    public func loadSession(id: String, select: Bool = false) async {
-        do {
-            let session: Session = try await waveService.getSession(id)
-            terminalWorkspaceStore.upsert(session, select: select)
-        } catch {
-            LoggingService.model("loadSession: error=\(error.localizedDescription)")
-        }
-    }
-
-    @discardableResult
-    public func cancelSession(_ id: String) async throws -> Session {
-        let session = try await waveService.cancelSession(id)
-        terminalWorkspaceStore.upsert(session, select: false)
-        return session
-    }
-
-    public func createSession(
-        waveId: String,
-        flow: String,
-        worktree: String,
-        agent: String
-    ) async throws -> SessionLaunchResponse {
-        let response = try await waveService.createSession(
-            waveId: waveId,
-            flow: flow,
-            worktree: worktree,
-            agent: agent
-        )
-        terminalWorkspaceStore.upsert(response.session, select: true)
-        return response
-    }
-
-    public func attachSession(_ id: String) async throws -> SessionConnectionInfo {
-        try await waveService.attachSession(id)
-    }
-
-    @discardableResult
-    public func startSession(_ id: String) async throws -> Session {
-        let session = try await waveService.startSession(id)
-        terminalWorkspaceStore.upsert(session, select: false)
-        return session
-    }
-
-    public func selectSession(_ id: String?, waveId: String? = nil) {
-        focusSession(id, waveId: waveId)
-    }
-
-    /// Navigate to a terminal session from the attention queue.
-    /// Selects the wave, switches to the terminal tab, and selects the session.
-    public func openSession(_ sessionId: String) {
-        focusSession(sessionId, autoPresent: true)
-    }
-
-    private func focusSession(_ sessionId: String?, waveId: String? = nil, autoPresent: Bool = false) {
-        terminalWorkspaceStore.select(sessionId, waveId: waveId)
-        guard let sessionId,
-              let session = terminalWorkspaceStore.sessionsById[sessionId] else {
-            return
-        }
-        selectedWaveId = session.waveId
-        if autoPresent {
-            markAutoPresentTerminal(for: session.waveId)
-        }
-        // A live run session repoints the wave's terminal pane at its tmux
-        // session, so focusing it lands on the running flow.
-        if session.runId != nil, !session.status.isTerminal {
-            attachTerminalPane(to: session)
-        }
-        loadWaveContent(for: session.waveId)
-    }
-
     private func statusSnapshot(for waveId: String) async throws -> WaveStatusResult {
         guard let registryQuery,
               let wave = waveStore.wave(for: waveId)
@@ -617,21 +441,6 @@ public final class RepoState {
         }
         let cwd = currentRepo?.path()
         return try await registryQuery.status(wave: wave.name, waveId: wave.id, cwd: cwd)
-    }
-
-    /// Point the wave's terminal pane at a run's live tmux session so opening
-    /// the wave lands the user on the running flow, not the empty default
-    /// `lf-<waveId>-<paneId>` session. Called when a run session is focused.
-    func attachTerminalPane(to session: Session) {
-        guard let pane = multiplexerStore.pane(ofType: .terminal, for: session.waveId) else {
-            return
-        }
-        if pane.config.terminalSessionId != session.id {
-            var config = pane.config
-            config.terminalSessionId = session.id
-            multiplexerStore.updatePaneConfig(pane.id, config: config, for: session.waveId)
-        }
-        markAutoPresentTerminal(for: session.waveId)
     }
 
     public func refreshWorktrees() async {
@@ -850,7 +659,6 @@ public final class RepoState {
     }
 
     public func selectRemoteRepo(path: String) {
-        cancelTrackedSessions()
         resetTransientWaveState()
         let host = connectionStore.activeConnection.host
         connectionStore.setMode(.remote)
@@ -1032,20 +840,6 @@ public final class RepoState {
             tokenProvider: { token },
             shellCommandRunner: shellCommandRunner
         )
-    }
-
-    private func cancelTrackedSessions() {
-        let sessionIds = terminalWorkspaceStore.orderedSessions
-            .filter { !$0.status.isTerminal }
-            .map(\.id)
-        guard !sessionIds.isEmpty else { return }
-
-        let service = waveService
-        Task {
-            for sessionId in sessionIds {
-                _ = try? await service.cancelSession(sessionId)
-            }
-        }
     }
 
     // MARK: - Optimistic helpers

@@ -132,8 +132,7 @@ public struct PlayheadView: Codable, Sendable, Hashable {
     }
 }
 
-// `Lifecycle` and `FileEdit` are shared with the session models in
-// AgentSession.swift (made `Codable` there); the wire shape is identical.
+// `Lifecycle` and `FileEdit` are shared conversation wire types.
 // One `Lifecycle` covers turns and items; a `user` turn is always `completed`.
 
 /// A tool/command/file/message/thought item the agent produced, serde-tagged by

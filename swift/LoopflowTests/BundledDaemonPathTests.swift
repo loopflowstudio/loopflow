@@ -1,5 +1,5 @@
 // End-to-end checks that any process Loopflow spawns — the bundled lfd and the
-// tmux invocations driving the terminal panel — can actually find user-installed
+// tmux invocations driving local processes — can actually find user-installed
 // binaries like tmux, which GUI-launched apps lose access to because their
 // inherited PATH is /usr/bin:/bin:/usr/sbin:/sbin.
 
@@ -38,9 +38,9 @@ struct BundledDaemonPathTests {
         #expect(output.contains("tmux"))
     }
 
-    // Reproduces the exact failure mode the terminal panel hit in production:
-    // Loopflow's TmuxSession spawns `/usr/bin/env tmux ...` with the GUI-minimal
-    // environment, so `env` can't find tmux and exits 127. With
+    // Reproduces the exact failure mode local tmux processes hit in production:
+    // `/usr/bin/env tmux ...` uses the GUI-minimal environment, so `env` can't
+    // find tmux and exits 127. With
     // GUIProcessEnvironment.enriched applied, the same invocation succeeds.
     @Test("env tmux works with enriched env, fails with the bare GUI env")
     func envTmuxReproducesAndFixes() throws {

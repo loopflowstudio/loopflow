@@ -557,3 +557,16 @@ app only when it invokes a live Wave, Project, or Task behavior. Reintroducing
 a palette later should start from the current product actions—select a Wave,
 message it, inspect its work map, and prepare a child directive—not from the
 retired generic terminal/workspace model.
+
+## Current reduction: delete terminal ownership without deleting terminals
+
+The app also retained unused launchers for eight external terminal/IDE apps,
+per-workspace tmux creation and shutdown, app-icon lookup, focus notifications,
+and a window accessor. None had a caller after the workspace and command-shell
+removals. Keeping them would imply that the app still owns generic execution
+placement.
+
+Delete those helpers and their preference/test surface. Keep the reachable
+Ghostty diagnostic window, GUI process-environment repair, and the Wave's own
+detached tmux lifecycle. A terminal remains a display or debugging tool; Wave,
+Project, and Task lifecycles decide what work exists and where it runs.

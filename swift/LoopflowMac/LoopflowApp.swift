@@ -9,22 +9,6 @@ private func enrichProcessPathForGUILaunch() {
     setenv("PATH", enriched, 1)
 }
 
-@MainActor
-private enum TmuxTerminationCleanup {
-    private static var observer: NSObjectProtocol?
-
-    static func install() {
-        guard observer == nil else { return }
-        observer = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: nil
-        ) { _ in
-            TmuxSessionRegistry.shared.killAllSynchronously()
-        }
-    }
-}
-
 @main
 struct LoopflowApp: App {
     @State private var portfolioService = PortfolioService()
@@ -46,7 +30,6 @@ struct LoopflowApp: App {
                 SharedDaemon.eagerStart()
             }
         }
-        TmuxTerminationCleanup.install()
     }
 
     var body: some Scene {

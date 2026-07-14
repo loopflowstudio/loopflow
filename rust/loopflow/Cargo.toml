@@ -76,3 +76,7 @@ tempfile = "3.27"
 [dev-dependencies]
 loopflow-test-support = { path = "../loopflow-test-support" }
 tokio = { version = "1", features = ["test-util"] }
+
+[[bench]]
+name = "wave_stream"
+harness = false

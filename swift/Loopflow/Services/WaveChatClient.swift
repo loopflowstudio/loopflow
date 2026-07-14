@@ -52,6 +52,16 @@ struct SSEFrameParser {
         let data: String
     }
 
+    /// Feed a whole chunk; frames complete inside it, in order. The byte loop
+    /// stays synchronous — see `SSEChunkStream` for why that matters.
+    mutating func consume(_ chunk: Data) -> [Frame] {
+        var frames: [Frame] = []
+        for byte in chunk {
+            if let frame = consume(byte) { frames.append(frame) }
+        }
+        return frames
+    }
+
     private var line: [UInt8] = []
     private var event = ""
     private var data = ""
@@ -84,6 +94,100 @@ struct SSEFrameParser {
             data += data.isEmpty ? chunk : "\n" + chunk
         }
         return nil
+    }
+}
+
+/// Reads an SSE response as `Data` chunks.
+///
+/// `URLSession.AsyncBytes` yields one byte per `await`, and `WaveChatConnection`
+/// is `@MainActor` — so a per-byte read loop paid a **main-actor hop per byte**.
+/// Measured on a real connection: 0.14 MB/s (the same loop off the main actor
+/// runs ~140x faster, which is why the isolation, not the byte count, is the
+/// thing to keep in mind).
+///
+/// That is survivable only while frames are small, and they are not: the
+/// listener re-sends the whole open turn — prose plus every accumulated tool
+/// output — on every token, so a frame reaches ~106 KB and one turn puts ~68 MB
+/// on the wire. Byte-at-a-time, one frame took ~734 ms to read, the connect
+/// replay took ~22 s, and a live turn arrived at about a word per second. That
+/// was the whole of the symptom.
+///
+/// Chunks pay one hop per network read instead of one per byte — measured at
+/// >200 MB/s — while the parse inside a chunk stays byte-level, so the empty
+/// line that delimits an SSE frame still registers (`.lines` drops it; see
+/// `SSEFrameParser`). `WaveChatStreamTests` holds the budget.
+final class SSEChunkStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var chunks: AsyncThrowingStream<Data, Error>.Continuation?
+    private var awaitingResponse: CheckedContinuation<HTTPURLResponse, Error>?
+    private var task: URLSessionDataTask?
+
+    /// The response headers, once the server has sent them. Throws if the
+    /// connection fails before that.
+    func response() async throws -> HTTPURLResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            awaitingResponse = continuation
+            lock.unlock()
+        }
+    }
+
+    /// Start `request` on `session` and stream its body. Cancelling the
+    /// consuming task cancels the transfer.
+    func connect(_ request: URLRequest, on session: URLSession) -> AsyncThrowingStream<Data, Error> {
+        let dataTask = session.dataTask(with: request)
+        dataTask.delegate = self
+        lock.lock()
+        task = dataTask
+        lock.unlock()
+        return AsyncThrowingStream { continuation in
+            lock.lock()
+            chunks = continuation
+            lock.unlock()
+            continuation.onTermination = { _ in dataTask.cancel() }
+            dataTask.resume()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse
+    ) async -> URLSession.ResponseDisposition {
+        let waiter = lock.withLock { awaitingResponse.take() }
+        if let http = response as? HTTPURLResponse {
+            waiter?.resume(returning: http)
+        } else {
+            waiter?.resume(throwing: WaveChatError.badStatus(-1))
+        }
+        return .allow
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        let sink = chunks
+        lock.unlock()
+        sink?.yield(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let waiter = awaitingResponse.take()
+        let sink = chunks
+        lock.unlock()
+        // A failure before the headers has nobody else to surface it.
+        waiter?.resume(throwing: error ?? WaveChatError.badStatus(-1))
+        if let error {
+            sink?.finish(throwing: error)
+        } else {
+            sink?.finish()
+        }
+    }
+}
+
+extension Optional {
+    /// Read and clear in one step, so a continuation can only be resumed once.
+    fileprivate mutating func take() -> Wrapped? {
+        defer { self = nil }
+        return self
     }
 }
 
@@ -267,9 +371,13 @@ public final class WaveChatConnection {
         }
         var request = URLRequest(url: url)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
+        // Chunks, not `session.bytes(for:)`: one suspension per byte cannot keep
+        // up with whole-turn frames (see SSEChunkStream).
+        let transport = SSEChunkStream()
+        let body = transport.connect(request, on: session)
+        let http = try await transport.response()
+        guard http.statusCode == 200 else {
+            throw WaveChatError.badStatus(http.statusCode)
         }
         // A fresh stream replays the server's authoritative full transcript.
         // Drop the previous snapshot first so recovery changes cannot leave a
@@ -280,14 +388,12 @@ public final class WaveChatConnection {
         playhead = nil
         phase = .live
 
-        // Raw bytes, not `bytes.lines`: AsyncLineSequence drops the empty
-        // lines that delimit SSE frames (see SSEFrameParser). Cancellation
-        // still propagates — a cancelled task makes the byte iterator throw.
         var parser = SSEFrameParser()
-        for try await byte in bytes {
-            guard let frame = parser.consume(byte) else { continue }
-            if Task.isCancelled { return }
-            handle(event: frame.event, data: frame.data)
+        for try await chunk in body {
+            for frame in parser.consume(chunk) {
+                if Task.isCancelled { return }
+                handle(event: frame.event, data: frame.data)
+            }
         }
     }
 

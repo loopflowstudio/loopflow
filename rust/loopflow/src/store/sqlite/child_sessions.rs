@@ -2,13 +2,20 @@
 
 use std::path::PathBuf;
 
-use rusqlite::{params, Connection, OptionalExtension, ToSql};
+// Session writes read before they write (validating a parent Session, reading a
+// generation), so a deferred transaction has to upgrade its read lock to a write
+// lock. Under WAL, SQLite fails that upgrade immediately rather than waiting —
+// `busy_timeout` is never consulted, because waiting on an upgrade can deadlock
+// two upgraders. Beginning IMMEDIATE takes the write lock up front, where
+// `busy_timeout` does apply, so a second `lf` process queues instead of dying
+// with `database is locked`.
+use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId,
-    ChildProcessGeneration, ChildRef, DirectiveKind, ObservationRecipient,
+    AbandonIntent, BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId,
+    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId,
+    ChildExecutionContext, ChildProcessGeneration, ChildRef, DirectiveKind, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::project_session::{
@@ -45,7 +52,7 @@ impl SqliteStore {
     pub fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         validate_task_session(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project_session(&transaction, session)?;
         let parameters = task_session_params(session);
         transaction.execute(
@@ -64,7 +71,7 @@ impl SqliteStore {
         validate_task_session(session)?;
         ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project_session(&transaction, session)?;
         let parameters = task_session_params(session);
         transaction.execute(
@@ -98,7 +105,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         validate_task_session(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current_status: String = transaction.query_row(
             "SELECT status FROM task_sessions WHERE id = ?1",
             params![session.id.as_str()],
@@ -220,7 +227,7 @@ impl SqliteStore {
             ));
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing = {
             let mut statement = transaction.prepare(&format!(
                 "{CHILD_COMMAND_COLUMNS}
@@ -260,7 +267,7 @@ impl SqliteStore {
         command: &ChildCommand,
     ) -> StoreResult<Vec<ChildCommandId>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let superseded = supersede_child_commands(
             &transaction,
             command.target.target_kind(),
@@ -282,7 +289,7 @@ impl SqliteStore {
             command.target.target_id(),
         )?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let superseded = supersede_child_commands(
             &transaction,
             command.target.target_kind(),
@@ -341,7 +348,7 @@ impl SqliteStore {
         generation: u32,
     ) -> StoreResult<Vec<ChildCommand>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         claim_child_commands_in(&transaction, target, generation)?;
         let commands = read_claimed_child_commands(&transaction, target, generation)?;
         transaction.commit()?;
@@ -356,7 +363,7 @@ impl SqliteStore {
         reason: &str,
     ) -> StoreResult<BoundaryResult<TaskSession>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut session = transaction
             .query_row(
                 TASK_SESSION_SELECT,
@@ -403,7 +410,7 @@ impl SqliteStore {
         effect: Option<ChildCommandEffect>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let accepted_at = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
         let changed = transaction.execute(
             "UPDATE child_commands
@@ -466,7 +473,7 @@ impl SqliteStore {
         generation: u32,
     ) -> StoreResult<Vec<ChildCommand>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut commands = {
             let mut statement = transaction.prepare(&format!(
                 "{CHILD_COMMAND_COLUMNS}
@@ -564,7 +571,7 @@ impl SqliteStore {
         kind: &TaskEventKind,
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let created_at = now_unix();
         transaction.execute(
             "INSERT INTO task_events (session_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
@@ -676,7 +683,7 @@ impl SqliteStore {
         validate_project_session(session)?;
         ensure_directive_target(directive, "project", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_session_params(session);
         transaction.execute(
             PROJECT_SESSION_INSERT,
@@ -711,7 +718,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         validate_project_session(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let changed = transaction.execute(
             "UPDATE project_sessions SET
                 status=?2, status_reason=?3, status_at=?4,
@@ -819,7 +826,7 @@ impl SqliteStore {
         reason: &str,
     ) -> StoreResult<BoundaryResult<ProjectSession>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut session = transaction
             .query_row(
                 PROJECT_SESSION_SELECT,
@@ -865,7 +872,7 @@ impl SqliteStore {
         kind: &ProjectEventKind,
     ) -> StoreResult<ProjectEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let created_at = now_unix();
         transaction.execute(
             "INSERT INTO project_events (session_id, kind_json, created_at)
@@ -983,7 +990,7 @@ impl SqliteStore {
             )));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let exists: bool = transaction.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM project_events
@@ -1092,7 +1099,7 @@ impl SqliteStore {
         summary: &str,
     ) -> StoreResult<(ChildDirective, bool)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut directive = transaction
             .query_row(
                 "SELECT id, target_kind, target_id, version, kind, text, source_json,
@@ -1206,11 +1213,12 @@ const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
-    current_directive_version, incorporated_directive_version
+    current_directive_version, incorporated_directive_version,
+    lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-    ?28, ?29, ?30, ?31, ?32
+    ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -1220,7 +1228,8 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
-    current_directive_version, incorporated_directive_version
+    current_directive_version, incorporated_directive_version,
+    lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -1230,7 +1239,8 @@ const TASK_SESSION_SELECT: &str = "SELECT
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
-    current_directive_version, incorporated_directive_version
+    current_directive_version, incorporated_directive_version,
+    lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
     FROM task_sessions WHERE id = ?1";
 const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
@@ -1243,7 +1253,9 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     pm_snapshot_synced_at=?28, pm_writeback_json=?29,
     project_session_id=?30,
     current_directive_version=MAX(current_directive_version, ?31),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?32)
+    incorporated_directive_version=MAX(incorporated_directive_version, ?32),
+    lf_bin=?33, db_path=?34, lf_home=?35,
+    abandon_requested_at=?36, abandon_reason=?37
     WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
@@ -1472,6 +1484,21 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.project_session_id.as_str().to_string()),
         Box::new(i64::from(session.current_directive_version)),
         Box::new(i64::from(session.incorporated_directive_version)),
+        Box::new(session.execution.lf_bin.display().to_string()),
+        Box::new(session.execution.db_path.display().to_string()),
+        Box::new(session.execution.lf_home.display().to_string()),
+        Box::new(
+            session
+                .abandon_intent
+                .as_ref()
+                .map(|intent| intent.requested_at.unix_timestamp()),
+        ),
+        Box::new(
+            session
+                .abandon_intent
+                .as_ref()
+                .map(|intent| intent.reason.clone()),
+        ),
     ]
 }
 
@@ -1512,6 +1539,21 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         }),
         _ => None,
     };
+    let execution = ChildExecutionContext {
+        lf_bin: PathBuf::from(row.get::<_, String>(32)?),
+        db_path: PathBuf::from(row.get::<_, String>(33)?),
+        lf_home: PathBuf::from(row.get::<_, String>(34)?),
+    };
+    let abandon_intent = match (
+        row.get::<_, Option<i64>>(35)?,
+        row.get::<_, Option<String>>(36)?,
+    ) {
+        (Some(requested_at), Some(reason)) => Some(AbandonIntent {
+            requested_at: crate::store::rows::unix_to_datetime(requested_at),
+            reason,
+        }),
+        _ => None,
+    };
     Ok(TaskSession {
         id: TaskSessionId::from_raw(row.get::<_, String>(0)?),
         launch: crate::session_context::TaskLaunchReceipt {
@@ -1546,6 +1588,8 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         provider_session_id: row.get(18)?,
         latest_process: process,
         pull_request,
+        execution,
+        abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(25)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(26)?),
     })
@@ -1610,11 +1654,12 @@ const PROJECT_SESSION_INSERT: &str = "INSERT INTO project_sessions (
     last_state_fingerprint, agent, provider, provider_session_id,
     process_generation, process_pid, process_tmux_name,
     process_started_at, created_at, updated_at,
-    current_directive_version, incorporated_directive_version
+    current_directive_version, incorporated_directive_version,
+    lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
     ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
-    ?23, ?24
+    ?23, ?24, ?25, ?26, ?27, ?28, ?29
 )";
 const PROJECT_SESSION_COLUMNS: &str = "SELECT
     id, project_id, project_slug, project_name, project_prompt_context,
@@ -1622,7 +1667,8 @@ const PROJECT_SESSION_COLUMNS: &str = "SELECT
     status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
-    current_directive_version, incorporated_directive_version
+    current_directive_version, incorporated_directive_version,
+    lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
     FROM project_sessions";
 const PROJECT_SESSION_SELECT: &str = "SELECT
     id, project_id, project_slug, project_name, project_prompt_context,
@@ -1630,7 +1676,8 @@ const PROJECT_SESSION_SELECT: &str = "SELECT
     status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
-    current_directive_version, incorporated_directive_version
+    current_directive_version, incorporated_directive_version,
+    lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
     FROM project_sessions WHERE id=?1";
 const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     project_id=?2, project_slug=?3, project_name=?4, project_prompt_context=?5,
@@ -1641,7 +1688,9 @@ const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     process_tmux_name=?19, process_started_at=?20, created_at=?21,
     updated_at=?22,
     current_directive_version=MAX(current_directive_version, ?23),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?24)
+    incorporated_directive_version=MAX(incorporated_directive_version, ?24),
+    lf_bin=?25, db_path=?26, lf_home=?27,
+    abandon_requested_at=?28, abandon_reason=?29
     WHERE id=?1";
 fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
     vec![
@@ -1689,6 +1738,21 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.updated_at.unix_timestamp()),
         Box::new(i64::from(session.current_directive_version)),
         Box::new(i64::from(session.incorporated_directive_version)),
+        Box::new(session.execution.lf_bin.display().to_string()),
+        Box::new(session.execution.db_path.display().to_string()),
+        Box::new(session.execution.lf_home.display().to_string()),
+        Box::new(
+            session
+                .abandon_intent
+                .as_ref()
+                .map(|intent| intent.requested_at.unix_timestamp()),
+        ),
+        Box::new(
+            session
+                .abandon_intent
+                .as_ref()
+                .map(|intent| intent.reason.clone()),
+        ),
     ]
 }
 
@@ -1705,6 +1769,21 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
             pid: row.get::<_, Option<i64>>(17)?.map(|pid| pid as u32),
             tmux_name: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
             started_at: crate::store::rows::unix_to_datetime(started_at),
+        }),
+        _ => None,
+    };
+    let execution = ChildExecutionContext {
+        lf_bin: PathBuf::from(row.get::<_, String>(24)?),
+        db_path: PathBuf::from(row.get::<_, String>(25)?),
+        lf_home: PathBuf::from(row.get::<_, String>(26)?),
+    };
+    let abandon_intent = match (
+        row.get::<_, Option<i64>>(27)?,
+        row.get::<_, Option<String>>(28)?,
+    ) {
+        (Some(requested_at), Some(reason)) => Some(AbandonIntent {
+            requested_at: crate::store::rows::unix_to_datetime(requested_at),
+            reason,
         }),
         _ => None,
     };
@@ -1732,6 +1811,8 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         provider: row.get(14)?,
         provider_session_id: row.get(15)?,
         latest_process: process,
+        execution,
+        abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(20)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(21)?),
     })

@@ -445,6 +445,8 @@ mod tests {
             provider_session_id: None,
             latest_process: None,
             pull_request: None,
+            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            abandon_intent: None,
             created_at: now,
             updated_at: now,
         }
@@ -482,6 +484,8 @@ mod tests {
                 tmux_name: "lf-project-test".to_string(),
                 started_at: now,
             }),
+            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            abandon_intent: None,
             created_at: now,
             updated_at: now,
         }

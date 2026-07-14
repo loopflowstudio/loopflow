@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
-    ChildDirectiveId, ChildProcessGeneration, ChildRef, DirectiveKind, ObservationRecipient,
+    prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
+    ChildDecisionId, ChildDirectiveId, ChildExecutionContext, ChildProcessGeneration, ChildRef,
+    DirectiveKind, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::session_context::ProjectLaunchReceipt;
@@ -112,11 +113,35 @@ pub struct ProjectSession {
     pub provider_session_id: Option<String>,
     /// Latest launch generation, retained after that process exits.
     pub latest_process: Option<ChildProcessGeneration>,
+    /// The binary and store every generation of this Session relaunches with.
+    pub execution: ChildExecutionContext,
+    /// Set when abandonment is *requested*, not when it is applied. No launch
+    /// path may start a process for a Session carrying this.
+    pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
 
 impl ProjectSession {
+    /// Why a supervisor must not start another process generation, if it must not.
+    /// A Project has no PR, so delivery does not apply — see
+    /// [`crate::task::TaskSession::supervisor_restart_bar`].
+    pub fn supervisor_restart_bar(&self) -> Option<String> {
+        if self.status.is_terminal() {
+            return Some(format!(
+                "Project {} is {}; terminal Project Sessions do not restart",
+                self.launch.project.slug,
+                self.status.as_str()
+            ));
+        }
+        self.abandon_intent.as_ref().map(|intent| {
+            format!(
+                "Project {} is being abandoned: {}",
+                self.launch.project.slug, intent.reason
+            )
+        })
+    }
+
     pub fn validate(&self) -> Result<(), ProjectDataError> {
         if self.status.is_process_active() && self.latest_process.is_none() {
             return Err(ProjectDataError::InvalidInvariant(format!(
@@ -309,6 +334,8 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
+            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            abandon_intent: None,
             created_at: now,
             updated_at: now,
         }

@@ -233,7 +233,12 @@ CREATE TABLE project_sessions (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     current_directive_version INTEGER NOT NULL,
-    incorporated_directive_version INTEGER NOT NULL
+    incorporated_directive_version INTEGER NOT NULL,
+    lf_bin TEXT NOT NULL,
+    db_path TEXT NOT NULL,
+    lf_home TEXT NOT NULL,
+    abandon_requested_at INTEGER,
+    abandon_reason TEXT
 );
 CREATE INDEX idx_project_sessions_wave_status
     ON project_sessions(wave_id, status, updated_at DESC);
@@ -270,7 +275,12 @@ CREATE TABLE task_sessions (
     pm_writeback_json TEXT NOT NULL,
     project_session_id TEXT NOT NULL REFERENCES project_sessions(id) ON DELETE RESTRICT,
     current_directive_version INTEGER NOT NULL,
-    incorporated_directive_version INTEGER NOT NULL
+    incorporated_directive_version INTEGER NOT NULL,
+    lf_bin TEXT NOT NULL,
+    db_path TEXT NOT NULL,
+    lf_home TEXT NOT NULL,
+    abandon_requested_at INTEGER,
+    abandon_reason TEXT
 );
 CREATE INDEX idx_task_sessions_wave_status
     ON task_sessions(wave_id, status, updated_at DESC);

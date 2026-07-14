@@ -36,6 +36,52 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
+/// Resolve the `lf` a Session will be pinned to: an absolute path that exists.
+///
+/// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
+/// against the *login* shell's PATH inside tmux — a third binary, chosen by
+/// neither the Session nor its launcher. A Session that cannot name its own
+/// executable is not created.
+pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
+    let candidate = resolve_lf_binary();
+    if candidate.is_absolute() {
+        return if candidate.exists() {
+            Ok(candidate)
+        } else {
+            Err(anyhow!(
+                "lf binary {} does not exist; set LF_BIN to the lf this Session should run",
+                candidate.display()
+            ))
+        };
+    }
+    which_on_path(&candidate).ok_or_else(|| {
+        anyhow!(
+            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Session should run",
+            candidate.display()
+        )
+    })
+}
+
+/// Capture the execution context to pin on a Session being created: this
+/// process's `lf`, this process's store, this process's `LF_HOME` — all
+/// absolute, all resolved exactly once.
+pub(crate) fn pinned_execution_context() -> Result<crate::child_session::ChildExecutionContext> {
+    let db_path = crate::store::database_path_from_env()
+        .map_err(|error| anyhow!("cannot resolve the Session's database path: {error}"))?;
+    Ok(crate::child_session::ChildExecutionContext {
+        lf_bin: resolve_pinned_lf_binary()?,
+        db_path,
+        lf_home: crate::store::lf_home_dir(),
+    })
+}
+
+fn which_on_path(name: &Path) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
 pub(crate) fn shell_escape(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
     format!("'{escaped}'")

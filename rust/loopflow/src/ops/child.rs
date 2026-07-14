@@ -64,6 +64,13 @@ impl ChildSession {
         }
     }
 
+    fn supervisor_restart_bar(&self) -> Option<String> {
+        match self {
+            Self::Project(session) => session.supervisor_restart_bar(),
+            Self::Task(session) => session.supervisor_restart_bar(),
+        }
+    }
+
     fn current_directive_version(&self) -> u32 {
         match self {
             Self::Project(session) => session.current_directive_version,
@@ -98,7 +105,35 @@ impl ChildSession {
         Ok(())
     }
 
-    async fn launch(&mut self, store: &SharedStore) -> OpsResult<()> {
+    fn abandon_intent_reason(&self) -> Option<String> {
+        let intent = match self {
+            Self::Project(session) => session.abandon_intent.as_ref(),
+            Self::Task(session) => session.abandon_intent.as_ref(),
+        };
+        intent.map(|intent| {
+            format!(
+                "{} is being abandoned: {}",
+                self.label(),
+                intent.reason.clone()
+            )
+        })
+    }
+
+    /// Start a process generation, unless this Session's own state forbids it.
+    ///
+    /// `intent` decides how much is forbidden. A supervisor — a project waking on
+    /// a task observation, a queued steer, an internal retry — may not restart
+    /// delivered or abandoning work. An operator typing `lf task resume` may
+    /// restart delivered work (that is how review feedback gets answered), but
+    /// not abandoning work.
+    async fn launch(&mut self, store: &SharedStore, intent: LaunchIntent) -> OpsResult<()> {
+        let bar = match intent {
+            LaunchIntent::Supervisor => self.supervisor_restart_bar(),
+            LaunchIntent::ExplicitResume => self.abandon_intent_reason(),
+        };
+        if let Some(bar) = bar {
+            return Err(child_error(bar));
+        }
         match self {
             Self::Project(session) => super::project::launch_project_process(store, session).await,
             Self::Task(session) => super::task::relaunch_inactive_process(store, session).await,
@@ -175,6 +210,63 @@ impl ChildSession {
         }
     }
 
+    /// Record that an interrupt landed on a Session whose process was already gone.
+    ///
+    /// Without this the command is accepted silently: the receipt says `accepted`
+    /// while `lf task show` still reads whatever it read before, so an operator
+    /// cannot tell an interrupt that landed from one that evaporated. A delivered
+    /// (`Submitted`) Session keeps its status — interrupting it must not erase the
+    /// fact that its PR is open.
+    async fn record_interrupt_of_inactive_process(&mut self, store: &SharedStore) -> OpsResult<()> {
+        let reason = "interrupted while no process was running; \
+                      resume the Session to start one"
+            .to_string();
+        match self {
+            Self::Project(session) => {
+                let from = session.status;
+                session.set_status(ProjectSessionStatus::Waiting, reason);
+                store
+                    .update_project_session(session)
+                    .await
+                    .map_err(child_error)?;
+                store
+                    .append_project_event(
+                        &session.id,
+                        &ProjectEventKind::StatusChanged {
+                            from,
+                            to: ProjectSessionStatus::Waiting,
+                            reason: session.status_reason.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(child_error)?;
+            }
+            Self::Task(session) => {
+                if session.status == TaskSessionStatus::Submitted {
+                    return Ok(());
+                }
+                let from = session.status;
+                session.set_status(TaskSessionStatus::Waiting, reason);
+                store
+                    .update_task_session(session)
+                    .await
+                    .map_err(child_error)?;
+                store
+                    .append_task_event(
+                        &session.id,
+                        &TaskEventKind::StatusChanged {
+                            from,
+                            to: TaskSessionStatus::Waiting,
+                            reason: session.status_reason.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(child_error)?;
+            }
+        }
+        Ok(())
+    }
+
     async fn abandon(&mut self, store: &SharedStore, reason: &str) -> OpsResult<()> {
         match self {
             Self::Project(session) => {
@@ -240,6 +332,13 @@ pub(crate) struct ChildControlResult {
     pub error: Option<String>,
 }
 
+/// Who is asking for a process, which decides what state may refuse them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchIntent {
+    Supervisor,
+    ExplicitResume,
+}
+
 pub(crate) async fn queue_command(
     store: &SharedStore,
     mut session: ChildSession,
@@ -253,6 +352,22 @@ pub(crate) async fn queue_command(
             session.status()
         )));
     }
+    // Abandonment is decided the moment it is requested. Between that moment and
+    // the runner consuming the command, the Session must accept nothing else —
+    // otherwise a steer arriving in the gap relaunches work someone just ended.
+    if !matches!(kind, ChildCommandKind::Abandon { .. }) {
+        if let Some(bar) = session.abandon_intent_reason() {
+            return Err(child_error(bar));
+        }
+    }
+
+    // Only an operator's explicit resume may restart delivered work.
+    let launch_intent = match (&kind, &source) {
+        (ChildCommandKind::Resume { .. }, ChildCommandSource::Human) => {
+            LaunchIntent::ExplicitResume
+        }
+        _ => LaunchIntent::Supervisor,
+    };
 
     let command = ChildCommand::new(session.target(), source, kind);
     let wait_for_resolution = !matches!(&command.kind, ChildCommandKind::FollowUp { .. });
@@ -300,7 +415,7 @@ pub(crate) async fn queue_command(
 
     if !created {
         if !command.state.is_terminal() && !session.is_process_active() {
-            session.launch(store).await?;
+            session.launch(store, launch_intent).await?;
         }
         let receipt = resolve_receipt(store, &command.id, wait_for_resolution).await?;
         return control_result(store, &command, receipt).await;
@@ -338,11 +453,13 @@ pub(crate) async fn queue_command(
         }
     }
 
-    if matches!(
-        &command.kind,
-        ChildCommandKind::Interrupt { replacement: None }
-    ) && !session.is_process_active()
-    {
+    // Interrupt never starts a process. It ends the current turn; it does not
+    // begin one. Interrupting an inactive Session used to relaunch it whenever a
+    // replacement rode along — the exact path that respawned a Session under
+    // whatever binary the interrupting shell happened to be using. The
+    // replacement lands as the pending directive, and `resume` is the one verb
+    // that starts a process.
+    if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) && !session.is_process_active() {
         store
             .accept_child_command(&command.id, None)
             .await
@@ -350,12 +467,13 @@ pub(crate) async fn queue_command(
         session
             .append_command_event(store, command.id.clone(), ChildCommandState::Accepted, None)
             .await?;
+        session.record_interrupt_of_inactive_process(store).await?;
         let receipt = read_receipt(store, &command.id).await?;
         return control_result(store, &command, receipt).await;
     }
 
     if !session.is_process_active() {
-        session.launch(store).await?;
+        session.launch(store, launch_intent).await?;
     }
     let mut receipt = resolve_receipt(store, &command.id, wait_for_resolution).await?;
     if matches!(
@@ -364,7 +482,7 @@ pub(crate) async fn queue_command(
     ) {
         session.refresh(store).await?;
         if !session.is_process_active() && !session.is_terminal() {
-            session.launch(store).await?;
+            session.launch(store, launch_intent).await?;
             receipt = resolve_receipt(store, &command.id, wait_for_resolution).await?;
         }
     }
@@ -538,6 +656,8 @@ mod tests {
                 tmux_name: "lf-project-test".to_string(),
                 started_at: now,
             }),
+            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            abandon_intent: None,
             created_at: now,
             updated_at: now,
         }

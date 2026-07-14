@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
-    ChildDirectiveId, ChildProcessGeneration, DirectiveKind,
+    prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
+    ChildDecisionId, ChildDirectiveId, ChildExecutionContext, ChildProcessGeneration,
+    DirectiveKind,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
@@ -143,11 +144,61 @@ pub struct TaskSession {
     /// Latest launch generation, retained after that process exits.
     pub latest_process: Option<ChildProcessGeneration>,
     pub pull_request: Option<PullRequestRef>,
+    /// The binary and store every generation of this Session relaunches with.
+    pub execution: ChildExecutionContext,
+    /// Set when abandonment is *requested*, not when it is applied. No launch
+    /// path may start a process for a Session carrying this.
+    pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
 
 impl TaskSession {
+    /// Why a supervisor must not start another process generation, if it must not.
+    ///
+    /// Three intents are terminal for *automatic* restart, and only the first is
+    /// terminal for the Session itself:
+    ///
+    /// - the Session is `Merged` or `Abandoned` — the work is over;
+    /// - abandonment has been *requested* — the runner has not consumed the
+    ///   command yet, but the decision is made;
+    /// - the PR is open and the Session is `Submitted` — the work is delivered
+    ///   and belongs to review.
+    ///
+    /// The third was the 2026-07-14 W2-129 failure: `Submitted` is not terminal
+    /// and carries no live process, so it reads exactly like a Session that
+    /// merely stopped. A wake therefore launched generation 2, which reopened
+    /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
+    /// already open for review. Delivery is not an invitation to start over.
+    ///
+    /// A human may still `lf task resume` a submitted Session to answer review;
+    /// this bars the supervisor, not the operator.
+    pub fn supervisor_restart_bar(&self) -> Option<String> {
+        if self.status.is_terminal() {
+            return Some(format!(
+                "Task {} is {}; terminal Task Sessions do not restart",
+                self.launch.issue.identifier,
+                self.status.as_str()
+            ));
+        }
+        if let Some(intent) = &self.abandon_intent {
+            return Some(format!(
+                "Task {} is being abandoned: {}",
+                self.launch.issue.identifier, intent.reason
+            ));
+        }
+        if let Some(pull_request) = &self.pull_request {
+            if self.status == TaskSessionStatus::Submitted {
+                return Some(format!(
+                    "Task {} submitted pull request #{} and is awaiting review; \
+                     resume it explicitly with `lf task resume {}` to answer review",
+                    self.launch.issue.identifier, pull_request.number, self.launch.issue.identifier,
+                ));
+            }
+        }
+        None
+    }
+
     pub fn validate(&self) -> Result<(), TaskDataError> {
         if self.status.is_process_active() && self.latest_process.is_none() {
             return Err(TaskDataError::InvalidInvariant(format!(
@@ -361,6 +412,8 @@ mod tests {
             provider_session_id: None,
             latest_process: None,
             pull_request: None,
+            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            abandon_intent: None,
             created_at: now,
             updated_at: now,
         }

@@ -5,6 +5,8 @@
 //! Project and Task keep their own lifecycle states, events, runners, and
 //! public CLI nouns; there is no generic child lifecycle.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -105,6 +107,48 @@ pub struct ChildProcessGeneration {
     pub pid: Option<u32>,
     pub tmux_name: String,
     pub started_at: OffsetDateTime,
+}
+
+/// The executable and store a Session runs against, pinned once when the
+/// Session is created.
+///
+/// Re-deriving these per process is how a Session gets relaunched by a
+/// worktree's `target/debug/lf` against the live registry: the launching
+/// process's own binary and environment decided the child's, so whoever
+/// happened to type the command chose the child's execution context. Pinning
+/// makes the Session the authority, and every relaunch reproduces the context
+/// the Session was born with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildExecutionContext {
+    pub lf_bin: PathBuf,
+    pub db_path: PathBuf,
+    pub lf_home: PathBuf,
+}
+
+#[cfg(test)]
+impl ChildExecutionContext {
+    /// A pinned context for tests that do not care which binary or store a
+    /// Session names — only that it names one.
+    pub(crate) fn for_tests() -> Self {
+        Self {
+            lf_bin: PathBuf::from("/usr/local/bin/lf"),
+            db_path: PathBuf::from("/tmp/loopflow-test/loopflow.db"),
+            lf_home: PathBuf::from("/tmp/loopflow-test"),
+        }
+    }
+}
+
+/// A recorded request to end a Session, durable from the moment the Abandon
+/// command is queued rather than from the moment a runner consumes it.
+///
+/// The gap between those two moments is where a supervisor used to restart a
+/// Session someone had already ended: the pending command carried the intent,
+/// but the Session row still read `Running`, and every launch path reads the
+/// Session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AbandonIntent {
+    pub requested_at: OffsetDateTime,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

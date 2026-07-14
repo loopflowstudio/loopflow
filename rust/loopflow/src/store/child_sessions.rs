@@ -5,7 +5,7 @@ use crate::child_session::{
     BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildDirective, ChildRef,
     SessionSupervisor,
 };
-use crate::lfd::id::LfdId;
+use crate::id::WaveId;
 use crate::project_session::{
     ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession, ProjectSessionId,
     ProjectSessionStatus,
@@ -23,28 +23,20 @@ impl Store {
         .await
     }
 
-    pub async fn reserve_task_session(
-        &self,
-        session: &TaskSession,
-        max_active: u32,
-    ) -> StoreResult<bool> {
+    pub async fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session(&session, max_active)
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.reserve_task_session(&session)).await
     }
 
     pub async fn reserve_task_session_with_directive(
         &self,
         session: &TaskSession,
         directive: &ChildDirective,
-        max_active: u32,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<()> {
         let session = session.clone();
         let directive = directive.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session_with_directive(&session, &directive, max_active)
+            store.reserve_task_session_with_directive(&session, &directive)
         })
         .await
     }
@@ -61,11 +53,10 @@ impl Store {
         &self,
         session: &TaskSession,
         expected_status: TaskSessionStatus,
-        max_active: u32,
     ) -> StoreResult<bool> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_process(&session, expected_status, max_active)
+            store.reserve_task_process(&session, expected_status)
         })
         .await
     }
@@ -88,7 +79,7 @@ impl Store {
 
     pub async fn list_task_sessions(
         &self,
-        wave_id: Option<&LfdId>,
+        wave_id: Option<&WaveId>,
     ) -> StoreResult<Vec<TaskSession>> {
         let wave_id = wave_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
@@ -358,7 +349,7 @@ impl Store {
 
     pub async fn list_project_sessions(
         &self,
-        wave_id: Option<&LfdId>,
+        wave_id: Option<&WaveId>,
     ) -> StoreResult<Vec<ProjectSession>> {
         let wave_id = wave_id.cloned();
         run_sqlite(&self.sqlite, move |store| {

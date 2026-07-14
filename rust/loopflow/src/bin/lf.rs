@@ -1038,7 +1038,7 @@ fn main() -> anyhow::Result<()> {
     debug!(?cli, "parsed CLI arguments");
 
     // Inside a wave context, agent-launching runs register themselves as lfd
-    // sessions; every other command still flips LFD_SESSION_ID to "inherited"
+    // sessions; every other command still flips LF_SESSION_ID to "inherited"
     // for its children (see lf::session for the env contract).
     let registration = match run_label(&cli) {
         Some(skill) => loopflow::lf::session::register_run(

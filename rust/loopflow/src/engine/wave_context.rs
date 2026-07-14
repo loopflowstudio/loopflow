@@ -7,8 +7,8 @@
 //! resolves → nothing is added (zero tokens, no headers) — flows stay
 //! wave-agnostic.
 //!
-//! Resolution: explicit `--wave` (the caller passes it) > `LFD_CHANNEL` /
-//! `LFD_WAVE_ID` from a managed session. Repository location cannot identify a
+//! Resolution: explicit `--wave` (the caller passes it) > `LF_CHANNEL` /
+//! `LF_WAVE_ID` from a managed session. Repository location cannot identify a
 //! Wave: every Wave and Project operates from the same canonical checkout.
 //!
 //! Read path — reads only, the wave server stays the single writer:
@@ -31,6 +31,7 @@ use serde::Deserialize;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::id::{RunId, WaveId};
 use crate::wave::journal::{fold_thread, journal_path, read_events};
 use crate::wave::server::endpoint_path;
 
@@ -45,16 +46,16 @@ const LIVE_READ_TIMEOUT: Duration = Duration::from_secs(1);
 /// Which channel a managed process is ambiently inside, before store lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AmbientChannelRef {
-    /// `LFD_WAVE_ID` from the env: the id of a wave row in the shared store.
+    /// `LF_WAVE_ID` from the env: the id of a wave row in the shared store.
     WaveId(String),
-    /// `LFD_CHANNEL` from the env: the named channel a managed worker owns.
+    /// `LF_CHANNEL` from the env: the named channel a managed worker owns.
     Channel(String),
 }
 
 /// Resolve the Wave owned by a managed process.
 ///
 /// Humans choose a Wave explicitly. Managed Wave, Project, and Task processes
-/// inherit `LFD_WAVE_ID` from their launcher.
+/// inherit `LF_WAVE_ID` from their launcher.
 pub fn resolve_ambient_wave(env_wave_id: Option<&str>) -> Option<String> {
     env_wave_id
         .map(str::trim)
@@ -62,7 +63,7 @@ pub fn resolve_ambient_wave(env_wave_id: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// THE ambient-CHANNEL rule: `LFD_CHANNEL` (set on every worker)
+/// THE ambient-CHANNEL rule: `LF_CHANNEL` (set on every worker)
 /// wins; otherwise the managed process's Wave owns the channel.
 pub fn resolve_ambient_channel(
     env_channel: Option<&str>,
@@ -88,7 +89,7 @@ pub fn resolve_ambient_channel_name() -> Option<String> {
 
 /// The bus channel owned by a placed run. The worktree carries a timestamp for
 /// filesystem freshness; the channel stays stable at `wave.<short-run-id>`.
-pub fn placed_channel_name(wave_name: &str, run_id: &crate::lfd::id::LfdId) -> String {
+pub fn placed_channel_name(wave_name: &str, run_id: &RunId) -> String {
     format!(
         "{wave_name}.{}",
         crate::engine::worktrees::short_run_id(run_id.as_str())
@@ -161,11 +162,11 @@ fn query_repo_origin(repo_root: &Path) -> PathBuf {
 /// a runtime — flow skills), so the lookup runs on a scratch thread. No store
 /// or unknown id → `None`, and resolution falls back to the worktree.
 fn wave_name_for_id(id: &str) -> Option<String> {
-    let id: crate::lfd::id::LfdId = id.parse().ok()?;
+    let id: WaveId = id.parse().ok()?;
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().ok()?;
         rt.block_on(async {
-            let store = crate::lfdb::open_existing_store().await?;
+            let store = crate::store::open_existing_store().await?;
             store.get_wave(&id).await.ok().flatten()
         })
     })
@@ -206,7 +207,7 @@ fn memory_wave_chain(wave: &str) -> Option<Vec<String>> {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().ok()?;
         rt.block_on(async {
-            let store = crate::lfdb::open_existing_store().await?;
+            let store = crate::store::open_existing_store().await?;
             memory_wave_chain_from_store(&store, &wave).await
         })
     })
@@ -216,7 +217,7 @@ fn memory_wave_chain(wave: &str) -> Option<Vec<String>> {
 }
 
 async fn memory_wave_chain_from_store(
-    store: &crate::lfdb::Store,
+    store: &crate::store::Store,
     wave: &str,
 ) -> Option<Vec<String>> {
     let mut current = store.get_wave_by_name(wave).await.ok().flatten()?;
@@ -477,7 +478,7 @@ mod tests {
         assert_eq!(resolve_ambient_wave(None), None);
     }
 
-    /// LFD_CHANNEL wins; otherwise LFD_WAVE_ID identifies the Wave channel.
+    /// LF_CHANNEL wins; otherwise LF_WAVE_ID identifies the Wave channel.
     #[test]
     fn ambient_channel_env_wins_then_wave_id() {
         assert_eq!(
@@ -493,7 +494,7 @@ mod tests {
 
     #[test]
     fn placed_channel_uses_the_wave_and_registry_run_id() {
-        let run_id = crate::lfd::id::LfdId::from_raw("a1b2c3d4-rest");
+        let run_id = RunId::parse("a1b2c3d4-1111-4111-8111-111111111111").unwrap();
         assert_eq!(placed_channel_name("ship", &run_id), "ship.a1b2c3d4");
     }
 
@@ -692,18 +693,18 @@ mod tests {
     #[tokio::test]
     async fn child_memory_walks_parent_scope_while_chat_stays_local() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let store = crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
+        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
             tmp.path().join("lfd.db"),
         ))
         .await
         .unwrap();
-        let parent = crate::lfd::types::Wave::new(
-            crate::lfd::id::LfdId::new(),
+        let parent = crate::wave::Wave::new(
+            WaveId::new(),
             "platform".into(),
             tmp.path().display().to_string(),
         );
-        let child = crate::lfd::types::Wave::new(
-            crate::lfd::id::LfdId::new(),
+        let child = crate::wave::Wave::new(
+            WaveId::new(),
             "release".into(),
             tmp.path().display().to_string(),
         )

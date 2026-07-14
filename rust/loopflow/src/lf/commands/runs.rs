@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 
 use crate::journal::open_ledger;
 use crate::lf::output::{format_cost, truncate, Colors};
-use crate::lfdb::RunEventRow;
+use crate::store::RunEventRow;
 use crate::wave::journal::short_id;
 
 const WINDOW_DAYS: i64 = 7;
@@ -719,7 +719,7 @@ mod tests {
     use super::{
         boundary_spans, format_duration, format_tokens, own_spend, summarize, trace_spans, SpanDto,
     };
-    use crate::lfdb::RunEventRow;
+    use crate::store::RunEventRow;
 
     fn row(run_id: &str, seq: i64, ts: i64, node: &str, event: &str) -> RunEventRow {
         RunEventRow {

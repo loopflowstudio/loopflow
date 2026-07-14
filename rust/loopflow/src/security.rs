@@ -1,5 +1,28 @@
 use std::path::Path;
 
+pub fn sanitize_fs_component(value: &str) -> String {
+    let mut sanitized = String::new();
+    let mut pending_dash = false;
+
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
+            if pending_dash && !sanitized.is_empty() {
+                sanitized.push('-');
+            }
+            pending_dash = false;
+            sanitized.push(character);
+        } else {
+            pending_dash = true;
+        }
+    }
+
+    if sanitized.is_empty() {
+        "wave".to_string()
+    } else {
+        sanitized
+    }
+}
+
 /// Redact operator-visible error/status text.
 pub fn sanitize_operator_message(message: &str) -> String {
     let mut sanitized = redact_known_paths(message);
@@ -102,7 +125,13 @@ fn is_absolute_path_token(word: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_operator_message;
+    use super::{sanitize_fs_component, sanitize_operator_message};
+
+    #[test]
+    fn filesystem_components_are_flat_and_safe() {
+        assert_eq!(sanitize_fs_component("feature/new*wave"), "feature-new-wave");
+        assert_eq!(sanitize_fs_component("../.."), "wave");
+    }
 
     #[test]
     fn sanitize_operator_message_redacts_paths_and_tokens() {

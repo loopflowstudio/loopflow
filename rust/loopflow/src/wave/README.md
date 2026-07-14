@@ -163,7 +163,7 @@ tuned in replays.
 The byline is testimony and the channel is evidence. With no server in the
 path, client-submitted attribution is the only kind possible: `lf radio pub`
 derives its byline from the ambient identity it already resolves for routing
-(`LFD_CHANNEL`, else `LFD_WAVE_ID`, else the worktree name), `--from` overrides
+(`LF_CHANNEL`, else `LF_WAVE_ID`, else the worktree name), `--from` overrides
 it, and the row carries both. A forged byline is not prevented — it shows up as
 a mismatch with the channel it arrived on.
 
@@ -182,7 +182,7 @@ and skipped.
 
 **The thread** is the human surface — journaled, durable, replayed — and it
 stays SSE on the listener. `lf chat` resolves its target wave from context
-(`LFD_CHANNEL`, else `LFD_WAVE_ID`, else the worktree name; `--parent` walks
+(`LF_CHANNEL`, else `LF_WAVE_ID`, else the worktree name; `--parent` walks
 `parent_wave_id` through the registry; `--wave <name>` is explicit, a dotted
 name resolving to its family head), then finds that wave's live endpoint via
 its WaveAgent session row (falling back to `.wave-endpoint`). `--steer` POSTs

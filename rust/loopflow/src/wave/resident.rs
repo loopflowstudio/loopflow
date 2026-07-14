@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use crate::engine::repo::find_repo_root;
 use crate::engine::worktrees::main_repo_root;
 use crate::flowloop::wave::{path_for_children, run_loop, LoopConfig};
-use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
+use crate::control_session::WAVE_SERVER_ENDPOINT_ENV;
 use crate::ops::util::resolve_wave_name;
 use crate::wave::journal::{MessageId, PendingMessage};
 use crate::wave::runtime::InboxItem;

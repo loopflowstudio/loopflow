@@ -14,7 +14,7 @@ use crate::child_session::{
     prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
     ChildDirectiveId, ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
 };
-use crate::lfd::id::LfdId;
+use crate::id::WaveId;
 use crate::session_context::LinearProjectSnapshot;
 use crate::task::{TaskEventKind, TaskSessionId};
 
@@ -95,7 +95,7 @@ pub struct ProjectSession {
     pub id: ProjectSessionId,
     /// Linear Project context captured when this pursuit session was created.
     pub project: LinearProjectSnapshot,
-    pub wave_id: LfdId,
+    pub wave_id: WaveId,
     #[serde(rename = "wave")]
     pub wave_name: String,
     /// Canonical Wave checkout used as the read-only Project control plane.

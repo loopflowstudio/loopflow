@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
-use crate::lfdb::{open_store, CredentialType, ProviderToken, SharedStore};
+use crate::store::{open_store, CredentialType, ProviderToken, SharedStore};
 use crate::provider_auth::{
     no_event_sink, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
 };
@@ -133,7 +133,7 @@ async fn local_auth_service() -> Result<ProviderAuthService> {
 }
 
 async fn local_store() -> Result<SharedStore> {
-    let cfg = crate::lfd::storage_config_from_env()
+    let cfg = crate::store::storage_config_from_env()
         .context("failed to resolve local lfd credential store")?;
     let store = open_store(&cfg)
         .await
@@ -268,7 +268,7 @@ fn format_relative_delta(seconds: i64) -> String {
 mod tests {
     use time::OffsetDateTime;
 
-    use crate::lfdb::CredentialType;
+    use crate::store::CredentialType;
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
 
     use super::{format_relative_delta, format_snapshot};

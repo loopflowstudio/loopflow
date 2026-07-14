@@ -35,14 +35,14 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::process::Command;
 
-use crate::engine::wave_config::read_wave_config;
-use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    Session, SessionStatus, SessionUse, Wave, LIVE_SESSION_STATUSES, WAVE_SERVER_ENDPOINT_ENV,
+use crate::control_session::{
+    Session, SessionStatus, SessionUse, LIVE_SESSION_STATUSES, WAVE_SERVER_ENDPOINT_ENV,
     WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
-use crate::lfdb::{SharedStore, StoreResult};
+use crate::id::{ControlSessionId, WaveId};
+use crate::store::{SharedStore, StoreResult};
 use crate::task::TaskObservation;
+use crate::wave::Wave;
 use crate::wave::runtime::WaveRuntime;
 
 /// How often the observer re-reads the store between turns. Modest by
@@ -84,7 +84,7 @@ pub struct Registration {
 }
 
 impl Registration {
-    pub fn session_id(&self) -> &LfdId {
+    pub fn session_id(&self) -> &ControlSessionId {
         &self.session.id
     }
 
@@ -115,10 +115,8 @@ impl Registration {
 /// The db IS the registry: a reachable store with no row for the wave must
 /// not degrade to running unregistered (observed live — two brains on one
 /// wave because boot skipped registration entirely). The created row is
-/// minimal and refreshes authored launch configuration from GOAL.md
-/// frontmatter ([`read_wave_config`]): Task capacity when present,
-/// [`Wave::new`] defaults otherwise. This refresh makes a GOAL.md edit take
-/// effect on the next `lf serve`, including for rows created by older builds.
+/// minimal. Authored Wave policy remains in `GOAL.md`; the registry stores no
+/// launch-policy cache.
 ///
 /// # Errors
 /// Store failures only; the caller treats them as soft (run unregistered).
@@ -129,18 +127,13 @@ pub async fn ensure_wave_row(
 ) -> StoreResult<Wave> {
     let existing = store.get_wave_by_name(name).await?;
     let is_new = existing.is_none();
-    let mut wave = existing.unwrap_or_else(|| {
+    let wave = existing.unwrap_or_else(|| {
         Wave::new(
-            LfdId::new(),
+            WaveId::new(),
             name.to_string(),
             main_repo.display().to_string(),
         )
     });
-    if let Some(config) = read_wave_config(main_repo, name) {
-        if let Some(task_capacity) = config.task_capacity {
-            wave.task_capacity = task_capacity;
-        }
-    }
     store.create_wave(&wave).await?;
     if is_new {
         tracing::info!(
@@ -156,8 +149,8 @@ pub async fn ensure_wave_row(
 ///
 /// Probes the wave's live WaveAgent sessions first: crashed `wave_server`
 /// rows (dead pid) are closed; a surviving live brain refuses the start
-/// unless `force` takes over — kill by the recorded pid when it's alive (or
-/// the tmux session for an lfd-launched brain), cancel the row, proceed.
+/// unless `force` takes over — kill by the recorded pid when it's alive,
+/// cancel the row, proceed.
 ///
 /// # Errors
 /// Store failures only; a refusal is a value, not an error.
@@ -190,7 +183,7 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
         }
     }
 
-    let session_id = LfdId::new();
+    let session_id = ControlSessionId::new();
     let now = OffsetDateTime::now_utc();
     let session = Session {
         id: session_id,
@@ -230,11 +223,10 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
 /// The wave's live brain after pid-probing self-registered servers: a
 /// `wave_server` row whose recorded pid is dead is a server that crashed
 /// without deregistering — closed here so one-brain enforcement never keys
-/// on a ghost. lfd-launched WaveAgent sessions (tmux-backed) are the
-/// session supervisor's to observe and count as live.
+/// on a ghost.
 pub async fn live_brain_after_probe(
     store: &SharedStore,
-    wave_id: &LfdId,
+    wave_id: &WaveId,
 ) -> StoreResult<Option<Session>> {
     let sessions = store
         .list_control_sessions(Some(wave_id), Some(LIVE_SESSION_STATUSES))
@@ -264,38 +256,6 @@ pub async fn live_brain_after_probe(
     Ok(live)
 }
 
-/// Close every live `wave_server` row whose recorded process has died.
-///
-/// `lfd` calls this once at boot. It does not launch or supervise work; the
-/// registry cleanup only keeps one-brain enforcement from keying on a crashed
-/// server that never reached graceful deregistration.
-///
-/// # Errors
-///
-/// Returns a store error when sessions cannot be read or a reconciled row
-/// cannot be persisted.
-pub async fn reconcile_wave_servers(store: &SharedStore) -> StoreResult<u32> {
-    let sessions = store
-        .list_control_sessions(None, Some(LIVE_SESSION_STATUSES))
-        .await?;
-    let mut completed = 0;
-    for mut session in sessions {
-        if session.source != WAVE_SERVER_SOURCE {
-            continue;
-        }
-        let alive = match wave_server_pid(&session) {
-            Some(pid) => process_alive(pid).await,
-            None => false,
-        };
-        if !alive && session.complete(1) {
-            store.update_control_session(&session).await?;
-            tracing::info!(session_id = %session.id, "closed crashed wave server session");
-            completed += 1;
-        }
-    }
-    Ok(completed)
-}
-
 fn wave_server_pid(session: &Session) -> Option<u32> {
     if session.source != WAVE_SERVER_SOURCE {
         return None;
@@ -312,7 +272,7 @@ fn wave_server_pid(session: &Session) -> Option<u32> {
 /// `wave/<name>/.wave-endpoint` discovery file when the store has no live row.
 pub async fn wave_server_endpoint(
     store: &SharedStore,
-    wave_id: &LfdId,
+    wave_id: &WaveId,
 ) -> anyhow::Result<Option<String>> {
     let Some(session) = store.live_wave_agent_session(wave_id).await? else {
         return Ok(None);
@@ -361,7 +321,7 @@ fn block_on_new_runtime(future: impl Future<Output = ()>) {
 pub struct StoreObserver {
     runtime: Arc<WaveRuntime>,
     store: SharedStore,
-    wave_id: LfdId,
+    wave_id: WaveId,
 }
 
 impl fmt::Debug for StoreObserver {
@@ -373,7 +333,7 @@ impl fmt::Debug for StoreObserver {
 }
 
 impl StoreObserver {
-    pub fn new(runtime: Arc<WaveRuntime>, store: SharedStore, wave_id: LfdId) -> Self {
+    pub fn new(runtime: Arc<WaveRuntime>, store: SharedStore, wave_id: WaveId) -> Self {
         Self {
             runtime,
             store,
@@ -468,7 +428,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    use crate::lfdb::{open_store, StorageConfig};
+    use crate::store::{open_store, StorageConfig};
 
     async fn temp_store(tmp: &std::path::Path) -> SharedStore {
         Arc::new(
@@ -479,9 +439,7 @@ mod tests {
     }
 
     fn make_wave(name: &str) -> Wave {
-        let mut wave = Wave::new(LfdId::new(), name.to_string(), "/tmp/repo".to_string());
-        wave.task_capacity = 2;
-        wave
+        Wave::new(WaveId::new(), name.to_string(), "/tmp/repo".to_string())
     }
 
     fn registry_config(store: SharedStore, wave: Wave, force: bool) -> RegistryConfig {
@@ -497,7 +455,7 @@ mod tests {
     /// A wave_server WaveAgent row as a previous `lf serve` would have left it.
     fn server_session(wave: &Wave, pid: u32) -> Session {
         Session {
-            id: LfdId::new(),
+            id: ControlSessionId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
             parent_session_id: None,
@@ -540,7 +498,7 @@ mod tests {
         std::fs::create_dir_all(&goal_dir).expect("wave dir");
         std::fs::write(
             goal_dir.join("GOAL.md"),
-            "---\ngoal: keep shipping\ntask_capacity: 0\n---\nShip.\n",
+            "---\ngoal: keep shipping\n---\nShip.\n",
         )
         .expect("GOAL.md");
 
@@ -553,7 +511,6 @@ mod tests {
             .expect("lookup")
             .expect("row exists");
         assert_eq!(stored.id, wave.id);
-        assert_eq!(stored.task_capacity, 0, "task capacity from GOAL.md");
         assert_eq!(stored.repo(), repo.display().to_string());
 
         // Registered against the created row; one-brain now has its fact.
@@ -569,10 +526,6 @@ mod tests {
             .await
             .expect("idempotent");
         assert_eq!(again.id, wave.id, "ensure reuses the existing row");
-        assert_eq!(
-            again.task_capacity, 0,
-            "authored capacity remains effective"
-        );
         let outcome = register(&registry_config(store, again, false), "127.0.0.1:5")
             .await
             .expect("attempt");
@@ -582,7 +535,7 @@ mod tests {
         );
     }
 
-    /// No GOAL.md at all: the created row falls back to `Wave::new` policy.
+    /// No GOAL.md at all: the registry still creates the identity row.
     #[tokio::test]
     async fn ensure_wave_row_without_goal_md_uses_defaults() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -590,7 +543,7 @@ mod tests {
         let wave = ensure_wave_row(&store, tmp.path(), "ship")
             .await
             .expect("row created");
-        assert_eq!(wave.task_capacity, 1);
+        assert_eq!(wave.name(), "ship");
     }
 
     #[tokio::test]
@@ -700,44 +653,6 @@ mod tests {
             .expect("live lookup")
             .expect("new brain live");
         assert_eq!(live.id, *registration.session_id());
-    }
-
-    #[tokio::test]
-    async fn lfd_boot_reconciles_only_crashed_wave_servers() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = temp_store(tmp.path()).await;
-        let wave = make_wave("ship");
-        store.create_wave(&wave).await.expect("seed wave");
-        let crashed = server_session(&wave, 4_000_000);
-        let live = server_session(&wave, std::process::id());
-        store
-            .register_session(&crashed)
-            .await
-            .expect("seed crashed server");
-        store
-            .register_session(&live)
-            .await
-            .expect("seed live server");
-
-        assert_eq!(reconcile_wave_servers(&store).await.unwrap(), 1);
-        assert_eq!(
-            store
-                .get_control_session(&crashed.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .status,
-            SessionStatus::Failed
-        );
-        assert_eq!(
-            store
-                .get_control_session(&live.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .status,
-            SessionStatus::Running
-        );
     }
 
     #[tokio::test]

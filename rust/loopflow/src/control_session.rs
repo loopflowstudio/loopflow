@@ -4,7 +4,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::lfd::id::LfdId;
+use crate::id::{ControlSessionId, RunId, WaveId};
 
 pub const TMUX_TERMINAL_SOURCE: &str = "wave_skill_tmux";
 pub const PALETTE_TERMINAL_SOURCE: &str = "palette";
@@ -13,10 +13,9 @@ pub const PALETTE_TERMINAL_SOURCE: &str = "palette";
 /// attach/cancel must not manage tmux for it; the process marks itself
 /// terminal via the completion-token path.
 pub const LF_CLI_SOURCE: &str = "lf_cli";
-/// A self-registered `lf serve` listener: the process was not launched by
-/// lfd. The session row records the running server
-/// (endpoint + pid in `env`) so Loopflow sees the loop and one-brain
-/// enforcement has a fact to key on.
+/// A self-registered `lf serve` listener. The session row records the running
+/// server so Loopflow sees the loop and one-brain enforcement has a fact to
+/// key on.
 pub const WAVE_SERVER_SOURCE: &str = "wave_server";
 
 /// Env key on a `wave_server` session carrying the server's loopback
@@ -141,12 +140,12 @@ impl TryFrom<&str> for SessionUse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
-    pub id: LfdId,
-    pub wave_id: LfdId,
+    pub id: ControlSessionId,
+    pub wave_id: WaveId,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<LfdId>,
+    pub run_id: Option<RunId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_session_id: Option<LfdId>,
+    pub parent_session_id: Option<ControlSessionId>,
     #[serde(rename = "use")]
     pub session_use: SessionUse,
     pub skill: String,
@@ -203,13 +202,13 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::{Session, SessionStatus, SessionUse};
-    use crate::lfd::id::LfdId;
+    use crate::id::{ControlSessionId, WaveId};
     use time::OffsetDateTime;
 
     fn session(status: SessionStatus) -> Session {
         Session {
-            id: LfdId::new(),
-            wave_id: LfdId::new(),
+            id: ControlSessionId::new(),
+            wave_id: WaveId::new(),
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::Palette,

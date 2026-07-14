@@ -26,7 +26,6 @@ pub struct WavePmConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
     pub crons: Option<Vec<WaveCronDef>>,
-    pub task_capacity: Option<u32>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
@@ -251,12 +250,12 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\ntask_capacity: 3\n---\nDrive the work.\n",
+            "---\nagent: codex\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.task_capacity, Some(3));
+        assert_eq!(config.agent.as_deref(), Some("codex"));
     }
 
     #[test]
@@ -266,7 +265,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\ntask_capacity: 3\n---\n\n## Objective\n\nKeep the system\nboring.\n\n## Process\n\nDo the work.\n",
+            "---\nagent: codex\n---\n\n## Objective\n\nKeep the system\nboring.\n\n## Process\n\nDo the work.\n",
         )
         .expect("write");
 

@@ -16,10 +16,6 @@ name = "lf"
 path = "src/bin/lf.rs"
 
 [[bin]]
-name = "lfd"
-path = "src/bin/lfd.rs"
-
-[[bin]]
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 

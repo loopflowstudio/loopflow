@@ -7,7 +7,7 @@ Pursue the open KRs.
 
 ## Orientation
 
-Read the exact Linear Project named by `LFD_PROJECT_SESSION_ID` and the wave's
+Read the exact Linear Project named by `LF_PROJECT_SESSION_ID` and the wave's
 GOAL/MEMORY. The
 project loop owns the KR set, not a product PR. KRs are proof-shaped end
 states; tasks are the concrete work that advances them. Filed tasks live in

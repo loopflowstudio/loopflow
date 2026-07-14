@@ -27,7 +27,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::lfdb::{BusMessage, SharedStore};
+use crate::store::{BusMessage, SharedStore};
 use crate::wave::runtime::WaveRuntime;
 
 /// How often a subscriber sweeps the bus forward. Fast enough that a steer
@@ -140,8 +140,8 @@ impl BusListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfdb::sqlite::BUS_WINDOW_SECS;
-    use crate::lfdb::{open_store, StorageConfig};
+    use crate::store::sqlite::BUS_WINDOW_SECS;
+    use crate::store::{open_store, StorageConfig};
 
     async fn temp_store(dir: &std::path::Path) -> SharedStore {
         Arc::new(

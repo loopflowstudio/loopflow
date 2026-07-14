@@ -39,7 +39,7 @@ pub fn reap_orphaned_opencode_servers() -> OpenCodeReapReport {
 }
 
 fn registry_path() -> PathBuf {
-    crate::lfd::lf_home_dir().join(OPENCODE_REGISTRY_FILE)
+    crate::store::lf_home_dir().join(OPENCODE_REGISTRY_FILE)
 }
 
 fn register_opencode_server_at_path(

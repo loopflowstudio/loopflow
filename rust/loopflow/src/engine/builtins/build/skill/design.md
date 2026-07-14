@@ -84,7 +84,7 @@ This is the natural session exit point. The user's answer determines what to run
 
 1. Choose a wave name and create `wave/<name>/`.
 2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
-   - frontmatter: machine config only (`task_capacity`, `crons`, and, once connected,
+   - frontmatter: machine config only (`crons` and, once connected,
      `pm.linear_initiative`)
    - body (the loop prompt): Objective, Measures, Cron if any, and Process. Put
      routing judgment in Process, not frontmatter.

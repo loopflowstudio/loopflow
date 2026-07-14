@@ -25,7 +25,7 @@ use serde::Serialize;
 use crate::engine::prompt::count_tokens;
 use crate::journal::open_ledger;
 use crate::lf::output::{format_int, truncate, Colors};
-use crate::lfdb::sqlite::SqliteStore;
+use crate::store::sqlite::SqliteStore;
 
 const NAME_WIDTH: usize = 44;
 const NUM_WIDTH: usize = 12;

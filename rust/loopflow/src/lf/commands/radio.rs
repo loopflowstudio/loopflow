@@ -6,8 +6,8 @@
 //! with no mind awake between them.
 //!
 //! # Targeting
-//! - default: the invoking context's channel — `LFD_CHANNEL` (set by dispatch),
-//!   else `LFD_WAVE_ID`.
+//! - default: the invoking context's channel — `LF_CHANNEL` (set by dispatch),
+//!   else `LF_WAVE_ID`.
 //! - `--channel <name>`: any name on the bus. Whoever is tuned in hears it.
 //! - `--parent`: the parent wave's channel, walked through the registry.
 //!
@@ -28,8 +28,8 @@ use anyhow::{anyhow, Result};
 use crate::engine::wave_context::{resolve_ambient_channel, AmbientChannelRef};
 use crate::lf::commands::chat::{parent_wave, CliContext};
 use crate::lf::commands::util::message_text;
-use crate::lfd::types::Wave;
-use crate::lfdb::SharedStore;
+use crate::wave::Wave;
+use crate::store::SharedStore;
 use crate::wave::channel::family_head;
 use crate::wave::runtime::wave_channel_name;
 
@@ -91,8 +91,8 @@ impl AmbientWave {
     }
 }
 
-/// The invoking context: the shared ambient rule (`LFD_CHANNEL`, else
-/// `LFD_WAVE_ID`), with the Wave row resolved when the registry has it.
+/// The invoking context: the shared ambient rule (`LF_CHANNEL`, else
+/// `LF_WAVE_ID`), with the Wave row resolved when the registry has it.
 pub(crate) async fn ambient_wave(context: &CliContext, store: &SharedStore) -> Option<AmbientWave> {
     match resolve_ambient_channel(
         context.env_channel.as_deref(),
@@ -140,8 +140,8 @@ async fn target_channel(
         .and_then(|ambient| ambient.row.as_ref())
         .ok_or_else(|| {
             anyhow!(
-                "cannot resolve the invoking wave for --parent: no LFD_CHANNEL or \
-                 LFD_WAVE_ID in env"
+                "cannot resolve the invoking wave for --parent: no LF_CHANNEL or \
+                 LF_WAVE_ID in env"
             )
         })?;
     let parent = parent_wave(store, own).await?;
@@ -244,7 +244,7 @@ mod tests {
 
     /// `--parent` walks the registry row, not the channel name. A wave whose
     /// name sanitizes (`web/ui` → channel `web-ui`) would never find itself by
-    /// channel name, so escalation resolves through `LFD_WAVE_ID`'s row.
+    /// channel name, so escalation resolves through `LF_WAVE_ID`'s row.
     #[tokio::test]
     async fn parent_escalation_walks_the_wave_row_of_a_sanitized_name() {
         let tmp = tempfile::tempdir().expect("tempdir");

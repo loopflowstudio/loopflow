@@ -284,11 +284,11 @@ fn fallback_key_path() -> PathBuf {
 
 #[cfg(not(test))]
 fn fallback_key_path() -> PathBuf {
-    env_key_path_override().unwrap_or_else(|| crate::lfd::lf_home_dir().join("provider-token.key"))
+    env_key_path_override().unwrap_or_else(|| crate::store::lf_home_dir().join("provider-token.key"))
 }
 
 fn env_key_path_override() -> Option<PathBuf> {
-    let path = std::env::var("LFD_PROVIDER_TOKEN_KEY_PATH").ok()?;
+    let path = std::env::var("LF_PROVIDER_TOKEN_KEY_PATH").ok()?;
     let trimmed = path.trim();
     if trimmed.is_empty() {
         None

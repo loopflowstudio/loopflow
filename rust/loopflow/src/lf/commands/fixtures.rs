@@ -6,9 +6,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::lfd::id::LfdId;
-use crate::lfd::types::Wave;
-use crate::lfdb::{open_store, SharedStore, StorageConfig};
+use crate::id::WaveId;
+use crate::wave::Wave;
+use crate::store::{open_store, SharedStore, StorageConfig};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::server;
 
@@ -20,8 +20,8 @@ pub(crate) async fn temp_store(dir: &Path) -> SharedStore {
     )
 }
 
-pub(crate) fn make_wave(name: &str, repo: &Path, parent: Option<&LfdId>) -> Wave {
-    let mut wave = Wave::new(LfdId::new(), name.to_string(), repo.display().to_string());
+pub(crate) fn make_wave(name: &str, repo: &Path, parent: Option<&WaveId>) -> Wave {
+    let mut wave = Wave::new(WaveId::new(), name.to_string(), repo.display().to_string());
     wave.parent_wave_id = parent.cloned();
     wave
 }

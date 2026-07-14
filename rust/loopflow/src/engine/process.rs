@@ -75,7 +75,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_identity = "unset LFD_SESSION_INHERITED LFD_SESSION_ID LFD_WAVE_ID LFD_CHANNEL LFD_PROJECT_SESSION_ID LFD_PROJECT_GENERATION LFD_TASK_SESSION_ID LFD_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION";
+    let clear_identity = "unset LF_SESSION_INHERITED LF_SESSION_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION";
     if env.is_empty() {
         format!("{clear_identity}; exec {command}")
     } else {
@@ -135,12 +135,12 @@ mod tests {
         let argv = vec!["lf".to_string(), "__task".to_string()];
         let command = lf_session_shell_command(
             &argv,
-            &[("LFD_TASK_SESSION_ID", "task-1"), ("LFD_WAVE_ID", "infra")],
+            &[("LF_TASK_SESSION_ID", "task-1"), ("LF_WAVE_ID", "infra")],
         );
 
         assert_eq!(
             command,
-            "unset LFD_SESSION_INHERITED LFD_SESSION_ID LFD_WAVE_ID LFD_CHANNEL LFD_PROJECT_SESSION_ID LFD_PROJECT_GENERATION LFD_TASK_SESSION_ID LFD_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec env 'LFD_TASK_SESSION_ID'='task-1' 'LFD_WAVE_ID'='infra' 'lf' '__task'"
+            "unset LF_SESSION_INHERITED LF_SESSION_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
         );
     }
 
@@ -152,7 +152,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LFD_SESSION_INHERITED LFD_SESSION_ID LFD_WAVE_ID LFD_CHANNEL LFD_PROJECT_SESSION_ID LFD_PROJECT_GENERATION LFD_TASK_SESSION_ID LFD_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec 'lf' 'serve' 'child'"
+            "unset LF_SESSION_INHERITED LF_SESSION_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec 'lf' 'serve' 'child'"
         );
     }
 }

@@ -14,8 +14,8 @@ use crate::engine::process::{
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
-use crate::lfd::id::LfdId;
-use crate::lfdb::{open_existing_store, SharedStore, StoreError};
+use crate::id::WaveId;
+use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
@@ -131,7 +131,7 @@ async fn task_store() -> OpsResult<SharedStore> {
 }
 
 fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
-    match std::env::var("LFD_PROJECT_SESSION_ID") {
+    match std::env::var("LF_PROJECT_SESSION_ID") {
         Ok(value) => {
             let project_id =
                 crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
@@ -158,7 +158,7 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
     }
     let ambient = match std::env::var(crate::lf::session::WAVE_ID_ENV) {
         Ok(value) => Some(
-            LfdId::parse(&value)
+            WaveId::parse(&value)
                 .map_err(|error| task_error(format!("invalid ambient Wave id: {error}")))?,
         ),
         Err(std::env::VarError::NotPresent) => None,
@@ -175,8 +175,8 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
 }
 
 fn command_source_for_wave(
-    ambient: Option<LfdId>,
-    owning_wave_id: &LfdId,
+    ambient: Option<WaveId>,
+    owning_wave_id: &WaveId,
     issue_identifier: &str,
     owning_wave: &str,
 ) -> OpsResult<ChildCommandSource> {
@@ -324,17 +324,10 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             command_source(&session)?,
         );
         match store
-            .reserve_task_session_with_directive(&session, &initial, wave.task_capacity)
+            .reserve_task_session_with_directive(&session, &initial)
             .await
         {
-            Ok(true) => {}
-            Ok(false) => {
-                return Err(task_error(format!(
-                    "wave/{} has reached its {} active Task Session limit",
-                    wave.name(),
-                    wave.task_capacity
-                )))
-            }
+            Ok(()) => {}
             Err(StoreError::Sqlite(_)) => {
                 if let Some(existing) = store
                     .get_task_session_by_issue(&resolved.item.id)
@@ -377,17 +370,17 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             )));
         }
 
-        launch_task_process(&store, &mut session, None).await?;
+        launch_task_process(&store, &mut session).await?;
         wait_until_running(&store, &session.id).await
     })
 }
 
 async fn task_supervisor(
     store: &SharedStore,
-    wave_id: &LfdId,
+    wave_id: &WaveId,
     project_id: &str,
 ) -> OpsResult<SessionSupervisor> {
-    match std::env::var("LFD_PROJECT_SESSION_ID") {
+    match std::env::var("LF_PROJECT_SESSION_ID") {
         Ok(value) => {
             let session_id =
                 crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
@@ -421,7 +414,7 @@ async fn task_supervisor(
     }
 }
 
-pub(crate) fn project_context(project: &crate::lfd::pm::PmProject) -> String {
+pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
     let mut context = format!("Definition:\n{}", project.definition.trim());
     if !project.krs.is_empty() {
         context.push_str("\n\nKRs:");
@@ -498,30 +491,15 @@ async fn record_task_failure(
     Ok(())
 }
 
-/// Reserve capacity from the owning Wave and start a fresh generation for a
-/// session whose process is no longer active.
+/// Atomically start a fresh process generation for an inactive Session.
 pub(crate) async fn relaunch_inactive_process(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<()> {
-    let wave = store
-        .get_wave(&session.wave_id)
-        .await
-        .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
-        .ok_or_else(|| {
-            task_error(format!(
-                "owning wave/{} is not registered",
-                session.wave_name
-            ))
-        })?;
-    launch_task_process(store, session, Some(wave.task_capacity)).await
+    launch_task_process(store, session).await
 }
 
-async fn launch_task_process(
-    store: &SharedStore,
-    session: &mut TaskSession,
-    max_active: Option<u32>,
-) -> OpsResult<()> {
+async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
     let tmux_name = format!(
         "lf-task-{}-{}",
         tmux_session_slug(&session.issue.identifier),
@@ -530,46 +508,33 @@ async fn launch_task_process(
     let from = session.status;
     let mut launch = session.clone();
     let generation = launch.begin_generation(tmux_name.clone());
-    if let Some(max_active) = max_active {
-        let reserved = store
-            .reserve_task_process(&launch, from, max_active)
+    let reserved = store
+        .reserve_task_process(&launch, from)
+        .await
+        .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?;
+    if !reserved {
+        let current = store
+            .get_task_session(&session.id)
             .await
-            .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?;
-        if !reserved {
-            let current = store
-                .get_task_session(&session.id)
-                .await
-                .map_err(|error| task_error(format!("failed to reread task process: {error}")))?
-                .ok_or_else(|| task_error("Task Session disappeared during process reservation"))?;
-            if current.status.is_process_active() {
-                *session = current;
-                return Ok(());
-            }
-            if current.status.is_terminal() {
-                return Err(task_error(format!(
-                    "task {} became {}; terminal Task Sessions cannot start a process",
-                    current.issue.identifier,
-                    current.status.as_str()
-                )));
-            }
-            if current.status != from {
-                return Err(task_error(format!(
-                    "task {} changed from {} to {} during process reservation; retry the command",
-                    current.issue.identifier,
-                    from.as_str(),
-                    current.status.as_str()
-                )));
-            }
+            .map_err(|error| task_error(format!("failed to reread task process: {error}")))?
+            .ok_or_else(|| task_error("Task Session disappeared during process reservation"))?;
+        if current.status.is_process_active() {
+            *session = current;
+            return Ok(());
+        }
+        if current.status.is_terminal() {
             return Err(task_error(format!(
-                "wave/{} has reached its {max_active} active Task Session limit",
-                session.wave_name
+                "task {} became {}; terminal Task Sessions cannot start a process",
+                current.issue.identifier,
+                current.status.as_str()
             )));
         }
-    } else {
-        store
-            .update_task_session(&launch)
-            .await
-            .map_err(|error| task_error(format!("failed to record task launch: {error}")))?;
+        return Err(task_error(format!(
+            "task {} changed from {} to {} during process reservation; retry the command",
+            current.issue.identifier,
+            from.as_str(),
+            current.status.as_str()
+        )));
     }
     *session = launch;
     store
@@ -594,8 +559,8 @@ async fn launch_task_process(
     let generation_text = generation.to_string();
     let environment = [
         (crate::lf::session::WAVE_ID_ENV, session.wave_id.as_str()),
-        ("LFD_TASK_SESSION_ID", session.id.as_str()),
-        ("LFD_TASK_GENERATION", generation_text.as_str()),
+        ("LF_TASK_SESSION_ID", session.id.as_str()),
+        ("LF_TASK_GENERATION", generation_text.as_str()),
     ];
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
@@ -983,7 +948,7 @@ pub fn task_request_decision(
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        let ambient = std::env::var("LFD_TASK_SESSION_ID")
+        let ambient = std::env::var("LF_TASK_SESSION_ID")
             .map_err(|_| task_error("decision requests must run inside the owning Task Session"))?;
         if ambient != session.id.as_str() {
             return Err(task_error(format!(
@@ -1058,7 +1023,7 @@ pub fn task_acknowledge(issue: &str, version: u32, summary: String) -> OpsResult
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        let ambient = std::env::var("LFD_TASK_SESSION_ID").map_err(|_| {
+        let ambient = std::env::var("LF_TASK_SESSION_ID").map_err(|_| {
             task_error("directive acknowledgements must run inside the owning Task Session")
         })?;
         if ambient != session.id.as_str() {
@@ -1152,7 +1117,7 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 mod tests {
     use super::{command_source_for_wave, project_context, TaskControlResult};
     use crate::child_session::ChildCommandSource;
-    use crate::lfd::pm::{PmKr, PmProject};
+    use crate::pm::{PmKr, PmProject};
 
     #[test]
     fn task_context_captures_project_definition_and_kr_state() {
@@ -1183,7 +1148,7 @@ mod tests {
 
     #[test]
     fn foreign_wave_cannot_be_reclassified_as_a_human_command() {
-        let wave_id = crate::lfd::id::LfdId::new();
+        let wave_id = crate::id::WaveId::new();
 
         assert!(matches!(
             command_source_for_wave(Some(wave_id.clone()), &wave_id, "INF-123", "infrastructure")
@@ -1191,7 +1156,7 @@ mod tests {
             ChildCommandSource::Wave(_)
         ));
         assert!(command_source_for_wave(
-            Some(crate::lfd::id::LfdId::new()),
+            Some(crate::id::WaveId::new()),
             &wave_id,
             "INF-123",
             "infrastructure"

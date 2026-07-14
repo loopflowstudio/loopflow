@@ -696,7 +696,7 @@ struct PmTaskRow {
     rank: u32,
 }
 
-fn format_pm_task_table(items: &[crate::lfd::pm::PmItem]) -> Vec<String> {
+fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
     let mut rows: Vec<_> = items
         .iter()
         .map(|item| PmTaskRow {
@@ -733,7 +733,7 @@ fn format_pm_task_table(items: &[crate::lfd::pm::PmItem]) -> Vec<String> {
 #[cfg(test)]
 mod pm_output_tests {
     use super::format_pm_task_table;
-    use crate::lfd::pm::PmItem;
+    use crate::pm::PmItem;
 
     #[test]
     fn task_table_is_aligned_complete_and_open_first() {

@@ -12,9 +12,9 @@ use time::OffsetDateTime;
 use tracing::{debug, warn};
 
 use crate::engine::worktrees::main_repo_root;
-use crate::lfd::id::LfdId;
-use crate::lfdb::sqlite::SqliteStore;
-use crate::lfdb::RunEventRow;
+use crate::id::{ProcessId, RunId};
+use crate::store::sqlite::SqliteStore;
+use crate::store::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
@@ -39,9 +39,9 @@ thread_local! {
 
 #[derive(Debug, Clone)]
 struct RunContext {
-    run_id: LfdId,
-    process_id: LfdId,
-    parent_process_id: Option<LfdId>,
+    run_id: RunId,
+    process_id: ProcessId,
+    parent_process_id: Option<ProcessId>,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
     /// File-journal directory. Written in any git checkout; None only when the
@@ -174,7 +174,7 @@ pub struct LfEventFields {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LfEvent {
-    pub run_id: LfdId,
+    pub run_id: RunId,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
     pub node: LfNode,
@@ -375,7 +375,7 @@ fn first_ledger_failure() -> bool {
 }
 
 /// Open the local ledger store, creating and migrating it if needed.
-pub fn open_ledger() -> Result<SqliteStore, crate::lfdb::StoreError> {
+pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path())
 }
 
@@ -402,7 +402,7 @@ pub fn trace_capture_context(
 
 #[cfg(not(test))]
 fn ledger_db_path() -> PathBuf {
-    crate::lfd::default_db_path()
+    crate::store::default_db_path()
 }
 
 /// In lib tests, never touch the real ~/.lf ledger: honor a test's LF_HOME
@@ -453,7 +453,7 @@ fn ensure_run_context(
             // Mint and export the run id so prompt logs and child processes
             // carry the same identity as the ledger rows. The export is
             // removed when the run ends (see try_emit).
-            let run_id = LfdId::default();
+            let run_id = RunId::default();
             std::env::set_var(LF_RUN_ID_ENV, run_id.as_str());
             (run_id, true)
         }
@@ -465,9 +465,13 @@ fn ensure_run_context(
     // this row with a cross-trace parent that `lf doctor`'s lineage check
     // (rightly) rejects. Drop it so the violation is unspellable at write time.
     let parent_process_id = (!minted_run_id)
-        .then(|| std::env::var(LF_PROCESS_ID_ENV).ok().map(LfdId::from_raw))
+        .then(|| {
+            std::env::var(LF_PROCESS_ID_ENV)
+                .ok()
+                .and_then(|value| ProcessId::parse(&value).ok())
+        })
         .flatten();
-    let process_id = LfdId::default();
+    let process_id = ProcessId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
     // Write the file journal wherever we can. Fall back to ledger-only when
@@ -539,7 +543,7 @@ fn next_seq() -> i64 {
     })
 }
 
-fn configured_run_id(repo_root: &Path) -> Option<LfdId> {
+fn configured_run_id(repo_root: &Path) -> Option<RunId> {
     let value = std::env::var(LF_RUN_ID_ENV).ok()?;
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -714,8 +718,8 @@ mod tests {
         LfEventType, LfNode,
     };
     use crate::engine::git::is_clean;
-    use crate::lfd::id::LfdId;
-    use crate::lfd::types::Wave;
+    use crate::id::{ProcessId, RunId, WaveId};
+    use crate::wave::Wave;
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
@@ -845,7 +849,7 @@ mod tests {
             .expect("child event count env")
             .parse::<usize>()
             .expect("child event count");
-        let run_id = LfdId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
+        let run_id = RunId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
 
         for index in 0..event_count {
             let event = LfEvent {
@@ -926,7 +930,7 @@ mod tests {
         let repo = TestRepo::new();
         let worktree = repo.create_named_worktree("ambient");
         let wave = Wave::new(
-            LfdId::new(),
+            WaveId::new(),
             "context".to_string(),
             repo.path().display().to_string(),
         );
@@ -995,7 +999,7 @@ mod tests {
         // A process id lingers in the environment but no run id does — the
         // `pr land` / `wt switch` / `kickoff` shape that historically stamped a
         // new trace with a parent from the old one.
-        std::env::set_var(super::LF_PROCESS_ID_ENV, LfdId::new().as_str());
+        std::env::set_var(super::LF_PROCESS_ID_ENV, ProcessId::new().as_str());
 
         let context = super::ensure_run_context(repo.path(), &fields)
             .expect("run context")
@@ -1221,7 +1225,7 @@ mod tests {
                 .and_then(|name| name.to_str())
                 .expect("run dir name");
             assert!(
-                LfdId::parse(run_id).is_ok(),
+                RunId::parse(run_id).is_ok(),
                 "expected generated UUID run id"
             );
             assert_ne!(run_id, "not-a-uuid");

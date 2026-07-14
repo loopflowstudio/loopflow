@@ -1,21 +1,11 @@
-//! Persistence as shared infrastructure: the machine's registry, written and
-//! read by `lf` directly — `lfd` is one more client, not the owner. This
-//! module owns the sqlite registry, schema migrations, and one concrete
-//! registry API ([`Store`]).
-//!
-//! The persisted domain types still live in `crate::lfd::types` for now; the
-//! type split is a later, non-mechanical skill.
-//!
+//! Daemonless local persistence shared by `lf`, Waves, Projects, and Tasks.
 
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
-use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, Repo, RepoEdge,
-    RepoId, Session, SessionStatus, Summary, Wave,
-};
-pub mod catalog;
+use crate::control_session::{Session, SessionStatus};
+use crate::id::{ControlSessionId, WaveId};
+use crate::wave::Wave;
 mod child_sessions;
 pub mod migrations;
 pub mod rows;
@@ -105,6 +95,46 @@ impl StorageConfig {
     pub fn sqlite(path: PathBuf) -> Self {
         Self::Sqlite { path }
     }
+}
+
+pub(crate) fn lf_home_dir() -> PathBuf {
+    std::env::var_os("LF_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".lf")
+        })
+}
+
+pub fn default_db_path() -> PathBuf {
+    lf_home_dir().join("loopflow.db")
+}
+
+pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
+    let candidate = std::env::var_os("LF_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db_path);
+    let path = if candidate.is_absolute() {
+        candidate
+    } else {
+        if candidate.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "LF_DB_PATH must not escape LF_HOME",
+            ));
+        }
+        lf_home_dir().join(candidate)
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    Ok(StorageConfig::sqlite(path))
 }
 
 #[derive(Debug)]
@@ -214,12 +244,12 @@ impl Store {
 
     /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
     /// ordered by creation.
-    pub async fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
+    pub async fn list_child_waves(&self, parent: &WaveId) -> StoreResult<Vec<Wave>> {
         let parent = parent.clone();
         run_sqlite(&self.sqlite, move |store| store.list_child_waves(&parent)).await
     }
 
-    pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+    pub async fn get_wave(&self, wave_id: &WaveId) -> StoreResult<Option<Wave>> {
         let wave_id = wave_id.clone();
         run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
     }
@@ -239,168 +269,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
     }
 
-    pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+    pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
         let wave_id = wave_id.clone();
         run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
-    }
-
-    pub async fn list_attention_items(
-        &self,
-        status: Option<AttentionStatus>,
-        kind: Option<AttentionKind>,
-    ) -> StoreResult<Vec<AttentionItem>> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_attention_items(status, kind)
-        })
-        .await
-    }
-
-    pub async fn get_attention_item(
-        &self,
-        attention_id: &LfdId,
-    ) -> StoreResult<Option<AttentionItem>> {
-        let attention_id = attention_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.get_attention_item(&attention_id)
-        })
-        .await
-    }
-
-    pub async fn find_attention_item_for_run(
-        &self,
-        run_id: &LfdId,
-        kind: AttentionKind,
-    ) -> StoreResult<Option<AttentionItem>> {
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.find_attention_item_for_run(&run_id, kind)
-        })
-        .await
-    }
-
-    pub async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
-        let item = item.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.upsert_attention_item(&item)
-        })
-        .await
-    }
-
-    pub async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
-        let attention_id = attention_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.delete_attention_item(&attention_id)
-        })
-        .await
-    }
-
-    pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.get_summary(&wave_id)).await
-    }
-
-    pub async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
-        let summary = summary.clone();
-        run_sqlite(&self.sqlite, move |store| store.upsert_summary(&summary)).await
-    }
-
-    pub async fn list_chat_memory_blocks(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<ChatMemoryBlock>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_chat_memory_blocks(&wave_id)
-        })
-        .await
-    }
-
-    pub async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
-        let block = block.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.upsert_chat_memory_block(&block)
-        })
-        .await
-    }
-
-    pub async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        let name = name.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.delete_chat_memory_block(&wave_id, &name)
-        })
-        .await
-    }
-
-    pub async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_chat_messages(&wave_id)
-        })
-        .await
-    }
-
-    pub async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
-        let message = message.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.create_chat_message(&message)
-        })
-        .await
-    }
-
-    pub async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
-        run_sqlite(&self.sqlite, |store| store.list_repos()).await
-    }
-
-    pub async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
-        let path = path.to_string();
-        run_sqlite(&self.sqlite, move |store| store.get_repo(&path)).await
-    }
-
-    pub async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
-        let repo = repo.clone();
-        run_sqlite(&self.sqlite, move |store| store.upsert_repo(&repo)).await
-    }
-
-    pub async fn delete_repo(&self, path: &str) -> StoreResult<()> {
-        let path = path.to_string();
-        run_sqlite(&self.sqlite, move |store| store.delete_repo(&path)).await
-    }
-
-    pub async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
-        let repo_id = repo_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.get_repo_by_repo_id(&repo_id)
-        })
-        .await
-    }
-
-    pub async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
-        run_sqlite(&self.sqlite, |store| store.list_edges()).await
-    }
-
-    pub async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
-        let edge = edge.clone();
-        run_sqlite(&self.sqlite, move |store| store.add_edge(&edge)).await
-    }
-
-    pub async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
-        let parent_id = parent_id.clone();
-        let child_id = child_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.remove_edge(&parent_id, &child_id)
-        })
-        .await
-    }
-
-    pub async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        let repo_id = repo_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.children(&repo_id)).await
-    }
-
-    pub async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        let repo_id = repo_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.parents(&repo_id)).await
     }
 
     pub async fn create_control_session(&self, session: &Session) -> StoreResult<()> {
@@ -411,7 +282,10 @@ impl Store {
         .await
     }
 
-    pub async fn get_control_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+    pub async fn get_control_session(
+        &self,
+        session_id: &ControlSessionId,
+    ) -> StoreResult<Option<Session>> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.get_control_session(&session_id)
@@ -421,7 +295,7 @@ impl Store {
 
     pub async fn list_control_sessions(
         &self,
-        wave_id: Option<&LfdId>,
+        wave_id: Option<&WaveId>,
         statuses: Option<&[SessionStatus]>,
     ) -> StoreResult<Vec<Session>> {
         let wave_id = wave_id.cloned();
@@ -437,7 +311,7 @@ impl Store {
     /// regardless of how much terminal history the wave accumulates.
     pub async fn list_recent_control_sessions(
         &self,
-        wave_id: &LfdId,
+        wave_id: &WaveId,
         completed_since: i64,
     ) -> StoreResult<Vec<Session>> {
         let wave_id = wave_id.clone();
@@ -448,20 +322,18 @@ impl Store {
     }
 
     /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
-    /// either lfd-launched (`POST /waves/{id}/run`) or a self-registered
-    /// `lf serve` listener. One-brain enforcement (run_wave idempotency, the
-    /// loop-ticker skip, wave-server registration conflicts) keys on this
-    /// single fact.
-    pub async fn live_wave_agent_session(&self, wave_id: &LfdId) -> StoreResult<Option<Session>> {
+    /// a self-registered `lf serve` listener. One-brain enforcement keys on
+    /// this single fact.
+    pub async fn live_wave_agent_session(&self, wave_id: &WaveId) -> StoreResult<Option<Session>> {
         let sessions = self
             .list_control_sessions(
                 Some(wave_id),
-                Some(crate::lfd::types::LIVE_SESSION_STATUSES),
+                Some(crate::control_session::LIVE_SESSION_STATUSES),
             )
             .await?;
         Ok(sessions
             .into_iter()
-            .find(|session| session.session_use == crate::lfd::types::SessionUse::WaveAgent))
+            .find(|session| session.session_use == crate::control_session::SessionUse::WaveAgent))
     }
 
     /// Record a session in the run registry. The db IS the registry: `lf`
@@ -481,7 +353,7 @@ impl Store {
         worktree_name: &str,
     ) -> StoreResult<Vec<Session>> {
         let sessions = self
-            .list_control_sessions(None, Some(crate::lfd::types::LIVE_SESSION_STATUSES))
+            .list_control_sessions(None, Some(crate::control_session::LIVE_SESSION_STATUSES))
             .await?;
         Ok(sessions
             .into_iter()
@@ -592,37 +464,21 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
 /// self-registration, the wave server) treat that as "not instrumented" and
 /// stay silent rather than conjuring an empty db.
 pub async fn open_existing_store() -> Option<Store> {
-    let cfg = crate::lfd::storage_config_from_env().ok()?;
+    let cfg = crate::store::storage_config_from_env().ok()?;
     let StorageConfig::Sqlite { path } = &cfg;
     if !path.exists() {
         return None;
     }
-    // lf-direct openers can meet a db created by an older lfd (the daemon
-    // migrates only at its own boot). Apply pending migrations here so a
-    // direct writer never hits schema drift; versioned migrations make a
-    // concurrent second applier a no-op, and sqlite locking serializes
-    // them. A failed migration means the db is unusable for us: warn and
-    // report "not instrumented" rather than limping on a wrong schema.
+    // Opening validates the one live schema. An incompatible store is never
+    // repaired in place.
     let conn = rusqlite::Connection::open(path).ok()?;
     if let Err(err) = migrations::apply_sqlite(&conn) {
-        tracing::warn!(?path, %err, "registry store migration failed; running uninstrumented");
+        tracing::warn!(?path, %err, "local store is incompatible; delete it and rerun the command");
         return None;
     }
     open_store(&cfg).await.ok()
 }
 
-pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResult<String> {
-    let StorageConfig::Sqlite { path } = cfg;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|err| StoreError::InvalidData(format!("failed to create db dir: {err}")))?;
-    }
-    let conn = rusqlite::Connection::open(path)?;
-    if !status_only {
-        migrations::apply_sqlite(&conn)?;
-    }
-    migrations::latest_version_sqlite(&conn)
-}
 pub type SharedStore = Arc<Store>;
 
 #[cfg(test)]
@@ -634,7 +490,7 @@ mod tests {
         ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
         SessionSupervisor,
     };
-    use crate::lfd::id::LfdId;
+    use crate::id::LfdId;
     use crate::lfd::types::{ChatMemoryBlock, Repo, RepoEdge, RepoId, Summary, Wave};
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,

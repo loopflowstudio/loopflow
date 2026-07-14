@@ -32,7 +32,7 @@ use tokio::sync::broadcast;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
-use crate::lfd::security::sanitize_fs_component;
+use crate::security::sanitize_fs_component;
 use crate::project_session::ProjectObservation;
 use crate::task::TaskObservation;
 use crate::wave::channel::matches_prefix;

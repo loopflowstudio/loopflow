@@ -4,7 +4,7 @@ use std::process::Command;
 
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::{expand_flow, load_flow};
-use loopflow::lfdb::sqlite::SqliteStore;
+use loopflow::store::sqlite::SqliteStore;
 use tempfile::TempDir;
 
 fn write_skill(repo: &Path, name: &str, content: &str) {

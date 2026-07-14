@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::lfd::id::LfdId;
+use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
 use crate::task::TaskSessionId;
 
@@ -92,7 +92,7 @@ prefixed_uuid_id!(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionSupervisor {
-    Wave { wave_id: LfdId },
+    Wave { wave_id: WaveId },
     Project { session_id: ProjectSessionId },
 }
 
@@ -183,7 +183,7 @@ impl ChildCommandEffect {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum ChildCommandSource {
-    Wave(LfdId),
+    Wave(WaveId),
     Project(ProjectSessionId),
     Human,
     Attachment,

@@ -1,6 +1,6 @@
 //! Self-registration of bare `lf` runs in the shared session registry.
 //!
-//! Managed sessions get `LFD_WAVE_ID`/`LFD_SESSION_ID` from their launcher,
+//! Managed sessions get `LF_WAVE_ID`/`LF_SESSION_ID` from their launcher,
 //! and children chain wave/parent attribution off that env. A bare
 //! `lf design` typed inside such a session used to be invisible — no Session
 //! row, no wave attribution. This module closes the gap: when an
@@ -16,17 +16,17 @@
 //!
 //! # Env contract
 //!
-//! - `LFD_WAVE_ID` — wave attribution. Set by the session launcher, inherited down
+//! - `LF_WAVE_ID` — wave attribution. Set by the session launcher, inherited down
 //!   the process tree. Absent means the run has no ambient Wave.
-//! - `LFD_SESSION_ID` — the nearest enclosing session. The launcher sets it on
+//! - `LF_SESSION_ID` — the nearest enclosing session. The launcher sets it on
 //!   the process it launches, pointing at that process's *own* session row. A
 //!   self-registered `lf` overwrites it for its descendants with the id of the
 //!   session it just registered, so grandchildren chain parentage correctly.
-//! - `LFD_SESSION_INHERITED` — whose session `LFD_SESSION_ID` is. The launcher
-//!   never sets it, so `LFD_SESSION_ID` without the marker means "this very
+//! - `LF_SESSION_INHERITED` — whose session `LF_SESSION_ID` is. The launcher
+//!   never sets it, so `LF_SESSION_ID` without the marker means "this very
 //!   process already has a session row" (launcher-owned) — registering
 //!   again would double-count the run. Every `lf` exports
-//!   `LFD_SESSION_INHERITED=1` before spawning anything, flipping the meaning
+//!   `LF_SESSION_INHERITED=1` before spawning anything, flipping the meaning
 //!   for descendants to "an ancestor's session — register your own row with it
 //!   as parent".
 
@@ -39,15 +39,16 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 
 use crate::engine::wave_context::resolve_ambient_wave;
-use crate::lfd::id::LfdId;
-use crate::lfd::types::{Session, SessionStatus, SessionUse, Wave, LF_CLI_SOURCE};
-use crate::lfdb::{open_existing_store, SharedStore};
+use crate::control_session::{Session, SessionStatus, SessionUse, LF_CLI_SOURCE};
+use crate::id::{ControlSessionId, WaveId};
+use crate::store::{open_existing_store, SharedStore};
+use crate::wave::Wave;
 
-pub const WAVE_ID_ENV: &str = "LFD_WAVE_ID";
+pub const WAVE_ID_ENV: &str = "LF_WAVE_ID";
 /// The channel a managed process speaks on by default, set by its launcher.
-pub const CHANNEL_ENV: &str = "LFD_CHANNEL";
-pub const SESSION_ID_ENV: &str = "LFD_SESSION_ID";
-pub const SESSION_INHERITED_ENV: &str = "LFD_SESSION_INHERITED";
+pub const CHANNEL_ENV: &str = "LF_CHANNEL";
+pub const SESSION_ID_ENV: &str = "LF_SESSION_ID";
+pub const SESSION_INHERITED_ENV: &str = "LF_SESSION_INHERITED";
 
 /// Where this `lf` invocation stands relative to the session registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +56,7 @@ pub enum RunContext {
     /// No managed Wave identity: leave everything untouched.
     Outside,
     /// Launcher-owned: placement already created this process's session row and set
-    /// `LFD_SESSION_ID` to it. Registering again would double-count, but the
+    /// `LF_SESSION_ID` to it. Registering again would double-count, but the
     /// run still completes its own existing row at exit — with no daemon
     /// guaranteed to be running, nothing else may ever mark it terminal.
     OwnSession,
@@ -66,8 +67,8 @@ pub enum RunContext {
     },
 }
 
-/// The double-registration rule, in one place: `LFD_SESSION_ID` without
-/// `LFD_SESSION_INHERITED` is *this process's* session (the launcher made
+/// The double-registration rule, in one place: `LF_SESSION_ID` without
+/// `LF_SESSION_INHERITED` is *this process's* session (the launcher made
 /// the row); with the marker it is an ancestor's session and this run
 /// registers its own row underneath it. The wave itself comes from the
 /// shared ambient rule ([`resolve_ambient_wave`]).
@@ -163,7 +164,7 @@ fn register_run_in(
             parent_session_id,
         } => (wave_id, parent_session_id),
     };
-    let parent_session_id: Option<LfdId> = match parent_session_id {
+    let parent_session_id: Option<ControlSessionId> = match parent_session_id {
         Some(value) => Some(value.parse().ok()?),
         None => None,
     };
@@ -185,8 +186,8 @@ fn register_run_in(
     Some(session)
 }
 
-fn session_belongs_to_wave(session_id: &str, wave_id: &LfdId) -> bool {
-    let Ok(session_id) = session_id.parse::<LfdId>() else {
+fn session_belongs_to_wave(session_id: &str, wave_id: &WaveId) -> bool {
+    let Ok(session_id) = session_id.parse::<ControlSessionId>() else {
         return false;
     };
     let wave_id = wave_id.clone();
@@ -200,14 +201,14 @@ fn session_belongs_to_wave(session_id: &str, wave_id: &LfdId) -> bool {
 }
 
 /// Adopt the session row a launcher created for this process — placement
-/// points `LFD_SESSION_ID` at a row the
+/// points `LF_SESSION_ID` at a row the
 /// child owns. If no daemon ever runs, nothing else marks the row terminal,
 /// so the run completes it at exit through the same guard machinery as a
 /// self-registered row. Never creates a row: a missing row or store is a
 /// silent `None`, and an already-terminal row (canceled, or closed by a
 /// faster reconciler) stays untouched.
 fn adopt_own_session() -> Option<RunSession> {
-    let session_id: LfdId = env_var(SESSION_ID_ENV)?.parse().ok()?;
+    let session_id: ControlSessionId = env_var(SESSION_ID_ENV)?.parse().ok()?;
     let (store, session) = block_on(async move {
         let store: SharedStore = Arc::new(open_existing_store().await?);
         let session = store.get_control_session(&session_id).await.ok()??;
@@ -228,7 +229,7 @@ fn adopt_own_session() -> Option<RunSession> {
     Some(session)
 }
 
-/// Flip `LFD_SESSION_ID`'s meaning for everything this process spawns: the
+/// Flip `LF_SESSION_ID`'s meaning for everything this process spawns: the
 /// row belongs to an ancestor, not to the spawned process. Called by every
 /// `lf` command — including non-registering ones like `lf pr`/`lf serve`,
 /// which may themselves own the launched session.
@@ -300,7 +301,7 @@ impl SessionHandle {
 /// the run's way.
 async fn register_session(
     wave_id: String,
-    mut parent_session_id: Option<LfdId>,
+    mut parent_session_id: Option<ControlSessionId>,
     skill: String,
     agent: String,
     argv: Vec<String>,
@@ -308,7 +309,7 @@ async fn register_session(
     let store: SharedStore = Arc::new(open_existing_store().await?);
     // The Wave row anchors the registration; an identity this store never
     // heard of is stale env and therefore a silent no-op.
-    let wave_id: LfdId = wave_id.parse().ok()?;
+    let wave_id: WaveId = wave_id.parse().ok()?;
     store.get_wave(&wave_id).await.ok()??;
     // A parent the store never heard of: keep the registration, drop the
     // attribution (the row's FK would reject it otherwise).
@@ -324,7 +325,7 @@ async fn register_session(
     }
     let now = OffsetDateTime::now_utc();
     let session = Session {
-        id: LfdId::new(),
+        id: ControlSessionId::new(),
         wave_id,
         run_id: None,
         parent_session_id,
@@ -381,7 +382,7 @@ fn env_var(key: &str) -> Option<String> {
 }
 
 /// Serializes tests across the crate that mutate process env (the session
-/// vars, `LFD_DB_PATH`). Poison-tolerant so one panicked test doesn't wedge
+/// vars, `LF_DB_PATH`). Poison-tolerant so one panicked test doesn't wedge
 /// the rest.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -407,9 +408,10 @@ mod tests {
 
     use time::OffsetDateTime;
 
-    use crate::lfd::id::LfdId;
-    use crate::lfd::types::{Session, SessionStatus, Wave, TMUX_TERMINAL_SOURCE};
-    use crate::lfdb::{open_store, StorageConfig};
+    use crate::control_session::{Session, SessionStatus, TMUX_TERMINAL_SOURCE};
+    use crate::id::{ControlSessionId, WaveId};
+    use crate::store::{open_store, StorageConfig};
+    use crate::wave::Wave;
 
     use super::{
         block_on_new_runtime, classify_run_context, register_run_in, resolve_explicit_wave,
@@ -433,7 +435,7 @@ mod tests {
 
     #[test]
     fn launcher_owned_runs_do_not_register_again() {
-        // LFD_SESSION_ID without LFD_SESSION_INHERITED is this very process's
+        // LF_SESSION_ID without LF_SESSION_INHERITED is this very process's
         // session row: the launcher created it. Registering would double-count.
         assert_eq!(
             classify_run_context(env_wave("wave-1"), Some("sess-1"), false),
@@ -470,7 +472,7 @@ mod tests {
             super::WAVE_ID_ENV,
             super::SESSION_ID_ENV,
             super::SESSION_INHERITED_ENV,
-            "LFD_DB_PATH",
+            "LF_DB_PATH",
         ] {
             std::env::remove_var(key);
         }
@@ -481,10 +483,10 @@ mod tests {
     }
 
     fn make_named_wave(repo: &str, name: &str) -> Wave {
-        Wave::new(LfdId::new(), name.to_string(), repo.to_string())
+        Wave::new(WaveId::new(), name.to_string(), repo.to_string())
     }
 
-    /// Create a registry db at `path` with one wave; point `LFD_DB_PATH` at it.
+    /// Create a registry db at `path` with one wave; point `LF_DB_PATH` at it.
     fn seed_registry(path: &Path) -> Wave {
         let wave = make_wave("/tmp/repo");
         seed_wave(path, &wave);
@@ -500,18 +502,18 @@ mod tests {
                 .expect("open registry store");
             store.create_wave(&seeded).await.expect("seed wave");
         });
-        std::env::set_var("LFD_DB_PATH", path);
+        std::env::set_var("LF_DB_PATH", path);
     }
 
     /// Seed a live session row (a parent the run would chain off).
-    fn seed_parent_session(path: &Path, wave: &Wave) -> LfdId {
+    fn seed_parent_session(path: &Path, wave: &Wave) -> ControlSessionId {
         let now = OffsetDateTime::now_utc();
         let parent = Session {
-            id: LfdId::new(),
+            id: ControlSessionId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
             parent_session_id: None,
-            session_use: crate::lfd::types::SessionUse::WaveAgent,
+            session_use: crate::control_session::SessionUse::WaveAgent,
             skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
@@ -545,11 +547,11 @@ mod tests {
     fn seed_own_session(path: &Path, wave: &Wave) -> Session {
         let now = OffsetDateTime::now_utc();
         let session = Session {
-            id: LfdId::new(),
+            id: ControlSessionId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
             parent_session_id: None,
-            session_use: crate::lfd::types::SessionUse::Worker,
+            session_use: crate::control_session::SessionUse::Worker,
             skill: "implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
@@ -608,7 +610,7 @@ mod tests {
     }
 
     fn load_session(path: &Path, id: &str) -> Session {
-        let id: LfdId = id.parse().expect("session id");
+        let id: ControlSessionId = id.parse().expect("session id");
         let path = path.to_path_buf();
         block_on_new_runtime(async move {
             let store = open_store(&StorageConfig::sqlite(path))
@@ -690,7 +692,7 @@ mod tests {
         let registration = register_run_in(None, "design", "lf", &["lf".to_string()], None);
 
         assert!(registration.is_none());
-        // Children now read LFD_SESSION_ID as their parent's session.
+        // Children now read LF_SESSION_ID as their parent's session.
         assert_eq!(
             std::env::var(super::SESSION_INHERITED_ENV).as_deref(),
             Ok("1")
@@ -781,8 +783,8 @@ mod tests {
         clear_session_env();
         let tmp = tempfile::tempdir().expect("tempdir");
         let db = tmp.path().join("never-created.db");
-        std::env::set_var("LFD_DB_PATH", &db);
-        std::env::set_var(super::WAVE_ID_ENV, LfdId::new().to_string());
+        std::env::set_var("LF_DB_PATH", &db);
+        std::env::set_var(super::WAVE_ID_ENV, WaveId::new().to_string());
 
         assert!(register_run_in(None, "design", "lf", &["lf".to_string()], None).is_none());
         assert!(!db.exists(), "a missing registry must not be conjured");
@@ -801,7 +803,7 @@ mod tests {
         let own = seed_own_session(&db, &wave);
         std::env::set_var(super::WAVE_ID_ENV, wave.id().to_string());
         std::env::set_var(super::SESSION_ID_ENV, own.id.to_string());
-        // LFD_SESSION_INHERITED absent: this process owns the row.
+        // LF_SESSION_INHERITED absent: this process owns the row.
 
         let adoption =
             register_run_in(None, "implement", "lf", &["lf".to_string()], None).expect("adopted");
@@ -878,13 +880,13 @@ mod tests {
         std::env::set_var(super::WAVE_ID_ENV, wave.id().to_string());
 
         // Registry exists but the row does not: silent no-op, no row conjured.
-        std::env::set_var(super::SESSION_ID_ENV, LfdId::new().to_string());
+        std::env::set_var(super::SESSION_ID_ENV, ControlSessionId::new().to_string());
         assert!(register_run_in(None, "implement", "lf", &["lf".to_string()], None).is_none());
         assert_eq!(count_sessions(&db, &wave), 0);
 
         // No registry at all: silent no-op, db not conjured.
         let missing = tmp.path().join("never-created.db");
-        std::env::set_var("LFD_DB_PATH", &missing);
+        std::env::set_var("LF_DB_PATH", &missing);
         std::env::remove_var(super::SESSION_INHERITED_ENV);
         assert!(register_run_in(None, "implement", "lf", &["lf".to_string()], None).is_none());
         assert!(!missing.exists(), "a missing registry must not be conjured");
@@ -938,7 +940,7 @@ mod tests {
         let db = tmp.path().join("lfd.db");
         seed_registry(&db);
         // A wave id the store never heard of: stale env, silent no-op.
-        std::env::set_var(super::WAVE_ID_ENV, LfdId::new().to_string());
+        std::env::set_var(super::WAVE_ID_ENV, WaveId::new().to_string());
 
         assert!(register_run_in(None, "design", "lf", &["lf".to_string()], None).is_none());
         clear_session_env();

@@ -11,8 +11,8 @@
 //! two wires: `lf chat` needs a live mind; `lf radio pub` needs nothing.
 //!
 //! # Targeting
-//! - default: the invoking context's wave — `LFD_CHANNEL` env first (set by
-//!   dispatch), else `LFD_WAVE_ID`. A dotted name
+//! - default: the invoking context's wave — `LF_CHANNEL` env first (set by
+//!   dispatch), else `LF_WAVE_ID`. A dotted name
 //!   resolves to its family head: a hand's channel has no thread to converse
 //!   with. No managed wave context drops the
 //!   message with exit 0 and one stderr note.
@@ -52,8 +52,8 @@ use crate::engine::wave_context::{
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
-use crate::lfd::types::Wave;
-use crate::lfdb::{open_existing_store, SharedStore};
+use crate::wave::Wave;
+use crate::store::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
 use crate::wave::journal::{EventKind, Journal, MessageId, MessageOp};
 
@@ -330,8 +330,8 @@ pub(crate) async fn resolve_target(
 ) -> Result<Option<ResolvedWave>> {
     let main_repo = repo.map(wave_origin);
 
-    // The invoking context's channel: the shared ambient rule (LFD_CHANNEL
-    // first, else LFD_WAVE_ID) — the same resolution context assembly uses. The
+    // The invoking context's channel: the shared ambient rule (LF_CHANNEL
+    // first, else LF_WAVE_ID) — the same resolution context assembly uses. The
     // invoking WAVE is the channel's family head.
     let mut own_row: Option<Wave> = None;
     let mut own_name: Option<String> = None;
@@ -367,7 +367,7 @@ pub(crate) async fn resolve_target(
             )
         })?;
         let own = own_row.ok_or_else(|| {
-            anyhow!("cannot resolve the invoking wave for --parent: no LFD_WAVE_ID in env")
+            anyhow!("cannot resolve the invoking wave for --parent: no LF_WAVE_ID in env")
         })?;
         let parent = parent_wave(store, &own).await?;
         let name = parent.name().to_string();
@@ -483,11 +483,11 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::lf::commands::fixtures::{boot_server, make_wave, temp_store};
-    use crate::lfd::id::LfdId;
-    use crate::lfd::types::{
+    use crate::control_session::{
         Session, SessionStatus, SessionUse, WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV,
         WAVE_SERVER_SOURCE,
     };
+    use crate::id::ControlSessionId;
     use crate::wave::journal::{EventKind, MessageOp};
     use crate::wave::runtime::InboxItem;
 
@@ -507,7 +507,7 @@ mod tests {
     fn live_server_session(wave: &Wave, endpoint: &str) -> Session {
         let now = OffsetDateTime::now_utc();
         Session {
-            id: LfdId::new(),
+            id: ControlSessionId::new(),
             wave_id: wave.id().clone(),
             run_id: None,
             parent_session_id: None,
@@ -538,7 +538,7 @@ mod tests {
         }
     }
 
-    /// Env-context targeting: LFD_WAVE_ID names the wave; the endpoint comes
+    /// Env-context targeting: LF_WAVE_ID names the wave; the endpoint comes
     /// off its live WaveAgent session row in the store.
     #[tokio::test]
     async fn resolve_target_uses_env_wave_and_registry_endpoint() {

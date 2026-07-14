@@ -73,7 +73,7 @@ async fn wave_two_process_live_smoke() {
         .args(["serve", "demo"])
         .current_dir(&repo)
         // A private registry so the smoke never touches the machine's ~/.lf.
-        .env("LFD_DB_PATH", tmp.path().join("lfd.db"))
+        .env("LF_DB_PATH", tmp.path().join("lfd.db"))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

@@ -1,4 +1,4 @@
-use crate::lfdb::StoreResult;
+use crate::store::StoreResult;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]

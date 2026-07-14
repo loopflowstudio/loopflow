@@ -1,7 +1,7 @@
 //! Channel names: the dot tree everyone on the bus addresses each other by.
 //!
 //! A channel is a name, and nothing else. The bus itself is a table in the
-//! shared store (`crate::wave::bus`, `lfdb/migrations/059_bus.sql`): publishing
+//! shared store (`crate::wave::bus`, `store/migrations/059_bus.sql`): publishing
 //! is an INSERT, subscribing is a forward poll from an id cursor, and nothing
 //! brokers between them. A served wave journals its own thread because a mind
 //! must survive restarts; a hand's name (`goals.148e0e02`) records nothing.

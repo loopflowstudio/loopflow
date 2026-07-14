@@ -83,7 +83,7 @@ fn parent_deleted_on_remote(repo: &Path, parent: &str) -> bool {
 ///
 /// The child owns only its own commits: once the parent lands in ANY form, we
 /// replay the child's commits onto the default branch. "Landed" is detected
-/// content-independently — a caller-supplied signal (the daemon's lfdb
+/// content-independently — a caller-supplied signal (the daemon's store
 /// `stack_status == Merged`), a fast-forward ancestor or squash-merge into the
 /// default branch, or the parent's remote branch having been deleted. This is
 /// deliberately broader than a content match: a *reworked* parent (its merged

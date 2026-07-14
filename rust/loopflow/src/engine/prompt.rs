@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_skill, Direction, Skill};
-use crate::lfd::types::RepoId;
+use crate::repository::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};

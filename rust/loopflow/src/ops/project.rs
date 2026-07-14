@@ -12,9 +12,9 @@ use crate::engine::process::{
     resolve_lf_binary, start_lf_session, start_lf_session_with_env, tmux_session_exists,
     tmux_session_slug,
 };
-use crate::lfd::id::LfdId;
-use crate::lfd::types::Wave;
-use crate::lfdb::{open_existing_store, SharedStore, Store};
+use crate::id::WaveId;
+use crate::wave::Wave;
+use crate::store::{open_existing_store, SharedStore, Store};
 use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
@@ -373,8 +373,8 @@ pub(crate) async fn launch_project_process(
     let generation_text = generation.to_string();
     let environment = [
         (crate::lf::session::WAVE_ID_ENV, session.wave_id.as_str()),
-        ("LFD_PROJECT_SESSION_ID", session.id.as_str()),
-        ("LFD_PROJECT_GENERATION", generation_text.as_str()),
+        ("LF_PROJECT_SESSION_ID", session.id.as_str()),
+        ("LF_PROJECT_GENERATION", generation_text.as_str()),
     ];
     if let Err(error) = start_lf_session_with_env(
         &tmux_name,
@@ -544,7 +544,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
 fn project_command_source(session: &ProjectSession) -> OpsResult<ChildCommandSource> {
     match std::env::var(crate::lf::session::WAVE_ID_ENV) {
         Ok(value) => {
-            let wave_id = LfdId::parse(&value)
+            let wave_id = WaveId::parse(&value)
                 .map_err(|error| project_error(format!("invalid ambient Wave id: {error}")))?;
             if wave_id != session.wave_id {
                 return Err(project_error(format!(
@@ -677,7 +677,7 @@ pub fn project_request_decision(
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
-        let ambient = std::env::var("LFD_PROJECT_SESSION_ID").map_err(|_| {
+        let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
             project_error("decision requests must run inside the owning Project Session")
         })?;
         if ambient != session.id.as_str() {
@@ -766,7 +766,7 @@ pub fn project_acknowledge(
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
-        let ambient = std::env::var("LFD_PROJECT_SESSION_ID").map_err(|_| {
+        let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
             project_error("directive acknowledgements must run inside the owning Project Session")
         })?;
         if ambient != session.id.as_str() {
@@ -979,7 +979,7 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
         .map_err(|err| OpsError::Message(format!("failed to read child wave: {err}")))?
     {
         Some(wave) => wave,
-        None => Wave::new(LfdId::new(), child.to_string(), repo.display().to_string()),
+        None => Wave::new(WaveId::new(), child.to_string(), repo.display().to_string()),
     };
     if child_wave
         .parent_wave_id()
@@ -1041,7 +1041,7 @@ fn promotion_session_name(repo: &Path, wave: &str) -> String {
 mod tests {
     use super::*;
     use crate::lf::{Cli, Commands};
-    use crate::lfdb::{open_store, StorageConfig};
+    use crate::store::{open_store, StorageConfig};
     use clap::Parser;
     use std::process::Command;
 
@@ -1109,7 +1109,7 @@ mod tests {
             .await
             .unwrap();
         let parent = Wave::new(
-            LfdId::new(),
+            WaveId::new(),
             "platform".into(),
             tmp.path().display().to_string(),
         );

@@ -2,7 +2,6 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct RepoId(String);
@@ -41,9 +40,6 @@ impl RepoId {
             .unwrap_or(&self.0)
     }
 
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
 }
 
 impl fmt::Display for RepoId {
@@ -66,20 +62,6 @@ impl From<RepoId> for String {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Repo {
-    pub path: String,
-    pub repo_id: RepoId,
-    pub name: String,
-    pub added_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RepoEdge {
-    pub parent_repo_id: RepoId,
-    pub child_repo_id: RepoId,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,11 +76,5 @@ mod tests {
     fn repo_id_name_with_different_owner() {
         let id = RepoId::parse("acme/widgets").unwrap();
         assert_eq!(id.name(), "widgets");
-    }
-
-    #[test]
-    fn repo_id_name_raw_without_slash() {
-        let id = RepoId::from_raw("bare");
-        assert_eq!(id.name(), "bare");
     }
 }

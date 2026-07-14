@@ -135,7 +135,7 @@ pub const ENDPOINT_FILE: &str = ".wave-endpoint";
 ///
 /// The token is held as a [`SecretString`] and compared in constant time
 /// ([`subtle::ConstantTimeEq`]) — never `==`, never surfaced in `Debug` or a
-/// log. This mirrors [`crate::lfd::auth`], the machine lfd's bearer door.
+/// log.
 #[derive(Debug, Clone)]
 pub struct ResidentDoor {
     token: SecretString,
@@ -181,8 +181,8 @@ impl ResidentDoor {
 }
 
 /// Constant-time compare of a presented token against a stored secret — the
-/// door's only equality check. Length inequality short-circuits (inherent, as
-/// in [`crate::lfd::auth`]); equal-length inputs compare in constant time.
+/// door's only equality check. Length inequality short-circuits; equal-length
+/// inputs compare in constant time.
 fn token_matches(expected: &SecretString, provided: &str) -> bool {
     expected
         .expose_secret()

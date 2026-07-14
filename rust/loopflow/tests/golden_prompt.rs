@@ -54,7 +54,7 @@ fn golden_prompts_match_python() {
     // Goldens are hermetic fixture renders: a run inside a managed wave
     // session (workers run this suite) must not leak ambient wave context
     // into them. Safe to set here — this binary runs exactly one test.
-    std::env::remove_var("LFD_WAVE_ID");
+    std::env::remove_var("LF_WAVE_ID");
 
     let root = repo_root();
     for case_path in load_cases() {

@@ -13,7 +13,7 @@ use crate::child_session::{
     ChildDecisionId, ChildRef,
 };
 use crate::harness::Harness;
-use crate::lfdb::SharedStore;
+use crate::store::SharedStore;
 use crate::project_session::{ProjectEventKind, ProjectSessionId};
 use crate::task::{TaskEventKind, TaskSessionId};
 
@@ -73,7 +73,7 @@ impl ChildTarget<'_> {
         effect: Option<ChildCommandEffect>,
         error: &str,
     ) -> Result<()> {
-        let error = crate::lfd::redaction::sanitize_operator_message(error);
+        let error = crate::security::sanitize_operator_message(error);
         store
             .fail_child_command(&command_id, effect, error.clone())
             .await?;

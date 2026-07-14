@@ -5,7 +5,7 @@ use crate::engine::git::{
 };
 use crate::engine::identity::WaveId;
 use crate::engine::naming::git_user;
-use crate::lfd::security::sanitize_fs_component;
+use crate::security::sanitize_fs_component;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;

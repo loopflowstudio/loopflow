@@ -19,7 +19,7 @@ use crate::child_session::{
     ChildRef, SessionSupervisor,
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
-use crate::lfdb::{open_existing_store, SharedStore};
+use crate::store::{open_existing_store, SharedStore};
 use crate::project_session::{
     ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
@@ -939,9 +939,9 @@ mod tests {
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
-    use crate::lfd::id::LfdId;
-    use crate::lfd::types::Wave;
-    use crate::lfdb::{open_store, SharedStore, StorageConfig};
+    use crate::id::WaveId;
+    use crate::wave::Wave;
+    use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
 
@@ -1007,7 +1007,7 @@ mod tests {
         let path = dir.keep().join("registry.db");
         let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
         let wave = Wave::new(
-            LfdId::new(),
+            WaveId::new(),
             format!("wave-{provider}"),
             "/repo".to_string(),
         );

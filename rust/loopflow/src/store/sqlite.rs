@@ -3,22 +3,16 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
-use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, Repo, RepoEdge,
-    RepoId, Session, SessionStatus, SessionUse, Summary, Wave,
-};
-use crate::lfdb::catalog::{list_waves_query, sql, Query, SqlDialect};
-use crate::lfdb::rows::{
-    map_chat_memory_block_row, map_chat_message_row, map_repo_edge_row, map_repo_row,
-    map_summary_row, map_wave_row, now_unix,
-};
-use crate::lfdb::token_crypto;
-use crate::lfdb::{BusMessage, PmSnapshotRow, RunEventRow, StoreError, StoreResult};
+use crate::control_session::{Session, SessionStatus, SessionUse};
+use crate::id::{ControlSessionId, WaveId};
+use crate::store::rows::{map_wave_row, now_unix};
+use crate::store::token_crypto;
+use crate::store::{BusMessage, PmSnapshotRow, RunEventRow, StoreError, StoreResult};
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
     ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
 };
+use crate::wave::Wave;
 
 mod child_sessions;
 
@@ -160,10 +154,6 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
 }
 
 impl SqliteStore {
-    fn sql(query: Query) -> &'static str {
-        sql(query, SqlDialect::Sqlite)
-    }
-
     pub fn new(path: &Path) -> StoreResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
@@ -230,7 +220,13 @@ impl SqliteStore {
 
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = Self::sql(list_waves_query(repo.is_some()));
+        let query = if repo.is_some() {
+            "SELECT id, name, repo, created_at, parent_wave_id
+             FROM waves WHERE repo = ?1 ORDER BY created_at DESC"
+        } else {
+            "SELECT id, name, repo, created_at, parent_wave_id
+             FROM waves ORDER BY created_at DESC"
+        };
         let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
             vec![Box::new(repo.to_string())]
         } else {
@@ -257,24 +253,19 @@ impl SqliteStore {
             .unwrap_or_else(now_unix);
 
         conn.execute(
-            Self::sql(Query::UpsertWave),
+            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+               name = excluded.name,
+               repo = excluded.repo,
+               created_at = excluded.created_at,
+               parent_wave_id = excluded.parent_wave_id",
             params![
                 wave.id(),
                 wave.name(),
-                "[]",
-                "[]",
-                0i64,
+                wave.repo(),
                 created_at,
-                wave.task_capacity as i64,
-                wave.name(),
-                "[]",
                 wave.parent_wave_id(),
-                wave.repo,
-                "",
-                "",
-                1i64,
-                0i64,
-                0i64,
             ],
         )?;
         Ok(())
@@ -308,16 +299,16 @@ impl SqliteStore {
             tmux_name: row.get(11)?,
             status: SessionStatus::from_i32(row.get::<_, i64>(12)? as i32),
             completion_token: row.get(13)?,
-            created_at: crate::lfdb::rows::unix_to_datetime(row.get(14)?),
+            created_at: crate::store::rows::unix_to_datetime(row.get(14)?),
             attached_at: row
                 .get::<_, Option<i64>>(15)?
-                .map(crate::lfdb::rows::unix_to_datetime),
+                .map(crate::store::rows::unix_to_datetime),
             started_at: row
                 .get::<_, Option<i64>>(16)?
-                .map(crate::lfdb::rows::unix_to_datetime),
+                .map(crate::store::rows::unix_to_datetime),
             completed_at: row
                 .get::<_, Option<i64>>(17)?
-                .map(crate::lfdb::rows::unix_to_datetime),
+                .map(crate::store::rows::unix_to_datetime),
         })
     }
 }
@@ -336,7 +327,7 @@ fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
 impl SqliteStore {
     pub fn health_check(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(Self::sql(Query::HealthCheck), [], |_| Ok(()))?;
+        conn.query_row("SELECT 1", [], |_| Ok(()))?;
         Ok(())
     }
 
@@ -425,130 +416,6 @@ impl SqliteStore {
         Ok(tokens)
     }
 
-    // -- Repos -----------------------------------------------------------------
-
-    pub fn list_repos(&self) -> StoreResult<Vec<Repo>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt =
-            conn.prepare("SELECT path, repo_id, name, added_at FROM repos ORDER BY path ASC")?;
-        let rows = stmt.query_map([], |row| Ok(map_repo_row(row)))?;
-
-        let mut repos = Vec::new();
-        for row in rows {
-            repos.push(row??);
-        }
-        Ok(repos)
-    }
-
-    pub fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn
-            .prepare("SELECT path, repo_id, name, added_at FROM repos WHERE path = ?1 LIMIT 1")?;
-        let row = stmt
-            .query_row(params![path], |row| Ok(map_repo_row(row)))
-            .optional()?;
-        row.transpose()
-    }
-
-    pub fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT path, repo_id, name, added_at FROM repos WHERE repo_id = ?1 LIMIT 1",
-        )?;
-        let row = stmt
-            .query_row(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))
-            .optional()?;
-        row.transpose()
-    }
-
-    pub fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO repos (path, repo_id, name, added_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(path) DO UPDATE SET repo_id = excluded.repo_id, name = excluded.name, added_at = excluded.added_at",
-            params![
-                repo.path,
-                repo.repo_id.as_str(),
-                repo.name,
-                repo.added_at.unix_timestamp()
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_repo(&self, path: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute("DELETE FROM repos WHERE path = ?1", params![path])?;
-        Ok(())
-    }
-
-    pub fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT parent_repo_id, child_repo_id FROM repo_edges ORDER BY parent_repo_id, child_repo_id",
-        )?;
-        let rows = stmt.query_map([], |row| Ok(map_repo_edge_row(row)))?;
-
-        let mut edges = Vec::new();
-        for row in rows {
-            edges.push(row??);
-        }
-        Ok(edges)
-    }
-
-    pub fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT OR IGNORE INTO repo_edges (parent_repo_id, child_repo_id) VALUES (?1, ?2)",
-            params![edge.parent_repo_id.as_str(), edge.child_repo_id.as_str()],
-        )?;
-        Ok(())
-    }
-
-    pub fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "DELETE FROM repo_edges WHERE parent_repo_id = ?1 AND child_repo_id = ?2",
-            params![parent_id.as_str(), child_id.as_str()],
-        )?;
-        Ok(())
-    }
-
-    pub fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
-             FROM repo_edges
-             INNER JOIN repos ON repos.repo_id = repo_edges.child_repo_id
-             WHERE repo_edges.parent_repo_id = ?1
-             ORDER BY repos.path ASC",
-        )?;
-        let rows = stmt.query_map(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))?;
-        let mut repos = Vec::new();
-        for row in rows {
-            repos.push(row??);
-        }
-        Ok(repos)
-    }
-
-    pub fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
-             FROM repo_edges
-             INNER JOIN repos ON repos.repo_id = repo_edges.parent_repo_id
-             WHERE repo_edges.child_repo_id = ?1
-             ORDER BY repos.path ASC",
-        )?;
-        let rows = stmt.query_map(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))?;
-        let mut repos = Vec::new();
-        for row in rows {
-            repos.push(row??);
-        }
-        Ok(repos)
-    }
-
     const TERMINAL_SESSION_COLS: &str =
         "id, wave_id, run_id, parent_session_id, session_use, skill, agent, cwd, argv, env, source, tmux_name, status, \
          completion_token, created_at, attached_at, started_at, completed_at";
@@ -585,7 +452,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_control_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+    pub fn get_control_session(
+        &self,
+        session_id: &ControlSessionId,
+    ) -> StoreResult<Option<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(&format!(
             "SELECT {} FROM terminal_sessions WHERE id = ?1",
@@ -599,7 +469,7 @@ impl SqliteStore {
 
     pub fn list_control_sessions(
         &self,
-        wave_id: Option<&LfdId>,
+        wave_id: Option<&WaveId>,
         statuses: Option<&[SessionStatus]>,
     ) -> StoreResult<Vec<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -647,7 +517,7 @@ impl SqliteStore {
     /// (unix seconds) — bounded however much terminal history accumulates.
     pub fn list_recent_control_sessions(
         &self,
-        wave_id: &LfdId,
+        wave_id: &WaveId,
         completed_since: i64,
     ) -> StoreResult<Vec<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -724,9 +594,12 @@ impl SqliteStore {
         self.read_waves(repo)
     }
 
-    pub fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
+    pub fn list_child_waves(&self, parent: &WaveId) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListChildWaves))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, repo, created_at, parent_wave_id
+             FROM waves WHERE parent_wave_id = ?1 ORDER BY created_at ASC",
+        )?;
         let rows = stmt.query_map(params![parent], |row| Ok(map_wave_row(row)))?;
         let mut waves = Vec::new();
         for wave in rows {
@@ -735,9 +608,11 @@ impl SqliteStore {
         Ok(waves)
     }
 
-    pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+    pub fn get_wave(&self, wave_id: &WaveId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetWaveById))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, repo, created_at, parent_wave_id FROM waves WHERE id = ?1",
+        )?;
         let wave = stmt
             .query_row(params![wave_id], |row| Ok(map_wave_row(row)))
             .optional()?;
@@ -746,7 +621,9 @@ impl SqliteStore {
 
     pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetWaveByName))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, repo, created_at, parent_wave_id FROM waves WHERE name = ?1",
+        )?;
         let wave = stmt
             .query_row(params![name], |row| Ok(map_wave_row(row)))
             .optional()?;
@@ -761,273 +638,16 @@ impl SqliteStore {
         self.upsert_wave(wave)
     }
 
-    pub fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+    pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // attention_items and terminal_sessions reference waves without
-        // ON DELETE CASCADE; delete them explicitly or the wave row is
-        // undeletable once either exists.
-        conn.execute(
-            "DELETE FROM attention_items WHERE wave_id = ?1",
-            params![wave_id],
-        )?;
         conn.execute(
             "DELETE FROM terminal_sessions WHERE wave_id = ?1",
             params![wave_id],
         )?;
-        conn.execute(Self::sql(Query::DeleteWaveById), params![wave_id])?;
+        conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         Ok(())
     }
 
-    fn map_attention_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttentionItem> {
-        let kind_raw: String = row.get(3)?;
-        let status_raw: String = row.get(4)?;
-        let context_raw: String = row.get(7)?;
-        let kind = kind_raw.parse::<AttentionKind>().map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(
-                3,
-                rusqlite::types::Type::Text,
-                Box::new(StoreError::InvalidData(err)),
-            )
-        })?;
-        let status = status_raw.parse::<AttentionStatus>().map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(
-                4,
-                rusqlite::types::Type::Text,
-                Box::new(StoreError::InvalidData(err)),
-            )
-        })?;
-
-        Ok(AttentionItem {
-            id: LfdId::from_raw(row.get::<_, String>(0)?),
-            wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
-            run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
-            kind,
-            status,
-            title: row.get(5)?,
-            summary: row.get(6)?,
-            context: serde_json::from_str(&context_raw)
-                .unwrap_or(serde_json::Value::Object(Default::default())),
-            surfaced_at: crate::lfdb::rows::unix_to_datetime(row.get(8)?),
-            viewed_at: row
-                .get::<_, Option<i64>>(9)?
-                .map(crate::lfdb::rows::unix_to_datetime),
-            resolved_at: row
-                .get::<_, Option<i64>>(10)?
-                .map(crate::lfdb::rows::unix_to_datetime),
-        })
-    }
-
-    pub fn list_attention_items(
-        &self,
-        status: Option<AttentionStatus>,
-        kind: Option<AttentionKind>,
-    ) -> StoreResult<Vec<AttentionItem>> {
-        let mut sql = String::from(
-            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items",
-        );
-        let mut params: Vec<String> = Vec::new();
-        let mut clauses: Vec<String> = Vec::new();
-        if let Some(status) = status {
-            clauses.push("status = ?".to_string());
-            params.push(status.as_str().to_string());
-        }
-        if let Some(kind) = kind {
-            clauses.push("kind = ?".to_string());
-            params.push(kind.as_str().to_string());
-        }
-        if !clauses.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&clauses.join(" AND "));
-        }
-        sql.push_str(" ORDER BY surfaced_at DESC");
-
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(
-            rusqlite::params_from_iter(params.iter()),
-            Self::map_attention_item_row,
-        )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(StoreError::from)
-    }
-
-    pub fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items WHERE id = ?1",
-        )?;
-        stmt.query_row(
-            rusqlite::params![attention_id],
-            Self::map_attention_item_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
-    pub fn find_attention_item_for_run(
-        &self,
-        run_id: &LfdId,
-        kind: AttentionKind,
-    ) -> StoreResult<Option<AttentionItem>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at
-             FROM attention_items
-             WHERE run_id = ?1 AND kind = ?2 AND status != ?3
-             ORDER BY surfaced_at DESC
-             LIMIT 1",
-        )?;
-        stmt.query_row(
-            rusqlite::params![run_id, kind.as_str(), AttentionStatus::Resolved.as_str()],
-            Self::map_attention_item_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
-    pub fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO attention_items (id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT(id) DO UPDATE SET
-                wave_id = excluded.wave_id,
-                run_id = excluded.run_id,
-                kind = excluded.kind,
-                status = excluded.status,
-                title = excluded.title,
-                summary = excluded.summary,
-                context = excluded.context,
-                surfaced_at = excluded.surfaced_at,
-                viewed_at = excluded.viewed_at,
-                resolved_at = excluded.resolved_at",
-            rusqlite::params![
-                &item.id,
-                &item.wave_id,
-                &item.run_id,
-                &item.kind.as_str(),
-                &item.status.as_str(),
-                &item.title,
-                &item.summary,
-                &serde_json::to_string(&item.context)?,
-                &item.surfaced_at.unix_timestamp(),
-                &item.viewed_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
-                &item.resolved_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let deleted = conn.execute(
-            "DELETE FROM attention_items WHERE id = ?1",
-            rusqlite::params![attention_id],
-        )?;
-        Ok(deleted as u32)
-    }
-
-    pub fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetSummaryByWave))?;
-        let summary = stmt
-            .query_row(params![wave_id], |row| Ok(map_summary_row(row)))
-            .optional()?;
-        summary.transpose()
-    }
-
-    pub fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let created_at = summary
-            .created_at
-            .map(|dt| dt.unix_timestamp())
-            .unwrap_or_else(now_unix);
-
-        conn.execute(
-            Self::sql(Query::UpsertSummary),
-            params![
-                summary.id,
-                summary.wave_id,
-                summary.content,
-                summary.source_hash,
-                summary.token_budget as i64,
-                summary.agent,
-                created_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListChatMemoryBlocks))?;
-        let rows = stmt.query_map(params![wave_id], |row| Ok(map_chat_memory_block_row(row)))?;
-        let mut blocks = Vec::new();
-        for row in rows {
-            blocks.push(row??);
-        }
-        Ok(blocks)
-    }
-
-    pub fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated_at = block
-            .updated_at
-            .map(|dt| dt.unix_timestamp())
-            .unwrap_or_else(now_unix);
-        conn.execute(
-            Self::sql(Query::UpsertChatMemoryBlock),
-            params![
-                block.wave_id,
-                block.name,
-                block.content,
-                block.position as i64,
-                updated_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            Self::sql(Query::DeleteChatMemoryBlock),
-            params![wave_id, name],
-        )?;
-        Ok(())
-    }
-
-    pub fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, wave_id, role, content, created_at
-             FROM chat_messages
-             WHERE wave_id = ?1
-             ORDER BY created_at ASC",
-        )?;
-        let rows = stmt.query_map(params![wave_id], |row| Ok(map_chat_message_row(row)))?;
-        let mut messages = Vec::new();
-        for row in rows {
-            messages.push(row??);
-        }
-        Ok(messages)
-    }
-
-    pub fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO chat_messages (id, wave_id, role, content, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                message.id,
-                message.wave_id,
-                message.role,
-                message.content,
-                message.created_at.unix_timestamp(),
-            ],
-        )?;
-        Ok(())
-    }
 
     // The agent bus (`bus_messages`): `lf radio pub` publishes, every subscriber
     // polls forward from an id cursor. No process is in the path.

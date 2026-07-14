@@ -14,7 +14,7 @@ use crate::child_session::{
     prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
     ChildDirectiveId, ChildProcessGeneration, DirectiveKind, SessionSupervisor,
 };
-use crate::lfd::id::LfdId;
+use crate::id::WaveId;
 use crate::session_context::{LinearIssueSnapshot, LinearProjectSnapshot};
 
 pub mod runner;
@@ -121,7 +121,7 @@ pub struct TaskSession {
     pub project: LinearProjectSnapshot,
     pub pm_snapshot_synced_at: i64,
     pub pm_writeback: PmWritebackState,
-    pub wave_id: LfdId,
+    pub wave_id: WaveId,
     #[serde(rename = "wave")]
     pub wave_name: String,
     pub supervisor: SessionSupervisor,

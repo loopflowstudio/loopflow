@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::lfd::pm::{
+use crate::pm::{
     parse_project_content, project_slug, render_project_content, PmError, PmItem, PmItemCreate,
     PmItemUpdate, PmKr, PmProject, PmResult, PmWave, RATE_LIMIT_RETRIES,
 };
@@ -969,7 +969,7 @@ fn first_meaningful_paragraph(description: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::pm::test_server::{self, json_response};
+    use crate::pm::test_server::{self, json_response};
     use axum::http::StatusCode;
     use serde_json::json;
 

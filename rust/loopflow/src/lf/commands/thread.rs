@@ -6,8 +6,8 @@
 //! entirely — a table, polled ([`super::sub`]).
 //!
 //! Targeting and endpoint resolution are `lf chat`'s
-//! ([`super::chat::resolve_target`]): the ambient rule (`LFD_CHANNEL` env,
-//! else `LFD_WAVE_ID`, else the worktree name) with an explicit NAME override.
+//! ([`super::chat::resolve_target`]): the ambient rule (`LF_CHANNEL` env,
+//! else `LF_WAVE_ID`, else the worktree name) with an explicit NAME override.
 //!
 //! The stream is followed until the process is killed: on disconnect (or a
 //! wave with no live server yet) it reconnects on a backoff ladder,

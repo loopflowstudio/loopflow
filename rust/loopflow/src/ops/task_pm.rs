@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::lfd::pm::{PmItem, PmProject};
+use crate::pm::{PmItem, PmProject};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmUpdateOptions};
 

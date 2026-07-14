@@ -301,7 +301,7 @@ pub enum Commands {
         json: bool,
     },
     /// Show one wave's Project/Task hierarchy, runs, attention, and live loop
-    /// state from the registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
+    /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -454,7 +454,7 @@ fn reject_retired_sub(_: &str) -> Result<String, String> {
 }
 
 /// Wave targeting shared by `lf chat` and `lf memory`: default is the
-/// invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+/// invoking context's wave (`LF_WAVE_ID` env, else the worktree name).
 #[derive(Args, Debug, Clone, Default)]
 pub struct WaveTargetArgs {
     /// Target wave by name

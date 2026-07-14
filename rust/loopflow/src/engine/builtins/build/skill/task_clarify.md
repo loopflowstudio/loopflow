@@ -3,7 +3,7 @@ description: Turn one Linear Task directive into a computable change design.
 default_agent: codex
 action_style: procedural
 ---
-Clarify the exact Task named by `LFD_TASK_SESSION_ID`.
+Clarify the exact Task named by `LF_TASK_SESSION_ID`.
 
 Read the Task seed, current directive, Project definition/KRs, repository
 instructions, current worktree, and any existing design note in `scratch/`.

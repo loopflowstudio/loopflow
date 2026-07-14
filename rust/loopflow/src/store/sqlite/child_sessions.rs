@@ -10,9 +10,9 @@ use crate::child_session::{
     ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId,
     ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
 };
-use crate::lfd::id::LfdId;
-use crate::lfdb::rows::now_unix;
-use crate::lfdb::{StoreError, StoreResult};
+use crate::id::WaveId;
+use crate::store::rows::now_unix;
+use crate::store::{StoreError, StoreResult};
 use crate::project_session::{
     ChildEventPayload, ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession,
     ProjectSessionId, ProjectSessionStatus,
@@ -40,49 +40,26 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn reserve_task_session(
-        &self,
-        session: &TaskSession,
-        max_active: u32,
-    ) -> StoreResult<bool> {
+    pub fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
-        let active: i64 = transaction.query_row(
-            "SELECT COUNT(*) FROM task_sessions
-             WHERE wave_id = ?1 AND status IN ('created', 'starting', 'running')",
-            params![session.wave_id],
-            |row| row.get(0),
-        )?;
-        if active >= i64::from(max_active) {
-            return Ok(false);
-        }
         let parameters = task_session_params(session);
         transaction.execute(
             TASK_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         transaction.commit()?;
-        Ok(true)
+        Ok(())
     }
 
     pub fn reserve_task_session_with_directive(
         &self,
         session: &TaskSession,
         directive: &ChildDirective,
-        max_active: u32,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<()> {
         ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
-        let active: i64 = transaction.query_row(
-            "SELECT COUNT(*) FROM task_sessions
-             WHERE wave_id = ?1 AND status IN ('created', 'starting', 'running')",
-            params![session.wave_id],
-            |row| row.get(0),
-        )?;
-        if active >= i64::from(max_active) {
-            return Ok(false);
-        }
         let parameters = task_session_params(session);
         transaction.execute(
             TASK_SESSION_INSERT,
@@ -90,7 +67,7 @@ impl SqliteStore {
         )?;
         insert_child_directive(&transaction, directive)?;
         transaction.commit()?;
-        Ok(true)
+        Ok(())
     }
 
     pub fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
@@ -110,7 +87,6 @@ impl SqliteStore {
         &self,
         session: &TaskSession,
         expected_status: TaskSessionStatus,
-        max_active: u32,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
@@ -120,16 +96,6 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         if current_status != expected_status.as_str() {
-            return Ok(false);
-        }
-        let active: i64 = transaction.query_row(
-            "SELECT COUNT(*) FROM task_sessions
-             WHERE wave_id = ?1 AND id <> ?2
-               AND status IN ('created', 'starting', 'running')",
-            params![session.wave_id, session.id.as_str()],
-            |row| row.get(0),
-        )?;
-        if active >= i64::from(max_active) {
             return Ok(false);
         }
         let changed = transaction.execute(
@@ -202,7 +168,7 @@ impl SqliteStore {
         }
     }
 
-    pub fn list_task_sessions(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<TaskSession>> {
+    pub fn list_task_sessions(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<TaskSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (query, parameter): (String, Option<&dyn ToSql>) = match wave_id {
             Some(wave_id) => (
@@ -565,7 +531,7 @@ impl SqliteStore {
             id: event_id,
             session_id: session_id.clone(),
             kind: kind.clone(),
-            created_at: crate::lfdb::rows::unix_to_datetime(created_at),
+            created_at: crate::store::rows::unix_to_datetime(created_at),
         })
     }
 
@@ -734,7 +700,7 @@ impl SqliteStore {
 
     pub fn list_project_sessions(
         &self,
-        wave_id: Option<&LfdId>,
+        wave_id: Option<&WaveId>,
     ) -> StoreResult<Vec<ProjectSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = match wave_id {
@@ -849,7 +815,7 @@ impl SqliteStore {
             id: event_id,
             session_id: session_id.clone(),
             kind: kind.clone(),
-            created_at: crate::lfdb::rows::unix_to_datetime(created_at),
+            created_at: crate::store::rows::unix_to_datetime(created_at),
         })
     }
 
@@ -1423,7 +1389,7 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
             generation: generation as u32,
             pid: row.get::<_, Option<i64>>(21)?.map(|pid| pid as u32),
             tmux_name: row.get::<_, Option<String>>(22)?.unwrap_or_default(),
-            started_at: crate::lfdb::rows::unix_to_datetime(started_at),
+            started_at: crate::store::rows::unix_to_datetime(started_at),
         }),
         _ => None,
     };
@@ -1453,11 +1419,11 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         pm_snapshot_synced_at: row.get(28)?,
         pm_writeback: serde_json::from_str(&row.get::<_, String>(30)?)
             .map_err(|error| invalid_column(30, error))?,
-        wave_id: LfdId::from_raw(row.get::<_, String>(9)?),
+        wave_id: row.get(9)?,
         wave_name: row.get(10)?,
         supervisor: match row.get::<_, String>(31)?.as_str() {
             "wave" => SessionSupervisor::Wave {
-                wave_id: LfdId::from_raw(row.get::<_, String>(32)?),
+                wave_id: row.get(32)?,
             },
             "project" => SessionSupervisor::Project {
                 session_id: crate::project_session::ProjectSessionId::from_raw(
@@ -1478,7 +1444,7 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         incorporated_directive_version: row.get::<_, i64>(34)? as u32,
         status,
         status_reason: row.get(12)?,
-        status_at: crate::lfdb::rows::unix_to_datetime(row.get(13)?),
+        status_at: crate::store::rows::unix_to_datetime(row.get(13)?),
         worktree: PathBuf::from(row.get::<_, String>(14)?),
         branch: row.get(15)?,
         base_commit: row.get(16)?,
@@ -1487,8 +1453,8 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         provider_session_id: row.get(19)?,
         latest_process: process,
         pull_request,
-        created_at: crate::lfdb::rows::unix_to_datetime(row.get(26)?),
-        updated_at: crate::lfdb::rows::unix_to_datetime(row.get(27)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(26)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(27)?),
     })
 }
 
@@ -1540,7 +1506,7 @@ fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
         id: row.get(0)?,
         session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
         kind,
-        created_at: crate::lfdb::rows::unix_to_datetime(row.get(3)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(3)?),
     })
 }
 
@@ -1647,7 +1613,7 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
             generation: generation as u32,
             pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
             tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
-            started_at: crate::lfdb::rows::unix_to_datetime(started_at),
+            started_at: crate::store::rows::unix_to_datetime(started_at),
         }),
         _ => None,
     };
@@ -1659,7 +1625,7 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
             name: row.get(3)?,
             context: row.get(4)?,
         },
-        wave_id: LfdId::from_raw(row.get::<_, String>(5)?),
+        wave_id: row.get(5)?,
         wave_name: row.get(6)?,
         control_repo: row.get(7)?,
         pm_snapshot_synced_at: row.get(8)?,
@@ -1667,7 +1633,7 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         incorporated_directive_version: row.get::<_, i64>(25)? as u32,
         status,
         status_reason: row.get(10)?,
-        status_at: crate::lfdb::rows::unix_to_datetime(row.get(11)?),
+        status_at: crate::store::rows::unix_to_datetime(row.get(11)?),
         iteration: row.get::<_, i64>(12)? as u32,
         observation_cursor: row.get(13)?,
         last_state_fingerprint: row.get(14)?,
@@ -1675,8 +1641,8 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         provider: row.get(16)?,
         provider_session_id: row.get(17)?,
         latest_process: process,
-        created_at: crate::lfdb::rows::unix_to_datetime(row.get(22)?),
-        updated_at: crate::lfdb::rows::unix_to_datetime(row.get(23)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
     })
 }
 
@@ -1769,7 +1735,7 @@ fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEve
         id: row.get(0)?,
         session_id: ProjectSessionId::from_raw(row.get::<_, String>(1)?),
         kind,
-        created_at: crate::lfdb::rows::unix_to_datetime(row.get(3)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(3)?),
     })
 }
 
@@ -1820,7 +1786,13 @@ fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationO
     let supervisor_id: String = row.get(2)?;
     let supervisor = match supervisor_kind.as_str() {
         "wave" => SessionSupervisor::Wave {
-            wave_id: LfdId::from_raw(supervisor_id),
+            wave_id: WaveId::parse(&supervisor_id).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
         },
         "project" => SessionSupervisor::Project {
             session_id: ProjectSessionId::from_raw(supervisor_id),
@@ -1860,6 +1832,6 @@ fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationO
         payload,
         delivered_at: row
             .get::<_, Option<i64>>(7)?
-            .map(crate::lfdb::rows::unix_to_datetime),
+            .map(crate::store::rows::unix_to_datetime),
     })
 }

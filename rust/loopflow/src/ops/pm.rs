@@ -13,11 +13,11 @@ use futures_util::future::try_join_all;
 
 use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
-use crate::lfd::pm::linear::LinearClient;
-use crate::lfd::pm::{
+use crate::pm::linear::LinearClient;
+use crate::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
 };
-use crate::lfdb::{open_store, PmSnapshotRow, ProviderToken, Store};
+use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
@@ -221,7 +221,7 @@ async fn pm_create_project_async(
         });
     }
     let seed = LocalProject {
-        slug: crate::lfd::pm::project_slug(title),
+        slug: crate::pm::project_slug(title),
         name: title.to_string(),
         summary: title.to_string(),
         definition: title.to_string(),
@@ -474,11 +474,11 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
 }
 
 /// Linear authenticates via OAuth: the access token and refresh grant live in
-/// lfdb, and PM access refreshes the grant before the access token expires.
+/// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     // A forwarded token wins over the local store: `lf ssh` resolves the PM
-    // credential on the caller's machine (where lfdb lives) and hands it to the
-    // remote through the environment. The remote lfdb holds no PM credential, so
+    // credential on the caller's machine (where store lives) and hands it to the
+    // remote through the environment. The remote store holds no PM credential, so
     // without this hook remote `lf pm` could never authenticate.
     if let Some(token) = forwarded_pm_token(provider) {
         return Ok(token);
@@ -571,8 +571,8 @@ fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
     }
 }
 
-fn storage_config_from_env() -> OpsResult<crate::lfdb::StorageConfig> {
-    crate::lfd::storage_config_from_env()
+fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
+    crate::store::storage_config_from_env()
         .map_err(|err| OpsError::Message(format!("failed to resolve lfd credential store: {err}")))
 }
 
@@ -1480,7 +1480,7 @@ async fn pm_project_write_async(
             .title
             .clone()
             .unwrap_or_else(|| project.name.clone());
-        let new_slug = crate::lfd::pm::project_slug(&name);
+        let new_slug = crate::pm::project_slug(&name);
         if projects
             .iter()
             .any(|candidate| candidate.id != project.id && candidate.slug == new_slug)
@@ -1499,7 +1499,7 @@ async fn pm_project_write_async(
         let name = options.title.clone().ok_or_else(|| {
             OpsError::Message("`lf pm project create --title` is required".to_string())
         })?;
-        let slug = crate::lfd::pm::project_slug(&name);
+        let slug = crate::pm::project_slug(&name);
         if projects.iter().any(|project| project.slug == slug) {
             return Err(OpsError::Message(format!(
                 "wave/{wave} already has a Linear Project with slug `{slug}`; use `lf pm project update`"
@@ -1735,14 +1735,14 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::pm::test_server::{self, json_response, QueuedResponse};
+    use crate::pm::test_server::{self, json_response, QueuedResponse};
     use crate::ops::NullProgress;
     use axum::http::StatusCode;
     use serde_json::json;
 
     fn linear_test_ctx(base_url: String, initiative: &str) -> PmContext {
         PmContext {
-            client: PmClient::Linear(crate::lfd::pm::linear::LinearClient::with_base_url(
+            client: PmClient::Linear(crate::pm::linear::LinearClient::with_base_url(
                 "linear-secret".to_string(),
                 Some("team-9".to_string()),
                 base_url,
@@ -1870,7 +1870,7 @@ mod tests {
     fn duplicate_linear_project_slugs_are_drift() {
         let project = |id: &str, name: &str| PmProject {
             id: id.to_string(),
-            slug: crate::lfd::pm::project_slug(name),
+            slug: crate::pm::project_slug(name),
             name: name.to_string(),
             summary: String::new(),
             definition: String::new(),
@@ -2120,9 +2120,9 @@ mod tests {
     #[tokio::test]
     async fn pm_refreshes_due_linear_token_before_using_it() {
         let db_path =
-            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::lfd::id::LfdId::new()));
+            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
         let store = std::sync::Arc::new(
-            open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+            open_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open token store"),
         );
@@ -2136,7 +2136,7 @@ mod tests {
                 expires_at: Some(now + 60),
                 login: None,
                 updated_at: now,
-                credential_type: crate::lfdb::CredentialType::OAuth,
+                credential_type: crate::store::CredentialType::OAuth,
             })
             .await
             .expect("store current token");
@@ -2156,7 +2156,7 @@ mod tests {
                     expires_at: Some(now + 24 * 60 * 60),
                     login: None,
                     updated_at: now,
-                    credential_type: crate::lfdb::CredentialType::OAuth,
+                    credential_type: crate::store::CredentialType::OAuth,
                 })
             },
         )
@@ -2176,9 +2176,9 @@ mod tests {
     #[tokio::test]
     async fn proactive_refresh_failure_uses_still_valid_token() {
         let db_path =
-            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::lfd::id::LfdId::new()));
+            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
         let store = std::sync::Arc::new(
-            open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+            open_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open token store"),
         );
@@ -2192,7 +2192,7 @@ mod tests {
                 expires_at: Some(now + 60),
                 login: None,
                 updated_at: now,
-                credential_type: crate::lfdb::CredentialType::OAuth,
+                credential_type: crate::store::CredentialType::OAuth,
             })
             .await
             .expect("store current token");
@@ -2220,7 +2220,7 @@ mod tests {
         std::env::set_var(FORWARDED_PM_TOKEN_ENV, "forwarded-secret");
         std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
 
-        // Returns the forwarded token without ever opening the lfdb store.
+        // Returns the forwarded token without ever opening the store store.
         let token = block_on_pm(resolve_pm_token(PmProviderKind::Linear)).expect("token");
         assert_eq!(token, "forwarded-secret");
 

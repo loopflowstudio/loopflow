@@ -10,7 +10,7 @@ use crate::child_session::{
     ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
     ChildCommandState, ChildDirective, ChildRef,
 };
-use crate::lfdb::SharedStore;
+use crate::store::SharedStore;
 use crate::project_session::{ProjectEventKind, ProjectSession, ProjectSessionStatus};
 use crate::task::{TaskEventKind, TaskSession, TaskSessionStatus};
 
@@ -491,16 +491,16 @@ mod tests {
     use crate::child_session::{
         ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcessGeneration,
     };
-    use crate::lfd::id::LfdId;
-    use crate::lfd::types::Wave;
-    use crate::lfdb::{open_store, StorageConfig};
+    use crate::id::WaveId;
+    use crate::wave::Wave;
+    use crate::store::{open_store, StorageConfig};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
 
     use super::{queue_command, ChildSession};
 
     fn make_wave(repo: &str) -> Wave {
-        let id = LfdId::new();
+        let id = WaveId::new();
         Wave::new(id.clone(), format!("wave-{id}"), repo.to_string())
     }
 
@@ -510,8 +510,8 @@ mod tests {
         ProjectSession {
             id: ProjectSessionId::new(),
             project: LinearProjectSnapshot {
-                id: LinearProjectId::new(format!("project-{}", LfdId::new())).unwrap(),
-                slug: format!("project-{}", LfdId::new()),
+                id: LinearProjectId::new(format!("project-{}", WaveId::new())).unwrap(),
+                slug: format!("project-{}", WaveId::new()),
                 name: "Child control".to_string(),
                 context: "Keep one control protocol.".to_string(),
             },

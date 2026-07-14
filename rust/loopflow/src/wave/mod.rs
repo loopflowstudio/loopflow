@@ -42,8 +42,8 @@
 //! `.wave-resident-token`.
 //!
 //! The listener also keeps a best-effort seat in the shared session
-//! [`registry`] (the same local store lfd serves from — the db IS the
-//! registry): a `WaveAgent` session row registered store-direct at boot (one
+//! [`registry`] (the local db IS the registry): a `WaveAgent` session row
+//! registered store-direct at boot (one
 //! brain per wave, enforced by a pid-probing pre-flight) and a store-polling
 //! observer that carries typed Project/Task events into the Wave journal. No
 //! registry store on the machine → warn once, fully functional anyway.
@@ -55,14 +55,16 @@ pub(crate) mod memory;
 pub mod playhead;
 
 pub(crate) mod registry;
-pub use registry::reconcile_wave_servers;
 pub mod resident;
 pub mod runtime;
 pub mod server;
 pub mod state;
 pub mod subscription;
 pub(crate) mod supervisor;
+mod types;
 pub mod wire;
+
+pub use types::Wave;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -72,8 +74,8 @@ use anyhow::{anyhow, Result};
 
 use crate::engine::repo::find_repo_root;
 use crate::engine::worktrees::main_repo_root;
-use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
-use crate::lfdb::{open_existing_store, SharedStore};
+use crate::control_session::WAVE_SERVER_ENDPOINT_ENV;
+use crate::store::{open_existing_store, SharedStore};
 use crate::ops::util::resolve_wave_name;
 use crate::wave::runtime::WaveRuntime;
 
@@ -285,7 +287,7 @@ async fn run_listener(
     // the store + wave id forward to build the observer once the runtime is
     // open.
     let mut registration: Option<registry::Registration> = None;
-    let mut registered: Option<(SharedStore, crate::lfd::id::LfdId)> = None;
+    let mut registered: Option<(SharedStore, crate::id::WaveId)> = None;
     // Wave-session context handed to the spawned resident: a bare `lf`
     // inside the loop self-registers under this wave with the listener's
     // session as its parent (see lf::session for the env contract).
@@ -1448,12 +1450,12 @@ mod tests {
     async fn resolve_registry_without_a_store_runs_unregistered() {
         let _env = crate::lf::session::test_env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
-        let previous = std::env::var_os("LFD_DB_PATH");
-        std::env::set_var("LFD_DB_PATH", tmp.path().join("absent.db"));
+        let previous = std::env::var_os("LF_DB_PATH");
+        std::env::set_var("LF_DB_PATH", tmp.path().join("absent.db"));
         let config = resolve_registry(tmp.path(), "ship", false).await;
         match previous {
-            Some(value) => std::env::set_var("LFD_DB_PATH", value),
-            None => std::env::remove_var("LFD_DB_PATH"),
+            Some(value) => std::env::set_var("LF_DB_PATH", value),
+            None => std::env::remove_var("LF_DB_PATH"),
         }
         assert!(config.is_none(), "missing store boots unregistered");
     }
@@ -1535,9 +1537,9 @@ mod tests {
         assert!(!endpoint.exists(), "first server still owns its shutdown");
     }
 
-    fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
-        crate::lfd::types::Wave::new(
-            crate::lfd::id::LfdId::new(),
+    fn make_wave_row(name: &str) -> crate::wave::Wave {
+        crate::wave::Wave::new(
+            crate::id::WaveId::new(),
             name.to_string(),
             "/tmp/repo".to_string(),
         )
@@ -1550,8 +1552,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
         let repo = tmp.path().to_path_buf();
-        let store: crate::lfdb::SharedStore = Arc::new(
-            crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
+        let store: crate::store::SharedStore = Arc::new(
+            crate::store::open_store(&crate::store::StorageConfig::sqlite(
                 tmp.path().join("lfd.db"),
             ))
             .await
@@ -1589,7 +1591,7 @@ mod tests {
         let addr = std::fs::read_to_string(&endpoint).unwrap();
         assert_eq!(
             live.env
-                .get(crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV)
+                .get(crate::control_session::WAVE_SERVER_ENDPOINT_ENV)
                 .map(String::as_str),
             Some(addr.trim())
         );
@@ -1612,8 +1614,8 @@ mod tests {
     async fn serve_refuses_to_start_over_a_live_brain() {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
-        let store: crate::lfdb::SharedStore = Arc::new(
-            crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
+        let store: crate::store::SharedStore = Arc::new(
+            crate::store::open_store(&crate::store::StorageConfig::sqlite(
                 tmp.path().join("lfd.db"),
             ))
             .await

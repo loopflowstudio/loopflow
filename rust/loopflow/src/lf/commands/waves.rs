@@ -1,8 +1,8 @@
-//! `lf ls` and `lf status` — read the wave registry (`lfdb`).
+//! `lf ls` and `lf status` — read the wave registry (`store`).
 //!
 //! `lf ls` lists every durable Wave registry row and projects authored policy
 //! from `GOAL.md` plus current listener presence. `lf status <wave>` adds the
-//! Wave's Project/Task hierarchy, attention, and live loop state. Both are
+//! Wave's Project/Task hierarchy and live loop state. Both are
 //! read-only; `--json` is the dashboard contract. A stopped Wave remains
 //! visible, inert, and restartable.
 
@@ -13,11 +13,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::child_session::{ChildRef, DirectiveKind, SessionSupervisor};
 use crate::lf::output::Colors;
-use crate::lfd::pm::{PmItem, PmKr, PmProject};
-use crate::lfd::types::{AttentionItem, AttentionStatus, Wave};
-use crate::lfdb::{open_existing_store, SharedStore};
+use crate::pm::{PmItem, PmKr, PmProject};
+use crate::store::{open_existing_store, SharedStore};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
 use crate::task::{TaskSession, TaskSessionStatus};
+use crate::wave::Wave;
 use crate::wave::server::live_endpoint;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,8 +58,6 @@ pub struct WaveSnapshot {
     pub goal: String,
     /// Primary repo path.
     pub repo: String,
-    /// Max concurrent Task Sessions this wave allows.
-    pub task_capacity: u32,
     /// Non-terminal Task Sessions owned by this Wave.
     pub active_tasks: u32,
     /// Non-terminal Project Sessions owned by this Wave.
@@ -74,7 +72,7 @@ pub struct WaveSnapshot {
     pub parent_wave_id: Option<String>,
 }
 
-/// `lf status <wave>` snapshot: native work hierarchy, attention, and — when a
+/// `lf status <wave>` snapshot: native work hierarchy and — when a
 /// server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
@@ -84,7 +82,6 @@ pub struct WaveDetailSnapshot {
     /// serving dormant.
     pub loop_state: Option<String>,
     pub projects: Vec<ProjectDetailSnapshot>,
-    pub attention: Vec<AttentionSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,18 +182,6 @@ pub struct ProjectDetailSnapshot {
     pub tasks: Vec<TaskDetailSnapshot>,
 }
 
-/// One attention item's snapshot for `lf status`. Wire type; no serde defaults.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AttentionSnapshot {
-    pub id: String,
-    pub kind: String,
-    pub status: String,
-    pub title: String,
-    pub summary: String,
-    pub run_id: Option<String>,
-    pub surfaced_at: String,
-}
-
 /// `lf ls` — every wave the registry knows, running and stopped alike.
 pub fn ls(json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -222,7 +207,7 @@ pub fn ls(json: bool) -> Result<()> {
     })
 }
 
-/// `lf status <wave>` — one wave's work hierarchy, attention, and loop.
+/// `lf status <wave>` — one wave's work hierarchy and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let name = wave
         .map(str::to_string)
@@ -252,20 +237,10 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .await
             .map_err(|err| anyhow!("failed to read Task Sessions: {err}"))?;
         let projects = snapshot_projects(&store, &wave, stored_projects, stored_tasks).await?;
-        let wave_id = wave.id().clone();
-        let attention = store
-            .list_attention_items(None, None)
-            .await
-            .map_err(|err| anyhow!("failed to read attention: {err}"))?
-            .into_iter()
-            .filter(|item| item.wave_id == wave_id && item.status != AttentionStatus::Resolved)
-            .map(snapshot_attention)
-            .collect::<Vec<_>>();
         let status = WaveDetailSnapshot {
             wave: snapshot,
             loop_state,
             projects,
-            attention,
         };
         if json {
             println!("{}", serde_json::to_string(&status)?);
@@ -317,7 +292,6 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         goal: crate::engine::wave_config::read_wave_summary(Path::new(&repo), wave.name())
             .unwrap_or_else(|_| wave.name().to_string()),
         repo,
-        task_capacity: wave.task_capacity(),
         active_tasks,
         active_projects,
         live: endpoint.is_some(),
@@ -670,19 +644,7 @@ fn next_move_for_task(
     }
 }
 
-fn snapshot_attention(item: AttentionItem) -> AttentionSnapshot {
-    AttentionSnapshot {
-        id: item.id.to_string(),
-        kind: item.kind.as_str().to_string(),
-        status: item.status.as_str().to_string(),
-        title: item.title,
-        summary: item.summary,
-        run_id: item.run_id.map(|id| id.to_string()),
-        surfaced_at: format_time(item.surfaced_at).unwrap_or_default(),
-    }
-}
-
-/// The invoking context's wave: `LFD_WAVE_ID` env, else `None` (the caller
+/// The invoking context's wave: `LF_WAVE_ID` env, else `None` (the caller
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
 /// resolution surface `lf chat`/`lf radio sub` own.
 fn ambient_wave() -> Option<String> {
@@ -810,16 +772,6 @@ fn print_status(status: &WaveDetailSnapshot) {
             }
         }
     }
-    if !status.attention.is_empty() {
-        println!("  attention");
-        for item in &status.attention {
-            println!(
-                "    {kind:<11}  {title}",
-                kind = item.kind,
-                title = item.title
-            );
-        }
-    }
 }
 
 fn truncate(value: &str, width: usize) -> String {
@@ -835,8 +787,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::lfd::id::LfdId;
-    use crate::lfdb::{open_store, PmSnapshotRow, StorageConfig};
+    use crate::id::WaveId;
+    use crate::store::{open_store, PmSnapshotRow, StorageConfig};
 
     #[test]
     fn unknown_project_is_a_snapshot_error_not_a_synthetic_project() {
@@ -856,7 +808,7 @@ mod tests {
                 .expect("open store"),
         );
         let wave = Wave::new(
-            LfdId::new(),
+            WaveId::new(),
             "infrastructure".to_string(),
             repo.display().to_string(),
         );
@@ -932,7 +884,6 @@ mod tests {
             paused: false,
             goal: "ship the roadmap".into(),
             repo: "/repo".into(),
-            task_capacity: 2,
             active_tasks: 2,
             active_projects: 1,
             live: true,
@@ -953,7 +904,7 @@ mod tests {
     }
 
     #[test]
-    fn status_snapshot_nests_wave_work_and_attention() {
+    fn status_snapshot_nests_wave_work() {
         let status = WaveDetailSnapshot {
             wave: WaveSnapshot {
                 id: "wave-1".into(),
@@ -962,7 +913,6 @@ mod tests {
                 paused: false,
                 goal: "g".into(),
                 repo: "/repo".into(),
-                task_capacity: 1,
                 active_tasks: 0,
                 active_projects: 0,
                 live: false,

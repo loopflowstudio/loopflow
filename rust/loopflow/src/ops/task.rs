@@ -16,9 +16,9 @@ use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::project_session::SessionSupervisor;
 use crate::task::{
-    ChildDirective, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
-    PmWritebackOperation, PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandId,
-    TaskCommandKind, TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind,
+    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
+    ChildCommandState, ChildDecisionId, ChildDirective, ChildRef, LinearIssueId, LinearIssueRef,
+    LinearProjectId, LinearProjectRef, PmWritebackOperation, PmWritebackState, TaskEventKind,
     TaskSession, TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
@@ -41,8 +41,8 @@ pub struct TaskControlResult {
     pub session_id: String,
     pub command_id: String,
     pub directive_version: Option<u32>,
-    pub state: TaskCommandState,
-    pub effect: Option<TaskCommandEffect>,
+    pub state: ChildCommandState,
+    pub effect: Option<ChildCommandEffect>,
     pub incorporated: bool,
     pub generation: Option<u32>,
     pub accepted_at: Option<time::OffsetDateTime>,
@@ -120,7 +120,7 @@ async fn task_store() -> OpsResult<SharedStore> {
     })
 }
 
-fn command_source(session: &TaskSession) -> OpsResult<TaskCommandSource> {
+fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
     match std::env::var("LFD_PROJECT_SESSION_ID") {
         Ok(value) => {
             let project_id =
@@ -129,7 +129,7 @@ fn command_source(session: &TaskSession) -> OpsResult<TaskCommandSource> {
                 })?;
             return match &session.supervisor {
                 SessionSupervisor::Project { session_id } if session_id == &project_id => {
-                    Ok(TaskCommandSource::Project(project_id))
+                    Ok(ChildCommandSource::Project(project_id))
                 }
                 SessionSupervisor::Project { session_id } => Err(task_error(format!(
                     "Project Session {project_id} cannot control Task {}; its supervisor is {session_id}",
@@ -169,13 +169,13 @@ fn command_source_for_wave(
     owning_wave_id: &LfdId,
     issue_identifier: &str,
     owning_wave: &str,
-) -> OpsResult<TaskCommandSource> {
+) -> OpsResult<ChildCommandSource> {
     match ambient {
-        Some(wave_id) if &wave_id == owning_wave_id => Ok(TaskCommandSource::Wave(wave_id)),
+        Some(wave_id) if &wave_id == owning_wave_id => Ok(ChildCommandSource::Wave(wave_id)),
         Some(wave_id) => Err(task_error(format!(
             "Wave {wave_id} cannot control Task {issue_identifier} owned by wave/{owning_wave}"
         ))),
-        None => Ok(TaskCommandSource::Human),
+        None => Ok(ChildCommandSource::Human),
     }
 }
 
@@ -829,7 +829,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     })
 }
 
-fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlResult> {
+fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlResult> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut session = store
@@ -845,11 +845,15 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 session.status.as_str()
             )));
         }
-        let command = TaskCommand::new(session.id.clone(), command_source(&session)?, kind);
-        let wait_for_resolution = !matches!(&command.kind, TaskCommandKind::FollowUp { .. });
+        let command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            command_source(&session)?,
+            kind,
+        );
+        let wait_for_resolution = !matches!(&command.kind, ChildCommandKind::FollowUp { .. });
         let replacement = match &command.kind {
-            TaskCommandKind::Steer { text } => Some(text.clone()),
-            TaskCommandKind::Interrupt {
+            ChildCommandKind::Steer { text } => Some(text.clone()),
+            ChildCommandKind::Interrupt {
                 replacement: Some(text),
             } => Some(text.clone()),
             _ => None,
@@ -863,7 +867,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 command.id.clone(),
             );
             let superseded = store
-                .create_task_command_with_directive(&command, &directive)
+                .create_child_command_with_directive(&command, &directive)
                 .await
                 .map_err(|error| {
                     task_error(format!("failed to persist task directive: {error}"))
@@ -871,21 +875,21 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
             let event = (directive.id, directive.version, directive.kind);
             session.current_directive_version = directive.version;
             (command, true, superseded, Some(event))
-        } else if matches!(&command.kind, TaskCommandKind::Decide { .. }) {
+        } else if matches!(&command.kind, ChildCommandKind::Decide { .. }) {
             let (command, created) = store
-                .ensure_task_decision_command(&command)
+                .ensure_child_decision_command(&command)
                 .await
                 .map_err(|error| task_error(format!("failed to persist task decision: {error}")))?;
             (command, created, Vec::new(), None)
-        } else if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
+        } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
             let superseded = store
-                .supersede_and_create_task_command(&command)
+                .supersede_and_create_child_command(&command)
                 .await
                 .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
             (command, true, superseded, None)
         } else {
             store
-                .create_task_command(&command)
+                .create_child_command(&command)
                 .await
                 .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
             (command, true, Vec::new(), None)
@@ -902,7 +906,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 &store,
                 &session,
                 command_id,
-                TaskCommandState::Superseded,
+                ChildCommandState::Superseded,
                 None,
             )
             .await?;
@@ -924,22 +928,22 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
             &store,
             &session,
             command.id.clone(),
-            TaskCommandState::Persisted,
+            ChildCommandState::Persisted,
             command.effect,
         )
         .await?;
-        if let TaskCommandKind::Abandon { reason } = &command.kind {
+        if let ChildCommandKind::Abandon { reason } = &command.kind {
             if !session.status.is_process_active() {
                 let from = session.status;
                 store
-                    .accept_task_command(&command.id, None)
+                    .accept_child_command(&command.id, None)
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
                 append_command_event(
                     &store,
                     &session,
                     command.id.clone(),
-                    TaskCommandState::Accepted,
+                    ChildCommandState::Accepted,
                     None,
                 )
                 .await?;
@@ -972,7 +976,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
         let mut receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
         if matches!(
             receipt.state,
-            TaskCommandState::Persisted | TaskCommandState::Claimed
+            ChildCommandState::Persisted | ChildCommandState::Claimed
         ) {
             let current = store
                 .get_task_session(&session.id)
@@ -992,8 +996,8 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
 async fn control_result(
     store: &SharedStore,
     session: &TaskSession,
-    command: &TaskCommand,
-    receipt: TaskCommand,
+    command: &ChildCommand,
+    receipt: ChildCommand,
 ) -> OpsResult<TaskControlResult> {
     let directive = store
         .child_directive_for_command(&command.id)
@@ -1018,9 +1022,9 @@ async fn control_result(
 
 async fn resolve_receipt(
     store: &SharedStore,
-    command_id: &crate::task::TaskCommandId,
+    command_id: &crate::task::ChildCommandId,
     wait: bool,
-) -> OpsResult<TaskCommand> {
+) -> OpsResult<ChildCommand> {
     if wait {
         wait_for_command_receipt(store, command_id).await
     } else {
@@ -1030,8 +1034,8 @@ async fn resolve_receipt(
 
 async fn wait_for_command_receipt(
     store: &SharedStore,
-    command_id: &crate::task::TaskCommandId,
-) -> OpsResult<TaskCommand> {
+    command_id: &crate::task::ChildCommandId,
+) -> OpsResult<ChildCommand> {
     Ok(
         wait_for_command_receipt_until(store, command_id, Duration::from_secs(2))
             .await?
@@ -1041,9 +1045,9 @@ async fn wait_for_command_receipt(
 
 async fn wait_for_command_receipt_until(
     store: &SharedStore,
-    command_id: &crate::task::TaskCommandId,
+    command_id: &crate::task::ChildCommandId,
     timeout: Duration,
-) -> OpsResult<(TaskCommand, bool)> {
+) -> OpsResult<(ChildCommand, bool)> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let command = read_command_receipt(store, command_id).await?;
@@ -1059,10 +1063,10 @@ async fn wait_for_command_receipt_until(
 
 async fn read_command_receipt(
     store: &SharedStore,
-    command_id: &crate::task::TaskCommandId,
-) -> OpsResult<TaskCommand> {
+    command_id: &crate::task::ChildCommandId,
+) -> OpsResult<ChildCommand> {
     store
-        .get_task_command(command_id)
+        .get_child_command(command_id)
         .await
         .map_err(|error| task_error(format!("failed to read task command receipt: {error}")))?
         .ok_or_else(|| task_error(format!("task command {command_id} disappeared")))
@@ -1071,9 +1075,9 @@ async fn read_command_receipt(
 async fn append_command_event(
     store: &SharedStore,
     session: &TaskSession,
-    command_id: crate::task::TaskCommandId,
-    state: TaskCommandState,
-    effect: Option<TaskCommandEffect>,
+    command_id: crate::task::ChildCommandId,
+    state: ChildCommandState,
+    effect: Option<ChildCommandEffect>,
 ) -> OpsResult<()> {
     store
         .append_task_event(
@@ -1091,19 +1095,19 @@ async fn append_command_event(
 }
 
 pub fn task_follow_up(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, TaskCommandKind::FollowUp { text: message })
+    queue_command(issue, ChildCommandKind::FollowUp { text: message })
 }
 
 pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, TaskCommandKind::Steer { text: message })
+    queue_command(issue, ChildCommandKind::Steer { text: message })
 }
 
 pub fn task_interrupt(issue: &str, replacement: Option<String>) -> OpsResult<TaskControlResult> {
-    queue_command(issue, TaskCommandKind::Interrupt { replacement })
+    queue_command(issue, ChildCommandKind::Interrupt { replacement })
 }
 
 pub fn task_resume(issue: &str, message: Option<String>) -> OpsResult<TaskControlResult> {
-    queue_command(issue, TaskCommandKind::Resume { message })
+    queue_command(issue, ChildCommandKind::Resume { message })
 }
 
 pub fn task_receipt(
@@ -1112,7 +1116,7 @@ pub fn task_receipt(
     timeout: Duration,
 ) -> OpsResult<TaskReceiptRead> {
     let command_id =
-        TaskCommandId::parse(command_id).map_err(|error| task_error(error.to_string()))?;
+        ChildCommandId::parse(command_id).map_err(|error| task_error(error.to_string()))?;
     block_on_task(async move {
         let store = task_store().await?;
         let (command, timed_out) = if let Some(until) = until {
@@ -1120,13 +1124,16 @@ pub fn task_receipt(
         } else {
             (read_command_receipt(&store, &command_id).await?, false)
         };
+        let ChildRef::Task(session_id) = &command.target else {
+            return Err(task_error(format!(
+                "command {command_id} belongs to a Project Session"
+            )));
+        };
         let session = store
-            .get_task_session(&command.session_id)
+            .get_task_session(session_id)
             .await
             .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
-            .ok_or_else(|| {
-                task_error(format!("Task Session {} disappeared", command.session_id))
-            })?;
+            .ok_or_else(|| task_error(format!("Task Session {session_id} disappeared")))?;
         Ok(TaskReceiptRead {
             receipt: control_result(&store, &session, &command, command.clone()).await?,
             timed_out,
@@ -1136,16 +1143,16 @@ pub fn task_receipt(
 
 async fn wait_for_task_receipt_condition(
     store: &SharedStore,
-    command_id: &TaskCommandId,
+    command_id: &ChildCommandId,
     until: ChildReceiptUntil,
     timeout: Duration,
-) -> OpsResult<(TaskCommand, bool)> {
+) -> OpsResult<(ChildCommand, bool)> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let command = read_command_receipt(store, command_id).await?;
         if matches!(
             command.state,
-            TaskCommandState::Failed | TaskCommandState::Superseded
+            ChildCommandState::Failed | ChildCommandState::Superseded
         ) {
             return Ok((command, false));
         }
@@ -1180,7 +1187,7 @@ pub fn task_decide(
     message: Option<String>,
 ) -> OpsResult<TaskControlResult> {
     let decision_id =
-        TaskDecisionId::parse(decision_id).map_err(|error| task_error(error.to_string()))?;
+        ChildDecisionId::parse(decision_id).map_err(|error| task_error(error.to_string()))?;
     let choice = choice.trim().to_string();
     if choice.is_empty() {
         return Err(task_error("decision choice cannot be empty"));
@@ -1216,7 +1223,7 @@ pub fn task_decide(
     }
     queue_command(
         issue,
-        TaskCommandKind::Decide {
+        ChildCommandKind::Decide {
             decision_id,
             choice,
             message,
@@ -1257,7 +1264,7 @@ pub fn task_request_decision(
                 session.id
             )));
         }
-        let decision_id = TaskDecisionId::new();
+        let decision_id = ChildDecisionId::new();
         store
             .append_task_event(
                 &session.id,
@@ -1361,7 +1368,7 @@ pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult>
     }
     queue_command(
         issue,
-        TaskCommandKind::Abandon {
+        ChildCommandKind::Abandon {
             reason: reason.to_string(),
         },
     )
@@ -1418,7 +1425,7 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 mod tests {
     use super::{command_source_for_wave, project_context, TaskControlResult};
     use crate::lfd::pm::{PmKr, PmProject};
-    use crate::task::TaskCommandSource;
+    use crate::task::ChildCommandSource;
 
     #[test]
     fn task_context_captures_project_definition_and_kr_state() {
@@ -1454,7 +1461,7 @@ mod tests {
         assert!(matches!(
             command_source_for_wave(Some(wave_id.clone()), &wave_id, "INF-123", "infrastructure")
                 .unwrap(),
-            TaskCommandSource::Wave(_)
+            ChildCommandSource::Wave(_)
         ));
         assert!(command_source_for_wave(
             Some(crate::lfd::id::LfdId::new()),
@@ -1465,7 +1472,7 @@ mod tests {
         .is_err());
         assert_eq!(
             command_source_for_wave(None, &wave_id, "INF-123", "infrastructure").unwrap(),
-            TaskCommandSource::Human
+            ChildCommandSource::Human
         );
     }
 
@@ -1476,8 +1483,8 @@ mod tests {
             session_id: "ts_example".to_string(),
             command_id: "cc_example".to_string(),
             directive_version: Some(2),
-            state: crate::task::TaskCommandState::Accepted,
-            effect: Some(crate::task::TaskCommandEffect::LiveSteer),
+            state: crate::task::ChildCommandState::Accepted,
+            effect: Some(crate::task::ChildCommandEffect::LiveSteer),
             incorporated: true,
             generation: Some(2),
             accepted_at: None,

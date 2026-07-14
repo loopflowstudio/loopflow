@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use crate::lfd::id::LfdId;
 use crate::task::{
-    ChildDirectiveId, DirectiveKind, LinearProjectRef, TaskCommandEffect, TaskCommandState,
-    TaskEventKind, TaskSessionId,
+    ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId, ChildDirectiveId,
+    DirectiveKind, LinearProjectRef, TaskEventKind, TaskSessionId,
 };
 
 pub mod runner;
@@ -73,8 +73,6 @@ pub enum ProjectDataError {
 }
 
 string_id!(ProjectSessionId, "ps_");
-pub type ProjectCommandId = crate::task::ChildCommandId;
-pub type ProjectDecisionId = crate::task::ChildDecisionId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -199,56 +197,6 @@ impl ProjectSession {
     }
 }
 
-pub type ProjectCommandKind = crate::task::ChildCommandKind;
-pub type ProjectCommandSource = crate::task::ChildCommandSource;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectCommand {
-    pub id: ProjectCommandId,
-    pub session_id: ProjectSessionId,
-    pub source: ProjectCommandSource,
-    pub kind: ProjectCommandKind,
-    pub state: TaskCommandState,
-    pub effect: Option<TaskCommandEffect>,
-    pub created_at: OffsetDateTime,
-    pub claimed_by_generation: Option<u32>,
-    pub accepted_at: Option<OffsetDateTime>,
-    pub error: Option<String>,
-}
-
-impl ProjectCommand {
-    pub fn new(
-        session_id: ProjectSessionId,
-        source: ProjectCommandSource,
-        kind: ProjectCommandKind,
-    ) -> Self {
-        let effect = match &kind {
-            ProjectCommandKind::FollowUp { .. }
-            | ProjectCommandKind::Resume { message: Some(_) } => Some(TaskCommandEffect::NextTurn),
-            ProjectCommandKind::Interrupt {
-                replacement: Some(_),
-            } => Some(TaskCommandEffect::Replacement),
-            ProjectCommandKind::Decide { .. } => Some(TaskCommandEffect::Decision),
-            ProjectCommandKind::Steer { .. }
-            | ProjectCommandKind::Interrupt { replacement: None }
-            | ProjectCommandKind::Resume { message: None }
-            | ProjectCommandKind::Abandon { .. } => None,
-        };
-        Self {
-            id: ProjectCommandId::new(),
-            session_id,
-            source,
-            kind,
-            state: TaskCommandState::Persisted,
-            effect,
-            created_at: OffsetDateTime::now_utc(),
-            claimed_by_generation: None,
-            accepted_at: None,
-            error: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProjectEventKind {
@@ -259,9 +207,9 @@ pub enum ProjectEventKind {
         reason: String,
     },
     CommandChanged {
-        command_id: ProjectCommandId,
-        state: TaskCommandState,
-        effect: Option<TaskCommandEffect>,
+        command_id: ChildCommandId,
+        state: ChildCommandState,
+        effect: Option<ChildCommandEffect>,
         error: Option<String>,
     },
     DirectiveChanged {
@@ -280,12 +228,12 @@ pub enum ProjectEventKind {
         event: Box<TaskEventKind>,
     },
     DecisionRequested {
-        decision_id: ProjectDecisionId,
+        decision_id: ChildDecisionId,
         prompt: String,
         options: Vec<String>,
     },
     DecisionResolved {
-        decision_id: ProjectDecisionId,
+        decision_id: ChildDecisionId,
         choice: String,
         message: Option<String>,
     },
@@ -369,15 +317,15 @@ pub struct ObservationOutboxRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectCommandId, ProjectEventKind, ProjectSessionId, ProjectSessionStatus};
-    use crate::task::TaskCommandState;
+    use super::{ChildCommandId, ProjectEventKind, ProjectSessionId, ProjectSessionStatus};
+    use crate::task::ChildCommandState;
 
     #[test]
     fn project_ids_are_prefixed_and_round_trip() {
         let session = ProjectSessionId::new();
-        let command = ProjectCommandId::new();
+        let command = ChildCommandId::new();
         assert_eq!(ProjectSessionId::parse(session.as_str()).unwrap(), session);
-        assert_eq!(ProjectCommandId::parse(command.as_str()).unwrap(), command);
+        assert_eq!(ChildCommandId::parse(command.as_str()).unwrap(), command);
     }
 
     #[test]
@@ -390,15 +338,15 @@ mod tests {
     #[test]
     fn wave_observes_project_control_outcomes_not_transport_chatter() {
         let event = |state| ProjectEventKind::CommandChanged {
-            command_id: ProjectCommandId::new(),
+            command_id: ChildCommandId::new(),
             state,
             effect: None,
             error: None,
         };
 
-        assert!(!event(TaskCommandState::Persisted).is_wave_observable());
-        assert!(!event(TaskCommandState::Claimed).is_wave_observable());
-        assert!(event(TaskCommandState::Accepted).is_wave_observable());
-        assert!(event(TaskCommandState::Failed).is_wave_observable());
+        assert!(!event(ChildCommandState::Persisted).is_wave_observable());
+        assert!(!event(ChildCommandState::Claimed).is_wave_observable());
+        assert!(event(ChildCommandState::Accepted).is_wave_observable());
+        assert!(event(ChildCommandState::Failed).is_wave_observable());
     }
 }

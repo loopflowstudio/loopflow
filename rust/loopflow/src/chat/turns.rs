@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn decision_activity_keeps_options_and_lineage() {
-        let decision_id = crate::task::TaskDecisionId::new();
+        let decision_id = crate::task::ChildDecisionId::new();
         let observation = TaskObservation {
             session_id: crate::task::TaskSessionId::new(),
             issue_identifier: "INF-123".to_string(),

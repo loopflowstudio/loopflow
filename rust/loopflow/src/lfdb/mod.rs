@@ -784,15 +784,14 @@ mod tests {
         DEFAULT_WAVE_FLOW,
     };
     use crate::project_session::{
-        ChildEventPayload, ChildSessionRef, ProjectCommand, ProjectCommandKind,
-        ProjectCommandSource, ProjectDecisionId, ProjectEventKind, ProjectProcess, ProjectSession,
+        ChildEventPayload, ChildSessionRef, ProjectEventKind, ProjectProcess, ProjectSession,
         ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
     };
     use crate::task::{
-        BoundaryResult, ChildDirective, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId,
-        LinearProjectRef, PmWritebackOperation, PmWritebackState, TaskCommand, TaskCommandEffect,
-        TaskCommandKind, TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind,
-        TaskSession, TaskSessionId, TaskSessionStatus,
+        BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource,
+        ChildCommandState, ChildDecisionId, ChildDirective, ChildRef, LinearIssueId,
+        LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation, PmWritebackState,
+        TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -940,7 +939,7 @@ mod tests {
         let task_initial = ChildDirective::initial(
             task_target.clone(),
             "Fix the parser before the docs".to_string(),
-            TaskCommandSource::Wave(wave.id().clone()),
+            ChildCommandSource::Wave(wave.id().clone()),
         );
         assert!(store
             .reserve_task_session_with_directive(&task, &task_initial, 2)
@@ -949,10 +948,10 @@ mod tests {
         assert_eq!(store.child_directives(&task_target).await.unwrap().len(), 1);
         let stale_task = task.clone();
 
-        let task_command = TaskCommand::new(
-            task.id.clone(),
-            TaskCommandSource::Wave(wave.id().clone()),
-            TaskCommandKind::Steer {
+        let task_command = ChildCommand::new(
+            ChildRef::Task(task.id.clone()),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Steer {
                 text: "Fix the parser before the docs or tests".to_string(),
             },
         );
@@ -964,7 +963,7 @@ mod tests {
             task_command.id.clone(),
         );
         store
-            .create_task_command_with_directive(&task_command, &task_replacement)
+            .create_child_command_with_directive(&task_command, &task_replacement)
             .await
             .unwrap();
         store
@@ -986,7 +985,7 @@ mod tests {
         let project_initial = ChildDirective::initial(
             project_target.clone(),
             "Pursue onboarding first".to_string(),
-            TaskCommandSource::Wave(wave.id().clone()),
+            ChildCommandSource::Wave(wave.id().clone()),
         );
         store
             .create_project_session_with_directive(&project, &project_initial)
@@ -994,10 +993,10 @@ mod tests {
             .unwrap();
         let stale_project = project.clone();
 
-        let command = ProjectCommand::new(
-            project.id.clone(),
-            ProjectCommandSource::Wave(wave.id().clone()),
-            ProjectCommandKind::Steer {
+        let command = ChildCommand::new(
+            ChildRef::Project(project.id.clone()),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Steer {
                 text: "Prove the parser path first".to_string(),
             },
         );
@@ -1009,7 +1008,7 @@ mod tests {
             command.id.clone(),
         );
         store
-            .create_project_command_with_directive(&command, &replacement)
+            .create_child_command_with_directive(&command, &replacement)
             .await
             .unwrap();
         let persisted = store
@@ -1067,35 +1066,31 @@ mod tests {
         let project = make_project_session(&wave);
         store.create_project_session(&project).await.unwrap();
 
-        let command = ProjectCommand::new(
-            project.id.clone(),
-            ProjectCommandSource::Wave(wave.id().clone()),
-            ProjectCommandKind::FollowUp {
+        let command = ChildCommand::new(
+            ChildRef::Project(project.id.clone()),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::FollowUp {
                 text: "audit the parser".to_string(),
             },
         );
-        store.create_project_command(&command).await.unwrap();
-        let claimed = store.claim_project_commands(&project.id, 1).await.unwrap();
-        assert_eq!(claimed.len(), 1);
-        store
-            .accept_project_command(&command.id, Some(TaskCommandEffect::NextTurn))
+        store.create_child_command(&command).await.unwrap();
+        let claimed = store
+            .claim_child_commands(&ChildRef::Project(project.id.clone()), 1)
             .await
             .unwrap();
-        assert_eq!(
-            store
-                .get_project_command(&command.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .state,
-            TaskCommandState::Accepted
-        );
-        assert!(store.get_task_command(&command.id).await.unwrap().is_none());
-        let decision = ProjectDecisionId::new();
-        let decision_command = ProjectCommand::new(
-            project.id.clone(),
-            ProjectCommandSource::Wave(wave.id().clone()),
-            ProjectCommandKind::Decide {
+        assert_eq!(claimed.len(), 1);
+        store
+            .accept_child_command(&command.id, Some(ChildCommandEffect::NextTurn))
+            .await
+            .unwrap();
+        let stored = store.get_child_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(stored.state, ChildCommandState::Accepted);
+        assert_eq!(stored.target, ChildRef::Project(project.id.clone()));
+        let decision = ChildDecisionId::new();
+        let decision_command = ChildCommand::new(
+            ChildRef::Project(project.id.clone()),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Decide {
                 decision_id: decision,
                 choice: "approve".to_string(),
                 message: None,
@@ -1103,14 +1098,14 @@ mod tests {
         );
         assert!(
             store
-                .ensure_project_decision_command(&decision_command)
+                .ensure_child_decision_command(&decision_command)
                 .await
                 .unwrap()
                 .1
         );
         assert!(
             !store
-                .ensure_project_decision_command(&decision_command)
+                .ensure_child_decision_command(&decision_command)
                 .await
                 .unwrap()
                 .1
@@ -1195,7 +1190,7 @@ mod tests {
         };
         store.create_task_session(&task).await.unwrap();
 
-        let task_decision_id = TaskDecisionId::new();
+        let task_decision_id = ChildDecisionId::new();
         store
             .sqlite
             .append_task_event(
@@ -1237,7 +1232,7 @@ mod tests {
             .await
             .unwrap());
 
-        let project_decision_id = ProjectDecisionId::new();
+        let project_decision_id = ChildDecisionId::new();
         store
             .append_project_event(
                 &project.id,
@@ -1277,7 +1272,7 @@ mod tests {
             .append_task_event(
                 &direct.id,
                 &TaskEventKind::DecisionRequested {
-                    decision_id: TaskDecisionId::new(),
+                    decision_id: ChildDecisionId::new(),
                     prompt: "Ship now?".to_string(),
                     options: vec!["ship".to_string(), "wait".to_string()],
                 },
@@ -1324,62 +1319,69 @@ mod tests {
             .unwrap();
         assert_eq!(loaded, session);
 
-        let command = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::Steer {
+        let command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
                 text: "rename the flag".to_string(),
             },
         );
-        store.create_task_command(&command).await.unwrap();
-        let first_claim = store.claim_task_commands(&session.id, 1).await.unwrap();
+        store.create_child_command(&command).await.unwrap();
+        let first_claim = store
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+            .await
+            .unwrap();
         assert_eq!(first_claim.len(), 1);
         assert_eq!(first_claim[0].id, command.id);
         assert_eq!(first_claim[0].kind, command.kind);
-        assert_eq!(first_claim[0].state, TaskCommandState::Claimed);
+        assert_eq!(first_claim[0].state, ChildCommandState::Claimed);
         assert_eq!(first_claim[0].claimed_by_generation, Some(1));
         assert_eq!(
-            store.claim_task_commands(&session.id, 2).await.unwrap()[0].claimed_by_generation,
+            store
+                .claim_child_commands(&ChildRef::Task(session.id.clone()), 2)
+                .await
+                .unwrap()[0]
+                .claimed_by_generation,
             Some(2)
         );
         store
-            .accept_task_command(&command.id, Some(TaskCommandEffect::LiveSteer))
+            .accept_child_command(&command.id, Some(ChildCommandEffect::LiveSteer))
             .await
             .unwrap();
-        let accepted = store.get_task_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(accepted.state, TaskCommandState::Accepted);
-        assert_eq!(accepted.effect, Some(TaskCommandEffect::LiveSteer));
+        let accepted = store.get_child_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(accepted.state, ChildCommandState::Accepted);
+        assert_eq!(accepted.effect, Some(ChildCommandEffect::LiveSteer));
         assert!(store
-            .claim_task_commands(&session.id, 3)
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 3)
             .await
             .unwrap()
             .is_empty());
 
-        let follow_up_a = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::FollowUp {
+        let follow_up_a = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
                 text: "A".to_string(),
             },
         );
-        let follow_up_b = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::FollowUp {
+        let follow_up_b = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
                 text: "B".to_string(),
             },
         );
-        store.create_task_command(&follow_up_a).await.unwrap();
-        store.create_task_command(&follow_up_b).await.unwrap();
-        let interrupt = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::Interrupt {
+        store.create_child_command(&follow_up_a).await.unwrap();
+        store.create_child_command(&follow_up_b).await.unwrap();
+        let interrupt = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Interrupt {
                 replacement: Some("C".to_string()),
             },
         );
         let superseded = store
-            .supersede_and_create_task_command(&interrupt)
+            .supersede_and_create_child_command(&interrupt)
             .await
             .unwrap();
         assert_eq!(
@@ -1388,16 +1390,16 @@ mod tests {
         );
         assert_eq!(
             store
-                .get_task_command(&follow_up_a.id)
+                .get_child_command(&follow_up_a.id)
                 .await
                 .unwrap()
                 .unwrap()
                 .state,
-            TaskCommandState::Superseded
+            ChildCommandState::Superseded
         );
         assert_eq!(
             store
-                .claim_task_commands(&session.id, 3)
+                .claim_child_commands(&ChildRef::Task(session.id.clone()), 3)
                 .await
                 .unwrap()
                 .into_iter()
@@ -1406,23 +1408,23 @@ mod tests {
             vec![interrupt.id.clone()]
         );
         store
-            .fail_task_command(
+            .fail_child_command(
                 &interrupt.id,
-                Some(TaskCommandEffect::Replacement),
+                Some(ChildCommandEffect::Replacement),
                 "provider control failed".to_string(),
             )
             .await
             .unwrap();
         let failed = store
-            .get_task_command(&interrupt.id)
+            .get_child_command(&interrupt.id)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(failed.state, TaskCommandState::Failed);
-        assert_eq!(failed.effect, Some(TaskCommandEffect::Replacement));
+        assert_eq!(failed.state, ChildCommandState::Failed);
+        assert_eq!(failed.effect, Some(ChildCommandEffect::Replacement));
         assert_eq!(failed.error.as_deref(), Some("provider control failed"));
         assert!(store
-            .claim_task_commands(&session.id, 4)
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 4)
             .await
             .unwrap()
             .is_empty());
@@ -1467,14 +1469,14 @@ mod tests {
         with_command.begin_generation("task-a".to_string());
         with_command.set_status(TaskSessionStatus::Running, "provider active");
         store.create_task_session(&with_command).await.unwrap();
-        let command = TaskCommand::new(
-            with_command.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::FollowUp {
+        let command = ChildCommand::new(
+            ChildRef::Task(with_command.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
                 text: "arrived at the boundary".to_string(),
             },
         );
-        store.create_task_command(&command).await.unwrap();
+        store.create_child_command(&command).await.unwrap();
 
         let claimed = store
             .claim_task_commands_or_stop(
@@ -1534,37 +1536,41 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let session = make_task_session(&wave);
         store.create_task_session(&session).await.unwrap();
-        let decision_id = TaskDecisionId::new();
-        let first = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::Decide {
+        let decision_id = ChildDecisionId::new();
+        let first = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Decide {
                 decision_id: decision_id.clone(),
                 choice: "revise".to_string(),
                 message: Some("cover the boundary".to_string()),
             },
         );
-        let duplicate = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::Decide {
+        let duplicate = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Decide {
                 decision_id,
                 choice: "approve".to_string(),
                 message: None,
             },
         );
 
-        let (stored, created) = store.ensure_task_decision_command(&first).await.unwrap();
+        let (stored, created) = store.ensure_child_decision_command(&first).await.unwrap();
         assert!(created);
         assert_eq!(stored.id, first.id);
         let (stored, created) = store
-            .ensure_task_decision_command(&duplicate)
+            .ensure_child_decision_command(&duplicate)
             .await
             .unwrap();
         assert!(!created);
         assert_eq!(stored.id, first.id);
         assert_eq!(
-            store.list_task_commands(&session.id).await.unwrap().len(),
+            store
+                .list_child_commands(&ChildRef::Task(session.id.clone()))
+                .await
+                .unwrap()
+                .len(),
             1
         );
     }

@@ -10,10 +10,10 @@ use anyhow::Result;
 
 use crate::harness::Harness;
 use crate::lfdb::SharedStore;
-use crate::project_session::{ProjectCommand, ProjectEventKind, ProjectSession};
+use crate::project_session::{ProjectEventKind, ProjectSession};
 use crate::task::{
-    ChildCommandId, ChildCommandKind, ChildDecisionId, TaskCommand, TaskCommandEffect,
-    TaskCommandState, TaskEventKind, TaskSession,
+    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
+    ChildDecisionId, TaskEventKind, TaskSession,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -28,16 +28,21 @@ impl ChildTarget<'_> {
         store: &SharedStore,
         command_id: &ChildCommandId,
     ) -> Result<bool> {
-        let claimed = match self {
-            Self::Project(_) => store
-                .get_project_command(command_id)
-                .await?
-                .is_some_and(|command| command.state == TaskCommandState::Claimed),
-            Self::Task(_) => store
-                .get_task_command(command_id)
-                .await?
-                .is_some_and(|command| command.state == TaskCommandState::Claimed),
-        };
+        let claimed = store
+            .get_child_command(command_id)
+            .await?
+            .is_some_and(|command| {
+                let targets_match = match (self, &command.target) {
+                    (Self::Project(session), crate::task::ChildRef::Project(session_id)) => {
+                        &session.id == session_id
+                    }
+                    (Self::Task(session), crate::task::ChildRef::Task(session_id)) => {
+                        &session.id == session_id
+                    }
+                    _ => false,
+                };
+                targets_match && command.state == ChildCommandState::Claimed
+            });
         Ok(claimed)
     }
 
@@ -45,9 +50,9 @@ impl ChildTarget<'_> {
         self,
         store: &SharedStore,
         command_id: ChildCommandId,
-        effect: Option<TaskCommandEffect>,
+        effect: Option<ChildCommandEffect>,
     ) -> Result<()> {
-        self.record_command_changed(store, command_id, TaskCommandState::Claimed, effect, None)
+        self.record_command_changed(store, command_id, ChildCommandState::Claimed, effect, None)
             .await
     }
 
@@ -55,13 +60,10 @@ impl ChildTarget<'_> {
         self,
         store: &SharedStore,
         command_id: ChildCommandId,
-        effect: Option<TaskCommandEffect>,
+        effect: Option<ChildCommandEffect>,
     ) -> Result<()> {
-        match self {
-            Self::Project(_) => store.accept_project_command(&command_id, effect).await?,
-            Self::Task(_) => store.accept_task_command(&command_id, effect).await?,
-        }
-        self.record_command_changed(store, command_id, TaskCommandState::Accepted, effect, None)
+        store.accept_child_command(&command_id, effect).await?;
+        self.record_command_changed(store, command_id, ChildCommandState::Accepted, effect, None)
             .await
     }
 
@@ -69,26 +71,17 @@ impl ChildTarget<'_> {
         self,
         store: &SharedStore,
         command_id: ChildCommandId,
-        effect: Option<TaskCommandEffect>,
+        effect: Option<ChildCommandEffect>,
         error: &str,
     ) -> Result<()> {
         let error = crate::lfd::redaction::sanitize_operator_message(error);
-        match self {
-            Self::Project(_) => {
-                store
-                    .fail_project_command(&command_id, effect, error.clone())
-                    .await?
-            }
-            Self::Task(_) => {
-                store
-                    .fail_task_command(&command_id, effect, error.clone())
-                    .await?
-            }
-        }
+        store
+            .fail_child_command(&command_id, effect, error.clone())
+            .await?;
         self.record_command_changed(
             store,
             command_id,
-            TaskCommandState::Failed,
+            ChildCommandState::Failed,
             effect,
             Some(error),
         )
@@ -99,8 +92,8 @@ impl ChildTarget<'_> {
         self,
         store: &SharedStore,
         command_id: ChildCommandId,
-        state: TaskCommandState,
-        effect: Option<TaskCommandEffect>,
+        state: ChildCommandState,
+        effect: Option<ChildCommandEffect>,
         error: Option<String>,
     ) -> Result<()> {
         match self {
@@ -170,33 +163,6 @@ impl ChildTarget<'_> {
 }
 
 #[derive(Debug)]
-pub(crate) struct ChildCommand {
-    id: ChildCommandId,
-    kind: ChildCommandKind,
-    effect: Option<TaskCommandEffect>,
-}
-
-impl From<TaskCommand> for ChildCommand {
-    fn from(command: TaskCommand) -> Self {
-        Self {
-            id: command.id,
-            kind: command.kind,
-            effect: command.effect,
-        }
-    }
-}
-
-impl From<ProjectCommand> for ChildCommand {
-    fn from(command: ProjectCommand) -> Self {
-        Self {
-            id: command.id,
-            kind: command.kind,
-            effect: command.effect,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub(crate) struct DecisionResolution {
     pub decision_id: ChildDecisionId,
     pub choice: String,
@@ -207,7 +173,7 @@ pub(crate) struct DecisionResolution {
 pub(crate) struct PendingInput {
     pub command_id: Option<ChildCommandId>,
     pub text: String,
-    pub effect: TaskCommandEffect,
+    pub effect: ChildCommandEffect,
     pub decision: Option<DecisionResolution>,
 }
 
@@ -216,7 +182,7 @@ impl PendingInput {
         Self {
             command_id: None,
             text,
-            effect: TaskCommandEffect::NextTurn,
+            effect: ChildCommandEffect::NextTurn,
             decision: None,
         }
     }
@@ -252,19 +218,15 @@ pub(crate) async fn input_is_current(
     }
 }
 
-pub(crate) async fn absorb_commands<C>(
+pub(crate) async fn absorb_commands(
     store: &SharedStore,
     target: ChildTarget<'_>,
-    commands: impl IntoIterator<Item = C>,
+    commands: impl IntoIterator<Item = ChildCommand>,
     harness: &mut dyn Harness,
     turn_active: bool,
     pending: &mut VecDeque<PendingInput>,
-) -> Result<Option<CommandStop>>
-where
-    C: Into<ChildCommand>,
-{
+) -> Result<Option<CommandStop>> {
     for command in commands {
-        let command = command.into();
         if !target.command_is_claimed(store, &command.id).await? {
             continue;
         }
@@ -275,7 +237,7 @@ where
             ChildCommandKind::FollowUp { text } => pending.push_back(PendingInput {
                 command_id: Some(command.id),
                 text,
-                effect: TaskCommandEffect::NextTurn,
+                effect: ChildCommandEffect::NextTurn,
                 decision: None,
             }),
             ChildCommandKind::Steer { text }
@@ -288,7 +250,7 @@ where
                     PendingInput {
                         command_id: Some(command.id),
                         text,
-                        effect: TaskCommandEffect::LiveSteer,
+                        effect: ChildCommandEffect::LiveSteer,
                         decision: None,
                     },
                 )
@@ -301,13 +263,13 @@ where
                     harness,
                     turn_active,
                     command.id.clone(),
-                    Some(TaskCommandEffect::Replacement),
+                    Some(ChildCommandEffect::Replacement),
                 )
                 .await?;
                 pending.push_back(PendingInput {
                     command_id: Some(command.id),
                     text,
-                    effect: TaskCommandEffect::Replacement,
+                    effect: ChildCommandEffect::Replacement,
                     decision: None,
                 });
             }
@@ -319,14 +281,16 @@ where
                     harness,
                     turn_active,
                     command.id.clone(),
-                    replacement.as_ref().map(|_| TaskCommandEffect::Replacement),
+                    replacement
+                        .as_ref()
+                        .map(|_| ChildCommandEffect::Replacement),
                 )
                 .await?;
                 if let Some(text) = replacement {
                     pending.push_back(PendingInput {
                         command_id: Some(command.id),
                         text,
-                        effect: TaskCommandEffect::Replacement,
+                        effect: ChildCommandEffect::Replacement,
                         decision: None,
                     });
                 } else {
@@ -339,7 +303,7 @@ where
                     pending.push_back(PendingInput {
                         command_id: Some(command.id),
                         text,
-                        effect: TaskCommandEffect::NextTurn,
+                        effect: ChildCommandEffect::NextTurn,
                         decision: None,
                     });
                 } else {
@@ -359,7 +323,7 @@ where
                 let input = PendingInput {
                     command_id: Some(command.id.clone()),
                     text: decision_prompt(&resolution),
-                    effect: TaskCommandEffect::Decision,
+                    effect: ChildCommandEffect::Decision,
                     decision: Some(resolution),
                 };
                 if turn_active && harness.capabilities().supports_steer {
@@ -371,7 +335,7 @@ where
                         harness,
                         turn_active,
                         command.id,
-                        Some(TaskCommandEffect::Decision),
+                        Some(ChildCommandEffect::Decision),
                     )
                     .await?;
                     pending.push_back(input);
@@ -417,7 +381,7 @@ async fn interrupt_harness(
     harness: &mut dyn Harness,
     turn_active: bool,
     command_id: ChildCommandId,
-    effect: Option<TaskCommandEffect>,
+    effect: Option<ChildCommandEffect>,
 ) -> Result<()> {
     if !turn_active {
         return Ok(());

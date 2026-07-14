@@ -14,12 +14,12 @@ use crate::lfdb::{open_existing_store, SharedStore, Store};
 use crate::ops::task::ChildReceiptUntil;
 use crate::ops::{OpsError, OpsResult};
 use crate::project_session::{
-    ProjectCommand, ProjectCommandId, ProjectCommandKind, ProjectCommandSource, ProjectDecisionId,
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
 use crate::task::{
-    ChildDirective, ChildRef, LinearProjectId, LinearProjectRef, TaskCommandEffect,
-    TaskCommandState,
+    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
+    ChildCommandState, ChildDecisionId, ChildDirective, ChildRef, LinearProjectId,
+    LinearProjectRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -53,8 +53,8 @@ pub struct ProjectControlResult {
     pub session_id: String,
     pub command_id: String,
     pub directive_version: Option<u32>,
-    pub state: TaskCommandState,
-    pub effect: Option<TaskCommandEffect>,
+    pub state: ChildCommandState,
+    pub effect: Option<ChildCommandEffect>,
     pub incorporated: bool,
     pub generation: Option<u32>,
     pub accepted_at: Option<time::OffsetDateTime>,
@@ -517,7 +517,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
     })
 }
 
-fn project_command_source(session: &ProjectSession) -> OpsResult<ProjectCommandSource> {
+fn project_command_source(session: &ProjectSession) -> OpsResult<ChildCommandSource> {
     match std::env::var(crate::lf::session::WAVE_ID_ENV) {
         Ok(value) => {
             let wave_id = LfdId::parse(&value)
@@ -528,19 +528,16 @@ fn project_command_source(session: &ProjectSession) -> OpsResult<ProjectCommandS
                     session.project.slug, session.wave
                 )));
             }
-            Ok(ProjectCommandSource::Wave(wave_id))
+            Ok(ChildCommandSource::Wave(wave_id))
         }
-        Err(std::env::VarError::NotPresent) => Ok(ProjectCommandSource::Human),
+        Err(std::env::VarError::NotPresent) => Ok(ChildCommandSource::Human),
         Err(std::env::VarError::NotUnicode(_)) => {
             Err(project_error("ambient Wave id is not valid UTF-8"))
         }
     }
 }
 
-fn queue_project_command(
-    project: &str,
-    kind: ProjectCommandKind,
-) -> OpsResult<ProjectControlResult> {
+fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
         let mut session = store
@@ -556,11 +553,14 @@ fn queue_project_command(
                 session.status.as_str()
             )));
         }
-        let command =
-            ProjectCommand::new(session.id.clone(), project_command_source(&session)?, kind);
+        let command = ChildCommand::new(
+            ChildRef::Project(session.id.clone()),
+            project_command_source(&session)?,
+            kind,
+        );
         let replacement = match &command.kind {
-            ProjectCommandKind::Steer { text } => Some(text.clone()),
-            ProjectCommandKind::Interrupt {
+            ChildCommandKind::Steer { text } => Some(text.clone()),
+            ChildCommandKind::Interrupt {
                 replacement: Some(text),
             } => Some(text.clone()),
             _ => None,
@@ -574,27 +574,27 @@ fn queue_project_command(
                 command.id.clone(),
             );
             let superseded = store
-                .create_project_command_with_directive(&command, &directive)
+                .create_child_command_with_directive(&command, &directive)
                 .await
                 .map_err(|error| project_error(error.to_string()))?;
             let event = (directive.id, directive.version, directive.kind);
             session.current_directive_version = directive.version;
             (command, true, superseded, Some(event))
-        } else if matches!(command.kind, ProjectCommandKind::Decide { .. }) {
+        } else if matches!(command.kind, ChildCommandKind::Decide { .. }) {
             let (command, created) = store
-                .ensure_project_decision_command(&command)
+                .ensure_child_decision_command(&command)
                 .await
                 .map_err(|error| project_error(error.to_string()))?;
             (command, created, Vec::new(), None)
-        } else if matches!(command.kind, ProjectCommandKind::Interrupt { .. }) {
+        } else if matches!(command.kind, ChildCommandKind::Interrupt { .. }) {
             let superseded = store
-                .supersede_and_create_project_command(&command)
+                .supersede_and_create_child_command(&command)
                 .await
                 .map_err(|error| project_error(error.to_string()))?;
             (command, true, superseded, None)
         } else {
             store
-                .create_project_command(&command)
+                .create_child_command(&command)
                 .await
                 .map_err(|error| project_error(error.to_string()))?;
             (command, true, Vec::new(), None)
@@ -613,7 +613,7 @@ fn queue_project_command(
                 &store,
                 &session,
                 command_id,
-                TaskCommandState::Superseded,
+                ChildCommandState::Superseded,
                 None,
             )
             .await?;
@@ -635,7 +635,7 @@ fn queue_project_command(
             &store,
             &session,
             command.id.clone(),
-            TaskCommandState::Persisted,
+            ChildCommandState::Persisted,
             command.effect,
         )
         .await?;
@@ -652,9 +652,9 @@ fn queue_project_command(
 async fn append_project_command_event(
     store: &SharedStore,
     session: &ProjectSession,
-    command_id: ProjectCommandId,
-    state: TaskCommandState,
-    effect: Option<TaskCommandEffect>,
+    command_id: ChildCommandId,
+    state: ChildCommandState,
+    effect: Option<ChildCommandEffect>,
 ) -> OpsResult<()> {
     store
         .append_project_event(
@@ -674,8 +674,8 @@ async fn append_project_command_event(
 async fn project_control_result(
     store: &SharedStore,
     session: &ProjectSession,
-    command: &ProjectCommand,
-    receipt: ProjectCommand,
+    command: &ChildCommand,
+    receipt: ChildCommand,
 ) -> OpsResult<ProjectControlResult> {
     let directive = store
         .child_directive_for_command(&command.id)
@@ -700,13 +700,13 @@ async fn project_control_result(
 
 async fn wait_for_project_receipt(
     store: &SharedStore,
-    command_id: &ProjectCommandId,
+    command_id: &ChildCommandId,
     timeout: Duration,
-) -> OpsResult<(ProjectCommand, bool)> {
+) -> OpsResult<(ChildCommand, bool)> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let command = store
-            .get_project_command(command_id)
+            .get_child_command(command_id)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("project command {command_id} disappeared")))?;
@@ -721,22 +721,22 @@ async fn wait_for_project_receipt(
 }
 
 pub fn project_follow_up(project: &str, message: String) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ProjectCommandKind::FollowUp { text: message })
+    queue_project_command(project, ChildCommandKind::FollowUp { text: message })
 }
 
 pub fn project_steer(project: &str, message: String) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ProjectCommandKind::Steer { text: message })
+    queue_project_command(project, ChildCommandKind::Steer { text: message })
 }
 
 pub fn project_interrupt(
     project: &str,
     replacement: Option<String>,
 ) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ProjectCommandKind::Interrupt { replacement })
+    queue_project_command(project, ChildCommandKind::Interrupt { replacement })
 }
 
 pub fn project_resume(project: &str, message: Option<String>) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ProjectCommandKind::Resume { message })
+    queue_project_command(project, ChildCommandKind::Resume { message })
 }
 
 pub fn project_decide(
@@ -746,7 +746,7 @@ pub fn project_decide(
     message: Option<String>,
 ) -> OpsResult<ProjectControlResult> {
     let decision_id =
-        ProjectDecisionId::parse(decision_id).map_err(|error| project_error(error.to_string()))?;
+        ChildDecisionId::parse(decision_id).map_err(|error| project_error(error.to_string()))?;
     let choice = choice.trim().to_string();
     if choice.is_empty() {
         return Err(project_error("decision choice cannot be empty"));
@@ -781,7 +781,7 @@ pub fn project_decide(
     }
     queue_project_command(
         project,
-        ProjectCommandKind::Decide {
+        ChildCommandKind::Decide {
             decision_id,
             choice,
             message,
@@ -823,7 +823,7 @@ pub fn project_request_decision(
                 session.id
             )));
         }
-        let decision_id = ProjectDecisionId::new();
+        let decision_id = ChildDecisionId::new();
         store
             .append_project_event(
                 &session.id,
@@ -934,7 +934,7 @@ pub fn project_acknowledge(
 }
 
 pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ProjectCommandKind::Abandon { reason })
+    queue_project_command(project, ChildCommandKind::Abandon { reason })
 }
 
 pub fn project_receipt(
@@ -943,21 +943,26 @@ pub fn project_receipt(
     timeout: Duration,
 ) -> OpsResult<ProjectReceiptRead> {
     let command_id =
-        ProjectCommandId::parse(command_id).map_err(|error| project_error(error.to_string()))?;
+        ChildCommandId::parse(command_id).map_err(|error| project_error(error.to_string()))?;
     block_on_project(async move {
         let store = project_store().await?;
         let (command, timed_out) = if let Some(until) = until {
             wait_for_project_receipt_condition(&store, &command_id, until, timeout).await?
         } else {
             let command = store
-                .get_project_command(&command_id)
+                .get_child_command(&command_id)
                 .await
                 .map_err(|error| project_error(error.to_string()))?
                 .ok_or_else(|| project_error(format!("project command {command_id} not found")))?;
             (command, false)
         };
+        let ChildRef::Project(session_id) = &command.target else {
+            return Err(project_error(format!(
+                "command {command_id} belongs to a Task Session"
+            )));
+        };
         let session = store
-            .get_project_session(&command.session_id)
+            .get_project_session(session_id)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project Session disappeared"))?;
@@ -970,20 +975,20 @@ pub fn project_receipt(
 
 async fn wait_for_project_receipt_condition(
     store: &SharedStore,
-    command_id: &ProjectCommandId,
+    command_id: &ChildCommandId,
     until: ChildReceiptUntil,
     timeout: Duration,
-) -> OpsResult<(ProjectCommand, bool)> {
+) -> OpsResult<(ChildCommand, bool)> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let command = store
-            .get_project_command(command_id)
+            .get_child_command(command_id)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("project command {command_id} disappeared")))?;
         if matches!(
             command.state,
-            TaskCommandState::Failed | TaskCommandState::Superseded
+            ChildCommandState::Failed | ChildCommandState::Superseded
         ) {
             return Ok((command, false));
         }

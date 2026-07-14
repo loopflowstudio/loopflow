@@ -16,12 +16,13 @@ use crate::child_control::{
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::project_session::{
-    ChildEventPayload, ProjectCommand, ProjectCommandId, ProjectCommandKind, ProjectEventKind,
-    ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
+    ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
+    SessionSupervisor,
 };
 use crate::task::{
-    unincorporated_directive_version, ChildDirective, ChildRef, TaskCommandEffect,
-    TaskCommandState, TaskSessionStatus,
+    unincorporated_directive_version, ChildCommand, ChildCommandEffect, ChildCommandId,
+    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildRef,
+    TaskSessionStatus,
 };
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
@@ -428,7 +429,7 @@ async fn start_project_flow_turn(
         PendingInput {
             command_id: None,
             text: prepared.input,
-            effect: TaskCommandEffect::NextTurn,
+            effect: ChildCommandEffect::NextTurn,
             decision: None,
         },
     )
@@ -485,22 +486,22 @@ async fn handle_attachment(
     }
     let kind = if let Some(message) = line.strip_prefix("/interrupt") {
         let message = message.trim();
-        ProjectCommandKind::Interrupt {
+        ChildCommandKind::Interrupt {
             replacement: (!message.is_empty()).then(|| message.to_string()),
         }
     } else {
-        ProjectCommandKind::Steer {
+        ChildCommandKind::Steer {
             text: line.to_string(),
         }
     };
-    let command = ProjectCommand::new(
-        session.id.clone(),
-        crate::project_session::ProjectCommandSource::Attachment,
+    let command = ChildCommand::new(
+        ChildRef::Project(session.id.clone()),
+        ChildCommandSource::Attachment,
         kind,
     );
     let replacement = match &command.kind {
-        ProjectCommandKind::Steer { text } => Some(text.clone()),
-        ProjectCommandKind::Interrupt {
+        ChildCommandKind::Steer { text } => Some(text.clone()),
+        ChildCommandKind::Interrupt {
             replacement: Some(text),
         } => Some(text.clone()),
         _ => None,
@@ -518,19 +519,19 @@ async fn handle_attachment(
             command.id.clone(),
         );
         let superseded = store
-            .create_project_command_with_directive(&command, &directive)
+            .create_child_command_with_directive(&command, &directive)
             .await?;
         (
             superseded,
             Some((directive.id, directive.version, directive.kind)),
         )
-    } else if matches!(&command.kind, ProjectCommandKind::Interrupt { .. }) {
+    } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
         (
-            store.supersede_and_create_project_command(&command).await?,
+            store.supersede_and_create_child_command(&command).await?,
             None,
         )
     } else {
-        store.create_project_command(&command).await?;
+        store.create_child_command(&command).await?;
         (Vec::new(), None)
     };
     for command_id in superseded {
@@ -539,7 +540,7 @@ async fn handle_attachment(
                 &session.id,
                 &ProjectEventKind::CommandChanged {
                     command_id,
-                    state: TaskCommandState::Superseded,
+                    state: ChildCommandState::Superseded,
                     effect: None,
                     error: None,
                 },
@@ -563,7 +564,7 @@ async fn handle_attachment(
             &session.id,
             &ProjectEventKind::CommandChanged {
                 command_id: command.id.clone(),
-                state: TaskCommandState::Persisted,
+                state: ChildCommandState::Persisted,
                 effect: command.effect,
                 error: None,
             },
@@ -577,18 +578,18 @@ async fn claim_commands(
     store: &SharedStore,
     session: &ProjectSession,
     generation: u32,
-    seen: &mut HashSet<ProjectCommandId>,
-) -> Result<Vec<ProjectCommand>> {
+    seen: &mut HashSet<ChildCommandId>,
+) -> Result<Vec<ChildCommand>> {
     let commands = store
-        .claim_project_commands(&session.id, generation)
+        .claim_child_commands(&ChildRef::Project(session.id.clone()), generation)
         .await?;
     Ok(filter_new_commands(commands, seen))
 }
 
 fn filter_new_commands(
-    commands: Vec<ProjectCommand>,
-    seen: &mut HashSet<ProjectCommandId>,
-) -> Vec<ProjectCommand> {
+    commands: Vec<ChildCommand>,
+    seen: &mut HashSet<ChildCommandId>,
+) -> Vec<ChildCommand> {
     commands
         .into_iter()
         .filter(|command| seen.insert(command.id.clone()))
@@ -718,7 +719,7 @@ async fn consume_task_observations(
 async fn absorb_commands(
     store: &SharedStore,
     session: &ProjectSession,
-    commands: Vec<ProjectCommand>,
+    commands: Vec<ChildCommand>,
     harness: &mut dyn Harness,
     turn_active: bool,
     pending: &mut VecDeque<PendingInput>,
@@ -902,11 +903,11 @@ mod tests {
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::project_session::{
-        ProjectCommand, ProjectCommandKind, ProjectCommandSource, ProjectDecisionId,
         ProjectProcess, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
     use crate::task::{
-        ChildRef, LinearProjectId, LinearProjectRef, TaskCommandEffect, TaskCommandState,
+        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
+        ChildDecisionId, ChildRef, LinearProjectId, LinearProjectRef,
     };
 
     struct ScriptedHarness {
@@ -1017,20 +1018,23 @@ mod tests {
     #[tokio::test]
     async fn project_provider_control_reports_honest_steer_effects() {
         for (provider, supports_steer, expected_effect) in [
-            ("codex", true, TaskCommandEffect::LiveSteer),
-            ("claude", false, TaskCommandEffect::Replacement),
-            ("opencode", false, TaskCommandEffect::Replacement),
+            ("codex", true, ChildCommandEffect::LiveSteer),
+            ("claude", false, ChildCommandEffect::Replacement),
+            ("opencode", false, ChildCommandEffect::Replacement),
         ] {
             let (store, session) = session(provider).await;
-            let command = ProjectCommand::new(
-                session.id.clone(),
-                ProjectCommandSource::Human,
-                ProjectCommandKind::Steer {
+            let command = ChildCommand::new(
+                ChildRef::Project(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::Steer {
                     text: "change direction".to_string(),
                 },
             );
-            store.create_project_command(&command).await.unwrap();
-            let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
+            store.create_child_command(&command).await.unwrap();
+            let commands = store
+                .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
+                .await
+                .unwrap();
             let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = std::collections::VecDeque::new();
 
@@ -1043,12 +1047,8 @@ mod tests {
                     .unwrap();
             }
 
-            let receipt = store
-                .get_project_command(&command.id)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(receipt.state, TaskCommandState::Accepted, "{provider}");
+            let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
+            assert_eq!(receipt.state, ChildCommandState::Accepted, "{provider}");
             assert_eq!(receipt.effect, Some(expected_effect), "{provider}");
             assert_eq!(harness.sent, vec!["change direction"], "{provider}");
             assert_eq!(
@@ -1062,14 +1062,14 @@ mod tests {
     #[tokio::test]
     async fn project_runner_delivers_each_command_once_and_skips_superseded_input() {
         let (store, session) = session("codex").await;
-        let first = ProjectCommand::new(
-            session.id.clone(),
-            ProjectCommandSource::Human,
-            ProjectCommandKind::FollowUp {
+        let first = ChildCommand::new(
+            ChildRef::Project(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
                 text: "old context".to_string(),
             },
         );
-        store.create_project_command(&first).await.unwrap();
+        store.create_child_command(&first).await.unwrap();
         let mut seen = std::collections::HashSet::new();
         let mut pending = std::collections::VecDeque::new();
         let mut harness = ScriptedHarness::new(true);
@@ -1086,15 +1086,15 @@ mod tests {
             .is_empty());
         assert_eq!(pending.len(), 1);
 
-        let replacement = ProjectCommand::new(
-            session.id.clone(),
-            ProjectCommandSource::Human,
-            ProjectCommandKind::Steer {
+        let replacement = ChildCommand::new(
+            ChildRef::Project(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
                 text: "new direction".to_string(),
             },
         );
         store
-            .supersede_and_create_project_command(&replacement)
+            .supersede_and_create_child_command(&replacement)
             .await
             .unwrap();
         let commands = claim_commands(&store, &session, 1, &mut seen)
@@ -1140,20 +1140,23 @@ mod tests {
         assert_eq!(current.current_directive_version, 1);
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].text, "pursue the parser first");
-        assert_eq!(directives[0].source, ProjectCommandSource::Attachment);
+        assert_eq!(directives[0].source, ChildCommandSource::Attachment);
         assert!(directives[0].command_id.is_some());
     }
 
     #[tokio::test]
     async fn bare_project_interrupt_stops_without_abandoning_history() {
         let (store, session) = session("codex").await;
-        let command = ProjectCommand::new(
-            session.id.clone(),
-            ProjectCommandSource::Human,
-            ProjectCommandKind::Interrupt { replacement: None },
+        let command = ChildCommand::new(
+            ChildRef::Project(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Interrupt { replacement: None },
         );
-        store.create_project_command(&command).await.unwrap();
-        let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
+        store.create_child_command(&command).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
+            .await
+            .unwrap();
         let mut harness = ScriptedHarness::new(true);
         let stop = absorb_commands(
             &store,
@@ -1170,12 +1173,12 @@ mod tests {
         assert_eq!(harness.interrupts, 1);
         assert_eq!(
             store
-                .get_project_command(&command.id)
+                .get_child_command(&command.id)
                 .await
                 .unwrap()
                 .unwrap()
                 .state,
-            TaskCommandState::Accepted
+            ChildCommandState::Accepted
         );
     }
 
@@ -1184,18 +1187,21 @@ mod tests {
         for (provider, supports_steer) in [("codex", true), ("claude", false), ("opencode", false)]
         {
             let (store, session) = session(provider).await;
-            let decision_id = ProjectDecisionId::new();
-            let command = ProjectCommand::new(
-                session.id.clone(),
-                ProjectCommandSource::Human,
-                ProjectCommandKind::Decide {
+            let decision_id = ChildDecisionId::new();
+            let command = ChildCommand::new(
+                ChildRef::Project(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::Decide {
                     decision_id: decision_id.clone(),
                     choice: "approve".to_string(),
                     message: None,
                 },
             );
-            store.create_project_command(&command).await.unwrap();
-            let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
+            store.create_child_command(&command).await.unwrap();
+            let commands = store
+                .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
+                .await
+                .unwrap();
             let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = std::collections::VecDeque::new();
 
@@ -1213,13 +1219,9 @@ mod tests {
                 harness.sent,
                 vec![format!("Decision {decision_id} resolved: approve")]
             );
-            let receipt = store
-                .get_project_command(&command.id)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(receipt.state, TaskCommandState::Accepted);
-            assert_eq!(receipt.effect, Some(TaskCommandEffect::Decision));
+            let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
+            assert_eq!(receipt.state, ChildCommandState::Accepted);
+            assert_eq!(receipt.effect, Some(ChildCommandEffect::Decision));
             assert!(store
                 .project_events_after(&session.id, 0)
                 .await
@@ -1239,23 +1241,26 @@ mod tests {
     async fn project_follow_up_is_fifo_and_never_interrupts() {
         for provider in ["codex", "claude", "opencode"] {
             let (store, session) = session(provider).await;
-            let first = ProjectCommand::new(
-                session.id.clone(),
-                ProjectCommandSource::Human,
-                ProjectCommandKind::FollowUp {
+            let first = ChildCommand::new(
+                ChildRef::Project(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::FollowUp {
                     text: "first".to_string(),
                 },
             );
-            let second = ProjectCommand::new(
-                session.id.clone(),
-                ProjectCommandSource::Human,
-                ProjectCommandKind::FollowUp {
+            let second = ChildCommand::new(
+                ChildRef::Project(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::FollowUp {
                     text: "second".to_string(),
                 },
             );
-            store.create_project_command(&first).await.unwrap();
-            store.create_project_command(&second).await.unwrap();
-            let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
+            store.create_child_command(&first).await.unwrap();
+            store.create_child_command(&second).await.unwrap();
+            let commands = store
+                .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
+                .await
+                .unwrap();
             let mut harness = ScriptedHarness::new(provider == "codex");
             let mut pending = std::collections::VecDeque::new();
 
@@ -1274,12 +1279,12 @@ mod tests {
             }
             assert_eq!(
                 store
-                    .get_project_command(&first.id)
+                    .get_child_command(&first.id)
                     .await
                     .unwrap()
                     .unwrap()
                     .effect,
-                Some(TaskCommandEffect::NextTurn),
+                Some(ChildCommandEffect::NextTurn),
                 "{provider}"
             );
         }
@@ -1288,15 +1293,18 @@ mod tests {
     #[tokio::test]
     async fn project_provider_control_failures_settle_the_receipt() {
         let (store, session) = session("opencode").await;
-        let command = ProjectCommand::new(
-            session.id.clone(),
-            ProjectCommandSource::Human,
-            ProjectCommandKind::Steer {
+        let command = ChildCommand::new(
+            ChildRef::Project(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
                 text: "change direction".to_string(),
             },
         );
-        store.create_project_command(&command).await.unwrap();
-        let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
+        store.create_child_command(&command).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
+            .await
+            .unwrap();
         let mut harness = ScriptedHarness::new(false);
         harness.fail_interrupt = true;
 
@@ -1314,13 +1322,9 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("scripted interrupt failed"));
-        let receipt = store
-            .get_project_command(&command.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(receipt.state, TaskCommandState::Failed);
-        assert_eq!(receipt.effect, Some(TaskCommandEffect::Replacement));
+        let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(receipt.state, ChildCommandState::Failed);
+        assert_eq!(receipt.effect, Some(ChildCommandEffect::Replacement));
         assert!(receipt
             .error
             .as_deref()

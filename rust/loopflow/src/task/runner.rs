@@ -16,8 +16,8 @@ use crate::child_control::{
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::task::{
-    unincorporated_directive_version, BoundaryResult, ChildDirective, ChildRef, TaskCommand,
-    TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandState, TaskEventKind,
+    unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
+    ChildCommandId, ChildCommandKind, ChildCommandState, ChildDirective, ChildRef, TaskEventKind,
     TaskSession, TaskSessionId, TaskSessionStatus,
 };
 use crate::wave::playhead::{
@@ -360,7 +360,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 }
                             };
                             let resume_requested = boundary_commands.iter().any(|command| {
-                                matches!(&command.kind, TaskCommandKind::Resume { .. })
+                                matches!(&command.kind, ChildCommandKind::Resume { .. })
                             });
                             if let Some(stop) = absorb_commands(
                                 &store,
@@ -547,22 +547,22 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
     }
     let kind = if let Some(message) = line.strip_prefix("/interrupt") {
         let message = message.trim();
-        TaskCommandKind::Interrupt {
+        ChildCommandKind::Interrupt {
             replacement: (!message.is_empty()).then(|| message.to_string()),
         }
     } else {
-        TaskCommandKind::Steer {
+        ChildCommandKind::Steer {
             text: line.to_string(),
         }
     };
-    let command = TaskCommand::new(
-        session.id.clone(),
-        crate::task::TaskCommandSource::Attachment,
+    let command = ChildCommand::new(
+        ChildRef::Task(session.id.clone()),
+        crate::task::ChildCommandSource::Attachment,
         kind,
     );
     let replacement = match &command.kind {
-        TaskCommandKind::Steer { text } => Some(text.clone()),
-        TaskCommandKind::Interrupt {
+        ChildCommandKind::Steer { text } => Some(text.clone()),
+        ChildCommandKind::Interrupt {
             replacement: Some(text),
         } => Some(text.clone()),
         _ => None,
@@ -580,19 +580,19 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
             command.id.clone(),
         );
         let superseded = store
-            .create_task_command_with_directive(&command, &directive)
+            .create_child_command_with_directive(&command, &directive)
             .await?;
         (
             superseded,
             Some((directive.id, directive.version, directive.kind)),
         )
-    } else if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
+    } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
         (
-            store.supersede_and_create_task_command(&command).await?,
+            store.supersede_and_create_child_command(&command).await?,
             None,
         )
     } else {
-        store.create_task_command(&command).await?;
+        store.create_child_command(&command).await?;
         (Vec::new(), None)
     };
     for command_id in superseded {
@@ -601,7 +601,7 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
                 &session.id,
                 &TaskEventKind::CommandChanged {
                     command_id,
-                    state: TaskCommandState::Superseded,
+                    state: ChildCommandState::Superseded,
                     effect: None,
                     error: None,
                 },
@@ -625,7 +625,7 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
             &session.id,
             &TaskEventKind::CommandChanged {
                 command_id: command.id.clone(),
-                state: TaskCommandState::Persisted,
+                state: ChildCommandState::Persisted,
                 effect: command.effect,
                 error: None,
             },
@@ -638,7 +638,7 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
 async fn absorb_commands(
     store: &SharedStore,
     session: &TaskSession,
-    commands: Vec<TaskCommand>,
+    commands: Vec<ChildCommand>,
     harness: &mut dyn Harness,
     turn_active: bool,
     pending: &mut VecDeque<PendingInput>,
@@ -658,16 +658,18 @@ async fn claim_commands(
     store: &SharedStore,
     session: &TaskSession,
     generation: u32,
-    seen: &mut HashSet<TaskCommandId>,
-) -> Result<Vec<TaskCommand>> {
-    let commands = store.claim_task_commands(&session.id, generation).await?;
+    seen: &mut HashSet<ChildCommandId>,
+) -> Result<Vec<ChildCommand>> {
+    let commands = store
+        .claim_child_commands(&ChildRef::Task(session.id.clone()), generation)
+        .await?;
     Ok(filter_new_commands(commands, seen))
 }
 
 fn filter_new_commands(
-    commands: Vec<TaskCommand>,
-    seen: &mut HashSet<TaskCommandId>,
-) -> Vec<TaskCommand> {
+    commands: Vec<ChildCommand>,
+    seen: &mut HashSet<ChildCommandId>,
+) -> Vec<ChildCommand> {
     commands
         .into_iter()
         .filter(|command| seen.insert(command.id.clone()))
@@ -725,12 +727,12 @@ async fn apply_input(
     session: &TaskSession,
     harness: &mut dyn Harness,
     text: &str,
-    command: Option<(TaskCommandId, TaskCommandEffect)>,
+    command: Option<(ChildCommandId, ChildCommandEffect)>,
     decision: Option<DecisionResolution>,
 ) -> Result<()> {
     let (command_id, effect) = command
         .map(|(command_id, effect)| (Some(command_id), effect))
-        .unwrap_or((None, TaskCommandEffect::NextTurn));
+        .unwrap_or((None, ChildCommandEffect::NextTurn));
     apply_child_input(
         store,
         ChildTarget::Task(session),
@@ -880,9 +882,9 @@ mod tests {
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
-        PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind, TaskCommandSource,
-        TaskCommandState, TaskDecisionId, TaskEventKind, TaskProcess, TaskSession, TaskSessionId,
+        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
+        ChildDecisionId, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId,
+        LinearProjectRef, PmWritebackState, TaskEventKind, TaskProcess, TaskSession, TaskSessionId,
         TaskSessionStatus,
     };
 
@@ -1025,27 +1027,30 @@ mod tests {
         assert_eq!(current.current_directive_version, 1);
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].text, "fix the parser first");
-        assert_eq!(directives[0].source, TaskCommandSource::Attachment);
+        assert_eq!(directives[0].source, ChildCommandSource::Attachment);
         assert!(directives[0].command_id.is_some());
     }
 
     #[tokio::test]
     async fn provider_control_conformance_reports_honest_steer_effects() {
         for (provider, supports_steer, expected_effect) in [
-            ("codex", true, TaskCommandEffect::LiveSteer),
-            ("claude", false, TaskCommandEffect::Replacement),
-            ("opencode", false, TaskCommandEffect::Replacement),
+            ("codex", true, ChildCommandEffect::LiveSteer),
+            ("claude", false, ChildCommandEffect::Replacement),
+            ("opencode", false, ChildCommandEffect::Replacement),
         ] {
             let (store, session) = conformance_session(provider).await;
-            let command = TaskCommand::new(
-                session.id.clone(),
-                TaskCommandSource::Human,
-                TaskCommandKind::Steer {
+            let command = ChildCommand::new(
+                ChildRef::Task(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::Steer {
                     text: "change direction".to_string(),
                 },
             );
-            store.create_task_command(&command).await.unwrap();
-            let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+            store.create_child_command(&command).await.unwrap();
+            let commands = store
+                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+                .await
+                .unwrap();
             let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = VecDeque::new();
 
@@ -1065,8 +1070,8 @@ mod tests {
                 .unwrap();
             }
 
-            let receipt = store.get_task_command(&command.id).await.unwrap().unwrap();
-            assert_eq!(receipt.state, TaskCommandState::Accepted, "{provider}");
+            let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
+            assert_eq!(receipt.state, ChildCommandState::Accepted, "{provider}");
             assert_eq!(receipt.effect, Some(expected_effect), "{provider}");
             assert_eq!(harness.sent, vec!["change direction"], "{provider}");
             assert_eq!(
@@ -1081,23 +1086,26 @@ mod tests {
     async fn task_follow_up_is_fifo_and_never_interrupts() {
         for provider in ["codex", "claude", "opencode"] {
             let (store, session) = conformance_session(provider).await;
-            let first = TaskCommand::new(
-                session.id.clone(),
-                TaskCommandSource::Human,
-                TaskCommandKind::FollowUp {
+            let first = ChildCommand::new(
+                ChildRef::Task(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::FollowUp {
                     text: "first".to_string(),
                 },
             );
-            let second = TaskCommand::new(
-                session.id.clone(),
-                TaskCommandSource::Human,
-                TaskCommandKind::FollowUp {
+            let second = ChildCommand::new(
+                ChildRef::Task(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::FollowUp {
                     text: "second".to_string(),
                 },
             );
-            store.create_task_command(&first).await.unwrap();
-            store.create_task_command(&second).await.unwrap();
-            let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+            store.create_child_command(&first).await.unwrap();
+            store.create_child_command(&second).await.unwrap();
+            let commands = store
+                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+                .await
+                .unwrap();
             let mut harness = ScriptedHarness::new(provider == "codex");
             let mut pending = VecDeque::new();
 
@@ -1123,12 +1131,12 @@ mod tests {
             }
             assert_eq!(
                 store
-                    .get_task_command(&first.id)
+                    .get_child_command(&first.id)
                     .await
                     .unwrap()
                     .unwrap()
                     .effect,
-                Some(TaskCommandEffect::NextTurn),
+                Some(ChildCommandEffect::NextTurn),
                 "{provider}"
             );
         }
@@ -1137,41 +1145,47 @@ mod tests {
     #[tokio::test]
     async fn task_replacement_supersedes_queued_input() {
         let (store, session) = conformance_session("claude").await;
-        let first = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::FollowUp {
+        let first = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
                 text: "A".to_string(),
             },
         );
-        let second = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::FollowUp {
+        let second = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
                 text: "B".to_string(),
             },
         );
-        store.create_task_command(&first).await.unwrap();
-        store.create_task_command(&second).await.unwrap();
+        store.create_child_command(&first).await.unwrap();
+        store.create_child_command(&second).await.unwrap();
         let mut harness = ScriptedHarness::new(false);
         let mut pending = VecDeque::new();
-        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+            .await
+            .unwrap();
         absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
             .await
             .unwrap();
 
-        let replacement = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::Interrupt {
+        let replacement = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Interrupt {
                 replacement: Some("C".to_string()),
             },
         );
         store
-            .supersede_and_create_task_command(&replacement)
+            .supersede_and_create_child_command(&replacement)
             .await
             .unwrap();
-        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+            .await
+            .unwrap();
         absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
             .await
             .unwrap();
@@ -1184,12 +1198,12 @@ mod tests {
         for superseded in [&first, &second] {
             assert_eq!(
                 store
-                    .get_task_command(&superseded.id)
+                    .get_child_command(&superseded.id)
                     .await
                     .unwrap()
                     .unwrap()
                     .state,
-                TaskCommandState::Superseded
+                ChildCommandState::Superseded
             );
         }
     }
@@ -1197,13 +1211,16 @@ mod tests {
     #[tokio::test]
     async fn bare_task_interrupt_stops_one_turn_without_abandoning_the_session() {
         let (store, session) = conformance_session("codex").await;
-        let command = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::Interrupt { replacement: None },
+        let command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Interrupt { replacement: None },
         );
-        store.create_task_command(&command).await.unwrap();
-        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        store.create_child_command(&command).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+            .await
+            .unwrap();
         let mut harness = ScriptedHarness::new(true);
         let mut pending = VecDeque::new();
 
@@ -1216,12 +1233,12 @@ mod tests {
         assert!(pending.is_empty());
         assert_eq!(
             store
-                .get_task_command(&command.id)
+                .get_child_command(&command.id)
                 .await
                 .unwrap()
                 .unwrap()
                 .state,
-            TaskCommandState::Accepted
+            ChildCommandState::Accepted
         );
         assert!(!session.status.is_terminal());
     }
@@ -1231,18 +1248,21 @@ mod tests {
         for (provider, supports_steer) in [("codex", true), ("claude", false), ("opencode", false)]
         {
             let (store, session) = conformance_session(provider).await;
-            let decision_id = TaskDecisionId::new();
-            let command = TaskCommand::new(
-                session.id.clone(),
-                TaskCommandSource::Human,
-                TaskCommandKind::Decide {
+            let decision_id = ChildDecisionId::new();
+            let command = ChildCommand::new(
+                ChildRef::Task(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::Decide {
                     decision_id: decision_id.clone(),
                     choice: "revise".to_string(),
                     message: Some("cover the boundary".to_string()),
                 },
             );
-            store.create_task_command(&command).await.unwrap();
-            let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+            store.create_child_command(&command).await.unwrap();
+            let commands = store
+                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+                .await
+                .unwrap();
             let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = VecDeque::new();
 
@@ -1269,12 +1289,12 @@ mod tests {
             );
             assert_eq!(
                 store
-                    .get_task_command(&command.id)
+                    .get_child_command(&command.id)
                     .await
                     .unwrap()
                     .unwrap()
                     .effect,
-                Some(TaskCommandEffect::Decision),
+                Some(ChildCommandEffect::Decision),
                 "{provider}"
             );
             assert!(
@@ -1301,15 +1321,18 @@ mod tests {
     #[tokio::test]
     async fn task_provider_control_failures_settle_the_receipt() {
         let (store, session) = conformance_session("claude").await;
-        let command = TaskCommand::new(
-            session.id.clone(),
-            TaskCommandSource::Human,
-            TaskCommandKind::Steer {
+        let command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
                 text: "change direction".to_string(),
             },
         );
-        store.create_task_command(&command).await.unwrap();
-        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        store.create_child_command(&command).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+            .await
+            .unwrap();
         let mut harness = ScriptedHarness::new(false);
         harness.fail_interrupt = true;
 
@@ -1324,9 +1347,9 @@ mod tests {
         .await
         .expect_err("interrupt failure should fail control");
         assert!(error.to_string().contains("scripted interrupt failed"));
-        let receipt = store.get_task_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(receipt.state, TaskCommandState::Failed);
-        assert_eq!(receipt.effect, Some(TaskCommandEffect::Replacement));
+        let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(receipt.state, ChildCommandState::Failed);
+        assert_eq!(receipt.effect, Some(ChildCommandEffect::Replacement));
         assert!(receipt
             .error
             .as_deref()

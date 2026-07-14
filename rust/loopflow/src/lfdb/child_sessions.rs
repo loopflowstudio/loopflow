@@ -3,12 +3,12 @@
 
 use crate::lfd::id::LfdId;
 use crate::project_session::{
-    ObservationOutboxRow, ProjectCommand, ProjectCommandId, ProjectEvent, ProjectEventKind,
-    ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
+    ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession, ProjectSessionId,
+    ProjectSessionStatus, SessionSupervisor,
 };
 use crate::task::{
-    BoundaryResult, ChildDirective, ChildRef, TaskCommand, TaskCommandId, TaskEvent, TaskEventKind,
-    TaskSession, TaskSessionId, TaskSessionStatus,
+    BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildDirective, ChildRef,
+    TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -96,73 +96,70 @@ impl Store {
         .await
     }
 
-    pub async fn create_task_command(&self, command: &TaskCommand) -> StoreResult<()> {
+    pub async fn create_child_command(&self, command: &ChildCommand) -> StoreResult<()> {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_command(&command)
+            store.insert_child_command(&command)
         })
         .await
     }
 
-    pub async fn ensure_task_decision_command(
+    pub async fn ensure_child_decision_command(
         &self,
-        command: &TaskCommand,
-    ) -> StoreResult<(TaskCommand, bool)> {
+        command: &ChildCommand,
+    ) -> StoreResult<(ChildCommand, bool)> {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.ensure_task_decision_command(&command)
+            store.ensure_child_decision_command(&command)
         })
         .await
     }
 
-    pub async fn supersede_and_create_task_command(
+    pub async fn supersede_and_create_child_command(
         &self,
-        command: &TaskCommand,
-    ) -> StoreResult<Vec<TaskCommandId>> {
+        command: &ChildCommand,
+    ) -> StoreResult<Vec<ChildCommandId>> {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.supersede_and_insert_task_command(&command)
+            store.supersede_and_insert_child_command(&command)
         })
         .await
     }
 
-    pub async fn create_task_command_with_directive(
+    pub async fn create_child_command_with_directive(
         &self,
-        command: &TaskCommand,
+        command: &ChildCommand,
         directive: &ChildDirective,
-    ) -> StoreResult<Vec<TaskCommandId>> {
+    ) -> StoreResult<Vec<ChildCommandId>> {
         let command = command.clone();
         let directive = directive.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_command_with_directive(&command, &directive)
+            store.insert_child_command_with_directive(&command, &directive)
         })
         .await
     }
 
-    pub async fn get_task_command(
+    pub async fn get_child_command(
         &self,
-        command_id: &TaskCommandId,
-    ) -> StoreResult<Option<TaskCommand>> {
+        command_id: &ChildCommandId,
+    ) -> StoreResult<Option<ChildCommand>> {
         let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_command(&command_id)).await
+        run_sqlite(&self.sqlite, move |store| store.child_command(&command_id)).await
     }
 
-    pub async fn list_task_commands(
-        &self,
-        session_id: &TaskSessionId,
-    ) -> StoreResult<Vec<TaskCommand>> {
-        let session_id = session_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_commands(&session_id)).await
+    pub async fn list_child_commands(&self, target: &ChildRef) -> StoreResult<Vec<ChildCommand>> {
+        let target = target.clone();
+        run_sqlite(&self.sqlite, move |store| store.child_commands(&target)).await
     }
 
-    pub async fn claim_task_commands(
+    pub async fn claim_child_commands(
         &self,
-        session_id: &TaskSessionId,
+        target: &ChildRef,
         generation: u32,
-    ) -> StoreResult<Vec<TaskCommand>> {
-        let session_id = session_id.clone();
+    ) -> StoreResult<Vec<ChildCommand>> {
+        let target = target.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_task_commands(&session_id, generation)
+            store.claim_child_commands(&target, generation)
         })
         .await
     }
@@ -182,39 +179,39 @@ impl Store {
         .await
     }
 
-    pub async fn accept_task_command(
+    pub async fn accept_child_command(
         &self,
-        command_id: &TaskCommandId,
-        effect: Option<crate::task::TaskCommandEffect>,
+        command_id: &ChildCommandId,
+        effect: Option<ChildCommandEffect>,
     ) -> StoreResult<()> {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.accept_task_command(&command_id, effect)
+            store.accept_child_command(&command_id, effect)
         })
         .await
     }
 
-    pub async fn set_task_command_effect(
+    pub async fn set_child_command_effect(
         &self,
-        command_id: &TaskCommandId,
-        effect: crate::task::TaskCommandEffect,
+        command_id: &ChildCommandId,
+        effect: ChildCommandEffect,
     ) -> StoreResult<()> {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.set_task_command_effect(&command_id, effect)
+            store.set_child_command_effect(&command_id, effect)
         })
         .await
     }
 
-    pub async fn fail_task_command(
+    pub async fn fail_child_command(
         &self,
-        command_id: &TaskCommandId,
-        effect: Option<crate::task::TaskCommandEffect>,
+        command_id: &ChildCommandId,
+        effect: Option<ChildCommandEffect>,
         error: String,
     ) -> StoreResult<()> {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.fail_task_command(&command_id, effect, &error)
+            store.fail_child_command(&command_id, effect, &error)
         })
         .await
     }
@@ -368,107 +365,16 @@ impl Store {
         .await
     }
 
-    pub async fn create_project_command(&self, command: &ProjectCommand) -> StoreResult<()> {
-        let command = command.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_project_command(&command)
-        })
-        .await
-    }
-
-    pub async fn ensure_project_decision_command(
-        &self,
-        command: &ProjectCommand,
-    ) -> StoreResult<(ProjectCommand, bool)> {
-        let command = command.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.ensure_project_decision_command(&command)
-        })
-        .await
-    }
-
-    pub async fn supersede_and_create_project_command(
-        &self,
-        command: &ProjectCommand,
-    ) -> StoreResult<Vec<ProjectCommandId>> {
-        let command = command.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.supersede_and_insert_project_command(&command)
-        })
-        .await
-    }
-
-    pub async fn create_project_command_with_directive(
-        &self,
-        command: &ProjectCommand,
-        directive: &ChildDirective,
-    ) -> StoreResult<Vec<ProjectCommandId>> {
-        let command = command.clone();
-        let directive = directive.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_project_command_with_directive(&command, &directive)
-        })
-        .await
-    }
-
-    pub async fn get_project_command(
-        &self,
-        command_id: &ProjectCommandId,
-    ) -> StoreResult<Option<ProjectCommand>> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.project_command(&command_id)
-        })
-        .await
-    }
-
-    pub async fn claim_project_commands(
-        &self,
-        session_id: &ProjectSessionId,
-        generation: u32,
-    ) -> StoreResult<Vec<ProjectCommand>> {
-        let session_id = session_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.claim_project_commands(&session_id, generation)
-        })
-        .await
-    }
-
     pub async fn claim_project_commands_or_stop(
         &self,
         session_id: &ProjectSessionId,
         generation: u32,
         stopped_status: ProjectSessionStatus,
         reason: String,
-    ) -> StoreResult<(Vec<ProjectCommand>, Option<ProjectSession>)> {
+    ) -> StoreResult<(Vec<ChildCommand>, Option<ProjectSession>)> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.claim_project_commands_or_stop(&session_id, generation, stopped_status, &reason)
-        })
-        .await
-    }
-
-    pub async fn accept_project_command(
-        &self,
-        command_id: &ProjectCommandId,
-        effect: Option<crate::task::TaskCommandEffect>,
-    ) -> StoreResult<()> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.accept_project_command(&command_id, effect)
-        })
-        .await
-    }
-
-    pub async fn fail_project_command(
-        &self,
-        command_id: &ProjectCommandId,
-        effect: Option<crate::task::TaskCommandEffect>,
-        error: String,
-    ) -> StoreResult<()> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.fail_project_command(&command_id, effect, &error)
         })
         .await
     }
@@ -553,7 +459,7 @@ impl Store {
 
     pub async fn child_directive_for_command(
         &self,
-        command_id: &TaskCommandId,
+        command_id: &ChildCommandId,
     ) -> StoreResult<Option<ChildDirective>> {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {

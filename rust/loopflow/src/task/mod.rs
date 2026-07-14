@@ -72,9 +72,7 @@ pub enum TaskDataError {
 
 string_id!(TaskSessionId, "ts_");
 string_id!(ChildCommandId, "cc_");
-pub type TaskCommandId = ChildCommandId;
 string_id!(ChildDecisionId, "cd_");
-pub type TaskDecisionId = ChildDecisionId;
 string_id!(ChildDirectiveId, "dir_");
 
 /// Opaque Linear identifier: non-empty, provider-assigned (no prefix grammar of
@@ -287,7 +285,7 @@ pub enum ChildCommandKind {
         message: Option<String>,
     },
     Decide {
-        decision_id: TaskDecisionId,
+        decision_id: ChildDecisionId,
         choice: String,
         message: Option<String>,
     },
@@ -295,12 +293,11 @@ pub enum ChildCommandKind {
         reason: String,
     },
 }
-pub type TaskCommandKind = ChildCommandKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TaskCommandState {
+pub enum ChildCommandState {
     Persisted,
     Claimed,
     Accepted,
@@ -308,7 +305,7 @@ pub enum TaskCommandState {
     Superseded,
 }
 
-impl TaskCommandState {
+impl ChildCommandState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Persisted => "persisted",
@@ -327,14 +324,14 @@ impl TaskCommandState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TaskCommandEffect {
+pub enum ChildCommandEffect {
     LiveSteer,
     NextTurn,
     Replacement,
     Decision,
 }
 
-impl TaskCommandEffect {
+impl ChildCommandEffect {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LiveSteer => "live_steer",
@@ -354,7 +351,6 @@ pub enum ChildCommandSource {
     Attachment,
     System,
 }
-pub type TaskCommandSource = ChildCommandSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
@@ -461,13 +457,13 @@ impl ChildDirective {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskCommand {
-    pub id: TaskCommandId,
-    pub session_id: TaskSessionId,
-    pub source: TaskCommandSource,
-    pub kind: TaskCommandKind,
-    pub state: TaskCommandState,
-    pub effect: Option<TaskCommandEffect>,
+pub struct ChildCommand {
+    pub id: ChildCommandId,
+    pub target: ChildRef,
+    pub source: ChildCommandSource,
+    pub kind: ChildCommandKind,
+    pub state: ChildCommandState,
+    pub effect: Option<ChildCommandEffect>,
     pub created_at: OffsetDateTime,
     pub claimed_by_generation: Option<u32>,
     pub accepted_at: Option<OffsetDateTime>,
@@ -476,35 +472,31 @@ pub struct TaskCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoundaryResult {
-    Commands(Vec<TaskCommand>),
+    Commands(Vec<ChildCommand>),
     Stopped(Box<TaskSession>),
 }
 
-impl TaskCommand {
-    pub fn new(
-        session_id: TaskSessionId,
-        source: TaskCommandSource,
-        kind: TaskCommandKind,
-    ) -> Self {
+impl ChildCommand {
+    pub fn new(target: ChildRef, source: ChildCommandSource, kind: ChildCommandKind) -> Self {
         let effect = match &kind {
-            TaskCommandKind::FollowUp { .. } | TaskCommandKind::Resume { message: Some(_) } => {
-                Some(TaskCommandEffect::NextTurn)
+            ChildCommandKind::FollowUp { .. } | ChildCommandKind::Resume { message: Some(_) } => {
+                Some(ChildCommandEffect::NextTurn)
             }
-            TaskCommandKind::Interrupt {
+            ChildCommandKind::Interrupt {
                 replacement: Some(_),
-            } => Some(TaskCommandEffect::Replacement),
-            TaskCommandKind::Decide { .. } => Some(TaskCommandEffect::Decision),
-            TaskCommandKind::Steer { .. }
-            | TaskCommandKind::Interrupt { replacement: None }
-            | TaskCommandKind::Resume { message: None }
-            | TaskCommandKind::Abandon { .. } => None,
+            } => Some(ChildCommandEffect::Replacement),
+            ChildCommandKind::Decide { .. } => Some(ChildCommandEffect::Decision),
+            ChildCommandKind::Steer { .. }
+            | ChildCommandKind::Interrupt { replacement: None }
+            | ChildCommandKind::Resume { message: None }
+            | ChildCommandKind::Abandon { .. } => None,
         };
         Self {
-            id: TaskCommandId::new(),
-            session_id,
+            id: ChildCommandId::new(),
+            target,
             source,
             kind,
-            state: TaskCommandState::Persisted,
+            state: ChildCommandState::Persisted,
             effect,
             created_at: OffsetDateTime::now_utc(),
             claimed_by_generation: None,
@@ -524,9 +516,9 @@ pub enum TaskEventKind {
         reason: String,
     },
     CommandChanged {
-        command_id: TaskCommandId,
-        state: TaskCommandState,
-        effect: Option<TaskCommandEffect>,
+        command_id: ChildCommandId,
+        state: ChildCommandState,
+        effect: Option<ChildCommandEffect>,
         error: Option<String>,
     },
     DirectiveChanged {
@@ -540,12 +532,12 @@ pub enum TaskEventKind {
         summary: String,
     },
     DecisionRequested {
-        decision_id: TaskDecisionId,
+        decision_id: ChildDecisionId,
         prompt: String,
         options: Vec<String>,
     },
     DecisionResolved {
-        decision_id: TaskDecisionId,
+        decision_id: ChildDecisionId,
         choice: String,
         message: Option<String>,
     },
@@ -621,19 +613,19 @@ impl TaskObservation {
 #[cfg(test)]
 mod tests {
     use super::{
-        PmWritebackOperation, PmWritebackState, TaskCommandId, TaskCommandState, TaskDecisionId,
+        ChildCommandId, ChildCommandState, ChildDecisionId, PmWritebackOperation, PmWritebackState,
         TaskEventKind, TaskObservation, TaskSessionId, TaskSessionStatus,
     };
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
         let session = TaskSessionId::new();
-        let command = TaskCommandId::new();
-        let decision = TaskDecisionId::new();
+        let command = ChildCommandId::new();
+        let decision = ChildDecisionId::new();
 
         assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
-        assert_eq!(TaskCommandId::parse(command.as_str()).unwrap(), command);
-        assert_eq!(TaskDecisionId::parse(decision.as_str()).unwrap(), decision);
+        assert_eq!(ChildCommandId::parse(command.as_str()).unwrap(), command);
+        assert_eq!(ChildDecisionId::parse(decision.as_str()).unwrap(), decision);
     }
 
     #[test]
@@ -670,27 +662,27 @@ mod tests {
     #[test]
     fn wave_observes_command_outcomes_not_transport_chatter() {
         let event = |state| TaskEventKind::CommandChanged {
-            command_id: TaskCommandId::new(),
+            command_id: ChildCommandId::new(),
             state,
             effect: None,
             error: None,
         };
 
-        assert!(!event(TaskCommandState::Persisted).is_wave_observable());
-        assert!(!event(TaskCommandState::Claimed).is_wave_observable());
-        assert!(event(TaskCommandState::Accepted).is_wave_observable());
-        assert!(event(TaskCommandState::Failed).is_wave_observable());
+        assert!(!event(ChildCommandState::Persisted).is_wave_observable());
+        assert!(!event(ChildCommandState::Claimed).is_wave_observable());
+        assert!(event(ChildCommandState::Accepted).is_wave_observable());
+        assert!(event(ChildCommandState::Failed).is_wave_observable());
     }
 
     #[test]
     fn project_supervision_keeps_routine_task_decisions_out_of_the_root_wave() {
         let requested = TaskEventKind::DecisionRequested {
-            decision_id: TaskDecisionId::new(),
+            decision_id: ChildDecisionId::new(),
             prompt: "Which parser shape?".to_string(),
             options: vec!["strict".to_string(), "permissive".to_string()],
         };
         let resolved = TaskEventKind::DecisionResolved {
-            decision_id: TaskDecisionId::new(),
+            decision_id: ChildDecisionId::new(),
             choice: "strict".to_string(),
             message: None,
         };

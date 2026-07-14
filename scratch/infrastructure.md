@@ -393,3 +393,31 @@ Use the same ownership boundary to split the oversized implementation:
 This makes the central persistence files smaller without pretending Project
 and Task are the same domain. They share a durable command/outbox mechanism;
 their event and session types remain distinct.
+
+## Current reduction: one child-command envelope
+
+The persistence split exposed one remaining false distinction. SQLite already
+stores Project and Task control in one `child_commands` table, command ids are
+already shared `cc_...` ids, directives already target `ChildRef`, and the
+provider-control loop already handles both domains. Rust nevertheless rebuilds
+the same command envelope twice as `ProjectCommand` and `TaskCommand`, then
+duplicates insert, claim, supersede, receipt, accept, and failure APIs for each.
+The public ops layer has consequently drifted: Project follow-ups wait for a
+two-second acceptance window while Task follow-ups return after durable
+persistence.
+
+Make the storage model truthful:
+
+- one concrete `ChildCommand { target: ChildRef, ... }` crosses both runners;
+- one set of persistence operations owns creation, supersession, claiming,
+  receipt reads, acceptance, and failure;
+- Project and Task keep distinct sessions, statuses, events, boundary
+  transitions, launch policy, and user-facing commands;
+- no public generic session noun, factory trait, or extensible target registry
+  is introduced;
+- follow-up, steer, interrupt, resume, decide, and abandon keep one intent at
+  both control edges.
+
+This is shared mechanism, not a fourth product concept. A human still says
+Project or Task; `ChildCommand` exists only where both nouns genuinely use the
+same durable protocol.

@@ -18,6 +18,8 @@ pub struct LandOptions {
     pub strict: bool,
     pub local: bool,
     pub create_pr: bool,
+    pub complete: bool,
+    pub next_slug: Option<String>,
     pub worktree: Option<String>,
     pub commit_message: Option<String>,
     pub pr_title: Option<String>,
@@ -48,6 +50,17 @@ fn prepare_pr(
     finalize: Finalize,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
+    if options.complete && options.next_slug.is_some() {
+        return Err(OpsError::Message(
+            "--complete and --next cannot be used together".to_string(),
+        ));
+    }
+    if options.local && (options.complete || options.next_slug.is_some()) {
+        return Err(OpsError::Message(
+            "Task disposition flags require a pull request merge and cannot be used with --local"
+                .to_string(),
+        ));
+    }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_delivery(&repo_root)?;
     let feature_branch = current_branch(&repo_root)?
@@ -82,6 +95,17 @@ fn prepare_pr(
         options.agent.as_deref(),
         progress,
     )?;
+    let pr = crate::ops::pr::current_pr(&repo_root)?;
+    crate::ops::task::configure_task_pull_request(
+        &repo_root,
+        pr.as_ref(),
+        if options.complete {
+            crate::task::AfterMerge::CompleteTask
+        } else {
+            crate::task::AfterMerge::Review
+        },
+        options.next_slug.as_deref(),
+    )?;
     finalize_remote(
         &repo_root,
         pr_title.as_deref(),
@@ -89,7 +113,7 @@ fn prepare_pr(
         finalize,
         progress,
     )?;
-    Ok(crate::ops::pr::current_pr(&repo_root).ok().flatten())
+    Ok(pr)
 }
 
 /// Land a PR and walk away: commit, rebase, clear scratch, and arm auto-merge so

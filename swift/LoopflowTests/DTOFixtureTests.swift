@@ -14,7 +14,7 @@ struct DTOFixtureTests {
 
         #expect(detail.projects[0].project.slug == "release-feedback")
         #expect(detail.projects[0].tasks.map(\.task.identifier) == ["INF-123", "INF-124"])
-        #expect(detail.projects[0].tasks[0].pullRequest?.number == 912)
+        #expect(detail.projects[0].tasks[0].pullRequests.map(\.number) == [912])
         #expect(detail.projects[0].directive?.version == 1)
         #expect(detail.projects[0].tasks[0].directive?.version == 2)
         #expect(detail.projects[0].tasks[0].directive?.incorporatedAt != nil)

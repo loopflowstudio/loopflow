@@ -20,6 +20,11 @@ pub fn abandon_branch(
     options: &AbandonOptions,
     progress: &impl Progress,
 ) -> OpsResult<()> {
+    if options.branch.is_none()
+        && crate::ops::task::abandon_task_delivery(repo, options.force, progress)?
+    {
+        return Ok(());
+    }
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let branch = match options.branch.as_deref() {
         Some(branch) => branch.to_string(),

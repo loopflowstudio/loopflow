@@ -346,9 +346,21 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
-        TaskEventKind::PullRequestOpened { number, url } => activity(
+        TaskEventKind::DeliveryStarted {
+            sequence, branch, ..
+        } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Started delivery {sequence}"),
+            branch,
+        ),
+        TaskEventKind::PullRequestOpened { number, url, .. } => activity(
             ChildActivityKind::PullRequestOpened,
             &format!("Opened PR #{number}"),
+            url,
+        ),
+        TaskEventKind::DeliveryMerged { number, url, .. } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Merged PR #{number}"),
             url,
         ),
         TaskEventKind::Completed { summary, .. } => {

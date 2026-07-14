@@ -14,7 +14,9 @@ Use the top-level `lf` command suites for mechanical git and GitHub operations.
 lf commit -m "message" -p     # commit and push
 lf pr open --title "..."           # create/update PR
 lf pr submit                     # prep + mark ready + assign to you; you click merge
-lf pr land                       # hands-off: submit, then arm auto-merge
+lf pr land                       # land one delivery; Task remains open
+lf pr land -c                    # land and complete the owning Task after merge
+lf pr land --next parser-proof   # name the next serial Task delivery
 lf rebase --plan              # show reset/rebase strategy
 lf rebase                     # apply the planned update
 ```
@@ -35,8 +37,10 @@ lands it:
   finish for anything a person should land by hand.
 - **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
   everything `submit` does, then arms auto-merge so it merges when checks pass.
-  Use it in headless/auto runs where no human is gating. Landing never moves the
-  current worktree; a merged worker's tree is pruned when its branch is deleted.
+  Use it in headless/auto runs where no human is gating. Inside a Task, bare
+  `land` settles one delivery but leaves the Task open; `-c` completes the Task
+  after merge. `--next <slug>` names the following delivery. The Task keeps its
+  worktree while Loopflow rotates serial branches from fetched main.
 
 Stay in the worktree Loopflow placed for this run. If the assigned task is
 explicitly about worktree management, use `lf wt`; never create another

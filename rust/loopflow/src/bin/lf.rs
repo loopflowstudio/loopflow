@@ -568,8 +568,8 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 }
 
 fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyhow::Result<()> {
+    let snapshot = loopflow::ops::task::task_snapshot(session)?;
     if json {
-        let snapshot = loopflow::ops::task::task_snapshot(session)?;
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
         let pm_writeback = match &session.pm_writeback {
@@ -578,6 +578,17 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
                 format!("pending: {error}")
             }
         };
+        let branch = snapshot
+            .active_delivery
+            .as_ref()
+            .and_then(|active| {
+                snapshot
+                    .deliveries
+                    .iter()
+                    .find(|delivery| &delivery.id == active)
+            })
+            .map(|delivery| delivery.branch.as_str())
+            .unwrap_or("none");
         println!(
             "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.launch.issue.identifier,
@@ -585,10 +596,24 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             session.provider,
             session.id,
             session.worktree.display(),
-            session.branch,
+            branch,
             pm_writeback,
             session.status_reason,
         );
+        for delivery in &snapshot.deliveries {
+            let pr = delivery
+                .pull_request
+                .as_ref()
+                .map(|pull_request| format!("PR #{}", pull_request.number))
+                .unwrap_or_else(|| "no PR".to_string());
+            println!(
+                "  delivery {}: {}  {}  {}",
+                delivery.sequence,
+                delivery.status.as_str(),
+                pr,
+                delivery.branch
+            );
+        }
     }
     Ok(())
 }
@@ -832,15 +857,18 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run {
             issue,
+            name,
             directive,
             json,
         } => {
-            let session = loopflow::ops::task::task_run(repo, issue, directive.clone())?;
+            let session =
+                loopflow::ops::task::task_run(repo, issue, name.clone(), directive.clone())?;
             print_task_session(&session, *json)
         }
         TaskCommand::Start {
             title,
             project_id,
+            name,
             directive,
             json,
         } => {
@@ -848,6 +876,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 title.clone(),
                 project_id,
+                name.clone(),
                 directive.clone(),
             )?;
             print_task_session(&session, *json)
@@ -907,6 +936,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 }
             }
             Ok(())
+        }
+        TaskCommand::Complete {
+            issue,
+            summary,
+            json,
+        } => {
+            let session = loopflow::ops::task::task_complete(issue, summary.clone())?;
+            print_task_session(&session, *json)
         }
         TaskCommand::FollowUp {
             issue,

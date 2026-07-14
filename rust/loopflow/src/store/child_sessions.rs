@@ -10,23 +10,23 @@ use crate::project_session::{
     ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession, ProjectSessionId,
     ProjectSessionStatus,
 };
-use crate::task::{TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
+use crate::task::{
+    TaskDelivery, TaskDeliveryId, TaskEvent, TaskEventKind, TaskSession, TaskSessionId,
+    TaskSessionStatus,
+};
 
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn create_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+    pub async fn create_task_session(
+        &self,
+        session: &TaskSession,
+        delivery: &TaskDelivery,
+    ) -> StoreResult<()> {
         let session = session.clone();
+        let delivery = delivery.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_session(&session)
-        })
-        .await
-    }
-
-    pub async fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
-        let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session(&session)
+            store.insert_task_session(&session, &delivery)
         })
         .await
     }
@@ -34,12 +34,14 @@ impl Store {
     pub async fn reserve_task_session_with_directive(
         &self,
         session: &TaskSession,
+        delivery: &TaskDelivery,
         directive: &ChildDirective,
     ) -> StoreResult<()> {
         let session = session.clone();
+        let delivery = delivery.clone();
         let directive = directive.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session_with_directive(&session, &directive)
+            store.reserve_task_session_with_directive(&session, &delivery, &directive)
         })
         .await
     }
@@ -48,6 +50,19 @@ impl Store {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.update_task_session(&session)
+        })
+        .await
+    }
+
+    pub async fn complete_task_session(
+        &self,
+        session: &TaskSession,
+        empty_delivery: Option<&TaskDelivery>,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let empty_delivery = empty_delivery.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_task_session(&session, empty_delivery.as_ref())
         })
         .await
     }
@@ -87,6 +102,57 @@ impl Store {
         let wave_id = wave_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
             store.list_task_sessions(wave_id.as_ref())
+        })
+        .await
+    }
+
+    pub async fn update_task_delivery(&self, delivery: &TaskDelivery) -> StoreResult<()> {
+        let delivery = delivery.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_task_delivery(&delivery)
+        })
+        .await
+    }
+
+    pub async fn get_task_delivery(
+        &self,
+        delivery_id: &TaskDeliveryId,
+    ) -> StoreResult<Option<TaskDelivery>> {
+        let delivery_id = delivery_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_delivery(&delivery_id)).await
+    }
+
+    pub async fn task_deliveries(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Vec<TaskDelivery>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_deliveries(&session_id)
+        })
+        .await
+    }
+
+    pub async fn active_task_delivery(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<TaskDelivery>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.active_task_delivery(&session_id)
+        })
+        .await
+    }
+
+    pub async fn settle_task_delivery(
+        &self,
+        settled: &TaskDelivery,
+        next: Option<&TaskDelivery>,
+    ) -> StoreResult<()> {
+        let settled = settled.clone();
+        let next = next.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.settle_task_delivery(&settled, next.as_ref())
         })
         .await
     }

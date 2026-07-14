@@ -26,7 +26,7 @@ pub use cron::{
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use land::{land, mark_ready, submit, LandOptions};
-pub use pr::{create_or_update_pr, current_or_merged_pr, current_pr, PrInfo, PrOptions, PrResult};
+pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{
     abort_rebase_for_resolution, continue_rebase_for_resolution, plan_rebase, rebase_class_name,

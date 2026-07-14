@@ -34,8 +34,10 @@ selection. Follow the repo style guide.
   it to the Wave. Do not invent a provider-specific approval path or start
   unrelated work while it is pending.
 - Use `lf pr open` when the branch has a reviewable PR-shaped change.
-- When a filed task id is known and its PR ships, close it with
-  `lf pm task done --id <task-id> --pr <url>`.
+- A merged PR settles one delivery. Use `lf pr land -c` only when that merge
+  completes the Task; use bare `lf pr land --next <slug>` when another serial
+  delivery follows. Use `lf task complete <issue> --summary "..."` for clean
+  work that needs no PR. Do not write Task completion directly through PM.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
 - Report consequential progress through the Task Session; its linked events

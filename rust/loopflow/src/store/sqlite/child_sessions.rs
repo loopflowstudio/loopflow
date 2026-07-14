@@ -28,7 +28,8 @@ use crate::session_context::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    PullRequestRef, TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+    PullRequestRef, TaskDelivery, TaskDeliveryId, TaskDeliveryStatus, TaskEvent, TaskEventKind,
+    TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 use super::SqliteStore;
@@ -37,28 +38,14 @@ impl SqliteStore {
     // Durable task sessions: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
-    pub fn insert_task_session(&self, session: &TaskSession) -> StoreResult<()> {
-        validate_task_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        validate_task_project_session(&conn, session)?;
-        let parameters = task_session_params(session);
-        conn.execute(
-            TASK_SESSION_INSERT,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        Ok(())
-    }
-
-    pub fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
-        validate_task_session(session)?;
+    pub fn insert_task_session(
+        &self,
+        session: &TaskSession,
+        delivery: &TaskDelivery,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project_session(&transaction, session)?;
-        let parameters = task_session_params(session);
-        transaction.execute(
-            TASK_SESSION_INSERT,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
+        insert_initial_task(&transaction, session, delivery)?;
         transaction.commit()?;
         Ok(())
     }
@@ -66,18 +53,13 @@ impl SqliteStore {
     pub fn reserve_task_session_with_directive(
         &self,
         session: &TaskSession,
+        delivery: &TaskDelivery,
         directive: &ChildDirective,
     ) -> StoreResult<()> {
-        validate_task_session(session)?;
         ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project_session(&transaction, session)?;
-        let parameters = task_session_params(session);
-        transaction.execute(
-            TASK_SESSION_INSERT,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
+        insert_initial_task(&transaction, session, delivery)?;
         insert_child_directive(&transaction, directive)?;
         transaction.commit()?;
         Ok(())
@@ -95,6 +77,49 @@ impl SqliteStore {
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        Ok(())
+    }
+
+    pub fn complete_task_session(
+        &self,
+        session: &TaskSession,
+        empty_delivery: Option<&TaskDelivery>,
+    ) -> StoreResult<()> {
+        validate_task_session(session)?;
+        if session.status != TaskSessionStatus::Completed {
+            return Err(StoreError::InvalidData(
+                "Task completion transaction requires a Completed Session".to_string(),
+            ));
+        }
+        if let Some(delivery) = empty_delivery {
+            validate_task_delivery(delivery)?;
+            if delivery.task_session_id != session.id
+                || delivery.status != TaskDeliveryStatus::Abandoned
+                || delivery.pull_request.is_some()
+            {
+                return Err(StoreError::InvalidData(
+                    "empty completion delivery must be an abandoned PR-less delivery for the Task"
+                        .to_string(),
+                ));
+            }
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project_session(&transaction, session)?;
+        if let Some(delivery) = empty_delivery {
+            if update_task_delivery(&transaction, delivery)? == 0 {
+                return Err(StoreError::NotFound);
+            }
+        }
+        let parameters = task_session_params(session);
+        if transaction.execute(
+            TASK_SESSION_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -210,6 +235,110 @@ impl SqliteStore {
             }
         }
         Ok(sessions)
+    }
+
+    pub fn update_task_delivery(&self, delivery: &TaskDelivery) -> StoreResult<()> {
+        validate_task_delivery(delivery)?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = update_task_delivery(&conn, delivery)?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn task_delivery(&self, delivery_id: &TaskDeliveryId) -> StoreResult<Option<TaskDelivery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_delivery_on(&conn, delivery_id)
+    }
+
+    pub fn task_deliveries(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskDelivery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "{TASK_DELIVERY_COLUMNS} WHERE task_session_id=?1 ORDER BY sequence"
+        ))?;
+        let rows = statement.query_map(params![session_id.as_str()], map_task_delivery_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn active_task_delivery(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<TaskDelivery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = format!(
+            "{TASK_DELIVERY_COLUMNS}
+             WHERE task_session_id=?1 AND status IN ('working', 'submitted')"
+        );
+        conn.query_row(&query, params![session_id.as_str()], map_task_delivery_row)
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    pub fn settle_task_delivery(
+        &self,
+        settled: &TaskDelivery,
+        next: Option<&TaskDelivery>,
+    ) -> StoreResult<()> {
+        validate_task_delivery(settled)?;
+        if !settled.status.is_settled() {
+            return Err(StoreError::InvalidData(
+                "task delivery transition requires a settled delivery".to_string(),
+            ));
+        }
+        if let Some(next) = next {
+            validate_task_delivery(next)?;
+            if next.task_session_id != settled.task_session_id
+                || next.sequence != settled.sequence + 1
+                || next.status != TaskDeliveryStatus::Working
+            {
+                return Err(StoreError::InvalidData(
+                    "next task delivery must be the following Working delivery for the same Task"
+                        .to_string(),
+                ));
+            }
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = task_delivery_on(&transaction, &settled.id)?.ok_or(StoreError::NotFound)?;
+        if current.status.is_settled() {
+            if !same_task_delivery(&current, settled) {
+                return Err(StoreError::InvalidData(format!(
+                    "task delivery {} is already settled differently",
+                    settled.id
+                )));
+            }
+        } else {
+            let changed = update_task_delivery(&transaction, settled)?;
+            if changed == 0 {
+                return Err(StoreError::NotFound);
+            }
+        }
+        if let Some(next) = next {
+            let existing = {
+                let query =
+                    format!("{TASK_DELIVERY_COLUMNS} WHERE task_session_id=?1 AND sequence=?2");
+                transaction
+                    .query_row(
+                        &query,
+                        params![next.task_session_id.as_str(), i64::from(next.sequence)],
+                        map_task_delivery_row,
+                    )
+                    .optional()?
+            };
+            match existing {
+                Some(existing) if same_task_delivery(&existing, next) => {}
+                Some(existing) => {
+                    return Err(StoreError::InvalidData(format!(
+                        "task delivery sequence {} already belongs to {}",
+                        next.sequence, existing.id
+                    )))
+                }
+                None => insert_task_delivery(&transaction, next)?,
+            }
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn insert_child_command(&self, command: &ChildCommand) -> StoreResult<()> {
@@ -1223,6 +1352,44 @@ fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
+fn validate_task_delivery(delivery: &TaskDelivery) -> StoreResult<()> {
+    delivery
+        .validate()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
+fn validate_initial_task_delivery(
+    session: &TaskSession,
+    delivery: &TaskDelivery,
+) -> StoreResult<()> {
+    validate_task_delivery(delivery)?;
+    if delivery.task_session_id != session.id
+        || delivery.sequence != 1
+        || delivery.status != TaskDeliveryStatus::Working
+    {
+        return Err(StoreError::InvalidData(
+            "Task Session requires its sequence-1 Working delivery".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn insert_initial_task(
+    conn: &Connection,
+    session: &TaskSession,
+    delivery: &TaskDelivery,
+) -> StoreResult<()> {
+    validate_task_session(session)?;
+    validate_initial_task_delivery(session, delivery)?;
+    validate_task_project_session(conn, session)?;
+    let parameters = task_session_params(session);
+    conn.execute(
+        TASK_SESSION_INSERT,
+        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+    )?;
+    insert_task_delivery(conn, delivery)
+}
+
 fn validate_task_project_session(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
     let owner = conn
         .query_row(
@@ -1255,25 +1422,25 @@ fn validate_project_session(session: &ProjectSession) -> StoreResult<()> {
 const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_prompt_context, wave_id,
-    status, status_reason, status_at, worktree, branch, base_commit,
+    status, status_reason, status_at, worktree, workspace_slug,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at, pm_snapshot_synced_at,
+    process_tmux_name, process_started_at, created_at, updated_at,
+    pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-    ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
+    ?28, ?29, ?30, ?31, ?32, ?33, ?34
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_prompt_context, wave_id,
-    status, status_reason, status_at, worktree, branch, base_commit,
+    status, status_reason, status_at, worktree, workspace_slug,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at, pm_snapshot_synced_at,
+    process_tmux_name, process_started_at, created_at, updated_at,
+    pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
@@ -1281,10 +1448,10 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_prompt_context, wave_id,
-    status, status_reason, status_at, worktree, branch, base_commit,
+    status, status_reason, status_at, worktree, workspace_slug,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at, pm_snapshot_synced_at,
+    process_tmux_name, process_started_at, created_at, updated_at,
+    pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
@@ -1293,17 +1460,25 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
     project_id=?6, project_slug=?7, project_name=?8, project_prompt_context=?9,
     wave_id=?10, status=?11, status_reason=?12, status_at=?13,
-    worktree=?14, branch=?15, base_commit=?16, agent=?17, provider=?18,
-    provider_session_id=?19, process_generation=?20, process_pid=?21,
-    process_tmux_name=?22, process_started_at=?23, pr_number=?24,
-    pr_url=?25, created_at=?26, updated_at=?27,
-    pm_snapshot_synced_at=?28, pm_writeback_json=?29,
-    project_session_id=?30,
-    current_directive_version=MAX(current_directive_version, ?31),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?32),
-    lf_bin=?33, db_path=?34, lf_home=?35,
-    abandon_requested_at=?36, abandon_reason=?37
+    worktree=?14, workspace_slug=?15, agent=?16, provider=?17,
+    provider_session_id=?18, process_generation=?19, process_pid=?20,
+    process_tmux_name=?21, process_started_at=?22,
+    created_at=?23, updated_at=?24,
+    pm_snapshot_synced_at=?25, pm_writeback_json=?26,
+    project_session_id=?27,
+    current_directive_version=MAX(current_directive_version, ?28),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?29),
+    lf_bin=?30, db_path=?31, lf_home=?32,
+    abandon_requested_at=?33, abandon_reason=?34
     WHERE id=?1";
+const TASK_DELIVERY_COLUMNS: &str = "SELECT
+    id, task_session_id, sequence, slug, branch, base_commit, status,
+    after_merge, next_slug, pr_number, pr_url, merge_commit, created_at, updated_at
+    FROM task_deliveries";
+const TASK_DELIVERY_SELECT: &str = "SELECT
+    id, task_session_id, sequence, slug, branch, base_commit, status,
+    after_merge, next_slug, pr_number, pr_url, merge_commit, created_at, updated_at
+    FROM task_deliveries WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
     claimed_by_generation, accepted_at, state, effect, error
@@ -1506,8 +1681,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.status_reason.clone()),
         Box::new(session.status_at.unix_timestamp()),
         Box::new(session.worktree.display().to_string()),
-        Box::new(session.branch.clone()),
-        Box::new(session.base_commit.clone()),
+        Box::new(session.workspace_slug.clone()),
         Box::new(session.agent.clone()),
         Box::new(session.provider.clone()),
         Box::new(session.provider_session_id.clone()),
@@ -1534,18 +1708,6 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
                 .latest_process
                 .as_ref()
                 .map(|process| process.started_at.unix_timestamp()),
-        ),
-        Box::new(
-            session
-                .pull_request
-                .as_ref()
-                .map(|pull_request| i64::from(pull_request.number)),
-        ),
-        Box::new(
-            session
-                .pull_request
-                .as_ref()
-                .map(|pull_request| pull_request.url.clone()),
         ),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
@@ -1590,6 +1752,100 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     ]
 }
 
+fn insert_task_delivery(conn: &Connection, delivery: &TaskDelivery) -> StoreResult<()> {
+    validate_task_delivery(delivery)?;
+    conn.execute(
+        "INSERT INTO task_deliveries (
+            id, task_session_id, sequence, slug, branch, base_commit, status,
+            after_merge, next_slug, pr_number, pr_url, merge_commit, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![
+            delivery.id.as_str(),
+            delivery.task_session_id.as_str(),
+            i64::from(delivery.sequence),
+            delivery.slug,
+            delivery.branch,
+            delivery.base_commit,
+            delivery.status.as_str(),
+            delivery.after_merge.as_str(),
+            delivery.next_slug,
+            delivery
+                .pull_request
+                .as_ref()
+                .map(|pull_request| i64::from(pull_request.number)),
+            delivery
+                .pull_request
+                .as_ref()
+                .map(|pull_request| pull_request.url.as_str()),
+            delivery.merge_commit,
+            delivery.created_at.unix_timestamp(),
+            delivery.updated_at.unix_timestamp(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn update_task_delivery(conn: &Connection, delivery: &TaskDelivery) -> StoreResult<usize> {
+    validate_task_delivery(delivery)?;
+    conn.execute(
+        "UPDATE task_deliveries SET
+            status=?7, after_merge=?8, next_slug=?9, pr_number=?10, pr_url=?11,
+            merge_commit=?12, updated_at=?14
+         WHERE id=?1 AND task_session_id=?2 AND sequence=?3 AND slug=?4
+           AND branch=?5 AND base_commit=?6 AND created_at=?13",
+        params![
+            delivery.id.as_str(),
+            delivery.task_session_id.as_str(),
+            i64::from(delivery.sequence),
+            delivery.slug,
+            delivery.branch,
+            delivery.base_commit,
+            delivery.status.as_str(),
+            delivery.after_merge.as_str(),
+            delivery.next_slug,
+            delivery
+                .pull_request
+                .as_ref()
+                .map(|pull_request| i64::from(pull_request.number)),
+            delivery
+                .pull_request
+                .as_ref()
+                .map(|pull_request| pull_request.url.as_str()),
+            delivery.merge_commit,
+            delivery.created_at.unix_timestamp(),
+            delivery.updated_at.unix_timestamp(),
+        ],
+    )
+    .map_err(StoreError::from)
+}
+
+fn task_delivery_on(
+    conn: &Connection,
+    delivery_id: &TaskDeliveryId,
+) -> StoreResult<Option<TaskDelivery>> {
+    conn.query_row(
+        TASK_DELIVERY_SELECT,
+        params![delivery_id.as_str()],
+        map_task_delivery_row,
+    )
+    .optional()
+    .map_err(StoreError::from)
+}
+
+fn same_task_delivery(left: &TaskDelivery, right: &TaskDelivery) -> bool {
+    left.id == right.id
+        && left.task_session_id == right.task_session_id
+        && left.sequence == right.sequence
+        && left.slug == right.slug
+        && left.branch == right.branch
+        && left.base_commit == right.base_commit
+        && left.status == right.status
+        && left.after_merge == right.after_merge
+        && left.next_slug == right.next_slug
+        && left.pull_request == right.pull_request
+        && left.merge_commit == right.merge_commit
+}
+
 fn invalid_column(
     index: usize,
     error: impl std::error::Error + Send + Sync + 'static,
@@ -1607,30 +1863,21 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
     let status = status_text
         .parse()
         .map_err(|error| invalid_column(10, error))?;
-    let process_generation: Option<i64> = row.get(19)?;
-    let process_started_at: Option<i64> = row.get(22)?;
+    let process_generation: Option<i64> = row.get(18)?;
+    let process_started_at: Option<i64> = row.get(21)?;
     let process = match (process_generation, process_started_at) {
         (Some(generation), Some(started_at)) => Some(ChildProcessGeneration {
             generation: generation as u32,
-            pid: row.get::<_, Option<i64>>(20)?.map(|pid| pid as u32),
-            tmux_name: row.get::<_, Option<String>>(21)?.unwrap_or_default(),
+            pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
+            tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
             started_at: crate::store::rows::unix_to_datetime(started_at),
         }),
         _ => None,
     };
-    let pr_number: Option<i64> = row.get(23)?;
-    let pr_url: Option<String> = row.get(24)?;
-    let pull_request = match (pr_number, pr_url) {
-        (Some(number), Some(url)) => Some(PullRequestRef {
-            number: number as u32,
-            url,
-        }),
-        _ => None,
-    };
-    let execution = execution_context(row, 32, 33, 34)?;
+    let execution = execution_context(row, 29, 30, 31)?;
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(35)?,
-        row.get::<_, Option<String>>(36)?,
+        row.get::<_, Option<i64>>(32)?,
+        row.get::<_, Option<String>>(33)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -1653,30 +1900,77 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
                 name: row.get(7)?,
                 prompt_context: row.get(8)?,
             },
-            pm_snapshot_synced_at: row.get(27)?,
+            pm_snapshot_synced_at: row.get(24)?,
         },
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(28)?)
-            .map_err(|error| invalid_column(28, error))?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(25)?)
+            .map_err(|error| invalid_column(25, error))?,
         wave_id: row.get(9)?,
-        project_session_id: ProjectSessionId::from_raw(row.get::<_, String>(29)?),
-        current_directive_version: row.get::<_, i64>(30)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(31)? as u32,
+        project_session_id: ProjectSessionId::from_raw(row.get::<_, String>(26)?),
+        current_directive_version: row.get::<_, i64>(27)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(28)? as u32,
         status,
         status_reason: row.get(11)?,
         status_at: crate::store::rows::unix_to_datetime(row.get(12)?),
         worktree: PathBuf::from(row.get::<_, String>(13)?),
-        branch: row.get(14)?,
-        base_commit: row.get(15)?,
-        agent: row.get(16)?,
-        provider: row.get(17)?,
-        provider_session_id: row.get(18)?,
+        workspace_slug: row.get(14)?,
+        agent: row.get(15)?,
+        provider: row.get(16)?,
+        provider_session_id: row.get(17)?,
         latest_process: process,
-        pull_request,
         execution,
         abandon_intent,
-        created_at: crate::store::rows::unix_to_datetime(row.get(25)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(26)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
     })
+}
+
+fn map_task_delivery_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskDelivery> {
+    let status_text: String = row.get(6)?;
+    let status = status_text
+        .parse()
+        .map_err(|error| invalid_column(6, error))?;
+    let after_merge_text: String = row.get(7)?;
+    let after_merge = after_merge_text
+        .parse()
+        .map_err(|error| invalid_column(7, error))?;
+    let pull_request = match (
+        row.get::<_, Option<i64>>(9)?,
+        row.get::<_, Option<String>>(10)?,
+    ) {
+        (Some(number), Some(url)) => Some(PullRequestRef {
+            number: number as u32,
+            url,
+        }),
+        (None, None) => None,
+        _ => {
+            return Err(invalid_column(
+                8,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "task delivery has a partial pull request reference",
+                ),
+            ))
+        }
+    };
+    let delivery = TaskDelivery {
+        id: TaskDeliveryId::from_raw(row.get::<_, String>(0)?),
+        task_session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
+        sequence: row.get::<_, i64>(2)? as u32,
+        slug: row.get(3)?,
+        branch: row.get(4)?,
+        base_commit: row.get(5)?,
+        status,
+        after_merge,
+        next_slug: row.get(8)?,
+        pull_request,
+        merge_commit: row.get(11)?,
+        created_at: crate::store::rows::unix_to_datetime(row.get(12)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(13)?),
+    };
+    delivery
+        .validate()
+        .map_err(|error| invalid_column(6, error))?;
+    Ok(delivery)
 }
 
 fn map_child_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildCommand> {

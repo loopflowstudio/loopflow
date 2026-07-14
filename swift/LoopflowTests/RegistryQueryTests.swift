@@ -63,7 +63,7 @@ struct RegistryQueryTests {
               "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
-              "pull_request":null
+              "pull_requests":[]
             }]
           }],
           "runs":{"state":"ok","truncated":false,"items":[{"id":"span-1","run_id":"abc","process_id":"span-1","parent_process_id":null,"repo":"/src/loopflow","wave":"goals","label":"pm sync","status":"ok","started":100,"ended":110,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus"}]},

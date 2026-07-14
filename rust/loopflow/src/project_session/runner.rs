@@ -665,7 +665,7 @@ async fn inspect_outcome(
     })
     .await
     .map_err(|error| anyhow!(error.to_string()))??;
-    let tasks = store
+    let mut tasks = store
         .list_task_sessions(Some(&session.wave_id))
         .await?
         .into_iter()
@@ -674,6 +674,31 @@ async fn inspect_outcome(
                 && task.project_session_id == session.id
         })
         .collect::<Vec<_>>();
+    for task in &mut tasks {
+        if task.status.is_terminal() {
+            continue;
+        }
+        let observed = crate::ops::task::reconcile_task_delivery(store, task)
+            .await
+            .map_err(|error| anyhow!(error.to_string()))?;
+        crate::ops::task::reconcile_process_liveness(store, task)
+            .await
+            .map_err(|error| anyhow!(error.to_string()))?;
+        let settled = observed
+            .as_ref()
+            .is_some_and(|delivery| delivery.status.is_settled())
+            || (observed.is_none() && store.active_task_delivery(&task.id).await?.is_none());
+        if settled && !task.status.is_terminal() {
+            crate::ops::task::ensure_working_delivery(store, task)
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?;
+            if !task.status.is_process_active() {
+                crate::ops::task::relaunch_inactive_process(store, task)
+                    .await
+                    .map_err(|error| anyhow!(error.to_string()))?;
+            }
+        }
+    }
     let pm_tasks = resolved
         .snapshot
         .items
@@ -693,15 +718,23 @@ async fn inspect_outcome(
             fingerprint,
         });
     }
-    if tasks.iter().any(|task| {
-        matches!(
-            task.status,
-            TaskSessionStatus::Created
-                | TaskSessionStatus::Starting
-                | TaskSessionStatus::Running
-                | TaskSessionStatus::Submitted
-        )
-    }) {
+    let mut has_submitted_delivery = false;
+    for task in &tasks {
+        has_submitted_delivery |= store
+            .active_task_delivery(&task.id)
+            .await?
+            .is_some_and(|delivery| delivery.status == crate::task::TaskDeliveryStatus::Submitted);
+    }
+    if has_submitted_delivery
+        || tasks.iter().any(|task| {
+            matches!(
+                task.status,
+                TaskSessionStatus::Created
+                    | TaskSessionStatus::Starting
+                    | TaskSessionStatus::Running
+            )
+        })
+    {
         return Ok(ProjectOutcome {
             status: ProjectSessionStatus::Waiting,
             reason: "supervised Tasks are active; waiting for typed Task observations".to_string(),

@@ -31,8 +31,9 @@ lf pm task update --id <task-id> --title "..."
   file-writing change begins as a Linear task under exactly one Project.
 - Start the task with `lf task run <issue-id> --directive "<delegation brief>"`.
   This ensures the owning Project Session before creating the Task Session.
-  The Task owns one immutable worktree, provider transcript, and pull request
-  to main; the Project receives its routine observations and decisions.
+  The Task owns one stable worktree and provider transcript. Its ordered
+  deliveries own serial branches and PRs to main; the Project receives routine
+  observations and decisions.
 - Supervise active work with `lf task status`, `lf task steer`, `lf task
   interrupt`, `lf task wait`, and `lf task resume` when root inspection or
   override is needed. This never replaces the Task's Project Session.

@@ -32,12 +32,12 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let runtime: TaskRuntimeSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
-    public let pullRequest: PullRequestSnapshot?
+    public let pullRequests: [PullRequestSnapshot]
 
     enum CodingKeys: String, CodingKey {
         case task, runtime, directive
         case nextMove = "next_move"
-        case pullRequest = "pull_request"
+        case pullRequests = "pull_requests"
     }
 }
 
@@ -93,7 +93,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let statusAt: String
     public let worktree: String
-    public let branch: String
+    public let branch: String?
     public let provider: String
     public let processAlive: Bool
 
@@ -111,7 +111,7 @@ public enum ProjectSessionStatus: String, Decodable, Sendable, Hashable {
 }
 
 public enum TaskSessionStatus: String, Decodable, Sendable, Hashable {
-    case created, starting, running, waiting, submitted, blocked, failed, merged, abandoned
+    case created, starting, running, waiting, blocked, failed, completed, abandoned
 }
 
 public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {

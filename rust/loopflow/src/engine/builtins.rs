@@ -243,7 +243,7 @@ mod tests {
         let wave = get_builtin_skill("wave_pursue").expect("wave pursue");
         assert!(wave.contains("lf task run <issue-id>"));
         assert!(wave.contains("lf task status"));
-        assert!(wave.contains("immutable worktree"));
+        assert!(wave.contains("stable worktree"));
 
         let project = get_builtin_skill("project_pursue").expect("project pursue");
         assert!(project.contains("lf task run <issue-id>"));
@@ -252,7 +252,8 @@ mod tests {
         let task = get_builtin_skill("task_pursue").expect("task pursue");
         assert!(task.contains("second Task Session"));
         assert!(task.contains("lf pr land"));
-        assert!(task.contains("lf pm task done"));
+        assert!(task.contains("lf task complete"));
+        assert!(!task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
 
         for (flow, steps) in [

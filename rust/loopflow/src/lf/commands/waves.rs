@@ -22,7 +22,7 @@ use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{TaskSession, TaskSessionStatus};
+use crate::task::{TaskDelivery, TaskDeliveryStatus, TaskSession, TaskSessionStatus};
 use crate::wave::server::live_endpoint;
 use crate::wave::Wave;
 
@@ -229,7 +229,7 @@ pub struct TaskRuntimeSnapshot {
     pub reason: String,
     pub status_at: String,
     pub worktree: String,
-    pub branch: String,
+    pub branch: Option<String>,
     pub provider: String,
     pub process_alive: bool,
 }
@@ -240,7 +240,7 @@ pub struct TaskDetailSnapshot {
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub directive: Option<DirectiveSnapshot>,
     pub next_move: NextMove,
-    pub pull_request: Option<crate::task::PullRequestRef>,
+    pub pull_requests: Vec<crate::task::PullRequestRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -513,7 +513,10 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     })
 }
 
-async fn snapshot_task_runtime(task: &TaskSession) -> TaskRuntimeSnapshot {
+async fn snapshot_task_runtime(
+    task: &TaskSession,
+    active_delivery: Option<&TaskDelivery>,
+) -> TaskRuntimeSnapshot {
     let process_alive = if task.status.is_process_active() {
         match task.latest_process.as_ref() {
             Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
@@ -531,7 +534,7 @@ async fn snapshot_task_runtime(task: &TaskSession) -> TaskRuntimeSnapshot {
         reason: task.status_reason.clone(),
         status_at: format_time(task.status_at).unwrap_or_default(),
         worktree: task.worktree.display().to_string(),
-        branch: task.branch.clone(),
+        branch: active_delivery.map(|delivery| delivery.branch.clone()),
         provider: task.provider.clone(),
         process_alive,
     }
@@ -704,12 +707,23 @@ async fn snapshot_task_detail(
     item: PmItem,
     session: Option<&TaskSession>,
 ) -> Result<TaskDetailSnapshot> {
+    let deliveries = match session {
+        Some(session) => store.task_deliveries(&session.id).await?,
+        None => Vec::new(),
+    };
+    let active_delivery = deliveries
+        .iter()
+        .find(|delivery| delivery.status.is_active());
     let runtime = match session {
-        Some(session) => Some(snapshot_task_runtime(session).await),
+        Some(session) => Some(snapshot_task_runtime(session, active_delivery).await),
         None => None,
     };
     let next_move = match session {
-        Some(session) => next_move_for_task(session.status, &session.status_reason),
+        Some(session) => next_move_for_task(
+            session.status,
+            active_delivery.map(|delivery| delivery.status),
+            &session.status_reason,
+        ),
         None if item.completed => NextMove {
             owner: NextMoveOwner::Project,
             reason: "Linear Task is complete".to_string(),
@@ -719,7 +733,10 @@ async fn snapshot_task_detail(
             reason: "Task is ready to start".to_string(),
         },
     };
-    let pull_request = session.and_then(|session| session.pull_request.clone());
+    let pull_requests = deliveries
+        .iter()
+        .filter_map(|delivery| delivery.pull_request.clone())
+        .collect();
     let directive = match session {
         Some(session) => {
             current_directive(
@@ -736,7 +753,7 @@ async fn snapshot_task_detail(
         runtime,
         directive,
         next_move,
-        pull_request,
+        pull_requests,
     })
 }
 
@@ -830,16 +847,23 @@ fn next_move_for_project(status: ProjectSessionStatus, reason: &str) -> NextMove
     }
 }
 
-fn next_move_for_task(status: TaskSessionStatus, reason: &str) -> NextMove {
-    let owner = match status {
-        TaskSessionStatus::Created | TaskSessionStatus::Starting | TaskSessionStatus::Running => {
-            NextMoveOwner::Task
+fn next_move_for_task(
+    status: TaskSessionStatus,
+    delivery_status: Option<TaskDeliveryStatus>,
+    reason: &str,
+) -> NextMove {
+    let owner = if delivery_status == Some(TaskDeliveryStatus::Submitted) {
+        NextMoveOwner::Review
+    } else {
+        match status {
+            TaskSessionStatus::Created
+            | TaskSessionStatus::Starting
+            | TaskSessionStatus::Running => NextMoveOwner::Task,
+            TaskSessionStatus::Waiting | TaskSessionStatus::Blocked | TaskSessionStatus::Failed => {
+                NextMoveOwner::Project
+            }
+            TaskSessionStatus::Completed | TaskSessionStatus::Abandoned => NextMoveOwner::Project,
         }
-        TaskSessionStatus::Waiting | TaskSessionStatus::Blocked | TaskSessionStatus::Failed => {
-            NextMoveOwner::Project
-        }
-        TaskSessionStatus::Submitted => NextMoveOwner::Review,
-        TaskSessionStatus::Merged | TaskSessionStatus::Abandoned => NextMoveOwner::Project,
     };
     NextMove {
         owner,
@@ -1233,7 +1257,7 @@ mod tests {
                         owner: NextMoveOwner::Project,
                         reason: "Task is ready to start".into(),
                     },
-                    pull_request: None,
+                    pull_requests: Vec::new(),
                 }],
             }],
         };
@@ -1313,7 +1337,7 @@ mod tests {
             runtime,
             directive: None,
             next_move,
-            pull_request: None,
+            pull_requests: Vec::new(),
         }
     }
 
@@ -1330,7 +1354,7 @@ mod tests {
             reason: reason.to_string(),
             status_at,
             worktree: "/repo".to_string(),
-            branch: "b".to_string(),
+            branch: Some("b".to_string()),
             provider: "claude".to_string(),
             process_alive,
         }
@@ -1362,7 +1386,7 @@ mod tests {
                 task_detail(
                     "W2-129",
                     Some(task_runtime(
-                        TaskSessionStatus::Submitted,
+                        TaskSessionStatus::Waiting,
                         "PR is open",
                         at(7200),
                         false,
@@ -1458,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn a_merged_task_is_done_not_waiting() {
+    fn a_completed_task_is_done_not_waiting() {
         let projects = vec![project_detail(
             "auditability",
             None,
@@ -1469,7 +1493,7 @@ mod tests {
             vec![task_detail(
                 "W2-100",
                 Some(task_runtime(
-                    TaskSessionStatus::Merged,
+                    TaskSessionStatus::Completed,
                     "merged",
                     at(10),
                     false,

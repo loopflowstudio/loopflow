@@ -339,7 +339,7 @@ private struct WaveTaskWorkView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
                 }
-                if let pullRequest = task.pullRequest {
+                ForEach(task.pullRequests, id: \.url) { pullRequest in
                     Link("PR #\(pullRequest.number)", destination: pullRequest.url)
                         .font(Typography.caption(10))
                 }
@@ -395,7 +395,7 @@ private struct WaveWorkInspector: View {
                     reason: project.nextMove.reason,
                     provider: project.runtime?.provider,
                     location: nil,
-                    pullRequest: nil
+                    pullRequests: []
                 )
             } else if let task {
                 Text("\(task.task.identifier) · \(task.task.name)")
@@ -406,8 +406,8 @@ private struct WaveWorkInspector: View {
                     status: task.runtime?.status.rawValue ?? "unstarted",
                     reason: task.nextMove.reason,
                     provider: task.runtime?.provider,
-                    location: task.runtime.map { "\($0.worktree)\n\($0.branch)" },
-                    pullRequest: task.pullRequest
+                    location: taskLocation,
+                    pullRequests: task.pullRequests
                 )
                 if task.runtime != nil {
                     Button("Open Task workspace") { showsTaskWorkspace = true }
@@ -442,6 +442,12 @@ private struct WaveWorkInspector: View {
             .first { $0.task.identifier == selection.id || $0.task.id == selection.id }
     }
 
+    private var taskLocation: String? {
+        guard let runtime = task?.runtime else { return nil }
+        guard let branch = runtime.branch else { return runtime.worktree }
+        return "\(runtime.worktree)\n\(branch)"
+    }
+
     @ViewBuilder
     private func details(
         directive: WorkDirectiveSnapshot?,
@@ -449,7 +455,7 @@ private struct WaveWorkInspector: View {
         reason: String,
         provider: String?,
         location: String?,
-        pullRequest: PullRequestSnapshot?
+        pullRequests: [PullRequestSnapshot]
     ) -> some View {
         Text("\(status) · \(reason)")
             .font(Typography.caption(11))
@@ -477,7 +483,7 @@ private struct WaveWorkInspector: View {
                 .foregroundStyle(palette.textSecondary)
                 .textSelection(.enabled)
         }
-        if let pullRequest {
+        ForEach(pullRequests, id: \.url) { pullRequest in
             Link("PR #\(pullRequest.number)", destination: pullRequest.url)
                 .font(Typography.caption(10))
         }

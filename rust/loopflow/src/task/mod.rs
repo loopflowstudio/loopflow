@@ -1,8 +1,8 @@
 //! Durable delivery of one Linear Task.
 //!
-//! A Task Session is the sole domain owner of its immutable worktree, branch,
-//! provider transcript, one PR to main, and review-through-merge lifecycle.
-//! Process generations may stop and resume without changing Task identity.
+//! A Task Session owns one durable worktree and provider transcript. Ordered
+//! deliveries own the serial branches and pull requests that advance the Task.
+//! Process generations and deliveries may change without changing Task identity.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -27,6 +27,8 @@ pub enum TaskDataError {
     InvalidId(String),
     #[error("invalid task session status: {0}")]
     InvalidStatus(String),
+    #[error("invalid task delivery status: {0}")]
+    InvalidDeliveryStatus(String),
     #[error("invalid task session: {0}")]
     InvalidInvariant(String),
 }
@@ -34,6 +36,13 @@ pub enum TaskDataError {
 prefixed_uuid_id!(
     TaskSessionId,
     "ts_",
+    TaskDataError,
+    TaskDataError::InvalidId
+);
+
+prefixed_uuid_id!(
+    TaskDeliveryId,
+    "td_",
     TaskDataError,
     TaskDataError::InvalidId
 );
@@ -46,10 +55,9 @@ pub enum TaskSessionStatus {
     Starting,
     Running,
     Waiting,
-    Submitted,
     Blocked,
     Failed,
-    Merged,
+    Completed,
     Abandoned,
 }
 
@@ -60,16 +68,15 @@ impl TaskSessionStatus {
             Self::Starting => "starting",
             Self::Running => "running",
             Self::Waiting => "waiting",
-            Self::Submitted => "submitted",
             Self::Blocked => "blocked",
             Self::Failed => "failed",
-            Self::Merged => "merged",
+            Self::Completed => "completed",
             Self::Abandoned => "abandoned",
         }
     }
 
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Merged | Self::Abandoned)
+        matches!(self, Self::Completed | Self::Abandoned)
     }
 
     pub fn is_process_active(self) -> bool {
@@ -86,10 +93,9 @@ impl FromStr for TaskSessionStatus {
             "starting" => Ok(Self::Starting),
             "running" => Ok(Self::Running),
             "waiting" => Ok(Self::Waiting),
-            "submitted" => Ok(Self::Submitted),
             "blocked" => Ok(Self::Blocked),
             "failed" => Ok(Self::Failed),
-            "merged" => Ok(Self::Merged),
+            "completed" => Ok(Self::Completed),
             "abandoned" => Ok(Self::Abandoned),
             _ => Err(TaskDataError::InvalidStatus(value.to_string())),
         }
@@ -100,6 +106,154 @@ impl FromStr for TaskSessionStatus {
 pub struct PullRequestRef {
     pub number: u32,
     pub url: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TaskDeliveryStatus {
+    Working,
+    Submitted,
+    Merged,
+    Abandoned,
+}
+
+impl TaskDeliveryStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Submitted => "submitted",
+            Self::Merged => "merged",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Working | Self::Submitted)
+    }
+
+    pub fn is_settled(self) -> bool {
+        matches!(self, Self::Merged | Self::Abandoned)
+    }
+}
+
+impl FromStr for TaskDeliveryStatus {
+    type Err = TaskDataError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "working" => Ok(Self::Working),
+            "submitted" => Ok(Self::Submitted),
+            "merged" => Ok(Self::Merged),
+            "abandoned" => Ok(Self::Abandoned),
+            _ => Err(TaskDataError::InvalidDeliveryStatus(value.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AfterMerge {
+    Review,
+    CompleteTask,
+}
+
+impl AfterMerge {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::CompleteTask => "complete_task",
+        }
+    }
+}
+
+impl FromStr for AfterMerge {
+    type Err = TaskDataError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "review" => Ok(Self::Review),
+            "complete_task" => Ok(Self::CompleteTask),
+            _ => Err(TaskDataError::InvalidInvariant(format!(
+                "invalid after-merge disposition: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskDelivery {
+    pub id: TaskDeliveryId,
+    pub task_session_id: TaskSessionId,
+    pub sequence: u32,
+    pub slug: String,
+    pub branch: String,
+    pub base_commit: String,
+    pub status: TaskDeliveryStatus,
+    pub after_merge: AfterMerge,
+    pub next_slug: Option<String>,
+    pub pull_request: Option<PullRequestRef>,
+    pub merge_commit: Option<String>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+impl TaskDelivery {
+    pub fn validate(&self) -> Result<(), TaskDataError> {
+        if self.sequence == 0 {
+            return Err(TaskDataError::InvalidInvariant(
+                "task delivery sequence starts at 1".to_string(),
+            ));
+        }
+        if self.slug.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(
+                "task delivery slug cannot be empty".to_string(),
+            ));
+        }
+        if self.branch.trim().is_empty() || self.base_commit.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(
+                "task delivery requires a branch and base commit".to_string(),
+            ));
+        }
+        if self.next_slug.as_deref().is_some_and(|slug| {
+            slug.split('-').any(|word| {
+                word.is_empty()
+                    || !word
+                        .bytes()
+                        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+            })
+        }) {
+            return Err(TaskDataError::InvalidInvariant(
+                "next delivery slug must be lowercase kebab-case".to_string(),
+            ));
+        }
+        if self.after_merge == AfterMerge::CompleteTask && self.next_slug.is_some() {
+            return Err(TaskDataError::InvalidInvariant(
+                "a completing delivery cannot name a next delivery".to_string(),
+            ));
+        }
+        if matches!(
+            self.status,
+            TaskDeliveryStatus::Submitted | TaskDeliveryStatus::Merged
+        ) && self.pull_request.is_none()
+        {
+            return Err(TaskDataError::InvalidInvariant(format!(
+                "{} delivery requires a pull request",
+                self.status.as_str()
+            )));
+        }
+        if self.status == TaskDeliveryStatus::Merged && self.merge_commit.is_none() {
+            return Err(TaskDataError::InvalidInvariant(
+                "merged delivery requires a merge commit".to_string(),
+            ));
+        }
+        if self.status != TaskDeliveryStatus::Merged && self.merge_commit.is_some() {
+            return Err(TaskDataError::InvalidInvariant(
+                "only a merged delivery may record a merge commit".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,15 +289,13 @@ pub struct TaskSession {
     pub status_reason: String,
     pub status_at: OffsetDateTime,
     pub worktree: PathBuf,
-    pub branch: String,
-    pub base_commit: String,
+    pub workspace_slug: String,
     /// Provider/model selection captured when the session is reserved.
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
     /// Latest launch generation, retained after that process exits.
     pub latest_process: Option<ChildProcessGeneration>,
-    pub pull_request: Option<PullRequestRef>,
     /// The binary and store every generation of this Session relaunches with.
     /// `None` only for a Session created before the context was pinned: nothing
     /// recorded which `lf` spawned it, so it refuses to launch rather than let
@@ -162,10 +314,10 @@ impl TaskSession {
     /// Three intents are terminal for *automatic* restart, and only the first is
     /// terminal for the Session itself:
     ///
-    /// - the Session is `Merged` or `Abandoned` — the work is over;
+    /// - the Session is `Completed` or `Abandoned` — the work is over;
     /// - abandonment has been *requested* — the runner has not consumed the
     ///   command yet, but the decision is made;
-    /// - the PR is open and the Session is `Submitted` — the work is delivered
+    /// - the active delivery is `Submitted` — the work is delivered
     ///   and belongs to review.
     ///
     /// The third was the 2026-07-14 W2-129 failure: `Submitted` is not terminal
@@ -176,7 +328,7 @@ impl TaskSession {
     ///
     /// A human may still `lf task resume` a submitted Session to answer review;
     /// this bars the supervisor, not the operator.
-    pub fn supervisor_restart_bar(&self) -> Option<String> {
+    pub fn supervisor_restart_bar(&self, active_delivery: Option<&TaskDelivery>) -> Option<String> {
         if self.status.is_terminal() {
             return Some(format!(
                 "Task {} is {}; terminal Task Sessions do not restart",
@@ -190,8 +342,12 @@ impl TaskSession {
                 self.launch.issue.identifier, intent.reason
             ));
         }
-        if let Some(pull_request) = &self.pull_request {
-            if self.status == TaskSessionStatus::Submitted {
+        if let Some(delivery) = active_delivery {
+            if delivery.status == TaskDeliveryStatus::Submitted {
+                let pull_request = delivery
+                    .pull_request
+                    .as_ref()
+                    .expect("submitted delivery passed validation");
                 return Some(format!(
                     "Task {} submitted pull request #{} and is awaiting review; \
                      resume it explicitly with `lf task resume {}` to answer review",
@@ -209,21 +365,17 @@ impl TaskSession {
                 self.status.as_str()
             )));
         }
-        if matches!(
-            self.status,
-            TaskSessionStatus::Submitted | TaskSessionStatus::Merged
-        ) && self.pull_request.is_none()
-        {
+        if self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
-                "{} requires a pull request",
-                self.status.as_str()
+                "Task Session {} requires a workspace slug",
+                self.id
             )));
         }
         if matches!(self.pm_writeback, PmWritebackState::Pending { .. })
-            && self.status != TaskSessionStatus::Merged
+            && self.status != TaskSessionStatus::Completed
         {
             return Err(TaskDataError::InvalidInvariant(
-                "pending PM completion is valid only after merge".to_string(),
+                "pending PM completion is valid only for a completed Task".to_string(),
             ));
         }
         if self.incorporated_directive_version > self.current_directive_version {
@@ -297,12 +449,24 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    DeliveryStarted {
+        delivery_id: TaskDeliveryId,
+        sequence: u32,
+        branch: String,
+        base_commit: String,
+    },
     PullRequestOpened {
+        delivery_id: TaskDeliveryId,
         number: u32,
         url: String,
     },
+    DeliveryMerged {
+        delivery_id: TaskDeliveryId,
+        number: u32,
+        url: String,
+        merge_commit: String,
+    },
     Completed {
-        pull_request: PullRequestRef,
         summary: String,
     },
     Failed {
@@ -371,8 +535,9 @@ impl TaskObservation {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState, PullRequestRef,
-        TaskEventKind, TaskObservation, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState,
+        PullRequestRef, TaskDelivery, TaskDeliveryId, TaskDeliveryStatus, TaskEventKind,
+        TaskObservation, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::child_session::ChildDecisionId;
     use crate::session_context::{
@@ -408,13 +573,11 @@ mod tests {
             status_reason: "created".to_string(),
             status_at: now,
             worktree: "/tmp/task".into(),
-            branch: "task/inf-123".to_string(),
-            base_commit: "abc".to_string(),
+            workspace_slug: "ship-it".to_string(),
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
-            pull_request: None,
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
@@ -426,6 +589,8 @@ mod tests {
     fn task_ids_are_prefixed_and_round_trip() {
         let session = TaskSessionId::new();
         assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
+        let delivery = TaskDeliveryId::new();
+        assert_eq!(TaskDeliveryId::parse(delivery.as_str()).unwrap(), delivery);
     }
 
     #[test]
@@ -447,10 +612,10 @@ mod tests {
     }
 
     #[test]
-    fn only_merged_and_abandoned_are_terminal() {
-        assert!(TaskSessionStatus::Merged.is_terminal());
+    fn only_completed_and_abandoned_tasks_are_terminal() {
+        assert!(TaskSessionStatus::Completed.is_terminal());
         assert!(TaskSessionStatus::Abandoned.is_terminal());
-        assert!(!TaskSessionStatus::Submitted.is_terminal());
+        assert!(!TaskSessionStatus::Waiting.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
     }
 
@@ -513,23 +678,46 @@ mod tests {
     }
 
     #[test]
-    fn submitted_and_merged_tasks_require_their_one_pull_request() {
-        let mut session = task_session();
-        session.status = TaskSessionStatus::Submitted;
-        assert!(session.validate().is_err());
+    fn delivery_invariants_separate_work_from_task_completion() {
+        let now = time::OffsetDateTime::now_utc();
+        let mut delivery = TaskDelivery {
+            id: TaskDeliveryId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            status: TaskDeliveryStatus::Working,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            pull_request: None,
+            merge_commit: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert!(delivery.validate().is_ok());
 
-        session.pull_request = Some(PullRequestRef {
+        delivery.status = TaskDeliveryStatus::Submitted;
+        assert!(delivery.validate().is_err());
+        delivery.pull_request = Some(PullRequestRef {
             number: 872,
             url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
         });
-        assert!(session.validate().is_ok());
+        assert!(delivery.validate().is_ok());
 
-        session.status = TaskSessionStatus::Merged;
-        session.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: "Linear is offline".to_string(),
-        };
-        assert!(session.validate().is_ok());
+        delivery.status = TaskDeliveryStatus::Merged;
+        assert!(delivery.validate().is_err());
+        delivery.merge_commit = Some("def".to_string());
+        assert!(delivery.validate().is_ok());
+
+        delivery.status = TaskDeliveryStatus::Submitted;
+        delivery.merge_commit = None;
+        delivery.next_slug = Some("released_upgrade".to_string());
+        assert!(delivery.validate().is_err());
+        delivery.next_slug = Some("released-upgrade".to_string());
+        assert!(delivery.validate().is_ok());
+        delivery.after_merge = AfterMerge::CompleteTask;
+        assert!(delivery.validate().is_err());
     }
 
     #[test]
@@ -544,5 +732,8 @@ mod tests {
             error: "too early".to_string(),
         };
         assert!(session.validate().is_err());
+
+        session.status = TaskSessionStatus::Completed;
+        assert!(session.validate().is_ok());
     }
 }

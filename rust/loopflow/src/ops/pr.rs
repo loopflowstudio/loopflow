@@ -34,6 +34,7 @@ pub struct PrInfo {
     pub number: u64,
     pub state: String,
     pub branch: String,
+    pub merge_commit: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +50,13 @@ struct GhPr {
     #[serde(default, rename = "isDraft")]
     is_draft: bool,
     number: u64,
+    #[serde(default, rename = "mergeCommit")]
+    merge_commit: Option<GhCommit>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCommit {
+    oid: String,
 }
 
 pub fn create_or_update_pr(
@@ -91,35 +99,80 @@ pub fn create_or_update_pr(
     let copy = resolve_pr_copy(repo, options, progress)?;
     let title = copy.title.trim();
     let body = copy.body.trim();
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
 
-    if let Some(pr) = find_open_pr(repo)? {
+    let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
         progress.status("Updating PR...");
         update_pr(repo, pr.number, title, body)?;
         if pr.is_draft {
             mark_pr_ready(repo, pr.number)?;
         }
         open_url(&pr.url);
-        Ok(PrResult {
-            url: pr.url,
-            created: false,
-            updated: true,
-        })
+        let info = pr_info(&branch, pr);
+        (
+            PrResult {
+                url: info.url.clone(),
+                created: false,
+                updated: true,
+            },
+            Some(info),
+        )
     } else {
         progress.status("Creating PR...");
         let base = pr_target(repo, &main_repo, &base_branch)?;
         let url = create_pr(repo, title, body, &base)?;
-        if let Some(pr) = find_open_pr(repo)? {
+        let visible = find_open_pr(repo)?;
+        if let Some(pr) = &visible {
             if pr.is_draft {
                 mark_pr_ready(repo, pr.number)?;
             }
         }
         open_url(&url);
-        Ok(PrResult {
-            url,
-            created: true,
-            updated: false,
-        })
+        let info = match visible {
+            Some(pr) => Some(pr_info(&branch, pr)),
+            None => pr_number_from_url(&url).map(|number| PrInfo {
+                number,
+                url: url.clone(),
+                state: "open".to_string(),
+                branch: branch.clone(),
+                merge_commit: None,
+            }),
+        };
+        (
+            PrResult {
+                url,
+                created: true,
+                updated: false,
+            },
+            info,
+        )
+    };
+    crate::ops::task::configure_task_pull_request(
+        repo,
+        pr.as_ref(),
+        crate::task::AfterMerge::Review,
+        None,
+    )?;
+    Ok(result)
+}
+
+fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
+    PrInfo {
+        url: pr.url,
+        number: pr.number,
+        state: if pr.is_draft {
+            "draft".to_string()
+        } else {
+            pr.state.to_ascii_lowercase()
+        },
+        branch: branch.to_string(),
+        merge_commit: pr.merge_commit.map(|commit| commit.oid),
     }
+}
+
+fn pr_number_from_url(url: &str) -> Option<u64> {
+    url.trim_end_matches('/').rsplit('/').next()?.parse().ok()
 }
 
 pub(crate) fn reject_control_plane_delivery(repo: &Path) -> OpsResult<()> {
@@ -253,27 +306,29 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
             number: pr.number,
             state,
             branch,
+            merge_commit: pr.merge_commit.map(|commit| commit.oid),
         }));
     }
 
     Ok(None)
 }
 
-pub fn current_or_merged_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
+pub(crate) fn current_or_merged_pr_for_branch(
+    repo: &Path,
+    branch: &str,
+) -> OpsResult<Option<PrInfo>> {
     if !gh_available() {
         return Ok(None);
     }
-    let branch =
-        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let output = Command::new("gh")
         .arg("pr")
         .arg("list")
         .arg("--head")
-        .arg(&branch)
+        .arg(branch)
         .arg("--state")
         .arg("all")
         .arg("--json")
-        .arg("url,state,isDraft,number")
+        .arg("url,state,isDraft,number,mergeCommit")
         .current_dir(repo)
         .output()?;
     if !output.status.success() {
@@ -293,7 +348,8 @@ pub fn current_or_merged_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
         } else {
             pr.state.to_ascii_lowercase()
         },
-        branch,
+        branch: branch.to_string(),
+        merge_commit: pr.merge_commit.map(|commit| commit.oid),
     }))
 }
 
@@ -306,7 +362,7 @@ fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
         .arg("--head")
         .arg(&branch)
         .arg("--json")
-        .arg("url,state,isDraft,number")
+        .arg("url,state,isDraft,number,mergeCommit")
         .current_dir(repo)
         .output()?;
 
@@ -763,7 +819,16 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_generated_pr_copy, PrCopy};
+    use super::{parse_generated_pr_copy, pr_number_from_url, PrCopy};
+
+    #[test]
+    fn created_pr_url_carries_the_attachment_number() {
+        assert_eq!(
+            pr_number_from_url("https://github.com/loopflowstudio/loopflow/pull/872"),
+            Some(872)
+        );
+        assert_eq!(pr_number_from_url("https://example.com/not-a-pr"), None);
+    }
 
     #[test]
     fn parse_generated_pr_copy_accepts_plain_json() {

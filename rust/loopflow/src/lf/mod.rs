@@ -341,6 +341,10 @@ pub enum Commands {
         /// Replay and follow the thread while typed lines post into it.
         #[arg(long, conflicts_with = "text")]
         follow: bool,
+        /// Follow the execution log behind the conversation: every tool call,
+        /// command, file edit, and turn boundary. Implies --follow.
+        #[arg(long, conflicts_with = "text")]
+        audit: bool,
         /// Inject into a live steer-capable turn; otherwise queue.
         #[arg(long, conflicts_with = "parent")]
         steer: bool,
@@ -1596,6 +1600,7 @@ mod tests {
         let Some(Commands::Chat {
             text,
             follow,
+            audit,
             steer,
             target,
         }) = cli.command
@@ -1604,6 +1609,7 @@ mod tests {
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
         assert!(!follow);
+        assert!(!audit, "the conversation is the default view");
         assert!(!steer);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
@@ -1658,6 +1664,7 @@ mod tests {
         let Some(Commands::Chat {
             text,
             follow,
+            audit,
             steer,
             target,
         }) = cli.command
@@ -1666,8 +1673,19 @@ mod tests {
         };
         assert!(text.is_empty());
         assert!(follow);
+        assert!(!audit);
         assert!(!steer);
         assert_eq!(target.wave.as_deref(), Some("goals"));
+
+        // The execution log is a mode of the followed thread, not of a send:
+        // --audit implies --follow, and refuses to ride a message.
+        let cli = Cli::try_parse_from(["lf", "chat", "--audit"]).expect("parse audit");
+        let Some(Commands::Chat { audit, .. }) = cli.command else {
+            panic!("expected chat command");
+        };
+        assert!(audit);
+        assert!(Cli::try_parse_from(["lf", "chat", "--follow", "--audit"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "chat", "--audit", "hello"]).is_err());
 
         assert!(Cli::try_parse_from(["lf", "chat", "--follow", "hello"]).is_err());
         assert!(Cli::command().find_subcommand("wavechat").is_none());

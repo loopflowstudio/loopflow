@@ -29,6 +29,11 @@ struct WaveChatView: View {
     @State private var isNearTranscriptBottom = true
     @FocusState private var composerFocused: Bool
 
+    /// Audit is a mode, not a per-turn expander. The flow-step boundaries
+    /// (`task / task_clarify`) are structure, not content — revealing them one
+    /// turn at a time would just rebuild the log this view exists to retire.
+    @AppStorage("waveChatAudit") private var audit = false
+
     enum LaunchState: Equatable {
         case idle
         case starting
@@ -98,11 +103,12 @@ struct WaveChatView: View {
             playhead: connection?.playhead,
             loopState: connection?.loopState ?? .idle
         )
+        let visible = turns.filter { isVisibleTurn($0, audit: audit) }
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                    ForEach(turns) { turn in
-                        if let body = turn.body, turn.role == .assistant {
+                    ForEach(visible) { turn in
+                        if audit, let body = turn.body, turn.role == .assistant {
                             bodyBoundary(body, status: turn.status)
                         }
                         if let activity = turn.activity {
@@ -125,7 +131,8 @@ struct WaveChatView: View {
                             MessageRow(
                                 turn: turn,
                                 timestampLabel: timestampLabel(for: turn),
-                                attemptFailure: failures[turn.id]
+                                attemptFailure: failures[turn.id],
+                                audit: audit
                             )
                                 .id(turn.id)
                         }
@@ -141,7 +148,7 @@ struct WaveChatView: View {
             }
             .accessibilityIdentifier("wave-chat-transcript")
             .overlay {
-                if turns.isEmpty {
+                if visible.isEmpty {
                     statusOverlay
                 }
             }
@@ -184,6 +191,15 @@ struct WaveChatView: View {
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
             Spacer()
+            Toggle(isOn: $audit) {
+                Text("Audit")
+                    .font(Typography.caption())
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .foregroundStyle(palette.textSecondary)
+            .help("Show every tool call, command, and flow step behind the conversation")
+            .accessibilityIdentifier("wave-chat-audit")
             Button {
                 confirmStop = true
             } label: {

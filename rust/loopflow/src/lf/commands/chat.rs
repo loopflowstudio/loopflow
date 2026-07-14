@@ -53,12 +53,25 @@ use crate::wave::channel::family_head;
 use crate::wave::journal::MessageOp;
 use crate::wave::Wave;
 
-pub fn run(text_args: &[String], follow: bool, steer: bool, target: &WaveTargetArgs) -> Result<()> {
+pub fn run(
+    text_args: &[String],
+    follow: bool,
+    audit: bool,
+    steer: bool,
+    target: &WaveTargetArgs,
+) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        if follow {
-            follow_with_context(&context, steer, target).await
+        // --audit is a view of the followed thread; asking for it is asking to
+        // watch.
+        if follow || audit {
+            let view = if audit {
+                thread::ThreadView::Audit
+            } else {
+                thread::ThreadView::Conversation
+            };
+            follow_with_context(&context, view, steer, target).await
         } else {
             run_with_context(&context, text_args, steer, target).await
         }
@@ -103,6 +116,7 @@ pub(crate) async fn run_with_context(
 /// Replay and follow the resolved thread while stdin supplies human speech.
 async fn follow_with_context(
     context: &CliContext,
+    view: thread::ThreadView,
     steer: bool,
     target: &WaveTargetArgs,
 ) -> Result<()> {
@@ -117,10 +131,14 @@ async fn follow_with_context(
     else {
         bail!("no wave here — name one with `lf chat --follow -w <wave>`");
     };
-    follow_thread(&resolved, steer).await
+    follow_thread(&resolved, view, steer).await
 }
 
-async fn follow_thread(resolved: &ResolvedWave, steer: bool) -> Result<()> {
+async fn follow_thread(
+    resolved: &ResolvedWave,
+    view: thread::ThreadView,
+    steer: bool,
+) -> Result<()> {
     let endpoint = resolved.require_endpoint()?;
     println!(
         "chat: {} @ {endpoint}   (/help, Ctrl-D to leave)",
@@ -130,7 +148,7 @@ async fn follow_thread(resolved: &ResolvedWave, steer: bool) -> Result<()> {
     // The stream replays on connect. Use the resolved family-head name so an
     // ambient hand or --parent follows the same wave that receives speech.
     let wave_name = resolved.name.clone();
-    let stream = tokio::spawn(async move { thread::follow(Some(wave_name.as_str()), false).await });
+    let stream = tokio::spawn(async move { thread::follow(Some(wave_name.as_str()), view).await });
 
     // stdin blocks, so it reads on its own thread and hands lines to the loop.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(16);

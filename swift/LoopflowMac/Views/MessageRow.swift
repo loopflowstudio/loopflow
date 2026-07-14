@@ -4,8 +4,13 @@ import Loopflow
 
 /// One turn in a wave's conversation. A `user` turn is the operator's message
 /// (accent bar + selectable prose). An `assistant` turn renders its accumulated
-/// prose with fenced-code segmentation, then the command/file/message/thought/
-/// tool items it produced, and a blinking cursor while it's still streaming.
+/// prose with fenced-code segmentation, then what `turnPresentation` decides a
+/// human should see of the items it produced, and a blinking cursor while it's
+/// still streaming.
+///
+/// The item machinery — every tool call, shell command, and file edit —
+/// collapses into one `ActivityRow` that expands on demand; actionable failures
+/// stay on the surface. In `audit` mode the raw cards come back.
 ///
 /// Recovered and rebuilt from the conversations `MessageRow` (git 45ab5d36e^),
 /// rebound from the old `SessionMessage`/transcript machinery to the live
@@ -16,6 +21,11 @@ struct MessageRow: View {
     let turn: ChatTurn
     let timestampLabel: String?
     let attemptFailure: AttemptFailurePresentation?
+    let audit: Bool
+
+    private var presentation: TurnPresentation {
+        turnPresentation(turn, audit: audit)
+    }
 
     var body: some View {
         if turn.role == .assistant {
@@ -64,8 +74,11 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var assistantBody: some View {
-        let segments = parseMessageSegments(turn.text)
-        let visibleItems = turn.items.filter(\.isVisibleInConversation)
+        // The prose path is deliberately unmediated: `presentation.prose` goes
+        // straight into the text view, so nothing sits between an arriving SSE
+        // frame and the glyph. Only the evidence below it coalesces.
+        let presentation = self.presentation
+        let segments = parseMessageSegments(presentation.prose)
         VStack(alignment: .leading, spacing: Spacing.sm) {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
@@ -76,9 +89,23 @@ struct MessageRow: View {
                 }
             }
 
-            if !visibleItems.isEmpty {
+            // Actionable errors are conversation, not evidence: they never
+            // collapse into the activity row.
+            if !presentation.failures.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(visibleItems) { item in
+                    ForEach(presentation.failures) { item in
+                        ConversationItemCard(item: item)
+                    }
+                }
+            }
+
+            if let activity = presentation.activity {
+                ActivityRow(activity: activity, items: turn.items.filter(\.isVisibleInConversation))
+            }
+
+            if !presentation.auditItems.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(presentation.auditItems) { item in
                         ConversationItemCard(item: item)
                     }
                 }
@@ -117,6 +144,59 @@ struct MessageRow: View {
                 Text("\(attemptFailure.flow) / \(attemptFailure.step)")
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
+            }
+        }
+    }
+}
+
+/// The evidence a turn produced, as one line. This is the audit disclosure at
+/// turn granularity: the label is a count, so items arriving while the turn
+/// runs change this row's text and never the transcript's row count. Expanding
+/// it reveals the raw cards this row stands in for.
+struct ActivityRow: View {
+    @Environment(\.palette) private var palette
+
+    let activity: TurnActivity
+    let items: [ConversationItem]
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    if activity.isRunning {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.6)
+                            .frame(width: 10, height: 10)
+                    }
+                    Text(activity.label)
+                        .font(Typography.caption(11))
+                        .foregroundStyle(palette.textSecondary)
+                    if !items.isEmpty {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(Typography.caption(9))
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(items.isEmpty)
+            .accessibilityLabel(activity.label)
+            .accessibilityHint(items.isEmpty ? "" : (isExpanded ? "Hide activity detail" : "Show activity detail"))
+            .accessibilityIdentifier("wave-chat-activity")
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(items) { item in
+                        ConversationItemCard(item: item)
+                    }
+                }
             }
         }
     }

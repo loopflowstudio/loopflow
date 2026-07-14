@@ -29,4 +29,3 @@ def test_wave_fixture_parses():
 
     assert wave.repo == "/home/user/project"
     assert wave.iteration == 3
-    assert wave.active_run is None

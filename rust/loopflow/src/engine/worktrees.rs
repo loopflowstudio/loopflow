@@ -141,8 +141,7 @@ pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
     dir_for_component(repo, &component)
 }
 
-/// Short run id: the leading 8 hex chars of the run's UUID, tying the
-/// worktree directory to its Run row.
+/// Short execution id: the leading 8 hex chars of a trace UUID.
 pub fn short_run_id(run_id: &str) -> String {
     let hex: String = run_id
         .chars()

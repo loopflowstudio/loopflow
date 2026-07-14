@@ -19,7 +19,7 @@ A wave is a named agent with a goal. Two files author it:
 ```markdown
 <!-- wave/designer/GOAL.md -->
 ---
-workers: 2
+task_capacity: 2
 ---
 
 ## Objective
@@ -134,13 +134,14 @@ and provider-reported history.
 ### Crons
 
 Crons schedule supplementary Wave wakes. They live in `GOAL.md` frontmatter;
-the Wave resident opens one system turn when a schedule is due. `workers: 0`
-is valid when the Wave coordinates without starting Task Sessions.
+the Wave resident opens one system turn when a schedule is due.
+`task_capacity: 0` is valid when the Wave coordinates without starting Task
+Sessions.
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-workers: 0
+task_capacity: 0
 crons:
   - flow: govern-identity
     schedule: "0 0 0 * * Sun *"

@@ -155,7 +155,7 @@ when chat, child observations, crons, or a heartbeat wake them.
 Linear Projects and tasks, starts durable Task Sessions, and supervises their
 results.
 
-Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`), then run the agent:
+Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `task_capacity:`, `crons:`, and `pm:`), then run the agent:
 
 ```bash
 lf serve shipper

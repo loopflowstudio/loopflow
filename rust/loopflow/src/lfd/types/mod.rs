@@ -11,9 +11,6 @@ mod session;
 mod summary;
 mod wave;
 
-/// Flow name used for CI failure remediation runs.
-pub const CI_FIX_FLOW: &str = "ci-fix";
-
 pub use attention::{AttentionItem, AttentionKind, AttentionStatus};
 pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
@@ -24,7 +21,4 @@ pub use session::{
     WAVE_SERVER_SOURCE,
 };
 pub use summary::Summary;
-pub use wave::{
-    LivePrState, LivePullRequestState, PullRequest, Run, RunStatus, Wave, WaveStatus,
-    DEFAULT_WAVE_FLOW,
-};
+pub use wave::{Wave, WaveStatus, DEFAULT_WAVE_FLOW};

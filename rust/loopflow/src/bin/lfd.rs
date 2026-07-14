@@ -113,16 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
-    // Boot registry hygiene: runs left mid-flight by a dead daemon are failed,
-    // and crashed Wave servers are removed from one-brain enforcement.
-    match store.fail_orphaned_runs().await {
-        Ok(count) if count > 0 => {
-            tracing::info!(count, "cleaned up orphaned runs from previous lfd");
-        }
-        Ok(_) => {}
-        Err(err) => tracing::warn!(error = %err, "orphaned run cleanup failed"),
-    }
-
+    // Boot registry hygiene: crashed Wave servers are removed from one-brain
+    // enforcement. Project and Task processes reconcile through their own
+    // durable Session generations.
     match loopflow::wave::reconcile_wave_servers(&store).await {
         Ok(completed) if completed > 0 => {
             tracing::info!(count = completed, "reconciled crashed wave servers");

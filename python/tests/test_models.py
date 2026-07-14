@@ -1,4 +1,4 @@
-"""Tests for loopflow.models — Wave and Run parsing."""
+"""Tests for loopflow wire models."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from conftest import (
     REPO_MINIMAL,
     WAVE_FULL,
     WAVE_MINIMAL,
-    WAVE_RUN_MINIMAL,
 )
 from loopflow.models import (
     AuthFlow,
@@ -21,7 +20,6 @@ from loopflow.models import (
     ModelInfo,
     ProviderInfo,
     Repo,
-    Run,
     Wave,
 )
 
@@ -32,18 +30,15 @@ class TestWaveModel:
         assert wave.name == "reduce"
         assert wave.created_at is None
         assert wave.flow_steps == []
-        assert wave.workers == 1
+        assert wave.task_capacity == 1
         assert wave.repo == "/tmp/repo"
         assert wave.iteration == 0
-        assert wave.active_run is None
         assert wave.agent is None
         assert wave.skill_agents is None
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)
         assert wave.created_at is not None
-        assert wave.active_run.status == "running"
-        assert wave.active_run.pr.number == 1
         assert wave.agent == "codex"
         assert wave.skill_agents == {"gate": "claude"}
         assert [skill.type for skill in wave.flow_steps] == ["skill", "skill", "skill", "skill"]
@@ -59,7 +54,6 @@ class TestWaveModel:
         dumped = wave.model_dump(mode="json")
         reparsed = Wave.model_validate(dumped)
         assert reparsed.id == wave.id
-        assert reparsed.active_run.pr.url == wave.active_run.pr.url
         assert reparsed.flow_steps == wave.flow_steps
 
     def test_unknown_fields_ignored(self):
@@ -72,19 +66,6 @@ class TestWaveModel:
         wave = Wave.model_validate(data)
         assert [skill.type for skill in wave.flow_steps] == ["skill", "op"]
         assert wave.flow_steps[1].name == "pr land --create-pr"
-
-class TestRunModel:
-    def test_minimal_payload(self):
-        run = Run.model_validate(WAVE_RUN_MINIMAL)
-        assert run.pr is None
-        assert run.error is None
-        assert run.flow_parents == []
-
-    def test_with_error(self):
-        data = {**WAVE_RUN_MINIMAL, "error": "rebase conflict"}
-        run = Run.model_validate(data)
-        assert run.error == "rebase conflict"
-
 
 class TestAuthModels:
     def test_auth_provider_status(self):

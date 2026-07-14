@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    LivePullRequestState, Repo, RepoEdge, RepoId, Run, Session, SessionStatus, Summary, Wave,
+    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, Repo, RepoEdge,
+    RepoId, Session, SessionStatus, Summary, Wave,
 };
 pub mod catalog;
 mod child_sessions;
@@ -21,37 +21,6 @@ pub mod migrations;
 pub mod rows;
 pub mod sqlite;
 mod token_crypto;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ForkRunStatus {
-    Pending = 0,
-    Running = 1,
-    Completed = 2,
-    Failed = 3,
-}
-
-impl ForkRunStatus {
-    pub fn from_i64(value: i64) -> Option<Self> {
-        match value {
-            0 => Some(Self::Pending),
-            1 => Some(Self::Running),
-            2 => Some(Self::Completed),
-            3 => Some(Self::Failed),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ForkRun {
-    pub id: LfdId,
-    pub run_id: LfdId,
-    pub step_index: u32,
-    pub branch_index: u32,
-    pub status: ForkRunStatus,
-    pub worktree: String,
-}
 
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
 /// for a run, flow, or skill, written directly by `lf` (and by `lfd`) into the
@@ -275,80 +244,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
-    pub async fn list_runs(
-        &self,
-        wave_id: Option<&LfdId>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<Run>> {
-        let wave_id = wave_id.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_runs(wave_id.as_ref(), limit)
-        })
-        .await
-    }
-
-    /// Non-terminal runs plus runs that ended at or after `ended_since` —
-    /// the push bridge's bounded working set.
-    pub async fn list_runs_active_or_ended_since(
-        &self,
-        ended_since: time::OffsetDateTime,
-    ) -> StoreResult<Vec<Run>> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_runs_active_or_ended_since(ended_since)
-        })
-        .await
-    }
-
-    pub async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.get_run(&run_id)).await
-    }
-
-    pub async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.get_active_run(&wave_id)).await
-    }
-
-    pub async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.count_active_runs(&wave_id)).await
-    }
-
-    pub async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.get_latest_run(&wave_id)).await
-    }
-
-    pub async fn create_run(&self, run: &Run) -> StoreResult<()> {
-        let run = run.clone();
-        run_sqlite(&self.sqlite, move |store| store.create_run(&run)).await
-    }
-
-    pub async fn update_run(&self, run: &Run) -> StoreResult<()> {
-        let run = run.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_run(&run)).await
-    }
-
-    pub async fn get_live_pr_state(
-        &self,
-        repo_id: &str,
-        pr_number: u32,
-    ) -> StoreResult<Option<LivePullRequestState>> {
-        let repo_id = repo_id.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.get_live_pr_state(&repo_id, pr_number)
-        })
-        .await
-    }
-
-    pub async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
-        let state = state.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.upsert_live_pr_state(&state)
-        })
-        .await
-    }
-
     pub async fn list_attention_items(
         &self,
         status: Option<AttentionStatus>,
@@ -508,39 +403,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.parents(&repo_id)).await
     }
 
-    pub async fn list_fork_runs(
-        &self,
-        run_id: &LfdId,
-        step_index: u32,
-    ) -> StoreResult<Vec<ForkRun>> {
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_fork_runs(&run_id, step_index)
-        })
-        .await
-    }
-
-    pub async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
-        let fork_run = fork_run.clone();
-        run_sqlite(&self.sqlite, move |store| store.upsert_fork_run(&fork_run)).await
-    }
-
-    pub async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
-        run_sqlite(&self.sqlite, |store| store.list_orphaned_fork_runs()).await
-    }
-
-    pub async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.delete_fork_runs(&run_id, step_index)
-        })
-        .await
-    }
-
-    pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
-        run_sqlite(&self.sqlite, |store| store.fail_orphaned_runs()).await
-    }
-
     pub async fn create_control_session(&self, session: &Session) -> StoreResult<()> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
@@ -630,17 +492,6 @@ impl Store {
                     == Some(worktree_name)
             })
             .collect())
-    }
-
-    pub async fn get_active_control_session_for_run(
-        &self,
-        run_id: &LfdId,
-    ) -> StoreResult<Option<Session>> {
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.get_active_control_session_for_run(&run_id)
-        })
-        .await
     }
 
     pub async fn update_control_session(&self, session: &Session) -> StoreResult<()> {
@@ -777,17 +628,14 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::sqlite::SqliteStore;
-    use super::{open_store, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow, StorageConfig};
+    use super::{open_store, PmSnapshotRow, RunEventRow, StorageConfig};
     use crate::child_session::{
         BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource,
         ChildCommandState, ChildDecisionId, ChildDirective, ChildProcess, ChildRef,
         SessionSupervisor,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{
-        ChatMemoryBlock, Repo, RepoEdge, RepoId, Run, RunStatus, Summary, Wave, WaveStatus,
-        DEFAULT_WAVE_FLOW,
-    };
+    use crate::lfd::types::{ChatMemoryBlock, Repo, RepoEdge, RepoId, Summary, Wave, WaveStatus};
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
@@ -814,33 +662,8 @@ mod tests {
             area: vec!["src".to_string()],
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
-            workers: 1,
+            task_capacity: 1,
             parent_wave_id: None,
-        }
-    }
-
-    fn make_run(wave: &Wave, status: RunStatus) -> Run {
-        Run {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            repo: wave.repo().to_string(),
-            flow: DEFAULT_WAVE_FLOW.to_string(),
-            task: None,
-            direction: wave.direction().clone(),
-            area: wave.area().clone(),
-            iteration: 0,
-            step_index: 0,
-            status,
-            worktree: "/repo".to_string(),
-            branch: "main".to_string(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            execution_cursor: None,
-            parent_run_id: None,
-            repair_of: None,
-            pr: None,
         }
     }
 
@@ -1457,6 +1280,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn zero_task_capacity_refuses_the_first_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let task = make_task_session(&wave);
+
+        assert!(!store.reserve_task_session(&task, 0).await.unwrap());
+        assert!(store.get_task_session(&task.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn task_boundary_atomically_claims_work_or_stops_the_generation() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -1722,52 +1559,6 @@ mod tests {
             .await
             .expect("list edges after delete")
             .is_empty());
-
-        let run = make_run(&wave, RunStatus::Running);
-        store.create_run(&run).await.expect("create wave run");
-        assert!(store
-            .get_active_run(wave.id())
-            .await
-            .expect("get active")
-            .is_some());
-
-        let fork_run = ForkRun {
-            id: LfdId::new(),
-            run_id: run.id.clone(),
-            step_index: 0,
-            branch_index: 0,
-            status: ForkRunStatus::Pending,
-            worktree: "/tmp/branch".to_string(),
-        };
-        store
-            .upsert_fork_run(&fork_run)
-            .await
-            .expect("upsert fork run");
-        assert_eq!(
-            store
-                .list_fork_runs(&run.id, 0)
-                .await
-                .expect("list fork runs")
-                .len(),
-            1
-        );
-        let mut failed_run = run.clone();
-        failed_run.status = RunStatus::Failed;
-        store
-            .update_run(&failed_run)
-            .await
-            .expect("update run to failed");
-        let orphaned = store
-            .list_orphaned_fork_runs()
-            .await
-            .expect("list orphaned fork runs");
-        assert_eq!(orphaned.len(), 1);
-        store.update_run(&run).await.expect("restore run status");
-        let deleted_forks = store
-            .delete_fork_runs(&run.id, 0)
-            .await
-            .expect("delete fork runs");
-        assert_eq!(deleted_forks, 1);
 
         let summary = Summary {
             id: LfdId::new(),
@@ -2049,91 +1840,6 @@ mod tests {
         store.health_check().await.expect("sqlite health check");
     }
 
-    // When lfd restarts, `fail_orphaned_runs` marks in-flight runs as Failed.
-    // Without also resetting the wave's own status, the wave stays visually
-    // "running" — the Loopflow sidebar and buttons stay disabled forever even
-    // though no executor is attached. Cover the reset here.
-    #[tokio::test]
-    async fn fail_orphaned_runs_resets_stuck_wave_status() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        // Wave that was actively running when lfd died.
-        let mut running_wave = make_wave("/repo-stuck-running");
-        running_wave.set_status(WaveStatus::Running);
-        store.create_wave(&running_wave).await.expect("create wave");
-        let mut running_run = make_run(&running_wave, RunStatus::Running);
-        store.create_run(&running_run).await.expect("create run");
-
-        // Wave that was at an interactive waitpoint.
-        let mut waiting_wave = make_wave("/repo-stuck-waiting");
-        waiting_wave.set_status(WaveStatus::Waiting);
-        store
-            .create_wave(&waiting_wave)
-            .await
-            .expect("create waiting wave");
-        let mut waiting_run = make_run(&waiting_wave, RunStatus::Waiting);
-        store
-            .create_run(&waiting_run)
-            .await
-            .expect("create waiting run");
-
-        // Paused wave with no active run — must be left alone.
-        let mut paused_wave = make_wave("/repo-paused");
-        paused_wave.set_status(WaveStatus::Paused);
-        store
-            .create_wave(&paused_wave)
-            .await
-            .expect("create paused wave");
-
-        let _ = store.fail_orphaned_runs().await.expect("fail orphans");
-
-        running_run = store
-            .get_run(&running_run.id)
-            .await
-            .expect("get run")
-            .expect("run exists");
-        assert_eq!(running_run.status, RunStatus::Failed);
-        waiting_run = store
-            .get_run(&waiting_run.id)
-            .await
-            .expect("get waiting run")
-            .expect("run exists");
-        assert_eq!(waiting_run.status, RunStatus::Failed);
-
-        let running_after = store
-            .get_wave(running_wave.id())
-            .await
-            .expect("get wave")
-            .expect("wave exists");
-        assert_eq!(
-            running_after.status(),
-            WaveStatus::Idle,
-            "wave whose run was orphaned should be reset to Idle"
-        );
-        let waiting_after = store
-            .get_wave(waiting_wave.id())
-            .await
-            .expect("get waiting wave")
-            .expect("wave exists");
-        assert_eq!(
-            waiting_after.status(),
-            WaveStatus::Idle,
-            "waiting-state wave should also be reset to Idle"
-        );
-        let paused_after = store
-            .get_wave(paused_wave.id())
-            .await
-            .expect("get paused wave")
-            .expect("wave exists");
-        assert_eq!(
-            paused_after.status(),
-            WaveStatus::Paused,
-            "paused wave must keep its status across orphan cleanup"
-        );
-    }
-
     #[tokio::test]
     async fn provider_token_round_trip() {
         let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
@@ -2325,53 +2031,5 @@ mod tests {
             .expect("query provider token");
         assert_ne!(raw_access, "gho_plaintext");
         assert!(encrypted);
-    }
-
-    #[tokio::test]
-    async fn active_run_excludes_failed_runs() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let wave = make_wave("/repo-active");
-        store.create_wave(&wave).await.expect("create wave");
-
-        let mut run = make_run(&wave, RunStatus::Running);
-        store.create_run(&run).await.expect("create running run");
-        assert!(store
-            .get_active_run(wave.id())
-            .await
-            .expect("active run")
-            .is_some());
-
-        run.status = RunStatus::Failed;
-        run.error = Some("failed".to_string());
-        run.ended_at = Some(OffsetDateTime::now_utc());
-        store.update_run(&run).await.expect("update run");
-        assert!(store
-            .get_active_run(wave.id())
-            .await
-            .expect("active after fail")
-            .is_none());
-        assert_eq!(
-            store
-                .get_latest_run(wave.id())
-                .await
-                .expect("latest run")
-                .expect("run exists")
-                .status,
-            RunStatus::Failed
-        );
-
-        let mut ci_fix = make_run(&wave, RunStatus::Running);
-        ci_fix.flow = "ci-fix".to_string();
-        store.create_run(&ci_fix).await.expect("create ci-fix run");
-        assert!(store
-            .get_active_run(wave.id())
-            .await
-            .expect("active with ci-fix")
-            .is_some());
-
-        store.delete_wave(wave.id()).await.expect("delete wave");
     }
 }

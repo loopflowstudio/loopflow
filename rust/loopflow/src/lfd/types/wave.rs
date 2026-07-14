@@ -1,11 +1,11 @@
-//! Wave and Run types.
+//! Durable Wave identity and authored launch policy.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 
-fn default_workers() -> u32 {
+fn default_task_capacity() -> u32 {
     1
 }
 
@@ -64,74 +64,6 @@ impl std::str::FromStr for WaveStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum RunStatus {
-    #[default]
-    Unspecified = 0,
-    Pending = 1,
-    Running = 2,
-    Waiting = 3,
-    Completed = 4,
-    Failed = 5,
-}
-
-impl RunStatus {
-    pub fn from_i32(value: i32) -> Self {
-        match value {
-            1 => Self::Pending,
-            2 => Self::Running,
-            3 => Self::Waiting,
-            4 => Self::Completed,
-            5 => Self::Failed,
-            _ => Self::Unspecified,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
-    }
-
-    /// A run still in flight — dispatched but not yet Completed or Failed.
-    pub fn is_active(self) -> bool {
-        matches!(self, Self::Pending | Self::Running | Self::Waiting)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum LivePrState {
-    #[default]
-    Unknown = 0,
-    Open = 1,
-    Closed = 2,
-    Merged = 3,
-}
-
-impl LivePrState {
-    pub fn from_i32(value: i32) -> Self {
-        match value {
-            1 => Self::Open,
-            2 => Self::Closed,
-            3 => Self::Merged,
-            _ => Self::Unknown,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Open => "open",
-            Self::Closed => "closed",
-            Self::Merged => "merged",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Wave {
     pub id: LfdId,
@@ -152,9 +84,9 @@ pub struct Wave {
     pub paused: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
-    /// Maximum number of active runs this wave can have at once.
-    #[serde(default = "default_workers")]
-    pub workers: u32,
+    /// Maximum number of active Task Sessions this Wave can have at once.
+    #[serde(default = "default_task_capacity")]
+    pub task_capacity: u32,
     /// Parent wave in the chord tree. `None` for a root wave. A chord is simply
     /// a wave that has children (`children_of(id)` non-empty) — there is no
     /// `wave_type` discriminator.
@@ -177,7 +109,7 @@ impl Wave {
             area: Vec::new(),
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
-            workers: default_workers(),
+            task_capacity: default_task_capacity(),
             parent_wave_id: None,
         }
     }
@@ -250,92 +182,7 @@ impl Wave {
         self.created_at
     }
 
-    pub fn workers(&self) -> u32 {
-        self.workers
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PullRequest {
-    pub url: String,
-    pub number: Option<u32>,
-    pub state: Option<String>,
-    pub title: Option<String>,
-    pub branch: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Run {
-    pub id: LfdId,
-    pub wave_id: LfdId,
-    pub repo: String,
-    pub flow: String,
-    pub task: Option<String>,
-    pub direction: Vec<String>,
-    pub area: Vec<String>,
-    pub iteration: u32,
-    pub step_index: u32,
-    pub status: RunStatus,
-    pub worktree: String,
-    pub branch: String,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub started_at: Option<OffsetDateTime>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub ended_at: Option<OffsetDateTime>,
-    pub error: Option<String>,
-    pub flow_parents: Vec<String>,
-    #[serde(skip)]
-    pub execution_cursor: Option<String>,
-    pub parent_run_id: Option<LfdId>,
-    /// When set, this run is a repair attempt for the referenced failed run.
-    /// Written by callers that retry failed work; nothing acts on it
-    /// automatically since the repair chain died with the daemon's organs.
-    pub repair_of: Option<LfdId>,
-    /// The pull request created or associated with this run.
-    /// Set when the run creates a PR (auto-create or land --create-pr).
-    pub pr: Option<PullRequest>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LivePullRequestState {
-    pub repo_id: String,
-    pub pr_number: u32,
-    pub state: LivePrState,
-    pub is_draft: bool,
-    pub head_ref: String,
-    pub head_sha: String,
-    pub base_ref: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub updated_at: OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub merged_at: Option<OffsetDateTime>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub synced_at: OffsetDateTime,
-}
-
-impl Run {
-    pub fn new(id: LfdId, wave_id: LfdId) -> Self {
-        Self {
-            id,
-            wave_id,
-            repo: String::new(),
-            flow: String::new(),
-            task: None,
-            direction: Vec::new(),
-            area: Vec::new(),
-            iteration: 0,
-            step_index: 0,
-            status: RunStatus::Pending,
-            worktree: String::new(),
-            branch: String::new(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            execution_cursor: None,
-            parent_run_id: None,
-            repair_of: None,
-            pr: None,
-        }
+    pub fn task_capacity(&self) -> u32 {
+        self.task_capacity
     }
 }

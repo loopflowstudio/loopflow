@@ -4,7 +4,7 @@
 //! center (see `scratch/eventing.md`): `lf ls` lists every wave the registry
 //! knows — running and stopped alike (`list_waves(None)`) — and marks which
 //! have a live server answering; `lf status <wave>` reports one wave's native
-//! Project/Task hierarchy, historical runs, attention, and live loop state.
+//! Project/Task hierarchy, attention, and live loop state.
 //! Both are pure readers over the shared SQLite ledger; `--json` is the
 //! machine-readable snapshot Loopflow's dashboard reads. A live wave has an
 //! endpoint you can subscribe to for motion (`GET /events`); a stopped one is
@@ -18,11 +18,10 @@ use serde::{Deserialize, Serialize};
 use crate::child_session::{ChildRef, SessionSupervisor};
 use crate::lf::output::Colors;
 use crate::lfd::pm::{PmItem, PmKr, PmProject};
-use crate::lfd::types::{AttentionItem, AttentionStatus, LivePrState, Run, RunStatus, Wave};
+use crate::lfd::types::{AttentionItem, AttentionStatus, Wave};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
 use crate::task::{TaskSession, TaskSessionStatus};
-use crate::wave::journal::short_id;
 use crate::wave::server::live_endpoint;
 
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
@@ -39,10 +38,8 @@ pub struct WaveSnapshot {
     /// Primary repo path.
     pub repo: String,
     pub iteration: u32,
-    /// Max concurrent runs this wave allows.
-    pub workers: u32,
-    /// Active (pending/running/waiting) runs right now.
-    pub active_runs: u32,
+    /// Max concurrent Task Sessions this wave allows.
+    pub task_capacity: u32,
     /// Non-terminal Task Sessions owned by this Wave.
     pub active_tasks: u32,
     /// Non-terminal Project Sessions owned by this Wave.
@@ -57,8 +54,8 @@ pub struct WaveSnapshot {
     pub parent_wave_id: Option<String>,
 }
 
-/// `lf status <wave>` snapshot: native work hierarchy, historical runs,
-/// attention, and — when a server is live — loop state. Wire type; no defaults.
+/// `lf status <wave>` snapshot: native work hierarchy, attention, and — when a
+/// server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
@@ -66,7 +63,6 @@ pub struct WaveDetailSnapshot {
     /// (`idle | turning | interrupting | failed`), `null` when stopped or
     /// serving dormant.
     pub loop_state: Option<String>,
-    pub runs: Vec<RunSnapshot>,
     pub projects: Vec<ProjectDetailSnapshot>,
     pub attention: Vec<AttentionSnapshot>,
 }
@@ -177,25 +173,6 @@ pub struct ProjectDetailSnapshot {
     pub tasks: Vec<TaskDetailSnapshot>,
 }
 
-/// One run's snapshot for `lf status`. Wire type; no serde defaults.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RunSnapshot {
-    pub id: String,
-    pub flow: String,
-    pub task: Option<String>,
-    /// Current execution step; generic loops publish their pass here.
-    pub step_index: u32,
-    pub status: String,
-    pub branch: String,
-    pub worktree: String,
-    pub started_at: Option<String>,
-    pub ended_at: Option<String>,
-    pub error: Option<String>,
-    pub pr_url: Option<String>,
-    pub pr_state: Option<String>,
-    pub pr_title: Option<String>,
-}
-
 /// One attention item's snapshot for `lf status`. Wire type; no serde defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AttentionSnapshot {
@@ -233,7 +210,7 @@ pub fn ls(json: bool) -> Result<()> {
     })
 }
 
-/// `lf status <wave>` — one wave's work hierarchy, runs, attention, and loop.
+/// `lf status <wave>` — one wave's work hierarchy, attention, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let name = wave
         .map(str::to_string)
@@ -254,14 +231,6 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             Some(endpoint) => loop_state(endpoint).await,
             None => None,
         };
-        let stored_runs = store
-            .list_runs(Some(wave.id()), Some(20))
-            .await
-            .map_err(|err| anyhow!("failed to read runs: {err}"))?;
-        let mut runs = Vec::with_capacity(stored_runs.len());
-        for run in stored_runs {
-            runs.push(snapshot_run(&store, run).await?);
-        }
         let stored_projects = store
             .list_project_sessions(Some(wave.id()))
             .await
@@ -283,7 +252,6 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let status = WaveDetailSnapshot {
             wave: snapshot,
             loop_state,
-            runs,
             projects,
             attention,
         };
@@ -305,10 +273,6 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     } else {
         live_endpoint(Path::new(&repo), wave.name()).await
     };
-    let active_runs = store
-        .count_active_runs(wave.id())
-        .await
-        .map_err(|err| anyhow!("failed to count active runs: {err}"))?;
     let active_tasks = store
         .list_task_sessions(Some(wave.id()))
         .await
@@ -331,8 +295,7 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         goal: wave.goal().to_string(),
         repo,
         iteration: wave.iteration(),
-        workers: wave.workers(),
-        active_runs,
+        task_capacity: wave.task_capacity(),
         active_tasks,
         active_projects,
         live: endpoint.is_some(),
@@ -696,46 +659,6 @@ fn next_move_for_task(
     }
 }
 
-async fn snapshot_run(store: &SharedStore, run: Run) -> Result<RunSnapshot> {
-    let (pr_url, pr_state, pr_title) = match run.pr {
-        Some(pr) => {
-            let live_state = match pr.number {
-                Some(number) => store
-                    .get_live_pr_state(&run.repo, number)
-                    .await
-                    .map_err(|err| anyhow!("failed to read PR state: {err}"))?
-                    .map(|state| snapshot_pr_state(state.state, state.is_draft).to_string()),
-                None => None,
-            };
-            (Some(pr.url), live_state.or(pr.state), pr.title)
-        }
-        None => (None, None, None),
-    };
-    Ok(RunSnapshot {
-        id: run.id.to_string(),
-        flow: run.flow,
-        task: run.task,
-        step_index: run.step_index,
-        status: run_status_str(run.status).to_string(),
-        branch: run.branch,
-        worktree: run.worktree,
-        started_at: run.started_at.and_then(format_time),
-        ended_at: run.ended_at.and_then(format_time),
-        error: run.error,
-        pr_url,
-        pr_state,
-        pr_title,
-    })
-}
-
-fn snapshot_pr_state(state: LivePrState, is_draft: bool) -> &'static str {
-    if state == LivePrState::Open && is_draft {
-        "draft"
-    } else {
-        state.as_str()
-    }
-}
-
 fn snapshot_attention(item: AttentionItem) -> AttentionSnapshot {
     AttentionSnapshot {
         id: item.id.to_string(),
@@ -776,17 +699,6 @@ async fn loop_state(endpoint: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn run_status_str(status: RunStatus) -> &'static str {
-    match status {
-        RunStatus::Unspecified => "unspecified",
-        RunStatus::Pending => "pending",
-        RunStatus::Running => "running",
-        RunStatus::Waiting => "waiting",
-        RunStatus::Completed => "completed",
-        RunStatus::Failed => "failed",
-    }
-}
-
 fn format_time(ts: time::OffsetDateTime) -> Option<String> {
     ts.format(&time::format_description::well_known::Rfc3339)
         .ok()
@@ -810,23 +722,23 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {status:<8}  {live:<5}  {runs:>5}  {iter:>5}  ENDPOINT{reset}",
+        "{bold}{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  ENDPOINT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
         status = "STATUS",
         live = "LIVE",
-        runs = "RUNS",
-        iter = "ITER",
+        tasks = "TASKS",
+        projects = "PROJECTS",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {status:<8}  {live:<5}  {runs:>5}  {iter:>5}  {endpoint}",
+            "{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {endpoint}",
             name = truncate(&wave.name, 16),
             status = wave.status,
             live = if wave.live { "yes" } else { "no" },
-            runs = wave.active_runs,
-            iter = wave.iteration,
+            tasks = wave.active_tasks,
+            projects = wave.active_projects,
             endpoint = wave.endpoint.as_deref().unwrap_or("-"),
         );
     }
@@ -852,20 +764,6 @@ fn print_status(status: &WaveDetailSnapshot) {
         "  endpoint  {}",
         wave.endpoint.as_deref().unwrap_or("(stopped)")
     );
-    if status.runs.is_empty() {
-        println!("  runs      none");
-    } else {
-        println!("  runs");
-        for run in &status.runs {
-            println!(
-                "    {id}  {flow:<18}  {status:<10}  {branch}",
-                id = short_id(&run.id),
-                flow = truncate(&run.flow, 18),
-                status = run.status,
-                branch = run.branch,
-            );
-        }
-    }
     if status.projects.is_empty() {
         println!("  projects  none");
     } else {
@@ -1024,8 +922,7 @@ mod tests {
             goal: "ship the roadmap".into(),
             repo: "/repo".into(),
             iteration: 3,
-            workers: 2,
-            active_runs: 1,
+            task_capacity: 2,
             active_tasks: 2,
             active_projects: 1,
             live: true,
@@ -1038,7 +935,7 @@ mod tests {
         assert_eq!(value["status"], "running");
         assert_eq!(value["live"], true);
         assert_eq!(value["endpoint"], "127.0.0.1:5678");
-        assert_eq!(value["active_runs"], 1);
+        assert_eq!(value["active_tasks"], 2);
         // Explicitly-null Optional stays present (no serde skip): a stopped
         // wave's endpoint is `null`, not absent — one stable shape.
         assert!(value.as_object().unwrap().contains_key("parent_wave_id"));
@@ -1046,7 +943,7 @@ mod tests {
     }
 
     #[test]
-    fn status_snapshot_nests_wave_runs_and_attention() {
+    fn status_snapshot_nests_wave_work_and_attention() {
         let status = WaveDetailSnapshot {
             wave: WaveSnapshot {
                 id: "wave-1".into(),
@@ -1056,8 +953,7 @@ mod tests {
                 goal: "g".into(),
                 repo: "/repo".into(),
                 iteration: 0,
-                workers: 1,
-                active_runs: 0,
+                task_capacity: 1,
                 active_tasks: 0,
                 active_projects: 0,
                 live: false,
@@ -1066,21 +962,6 @@ mod tests {
                 parent_wave_id: None,
             },
             loop_state: None,
-            runs: vec![RunSnapshot {
-                id: "run-1".into(),
-                flow: "implement".into(),
-                task: Some("wire it".into()),
-                step_index: 2,
-                status: "running".into(),
-                branch: "b".into(),
-                worktree: "/wt".into(),
-                started_at: None,
-                ended_at: None,
-                error: None,
-                pr_url: None,
-                pr_state: None,
-                pr_title: None,
-            }],
             projects: vec![ProjectDetailSnapshot {
                 project: PmProjectSummary {
                     id: "project-1".into(),
@@ -1131,10 +1012,6 @@ mod tests {
         let value: serde_json::Value = serde_json::to_value(&status).expect("serialize");
         assert_eq!(value["wave"]["name"], "goals");
         assert_eq!(value["loop_state"], serde_json::Value::Null);
-        assert_eq!(value["runs"][0]["flow"], "implement");
-        assert_eq!(value["runs"][0]["step_index"], 2);
-        assert_eq!(value["runs"][0]["pr_state"], serde_json::Value::Null);
-        assert_eq!(value["runs"][0]["pr_title"], serde_json::Value::Null);
         assert_eq!(value["projects"][0]["project"]["slug"], "runtime");
         assert_eq!(
             value["projects"][0]["tasks"][0]["task"]["identifier"],
@@ -1145,12 +1022,5 @@ mod tests {
             serde_json::Value::Null
         );
         assert_eq!(value["attention"][0]["kind"], "interactive");
-    }
-
-    #[test]
-    fn draft_live_pr_state_stays_distinct_from_open() {
-        assert_eq!(snapshot_pr_state(LivePrState::Open, true), "draft");
-        assert_eq!(snapshot_pr_state(LivePrState::Open, false), "open");
-        assert_eq!(snapshot_pr_state(LivePrState::Closed, true), "closed");
     }
 }

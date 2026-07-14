@@ -27,8 +27,7 @@ pub struct WavePmConfig {
 pub struct WaveConfig {
     pub goal: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
-    pub workers: Option<u32>,
-    pub serialized: Option<bool>,
+    pub task_capacity: Option<u32>,
     pub area: Option<Vec<String>>,
     pub direction: Option<Vec<String>>,
     pub metrics: Option<Vec<String>>,
@@ -65,7 +64,6 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
         None => WaveConfig::default(),
     };
     config.goal = config.goal.or_else(|| Some(name.to_string()));
-    config.serialized = None;
     config.area = None;
     config.direction = None;
     Some(config)
@@ -204,13 +202,13 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\nworkers: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
+            "---\ntask_capacity: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.goal.as_deref(), Some("scan"));
-        assert_eq!(config.workers, Some(3));
+        assert_eq!(config.task_capacity, Some(3));
         assert_eq!(
             config.metrics,
             Some(vec!["tests pass".to_string(), "docs updated".to_string()])

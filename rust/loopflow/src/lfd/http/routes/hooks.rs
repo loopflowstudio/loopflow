@@ -41,9 +41,11 @@ use crate::lfd::github::{
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Run, Wave, CI_FIX_FLOW};
+use crate::lfd::types::Wave;
 use crate::lfdb::SharedStore;
-use crate::task::{PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSessionStatus};
+use crate::task::{
+    PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionStatus,
+};
 
 #[derive(Debug, Clone)]
 struct WaveCiTarget {
@@ -610,39 +612,39 @@ async fn find_wave_ci_target(
     branch: Option<&str>,
     pr_number: Option<u32>,
 ) -> Result<Option<WaveCiTarget>, String> {
-    let runs = store
-        .list_runs(Some(wave.id()), None)
+    let tasks = store
+        .list_task_sessions(Some(wave.id()))
         .await
         .map_err(|err| err.to_string())?;
-    let run = runs
+    let task = tasks
         .into_iter()
-        .find(|run| run_matches_ci_target(run, branch, pr_number));
+        .find(|task| task_matches_ci_target(task, branch, pr_number));
 
-    Ok(run.and_then(|run| wave_ci_target(wave.id(), &run)))
+    Ok(task.and_then(|task| wave_ci_target(wave.id(), &task)))
 }
 
-fn run_matches_ci_target(run: &Run, branch: Option<&str>, pr_number: Option<u32>) -> bool {
-    if run.flow == CI_FIX_FLOW {
-        return false;
-    }
-
-    let Some(pr) = run.pr.as_ref() else {
+fn task_matches_ci_target(
+    task: &TaskSession,
+    branch: Option<&str>,
+    pr_number: Option<u32>,
+) -> bool {
+    let Some(pr) = task.pull_request.as_ref() else {
         return false;
     };
-    super::is_open_pr_state(pr.state.as_deref())
-        && branch.is_none_or(|branch| pr.branch.as_deref() == Some(branch))
-        && pr_number.is_none_or(|number| pr.number == Some(number))
+    !task.status.is_terminal()
+        && branch.is_none_or(|branch| task.branch == branch)
+        && pr_number.is_none_or(|number| pr.number == number)
 }
 
 fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {
     status == "completed" && conclusion == Some("failure")
 }
 
-fn wave_ci_target(wave_id: &LfdId, run: &Run) -> Option<WaveCiTarget> {
-    let pr = run.pr.as_ref()?;
+fn wave_ci_target(wave_id: &LfdId, task: &TaskSession) -> Option<WaveCiTarget> {
+    let pr = task.pull_request.as_ref()?;
     Some(WaveCiTarget {
         wave_id: wave_id.clone(),
-        pr_number: pr.number?,
+        pr_number: pr.number,
     })
 }
 
@@ -650,7 +652,7 @@ fn wave_ci_target(wave_id: &LfdId, run: &Run) -> Option<WaveCiTarget> {
 mod tests {
     use super::*;
     use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
-    use crate::lfd::types::{PullRequest, RunStatus, WaveStatus};
+    use crate::lfd::types::WaveStatus;
     use crate::lfdb::{open_store, StorageConfig};
     use crate::task::{
         LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
@@ -707,39 +709,8 @@ mod tests {
             area: Vec::new(),
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
-            workers: 1,
+            task_capacity: 1,
             parent_wave_id: None,
-        }
-    }
-
-    fn run_with_open_pr(wave: &Wave, flow: &str, branch: &str, pr_number: u32) -> Run {
-        Run {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            repo: wave.repo().to_string(),
-            flow: flow.to_string(),
-            task: None,
-            direction: Vec::new(),
-            area: Vec::new(),
-            iteration: 0,
-            step_index: 0,
-            status: RunStatus::Running,
-            worktree: "/tmp/worktree".to_string(),
-            branch: branch.to_string(),
-            started_at: None,
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            execution_cursor: None,
-            parent_run_id: None,
-            repair_of: None,
-            pr: Some(PullRequest {
-                url: format!("https://example.test/pr/{pr_number}"),
-                number: Some(pr_number),
-                state: Some("open".to_string()),
-                title: Some("test".to_string()),
-                branch: Some(branch.to_string()),
-            }),
         }
     }
 
@@ -901,10 +872,9 @@ mod tests {
         let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
         let wave = make_wave("ship", &repo);
         store.create_wave(&wave).await.expect("wave");
-        store
-            .create_run(&run_with_open_pr(&wave, "build", "feature", 1))
-            .await
-            .expect("run");
+        let mut task = task_with_open_pr(&wave, 1);
+        task.branch = "feature".to_string();
+        store.create_task_session(&task).await.expect("task");
 
         let cache = Arc::new(Mutex::new(HashSet::new()));
         let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
@@ -944,10 +914,9 @@ mod tests {
         let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
         let wave = make_wave("ship", &repo);
         store.create_wave(&wave).await.expect("wave");
-        store
-            .create_run(&run_with_open_pr(&wave, "build", "feature", 1))
-            .await
-            .expect("run");
+        let mut task = task_with_open_pr(&wave, 1);
+        task.branch = "feature".to_string();
+        store.create_task_session(&task).await.expect("task");
 
         let cache = Arc::new(Mutex::new(HashSet::new()));
         let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
@@ -1101,53 +1070,16 @@ mod tests {
         assert!(none.is_empty());
     }
 
-    fn run_with_pr(flow: &str, pr_state: Option<&str>, branch: Option<&str>) -> Run {
-        Run {
-            id: LfdId::new(),
-            wave_id: LfdId::new(),
-            repo: ".".to_string(),
-            flow: flow.to_string(),
-            task: None,
-            direction: Vec::new(),
-            area: Vec::new(),
-            iteration: 0,
-            step_index: 0,
-            status: RunStatus::Running,
-            worktree: "/tmp/worktree".to_string(),
-            branch: "feature".to_string(),
-            started_at: None,
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            execution_cursor: None,
-            parent_run_id: None,
-            repair_of: None,
-            pr: Some(PullRequest {
-                url: "https://example.test/pr/1".to_string(),
-                number: Some(1),
-                state: pr_state.map(ToString::to_string),
-                title: Some("test".to_string()),
-                branch: branch.map(ToString::to_string),
-            }),
-        }
-    }
-
     #[test]
-    fn run_matches_ci_target_only_matches_open_main_prs() {
-        let run = run_with_pr("build", Some("open"), Some("feature"));
-        assert!(run_matches_ci_target(&run, Some("feature"), Some(1)));
+    fn task_matches_ci_target_requires_matching_nonterminal_delivery() {
+        let wave = make_wave("ship", std::path::Path::new("."));
+        let mut task = task_with_open_pr(&wave, 1);
+        task.branch = "feature".to_string();
+        assert!(task_matches_ci_target(&task, Some("feature"), Some(1)));
+        assert!(!task_matches_ci_target(&task, Some("other"), Some(1)));
+        assert!(!task_matches_ci_target(&task, Some("feature"), Some(2)));
 
-        let closed = run_with_pr("build", Some("closed"), Some("feature"));
-        assert!(!run_matches_ci_target(&closed, Some("feature"), Some(1)));
-
-        let unknown_state = run_with_pr("build", None, Some("feature"));
-        assert!(!run_matches_ci_target(
-            &unknown_state,
-            Some("feature"),
-            Some(1)
-        ));
-
-        let ci_fix = run_with_pr("ci-fix", Some("open"), Some("feature"));
-        assert!(!run_matches_ci_target(&ci_fix, Some("feature"), Some(1)));
+        task.status = TaskSessionStatus::Merged;
+        assert!(!task_matches_ci_target(&task, Some("feature"), Some(1)));
     }
 }

@@ -115,9 +115,10 @@ impl Registration {
 /// The db IS the registry: a reachable store with no row for the wave must
 /// not degrade to running unregistered (observed live — two brains on one
 /// wave because boot skipped registration entirely). The created row is
-/// minimal and mirrors wave creation from GOAL.md frontmatter
-/// ([`read_wave_config`]): goal from the frontmatter when present,
-/// [`Wave::new`] defaults otherwise.
+/// minimal and refreshes authored launch configuration from GOAL.md
+/// frontmatter ([`read_wave_config`]): goal and task capacity when present,
+/// [`Wave::new`] defaults otherwise. This refresh makes a GOAL.md edit take
+/// effect on the next `lf serve`, including for rows created by older builds.
 ///
 /// # Errors
 /// Store failures only; the caller treats them as soft (run unregistered).
@@ -126,33 +127,32 @@ pub async fn ensure_wave_row(
     main_repo: &Path,
     name: &str,
 ) -> StoreResult<Wave> {
-    if let Some(wave) = store.get_wave_by_name(name).await? {
-        return Ok(wave);
-    }
-    let mut wave = Wave::new(
-        LfdId::new(),
-        name.to_string(),
-        main_repo.display().to_string(),
-    );
+    let existing = store.get_wave_by_name(name).await?;
+    let is_new = existing.is_none();
+    let mut wave = existing.unwrap_or_else(|| {
+        Wave::new(
+            LfdId::new(),
+            name.to_string(),
+            main_repo.display().to_string(),
+        )
+    });
     if let Some(config) = read_wave_config(main_repo, name) {
         if let Some(goal) = config.goal.filter(|goal| !goal.trim().is_empty()) {
             wave.goal = goal;
         }
+        if let Some(task_capacity) = config.task_capacity {
+            wave.task_capacity = task_capacity;
+        }
+        wave.paused = config.paused.unwrap_or(false);
     }
-    // Not born paused: the row exists so the SERVER can register as the
-    // wave's brain, not to silence a daemon (the ticker that read this column
-    // died in the collapse). The safety valve now lives in GOAL.md
-    // frontmatter, read file-first by the listener — a registry row born
-    // `paused: true` was a lie that only confused Loopflow.
-    wave.paused = read_wave_config(main_repo, name)
-        .and_then(|config| config.paused)
-        .unwrap_or(false);
     store.create_wave(&wave).await?;
-    tracing::info!(
-        wave = name,
-        wave_id = %wave.id,
-        "wave was not in the session registry; created its row"
-    );
+    if is_new {
+        tracing::info!(
+            wave = name,
+            wave_id = %wave.id,
+            "wave was not in the session registry; created its row"
+        );
+    }
     Ok(wave)
 }
 
@@ -497,7 +497,7 @@ mod tests {
             area: Vec::new(),
             paused: false,
             created_at: Some(OffsetDateTime::now_utc()),
-            workers: 2,
+            task_capacity: 2,
             parent_wave_id: None,
         }
     }
@@ -554,7 +554,7 @@ mod tests {
         std::fs::create_dir_all(&goal_dir).expect("wave dir");
         std::fs::write(
             goal_dir.join("GOAL.md"),
-            "---\ngoal: keep shipping\n---\nShip.\n",
+            "---\ngoal: keep shipping\ntask_capacity: 0\n---\nShip.\n",
         )
         .expect("GOAL.md");
 
@@ -568,6 +568,7 @@ mod tests {
             .expect("row exists");
         assert_eq!(stored.id, wave.id);
         assert_eq!(stored.goal, "keep shipping", "goal from GOAL.md");
+        assert_eq!(stored.task_capacity, 0, "task capacity from GOAL.md");
         assert_eq!(stored.repo(), repo.display().to_string());
 
         // Registered against the created row; one-brain now has its fact.
@@ -583,6 +584,10 @@ mod tests {
             .await
             .expect("idempotent");
         assert_eq!(again.id, wave.id, "ensure reuses the existing row");
+        assert_eq!(
+            again.task_capacity, 0,
+            "authored capacity remains effective"
+        );
         let outcome = register(&registry_config(store, again, false), "127.0.0.1:5")
             .await
             .expect("attempt");

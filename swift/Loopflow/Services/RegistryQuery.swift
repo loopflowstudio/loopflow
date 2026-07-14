@@ -204,8 +204,7 @@ struct WaveSnapshot: Decodable {
     let goal: String
     let repo: String
     let iteration: Int
-    let workers: Int
-    let activeRuns: Int
+    let taskCapacity: Int
     let activeTasks: Int
     let activeProjects: Int
     let live: Bool
@@ -214,8 +213,8 @@ struct WaveSnapshot: Decodable {
     let parentWaveId: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, paused, goal, repo, iteration, workers, live, endpoint
-        case activeRuns = "active_runs"
+        case id, name, status, paused, goal, repo, iteration, live, endpoint
+        case taskCapacity = "task_capacity"
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
@@ -238,42 +237,13 @@ struct WaveSnapshot: Decodable {
 struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
-    let runs: [RunSnapshot]
     let projects: [WaveProjectWork]
     let attention: [AttentionSnapshot]
 
     enum CodingKeys: String, CodingKey {
-        case wave, runs, projects, attention
+        case wave, projects, attention
         case loopState = "loop_state"
     }
-}
-
-/// One run under `lf status`. Mirrors Rust `RunSnapshot`.
-struct RunSnapshot: Decodable {
-    let id: String
-    let flow: String
-    let task: String?
-    let stepIndex: Int
-    let status: String
-    let branch: String
-    let worktree: String
-    let startedAt: String?
-    let endedAt: String?
-    let error: String?
-    let prURL: String?
-    let prState: String?
-    let prTitle: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, flow, task, status, branch, worktree, error
-        case stepIndex = "step_index"
-        case startedAt = "started_at"
-        case endedAt = "ended_at"
-        case prURL = "pr_url"
-        case prState = "pr_state"
-        case prTitle = "pr_title"
-    }
-
 }
 
 /// One attention item under `lf status`. Mirrors Rust `AttentionSnapshot`.

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
-use crate::lfd::types::{AttentionItem, LivePullRequestState, Run, RunStatus, Session};
+use crate::lfd::types::{AttentionItem, Session};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -75,59 +75,13 @@ pub struct WaveDto {
     /// Wave-level status rolled up over `repos` (see `Wave::status`).
     pub status: String,
     pub flow_steps: Vec<String>,
-    pub workers: u32,
+    pub task_capacity: u32,
     /// The single repository whose main checkout is this Wave's control plane.
     pub repo: String,
     pub iteration: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_run: Option<RunDto>,
     /// Parent wave in the chord tree. `null` for a root wave. Always emitted
     /// (no `skip_serializing_if`) so the Python/Swift mirrors stay in lockstep.
     pub parent_wave_id: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RunDto {
-    pub id: String,
-    pub object: String,
-    pub wave_id: String,
-    pub flow: String,
-    pub task: Option<String>,
-    pub repo: String,
-    pub direction: Vec<String>,
-    pub area: Vec<String>,
-    pub iteration: u32,
-    pub step_index: u32,
-    pub status: String,
-    pub local_worktree: String,
-    pub remote_branch: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pr: Option<PullRequestDto>,
-    pub started_at: Option<String>,
-    pub ended_at: Option<String>,
-    pub error: Option<String>,
-    pub flow_parents: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_run_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub live_pr_state: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub live_pr_is_draft: Option<bool>,
-    pub pr_state_stale: bool,
-    pub created_at: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PullRequestDto {
-    pub url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub number: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -227,11 +181,6 @@ pub struct WaveAgentTreeDto {
 }
 
 #[derive(Debug, Serialize)]
-pub struct StopWaveResponse {
-    pub stopped: bool,
-}
-
-#[derive(Debug, Serialize)]
 pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,
@@ -244,44 +193,6 @@ pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
         .ok()
 }
 
-pub fn run_dto(
-    run: Run,
-    live_pr_state: Option<&LivePullRequestState>,
-    pr_state_stale: bool,
-) -> RunDto {
-    RunDto {
-        id: run.id.to_string(),
-        object: "run".to_string(),
-        wave_id: run.wave_id.to_string(),
-        flow: run.flow.clone(),
-        task: run.task.clone(),
-        repo: run.repo.clone(),
-        direction: run.direction.clone(),
-        area: run.area.clone(),
-        iteration: run.iteration,
-        step_index: run.step_index,
-        status: run_status_str(run.status),
-        local_worktree: run.worktree,
-        remote_branch: run.branch,
-        pr: run.pr.map(|pr| PullRequestDto {
-            url: pr.url,
-            number: pr.number,
-            state: pr.state,
-            title: pr.title,
-            branch: pr.branch,
-        }),
-        started_at: format_datetime(run.started_at),
-        ended_at: format_datetime(run.ended_at),
-        error: run.error,
-        flow_parents: run.flow_parents,
-        parent_run_id: run.parent_run_id.map(|value| value.to_string()),
-        live_pr_state: live_pr_state.map(|value| value.state.as_str().to_string()),
-        live_pr_is_draft: live_pr_state.map(|value| value.is_draft),
-        pr_state_stale,
-        created_at: format_datetime(run.started_at),
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoDto {
     pub object: String,
@@ -292,18 +203,6 @@ pub struct RepoDto {
     pub registered: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub added_at: Option<String>,
-}
-
-pub fn run_status_str(status: RunStatus) -> String {
-    match status {
-        RunStatus::Pending => "pending",
-        RunStatus::Running => "running",
-        RunStatus::Waiting => "waiting",
-        RunStatus::Completed => "completed",
-        RunStatus::Failed => "failed",
-        RunStatus::Unspecified => "unknown",
-    }
-    .to_string()
 }
 
 #[cfg(test)]
@@ -338,12 +237,11 @@ mod contract_tests {
             agent: None,
             skill_agents: None,
             status: "idle".to_string(),
-            workers: 1,
+            task_capacity: 1,
             created_at: None,
             flow_steps: Vec::new(),
             repo: "/home/user/project".to_string(),
             iteration: 0,
-            active_run: None,
             parent_wave_id: None,
         };
 

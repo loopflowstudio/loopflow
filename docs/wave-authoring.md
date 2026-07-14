@@ -48,7 +48,7 @@ Infrastructure wave
 
 ## Creating a Wave
 
-Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`. Then run the agent:
+Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets machine config such as `task_capacity:`, `crons:`, and `pm:`. Then run the agent:
 
 ```bash
 lf serve infra             # start the wave agent
@@ -76,7 +76,7 @@ tasks live in Linear and sync into SQLite — read and edit them with `lf pm`
 
 ```markdown
 ---
-workers: 2
+task_capacity: 2
 ---
 
 ## Objective
@@ -190,13 +190,13 @@ lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 
 Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels
 like it needs splitting, it does. Give it a clear finish line and name the
-project it advances so a worker knows when to stop.
+Project it advances so its Task Session knows when to stop.
 
 ### Goal Frontmatter
 
 | Field | What it does |
 |-------|-------------|
-| `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
+| `task_capacity` | Maximum active Task processes. `0` prevents Task launch. |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident loop |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
@@ -261,13 +261,13 @@ anything needing attention.
 ### Crons
 
 Crons live in `GOAL.md` frontmatter; the Wave's resident opens each due
-schedule as a system turn. `workers: 0` is valid for a Wave that coordinates
-without starting Task Sessions:
+schedule as a system turn. `task_capacity: 0` is valid for a Wave that
+coordinates without starting Task Sessions:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-workers: 0
+task_capacity: 0
 crons:
   - flow: govern-coordination
     schedule: "0 0 0 * * * *"

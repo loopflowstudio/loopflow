@@ -1,9 +1,8 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge,
-    RepoId, Run, RunStatus, Summary, Wave, WaveStatus,
+    ChatMemoryBlock, ChatMessage, Repo, RepoEdge, RepoId, Summary, Wave, WaveStatus,
 };
-use crate::lfdb::{ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfdb::{StoreError, StoreResult};
 
 // -- Row helpers --------------------------------------------------------------
 
@@ -23,10 +22,6 @@ fn bigint(row: &rusqlite::Row<'_>, idx: usize) -> StoreResult<i64> {
     Ok(row.get(idx)?)
 }
 
-fn opt_bigint(row: &rusqlite::Row<'_>, idx: usize) -> StoreResult<Option<i64>> {
-    Ok(row.get(idx)?)
-}
-
 // -- Shared utilities --------------------------------------------------------
 
 pub fn unix_to_datetime(seconds: i64) -> time::OffsetDateTime {
@@ -41,22 +36,6 @@ pub fn parse_json_vec(value: &str) -> StoreResult<Vec<String>> {
     serde_json::from_str::<Vec<String>>(value).map_err(StoreError::Serde)
 }
 
-pub fn serialize_pr(value: &Option<PullRequest>) -> StoreResult<Option<String>> {
-    match value {
-        Some(pr) => Ok(Some(serde_json::to_string(pr)?)),
-        None => Ok(None),
-    }
-}
-
-pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
-    match value {
-        Some(raw) if !raw.trim().is_empty() => serde_json::from_str::<PullRequest>(&raw)
-            .map(Some)
-            .map_err(StoreError::Serde),
-        _ => Ok(None),
-    }
-}
-
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, direction, area, paused, created_at, workers,
@@ -68,7 +47,7 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let area = parse_json_vec(&text(row, 3)?)?;
     let paused = int(row, 4)? != 0;
     let created_at = unix_to_datetime(bigint(row, 5)?);
-    let workers = int(row, 6)? as u32;
+    let task_capacity = int(row, 6)? as u32;
     // Legacy rows predating migration 037 (goal NOT NULL DEFAULT) can hold
     // NULL; fall back to the same default so `lf ls`/reads stay robust.
     let goal = opt_text(row, 7)?.unwrap_or_else(|| "ship-roadmap".to_string());
@@ -88,7 +67,7 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
         area,
         paused,
         created_at: Some(created_at),
-        workers,
+        task_capacity,
         parent_wave_id,
     })
 }
@@ -108,77 +87,6 @@ pub fn map_repo_edge_row(row: &rusqlite::Row<'_>) -> StoreResult<RepoEdge> {
     Ok(RepoEdge {
         parent_repo_id: RepoId::from_raw(text(row, 0)?),
         child_repo_id: RepoId::from_raw(text(row, 1)?),
-    })
-}
-
-/// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
-///        snapshot_task, snapshot_direction, snapshot_area, snapshot_pr,
-///        flow_parents, execution_cursor, parent_run_id, repair_of
-pub fn map_run_row(row: &rusqlite::Row<'_>) -> StoreResult<Run> {
-    let started_at = unix_to_datetime(bigint(row, 7)?);
-    let ended_at = opt_bigint(row, 8)?;
-    let snapshot_direction = parse_json_vec(&text(row, 13)?)?;
-    let snapshot_area = parse_json_vec(&text(row, 14)?)?;
-    let snapshot_pr = parse_pr(opt_text(row, 15)?)?;
-    let flow_parents = parse_json_vec(&text(row, 16)?)?;
-    let execution_cursor = opt_text(row, 17)?;
-    let parent_run_id = opt_text(row, 18)?.map(LfdId::from_raw);
-    let repair_of = opt_text(row, 19)?.map(LfdId::from_raw);
-
-    Ok(Run {
-        id: LfdId::from_raw(text(row, 0)?),
-        wave_id: LfdId::from_raw(text(row, 1)?),
-        repo: text(row, 10)?,
-        flow: text(row, 11)?,
-        task: opt_text(row, 12)?,
-        direction: snapshot_direction,
-        area: snapshot_area,
-        iteration: int(row, 2)? as u32,
-        step_index: int(row, 3)? as u32,
-        status: RunStatus::from_i32(int(row, 4)?),
-        worktree: text(row, 5)?,
-        branch: text(row, 6)?,
-        started_at: Some(started_at),
-        ended_at: ended_at.map(unix_to_datetime),
-        error: opt_text(row, 9)?,
-        flow_parents,
-        execution_cursor,
-        parent_run_id,
-        repair_of,
-        pr: snapshot_pr,
-    })
-}
-
-/// SELECT repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
-///        updated_at, merged_at, synced_at
-pub fn map_live_pr_state_row(row: &rusqlite::Row<'_>) -> StoreResult<LivePullRequestState> {
-    Ok(LivePullRequestState {
-        repo_id: text(row, 0)?,
-        pr_number: bigint(row, 1)? as u32,
-        state: LivePrState::from_i32(int(row, 2)?),
-        is_draft: int(row, 3)? != 0,
-        head_ref: text(row, 4)?,
-        head_sha: text(row, 5)?,
-        base_ref: text(row, 6)?,
-        updated_at: unix_to_datetime(bigint(row, 7)?),
-        merged_at: opt_bigint(row, 8)?.map(unix_to_datetime),
-        synced_at: unix_to_datetime(bigint(row, 9)?),
-    })
-}
-
-/// SELECT id, run_id, step_index, branch_index, status, worktree
-pub fn map_fork_run_row(row: &rusqlite::Row<'_>) -> StoreResult<ForkRun> {
-    let status = ForkRunStatus::from_i64(int(row, 4)? as i64)
-        .ok_or_else(|| StoreError::InvalidData("invalid fork run status".to_string()))?;
-
-    Ok(ForkRun {
-        id: LfdId::from_raw(text(row, 0)?),
-        run_id: LfdId::from_raw(text(row, 1)?),
-        step_index: int(row, 2)? as u32,
-        branch_index: int(row, 3)? as u32,
-        status,
-        worktree: text(row, 5)?,
     })
 }
 

@@ -71,7 +71,7 @@ pub struct Wave {
     pub area: Vec<String>,
     pub paused: bool,
     pub created_at: Option<OffsetDateTime>,
-    pub workers: u32,
+    pub task_capacity: u32,
     pub parent_wave_id: Option<LfdId>,
 }
 ```
@@ -92,24 +92,6 @@ pub fn set_status(&mut self, status: WaveStatus) {
 }
 ```
 
-The same module still defines a separate execution record:
-
-```rust
-pub struct Run {
-    pub id: LfdId,
-    pub wave_id: LfdId,
-    pub repo: String,
-    pub flow: String,
-    pub task: Option<String>,
-    pub iteration: u32,
-    pub step_index: u32,
-    pub status: RunStatus,
-    pub worktree: String,
-    pub branch: String,
-    // ... ancestry, error, and PR fields
-}
-```
-
 ### What is clear
 
 - A Wave has one durable id, one human name, and one canonical repository.
@@ -124,24 +106,35 @@ pub struct Run {
   bookkeeping. Their current invariants are not visible in the type.
 - `paused` and `status` can disagree because both fields are public. The getter
   masks the disagreement rather than making it unrepresentable.
-- `workers` says it limits active Runs, while the current product model needs a
-  clear Task worker capacity. The name also collides with provider workers
-  inside a Task.
-- `Run` retains worktree, branch, task, ancestry, and PR identity. If it is only
-  historical flow telemetry, the name and placement make it look like a fourth
-  active runtime beside Wave/Project/Task.
-- No production path creates this `Run` anymore. The remaining code reads old
-  rows, projects them through HTTP/CLI DTOs, and tests the obsolete lifecycle.
-  This is distinct from the current run ledger: `lf runs` groups execution
-  events by a trace `run_id` and remains useful observability.
 - `DEFAULT_WAVE_FLOW = "ship-roadmap"` and `Wave::new(...).goal =
   "ship-roadmap"` use the same string as both a flow and a goal.
 
+### Reduced in code
+
+- The generic Wave `Run`, `RunStatus`, fork-run store, HTTP endpoints, Wave DTO
+  projection, and `lf status` projection are deleted. The independent execution
+  trace ledger behind `lf runs` remains.
+- CI failure ownership resolves the nonterminal Task Session that owns the PR.
+- The obsolete lfd stop endpoint is deleted; it previously returned success
+  after finding no generic Run and left the Wave server alive. The real Wave
+  listener `/stop` and Mac launcher remain.
+- Wave `workers` is now `task_capacity`. Provider workers may collaborate
+  inside a Task; Wave capacity limits active Task processes. Zero is no longer
+  silently coerced to one.
+- Wave registration refreshes authored goal and Task capacity from `GOAL.md`
+  before a child can launch. This repairs existing registry rows as well as new
+  ones, so `task_capacity: 0` is an enforced policy rather than documentation.
+- The obsolete `serialized` compatibility input is deleted. Capacity has one
+  name and one numeric meaning.
+- The orphaned `live_pr_states` store API and GitHub PR polling path are
+  deleted. Task Session status, PR identity, webhooks, and merge reconciliation
+  now own the live delivery lifecycle. Historical migration tables remain
+  readable but have no current domain type.
+
 ### Review question
 
-What is the minimum durable Wave aggregate after generic Runs stop being a
-product lifecycle? Resolve that before renaming fields individually. The likely
-center is identity, repo, objective, status, cadence/iteration, Task capacity,
+What is the minimum durable Wave aggregate now that generic Runs are gone? The
+likely center is identity, repo, objective, lifecycle/cadence, Task capacity,
 parent, and timestamps; memory/chat/PM bindings remain in their authoritative
 stores rather than being copied into this row.
 
@@ -683,26 +676,43 @@ This slice preserves schemas and behavior:
 This removes false ownership and duplicate representations. It does not create
 a generic lifecycle, generic runner, public `child` noun, or test-only trait.
 
+## Second simplification slice — implemented
+
+This slice removes the lifecycle that competed with Project and Task Sessions:
+
+1. Generic Wave `Run`/`ForkRun` types, persistence APIs, lfd routes, DTOs, and
+   CLI/Swift/Python projections are deleted. The independent trace ledger used
+   by `lf runs` remains.
+2. GitHub CI failures resolve the nonterminal Task Session that owns the PR.
+3. The obsolete lfd Wave stop route is deleted; the Wave listener remains the
+   single lifecycle owner.
+4. Wave `workers` is renamed `task_capacity` across authored config and public
+   contracts. `task_capacity: 0` prevents launch, and Wave registration applies
+   authored capacity to both new and existing registry rows.
+5. The stale `serialized` compatibility input and uncalled live-PR cache are
+   deleted. Task Session delivery owns PR state.
+
+The slice deletes 2,497 lines while adding 265. The repository gate passes:
+49 Python tests, 1,286 Rust tests with 3 intentional skips, 59 website tests
+with 3 intentional skips, 84 Swift tests, Swift multiplatform boundaries,
+clippy, format, and `git diff --check`.
+
 ## Questions to resolve as we move outward
 
 1. Which `Wave` fields are durable domain state, and which survive only because
    the old generic `Run` engine once owned the lifecycle?
-2. Can the dead Wave `Run` aggregate and its HTTP/CLI projections be removed
-   while retaining the independent execution trace ledger behind `lf runs`?
-3. Should Wave capacity count Task Sessions, live provider processes, or both?
-   What should that field be called?
-4. Are Wave name, repo, Linear context, and snapshot warning intentionally
+2. Are Wave name, repo, Linear context, and snapshot warning intentionally
    frozen launch receipts on child Sessions? If yes, name them that way.
-5. Which descendant Task events should reach the root Wave directly, and which
+3. Which descendant Task events should reach the root Wave directly, and which
    should arrive only through Project interpretation?
-6. Can Project Session no-progress detection be represented as typed input
+4. Can Project Session no-progress detection be represented as typed input
    state rather than an opaque serialized fingerprint?
-7. Is `Resume { message }` one atomic user intent, or two operations joined for
+5. Is `Resume { message }` one atomic user intent, or two operations joined for
    convenience?
-8. How does Wave Chat show transport receipt, directive incorporation, decision
+6. How does Wave Chat show transport receipt, directive incorporation, decision
    lineage, provider transcript, worktree, and PR without becoming three
    separate consoles?
-9. Where should the provider-side exactly-once limitation be visible to an
+7. Where should the provider-side exactly-once limitation be visible to an
    operator retrying a command after a crash?
 
 ## Review ledger
@@ -717,7 +727,7 @@ a generic lifecycle, generic runner, public `child` noun, or test-only trait.
   the correct durability shape.
 - `lf wt create` remains available below the domain workflow.
 - Generic Wave `Run` is a dead product lifecycle; trace `run_id` is a separate,
-  live observability concept.
+  live observability concept. The dead lifecycle is now removed.
 - The protected control plane is the canonical checkout on the default branch,
   not every branch that happens to use the canonical checkout path.
 
@@ -728,10 +738,15 @@ a generic lifecycle, generic runner, public `child` noun, or test-only trait.
 - One boundary result shape instead of enum versus tuple.
 - Shared child types moved out of the Task namespace.
 - The observation cursor now matches its stored id.
+- Generic Wave Run types, store APIs, HTTP/CLI projections, and clients removed.
+- CI failure routing now resolves Task Session PR ownership.
+- Wave `workers` renamed to `task_capacity`; zero capacity is honored.
+- Authored Task capacity is refreshed into the registry at Wave serve time.
+- Stale generic-Run PR cache and `serialized` compatibility input removed.
 
 ### Held open
 
-- The minimal Wave aggregate and fate of generic `Run`.
+- The minimal Wave aggregate after generic Run deletion.
 - Frozen launch receipt versus duplicated source-of-truth fields.
 - Root Wave visibility versus Project-owned interpretation of Task events.
 - Whether status/process invariants warrant a stronger runtime-state type or

@@ -6,30 +6,6 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-class PullRequest(BaseModel):
-    url: str
-    number: Optional[int] = None
-    state: Optional[str] = None
-    title: Optional[str] = None
-    branch: Optional[str] = None
-
-
-class Run(BaseModel):
-    id: str
-    wave_id: str
-    task: Optional[str] = None
-    iteration: int
-    step_index: int
-    status: str
-    local_worktree: str
-    remote_branch: str
-    pr: Optional[PullRequest] = None
-    started_at: Optional[datetime] = None
-    ended_at: Optional[datetime] = None
-    error: Optional[str] = None
-    flow_parents: list[str] = Field(default_factory=list)
-
-
 class FlowStep(BaseModel):
     type: str
     name: str
@@ -63,7 +39,7 @@ class Wave(BaseModel):
     name: str
     goal: str
     metrics: list[str]
-    workers: int
+    task_capacity: int
     direction: list[str]
     area: list[str]
     agent: Optional[str] = None
@@ -73,7 +49,6 @@ class Wave(BaseModel):
     iteration: int
     flow_steps: list[FlowStep]
     parent_wave_id: Optional[str]
-    active_run: Optional[Run] = None
     created_at: Optional[datetime] = None
 
     @field_validator("flow_steps", mode="before")

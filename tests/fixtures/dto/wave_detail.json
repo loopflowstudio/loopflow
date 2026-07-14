@@ -7,8 +7,7 @@
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
     "iteration": 7,
-    "workers": 2,
-    "active_runs": 0,
+    "task_capacity": 2,
     "active_tasks": 1,
     "active_projects": 1,
     "live": true,
@@ -17,7 +16,6 @@
     "parent_wave_id": null
   },
   "loop_state": "idle",
-  "runs": [],
   "projects": [
     {
       "project": {

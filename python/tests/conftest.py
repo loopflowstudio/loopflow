@@ -8,7 +8,7 @@ WAVE_MINIMAL = {
     "name": "reduce",
     "goal": "ship-roadmap",
     "metrics": [],
-    "workers": 1,
+    "task_capacity": 1,
     "direction": ["infra"],
     "area": [],
     "status": "running",
@@ -24,32 +24,6 @@ WAVE_FULL = {
     "flow_steps": ["review", "iterate", "build", "gate"],
     "agent": "codex",
     "skill_agents": {"gate": "claude"},
-    "active_run": {
-        "id": "run-1",
-        "wave_id": "abc-123",
-        "iteration": 0,
-        "step_index": 0,
-        "status": "running",
-        "local_worktree": "/tmp/wt",
-        "remote_branch": "wave/architecture",
-        "pr": {
-            "url": "https://github.com/org/repo/pull/1",
-            "number": 1,
-            "state": "open",
-        },
-        "started_at": "2026-02-08T02:00:00Z",
-        "flow_parents": ["parent-1"],
-    },
-}
-
-WAVE_RUN_MINIMAL = {
-    "id": "run-1",
-    "wave_id": "abc-123",
-    "iteration": 0,
-    "step_index": 0,
-    "status": "completed",
-    "local_worktree": "/tmp/wt",
-    "remote_branch": "wave/architecture",
 }
 
 REPO_MINIMAL = {

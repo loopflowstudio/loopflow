@@ -88,7 +88,7 @@ status and live sessions to clients.
 
 ```markdown
 ---
-workers: 2
+task_capacity: 2
 ---
 
 ## Objective

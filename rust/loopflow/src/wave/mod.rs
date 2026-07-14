@@ -1550,7 +1550,7 @@ mod tests {
             area: Vec::new(),
             paused: false,
             created_at: Some(time::OffsetDateTime::now_utc()),
-            workers: 1,
+            task_capacity: 1,
             parent_wave_id: None,
         }
     }

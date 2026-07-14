@@ -7,8 +7,8 @@
 //! - [`WaveId::branch`] — author-scoped, remote/glob-friendly:
 //!   `jack/bugs.fix-auth.20260706_0801`
 //!
-//! The chain is lineage *as a hint*. The authoritative parent/child DAG lives on
-//! the `Run` record and is never parsed back out of a name.
+//! The chain is lineage *as a hint*. Durable relationships live in explicit
+//! Wave/Project/Task records and are never parsed back out of a name.
 //!
 //! Input is liberal, output is strict. [`WaveId::parse`] is the single funnel:
 //! it accepts either surface form (with or without the `user/` prefix, with or

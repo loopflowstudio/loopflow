@@ -334,7 +334,7 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             command_source(&session)?,
         );
         match store
-            .reserve_task_session_with_directive(&session, &initial, wave.workers.max(1))
+            .reserve_task_session_with_directive(&session, &initial, wave.task_capacity)
             .await
         {
             Ok(true) => {}
@@ -342,7 +342,7 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
                 return Err(task_error(format!(
                     "wave/{} has reached its {} active Task Session limit",
                     wave.name(),
-                    wave.workers.max(1)
+                    wave.task_capacity
                 )))
             }
             Err(StoreError::Sqlite(_)) => {
@@ -519,7 +519,7 @@ pub(crate) async fn relaunch_inactive_process(
         .await
         .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
         .ok_or_else(|| task_error(format!("owning wave/{} is not registered", session.wave)))?;
-    launch_task_process(store, session, Some(wave.workers.max(1))).await
+    launch_task_process(store, session, Some(wave.task_capacity)).await
 }
 
 async fn launch_task_process(

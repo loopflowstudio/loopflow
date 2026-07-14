@@ -64,7 +64,7 @@ Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter
 ```markdown
 <!-- wave/shipper/GOAL.md -->
 ---
-workers: 2
+task_capacity: 2
 crons:
   - flow: sync
     schedule: "0 0 0 1 * * *"
@@ -85,13 +85,13 @@ Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
 
-Use `workers: 0` in `GOAL.md` for Waves that coordinate without starting Task
-Sessions, including cron-only observers:
+Use `task_capacity: 0` in `GOAL.md` for Waves that coordinate without starting
+Task Sessions, including cron-only observers:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-workers: 0
+task_capacity: 0
 crons:
   - flow: govern-identity
     schedule: "0 0 0 * * Sun *"

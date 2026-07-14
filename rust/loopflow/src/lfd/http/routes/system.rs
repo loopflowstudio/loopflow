@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 
 use crate::lfd::http::dto::{HealthResponse, MetricsResponse, StatusResponse};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::types::RunStatus;
+use crate::lfd::types::{SessionUse, LIVE_SESSION_STATUSES};
 
 pub async fn health_handler(State(state): State<HttpState>) -> Json<HealthResponse> {
     let counts = counts(&state).await;
@@ -42,24 +42,23 @@ struct Counts {
 
 async fn counts(state: &HttpState) -> Counts {
     let waves_fut = state.store.list_waves(None);
-    let runs_fut = state.store.list_runs(None, None);
+    let sessions_fut = state
+        .store
+        .list_control_sessions(None, Some(LIVE_SESSION_STATUSES));
     let health_fut = state.store.health_check();
-    let (waves, runs, health) = tokio::join!(waves_fut, runs_fut, health_fut);
+    let (waves, sessions, health) = tokio::join!(waves_fut, sessions_fut, health_fut);
 
     let waves = waves.unwrap_or_default();
-    let runs = runs.unwrap_or_default();
+    let sessions = sessions.unwrap_or_default();
     let database_ok = health.is_ok();
 
     let waves_defined = waves.len() as u32;
-    let waves_running = runs
+    let waves_running = sessions
         .iter()
-        .filter(|run| {
-            matches!(
-                run.status,
-                RunStatus::Running | RunStatus::Waiting | RunStatus::Pending
-            )
-        })
-        .count() as u32;
+        .filter(|session| session.session_use == SessionUse::WaveAgent)
+        .map(|session| &session.wave_id)
+        .collect::<std::collections::HashSet<_>>()
+        .len() as u32;
 
     Counts {
         waves_defined,

@@ -5,20 +5,16 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    LivePullRequestState, Repo, RepoEdge, RepoId, Run, RunStatus, Session, SessionStatus,
-    SessionUse, Summary, Wave, WaveStatus,
+    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, Repo, RepoEdge,
+    RepoId, Session, SessionStatus, SessionUse, Summary, Wave, WaveStatus,
 };
-use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
+use crate::lfdb::catalog::{list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
-    map_chat_memory_block_row, map_chat_message_row, map_fork_run_row, map_live_pr_state_row,
-    map_repo_edge_row, map_repo_row, map_run_row, map_summary_row, map_wave_row, now_unix,
-    serialize_pr,
+    map_chat_memory_block_row, map_chat_message_row, map_repo_edge_row, map_repo_row,
+    map_summary_row, map_wave_row, now_unix,
 };
 use crate::lfdb::token_crypto;
-use crate::lfdb::{
-    BusMessage, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow, StoreError, StoreResult,
-};
+use crate::lfdb::{BusMessage, PmSnapshotRow, RunEventRow, StoreError, StoreResult};
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
     ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
@@ -276,7 +272,7 @@ impl SqliteStore {
                     0i64
                 },
                 created_at,
-                wave.workers as i64,
+                wave.task_capacity as i64,
                 wave.goal(),
                 metrics_json,
                 wave.parent_wave_id(),
@@ -682,31 +678,6 @@ impl SqliteStore {
         Ok(sessions)
     }
 
-    pub fn get_active_control_session_for_run(
-        &self,
-        run_id: &LfdId,
-    ) -> StoreResult<Option<Session>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {} FROM terminal_sessions \
-             WHERE run_id = ?1 AND status IN (?2, ?3, ?4) \
-             ORDER BY created_at DESC LIMIT 1",
-            Self::TERMINAL_SESSION_COLS
-        ))?;
-        let row = stmt
-            .query_row(
-                params![
-                    run_id,
-                    SessionStatus::Pending.as_i32() as i64,
-                    SessionStatus::Attached.as_i32() as i64,
-                    SessionStatus::Running.as_i32() as i64,
-                ],
-                Self::map_control_session_row,
-            )
-            .optional()?;
-        Ok(row)
-    }
-
     pub fn update_control_session(&self, session: &Session) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
@@ -811,208 +782,6 @@ impl SqliteStore {
             params![wave_id],
         )?;
         conn.execute(Self::sql(Query::DeleteWaveById), params![wave_id])?;
-        Ok(())
-    }
-
-    pub fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>) -> StoreResult<Vec<Run>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = Self::sql(list_runs_query(wave_id.is_some(), limit.is_some()));
-        let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
-        if let Some(wave_id) = wave_id {
-            params_vec.push(Box::new(wave_id.clone()));
-        }
-        if let Some(limit) = limit {
-            params_vec.push(Box::new(limit as i64));
-        }
-
-        let mut stmt = conn.prepare(query)?;
-        let params_iter = params_vec.iter().map(|v| v.as_ref() as &dyn ToSql);
-        let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
-            Ok(map_run_row(row))
-        })?;
-
-        let mut runs = Vec::new();
-        for run in rows {
-            runs.push(run??);
-        }
-        Ok(runs)
-    }
-
-    /// Non-terminal runs plus runs that ended at or after `ended_since` —
-    /// the push bridge's working set (see `Query::ListRunsActiveOrEndedSince`).
-    pub fn list_runs_active_or_ended_since(
-        &self,
-        ended_since: time::OffsetDateTime,
-    ) -> StoreResult<Vec<Run>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListRunsActiveOrEndedSince))?;
-        let rows = stmt.query_map(
-            params![
-                RunStatus::Completed.as_i32() as i64,
-                RunStatus::Failed.as_i32() as i64,
-                ended_since.unix_timestamp(),
-            ],
-            |row| Ok(map_run_row(row)),
-        )?;
-        let mut runs = Vec::new();
-        for run in rows {
-            runs.push(run??);
-        }
-        Ok(runs)
-    }
-
-    pub fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetRunById))?;
-        let run = stmt
-            .query_row(params![run_id], |row| Ok(map_run_row(row)))
-            .optional()?;
-        run.transpose()
-    }
-
-    pub fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetActiveRun))?;
-        let run = stmt
-            .query_row(
-                params![
-                    wave_id,
-                    RunStatus::Pending.as_i32() as i64,
-                    RunStatus::Running.as_i32() as i64,
-                    RunStatus::Waiting.as_i32() as i64,
-                ],
-                |row| Ok(map_run_row(row)),
-            )
-            .optional()?;
-        run.transpose()
-    }
-
-    pub fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::CountActiveRuns))?;
-        let count = stmt.query_row(
-            params![
-                wave_id,
-                RunStatus::Pending.as_i32() as i64,
-                RunStatus::Running.as_i32() as i64,
-                RunStatus::Waiting.as_i32() as i64,
-            ],
-            |row| row.get::<_, i64>(0),
-        )?;
-        Ok(count.max(0) as u32)
-    }
-
-    pub fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetLatestRun))?;
-        let run = stmt
-            .query_row(params![wave_id], |row| Ok(map_run_row(row)))
-            .optional()?;
-        run.transpose()
-    }
-
-    pub fn create_run(&self, run: &Run) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let started_at = run
-            .started_at
-            .map(|dt| dt.unix_timestamp())
-            .unwrap_or_else(now_unix);
-        let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
-        let execution_cursor = run.execution_cursor.clone();
-        conn.execute(
-            Self::sql(Query::InsertRun),
-            params![
-                run.id,
-                run.wave_id,
-                run.iteration as i64,
-                run.step_index as i64,
-                run.status.as_i32() as i64,
-                run.worktree,
-                run.branch,
-                started_at,
-                run.ended_at.map(|dt| dt.unix_timestamp()),
-                run.error,
-                run.repo,
-                run.flow,
-                run.task,
-                serde_json::to_string(&run.direction)?,
-                serde_json::to_string(&run.area)?,
-                serialize_pr(&run.pr)?,
-                flow_parents_json,
-                execution_cursor,
-                run.parent_run_id.as_ref(),
-                run.repair_of.as_ref(),
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn update_run(&self, run: &Run) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
-        let execution_cursor = run.execution_cursor.clone();
-        let updated = conn.execute(
-            Self::sql(Query::UpdateRun),
-            params![
-                run.iteration as i64,
-                run.step_index as i64,
-                run.status.as_i32() as i64,
-                run.worktree,
-                run.branch,
-                run.started_at.map(|dt| dt.unix_timestamp()),
-                run.ended_at.map(|dt| dt.unix_timestamp()),
-                run.error,
-                run.repo,
-                run.flow,
-                run.task,
-                serde_json::to_string(&run.direction)?,
-                serde_json::to_string(&run.area)?,
-                serialize_pr(&run.pr)?,
-                flow_parents_json,
-                execution_cursor,
-                run.parent_run_id.as_ref(),
-                run.repair_of.as_ref(),
-                run.id,
-            ],
-        )?;
-        if updated == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn get_live_pr_state(
-        &self,
-        repo_id: &str,
-        pr_number: u32,
-    ) -> StoreResult<Option<LivePullRequestState>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetLivePrState))?;
-        let state = stmt
-            .query_row(params![repo_id, pr_number as i64], |row| {
-                Ok(map_live_pr_state_row(row))
-            })
-            .optional()?;
-        state.transpose()
-    }
-
-    pub fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            Self::sql(Query::UpsertLivePrState),
-            params![
-                state.repo_id,
-                state.pr_number as i64,
-                state.state.as_i32() as i64,
-                if state.is_draft { 1i64 } else { 0i64 },
-                state.head_ref,
-                state.head_sha,
-                state.base_ref,
-                state.updated_at.unix_timestamp(),
-                state.merged_at.map(|value| value.unix_timestamp()),
-                state.synced_at.unix_timestamp(),
-            ],
-        )?;
         Ok(())
     }
 
@@ -1161,102 +930,6 @@ impl SqliteStore {
         let deleted = conn.execute(
             "DELETE FROM attention_items WHERE id = ?1",
             rusqlite::params![attention_id],
-        )?;
-        Ok(deleted as u32)
-    }
-
-    pub fn fail_orphaned_runs(&self) -> StoreResult<u32> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            Self::sql(Query::FailOrphanedRuns),
-            params![
-                RunStatus::Failed.as_i32() as i64,
-                "orphaned: lfd restarted",
-                now_unix(),
-                RunStatus::Pending.as_i32() as i64,
-                RunStatus::Running.as_i32() as i64,
-                RunStatus::Waiting.as_i32() as i64,
-            ],
-        )?;
-        // Runs that were in flight are now Failed; the waves that owned them
-        // would otherwise stay stuck in Running/Waiting and keep their action
-        // buttons disabled. Reset them to Idle.
-        conn.execute(
-            Self::sql(Query::ResetStaleActiveWaves),
-            params![
-                WaveStatus::Idle.as_i32() as i64,
-                WaveStatus::Running.as_i32() as i64,
-                WaveStatus::Waiting.as_i32() as i64,
-            ],
-        )?;
-        Ok(updated as u32)
-    }
-
-    pub fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListForkRuns))?;
-        let rows = stmt.query_map(params![run_id, step_index as i64], |row| {
-            Ok(map_fork_run_row(row))
-        })?;
-        let mut runs = Vec::new();
-        for run in rows {
-            runs.push(run??);
-        }
-        Ok(runs)
-    }
-
-    pub fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT fr.id, fr.run_id, fr.step_index, fr.branch_index, fr.status, fr.worktree
-             FROM fork_runs fr
-             LEFT JOIN runs wr ON wr.id = fr.run_id
-             WHERE fr.status IN (?1, ?2)
-               AND (
-                 wr.id IS NULL
-                 OR wr.status NOT IN (?3, ?4, ?5)
-                 OR fr.step_index != wr.step_index
-               )
-             ORDER BY fr.run_id ASC, fr.step_index ASC, fr.branch_index ASC",
-        )?;
-        let rows = stmt.query_map(
-            params![
-                ForkRunStatus::Pending as i32 as i64,
-                ForkRunStatus::Running as i32 as i64,
-                RunStatus::Pending.as_i32() as i64,
-                RunStatus::Running.as_i32() as i64,
-                RunStatus::Waiting.as_i32() as i64
-            ],
-            |row| Ok(map_fork_run_row(row)),
-        )?;
-        let mut runs = Vec::new();
-        for run in rows {
-            runs.push(run??);
-        }
-        Ok(runs)
-    }
-
-    pub fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            Self::sql(Query::UpsertForkRun),
-            params![
-                fork_run.id,
-                fork_run.run_id,
-                fork_run.step_index as i64,
-                fork_run.branch_index as i64,
-                fork_run.status as i32 as i64,
-                fork_run.worktree,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let deleted = conn.execute(
-            Self::sql(Query::DeleteForkRuns),
-            params![run_id, step_index as i64],
         )?;
         Ok(deleted as u32)
     }

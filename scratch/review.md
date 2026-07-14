@@ -238,7 +238,10 @@ pub struct ChildProcessGeneration {
   reconcile a missing tmux process to resumable failure rather than trusting a
   persisted PID.
 - `last_state_fingerprint` now names its temporal role, but the hash still hides
-  which PM/Task input changed from an operator reading the row.
+  which PM/Task input changed from an operator reading the row. The digest is
+  deliberately not a public diagnostic: the visible status reason, PM
+  snapshot, Task rows, and event ledger are the inspectable evidence. Persisting
+  a second structured copy would create another current-state owner.
 
 ### Review question
 
@@ -532,12 +535,15 @@ transaction.commit()?;
 
 ### What is unclear
 
-- Project-supervised Task events may be delivered both to the Project and
-  directly to the root Wave. Decide which events are root visibility and which
-  should be Project rollups; otherwise Wave Chat can show two narratives.
-- `is_wave_observable` and `is_root_wave_observable` put routing policy on the
-  event enum. That is compact, but the naming hides the immediate-supervisor
-  distinction.
+- Routing is deliberate: every consequential Task event reaches its immediate
+  supervisor; significant delivery/control state also reaches the root Wave;
+  routine Task decisions remain at the Project boundary until explicitly
+  escalated. `ProjectEventKind::TaskObserved` is never sent onward, preventing a
+  duplicate Project narration of the same Task event.
+- Wave Chat activity does not yet carry `ChildCommandSource`. The durable
+  command/directive can distinguish Wave, Project, human, attachment, and
+  system control, but the card currently shows only outcome/effect. The UI
+  therefore cannot answer “who changed this direction?” without a drill-down.
 - The Rust/API field is now `observation_cursor`; the legacy SQLite column name
   is intentionally left in place until a schema rebuild earns a migration.
 
@@ -966,18 +972,30 @@ Captured planning context has a neutral owner and an honest name:
 The full Rust suite, clippy, format, and `git diff --check` pass. `scratch/`
 contains only this review.
 
+## Eleventh simplification slice — implemented
+
+The outward command contract now follows user intent at the stopped boundary:
+
+1. A bare `interrupt` against an inactive Project or Task is accepted without
+   launching a provider process solely to stop it again.
+2. `interrupt --message` still relaunches because the replacement must reach
+   the same durable Session.
+3. Task decision help now says “immediate supervisor”; a Project-supervised
+   Task does not bypass its Project and address the Wave directly.
+4. Project steer help states that inactive Sessions relaunch when needed.
+
+The stopped-interrupt regression test and clippy pass.
+
 ## Questions to resolve as we move outward
 
-1. Which descendant Task events should reach the root Wave directly, and which
-   should arrive only through Project interpretation?
-2. Can Project Session no-progress detection expose inspectable evidence rather
-   than only an opaque hash?
-3. How does Wave Chat show transport receipt, directive incorporation, decision
+1. How does Wave Chat show transport receipt, directive incorporation, decision
    lineage, provider transcript, worktree, and PR without becoming three
    separate consoles?
-4. Where should the provider-side exactly-once limitation be visible to an
+2. How should activity cards expose durable control source—Wave, Project,
+   human, attachment, or system—without duplicating the command ledger?
+3. Where should the provider-side exactly-once limitation be visible to an
    operator retrying a command after a crash?
-5. Should the ordered Wave thread eventually use a discriminated entry enum for
+4. Should the ordered Wave thread eventually use a discriminated entry enum for
    human messages, Wave turns, and child activity, or is the current optional
    activity field the smaller honest wire contract?
 
@@ -1031,6 +1049,4 @@ contains only this review.
 
 ### Held open
 
-- Root Wave visibility versus Project-owned interpretation of Task events.
-- Whether the Project no-progress hash needs inspectable evidence when it
-  blocks pursuit.
+- Wave Chat control-source lineage and visual hierarchy.

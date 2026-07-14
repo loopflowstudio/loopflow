@@ -528,7 +528,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Redirect the active Project turn
+    /// Redirect Project work now, relaunching the Session when needed
     Steer {
         project_id: String,
         message: String,
@@ -701,7 +701,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Ask the owning Wave to choose while preserving this Task Session
+    /// Ask the immediate supervisor to choose while preserving this Task Session
     RequestDecision {
         issue: String,
         prompt: String,

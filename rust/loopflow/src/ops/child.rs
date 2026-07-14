@@ -338,6 +338,22 @@ pub(crate) async fn queue_command(
         }
     }
 
+    if matches!(
+        &command.kind,
+        ChildCommandKind::Interrupt { replacement: None }
+    ) && !session.is_process_active()
+    {
+        store
+            .accept_child_command(&command.id, None)
+            .await
+            .map_err(child_error)?;
+        session
+            .append_command_event(store, command.id.clone(), ChildCommandState::Accepted, None)
+            .await?;
+        let receipt = read_receipt(store, &command.id).await?;
+        return control_result(store, &command, receipt).await;
+    }
+
     if !session.is_process_active() {
         session.launch(store).await?;
     }
@@ -585,6 +601,39 @@ mod tests {
 
         assert_eq!(result.state, ChildCommandState::Accepted);
         assert_eq!(persisted.status, ProjectSessionStatus::Abandoned);
+        assert_eq!(persisted.latest_process, None);
+    }
+
+    #[tokio::test]
+    async fn interrupting_an_inactive_project_does_not_launch_a_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Waiting);
+        let project_id = project.id.clone();
+        store.create_project_session(&project).await.unwrap();
+
+        let result = queue_command(
+            &store,
+            ChildSession::Project(Box::new(project)),
+            ChildCommandSource::Human,
+            ChildCommandKind::Interrupt { replacement: None },
+        )
+        .await
+        .unwrap();
+        let persisted = store
+            .get_project_session(&project_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.state, ChildCommandState::Accepted);
+        assert_eq!(persisted.status, ProjectSessionStatus::Waiting);
         assert_eq!(persisted.latest_process, None);
     }
 }

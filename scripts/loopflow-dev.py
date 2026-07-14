@@ -12,9 +12,6 @@ Commands:
     run-debug       Build and run with stdout visible (default: bundled lfd only)
     run-debug --with-lfd
                     Also run one-shot local lfd from this branch (for daemon debugging)
-    run-ios         Build and launch in iOS Simulator
-    run-ios --device "iPad Pro 13-inch (M4)"
-                    Target a specific simulator device
     release         Build release .app and .dmg (delegates to release-loopflow.py)
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
@@ -426,117 +423,6 @@ def cmd_run_debug(with_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
     if lfd_log is not None:
         lfd_log.close()
     return app_exit
-
-
-def _find_default_iphone_simulator() -> str:
-    """Find the first available iPhone simulator, preferring one already booted."""
-    result = run_capture(["xcrun", "simctl", "list", "devices", "available", "-j"])
-    if result.returncode != 0:
-        return "iPhone 16"
-
-    import json
-
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return "iPhone 16"
-
-    for runtime, devices in data.get("devices", {}).items():
-        if "iOS" not in runtime:
-            continue
-        for device in devices:
-            if device.get("state") == "Booted" and "iPhone" in device.get("name", ""):
-                return device["name"]
-
-    for runtime, devices in data.get("devices", {}).items():
-        if "iOS" not in runtime:
-            continue
-        for device in devices:
-            if "iPhone" in device.get("name", ""):
-                return device["name"]
-
-    return "iPhone 16"
-
-
-def cmd_run_ios(device: str | None = None) -> int:
-    """Build and launch Loopflow in the iOS Simulator."""
-    device = device or _find_default_iphone_simulator()
-
-    # Regenerate xcode project to pick up current file layout
-    print("Generating Xcode project...")
-    result = run(["xcodegen", "generate"], cwd=SWIFT_DIR, check=False)
-    if result.returncode != 0:
-        print("xcodegen failed. Install with: brew install xcodegen")
-        return result.returncode
-
-    project = SWIFT_DIR / "LoopflowSwift.xcodeproj"
-    destination = f"platform=iOS Simulator,name={device}"
-
-    print(f"Building Loopflow for {device}...")
-    result = run(
-        [
-            "xcodebuild",
-            "build",
-            "-scheme",
-            "LoopflowMac",
-            "-project",
-            str(project),
-            "-destination",
-            destination,
-            "-configuration",
-            "Debug",
-        ],
-        cwd=SWIFT_DIR,
-        check=False,
-    )
-    if result.returncode != 0:
-        return result.returncode
-
-    # Find the built .app
-    settings = run_capture(
-        [
-            "xcodebuild",
-            "-showBuildSettings",
-            "-scheme",
-            "LoopflowMac",
-            "-project",
-            str(project),
-            "-destination",
-            destination,
-            "-configuration",
-            "Debug",
-        ],
-        cwd=SWIFT_DIR,
-    )
-    app_path = None
-    for line in settings.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("BUILT_PRODUCTS_DIR = "):
-            products_dir = line.split(" = ", 1)[1].strip()
-            app_path = Path(products_dir) / "Loopflow.app"
-            break
-
-    if not app_path or not app_path.exists():
-        print("Could not locate built Loopflow.app in derived data")
-        return 1
-
-    # Boot simulator and install
-    print(f"Booting {device}...")
-    run(["xcrun", "simctl", "boot", device], check=False)  # already booted is fine
-    run(["open", "-a", "Simulator"], check=False)
-
-    print("Installing Loopflow...")
-    result = run(["xcrun", "simctl", "install", "booted", str(app_path)], check=False)
-    if result.returncode != 0:
-        return result.returncode
-
-    print(f"Launching Loopflow on {device}...")
-    print("Press Ctrl+C to quit")
-    print("---")
-    return run(
-        ["xcrun", "simctl", "launch", "--console-pty", "booted", "com.loopflow.mac"],
-        check=False,
-    ).returncode
 
 
 def cmd_release() -> int:
@@ -1191,7 +1077,6 @@ COMMANDS = {
     "test": (cmd_test, "Build and run tests"),
     "run": (cmd_run, "Build and launch the app"),
     "run-debug": (cmd_run_debug, "Build and run with stdout visible (bundled lfd default)"),
-    "run-ios": (cmd_run_ios, "Build and launch in iOS Simulator"),
     "release": (cmd_release, "Build release .app and .dmg"),
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
@@ -1238,13 +1123,6 @@ def main() -> int:
                 default=REPO_ROOT,
                 help="Repo the app opens on launch (default: this checkout)",
             )
-        if name == "run-ios":
-            sub.add_argument(
-                "--device",
-                type=str,
-                default=None,
-                help='Simulator device name (default: first iPhone, e.g. "iPad Pro 13-inch (M4)")',
-            )
         if name == "setup":
             sub.add_argument(
                 "--install",
@@ -1268,8 +1146,6 @@ def main() -> int:
     if args.command == "run-debug":
         with_lfd = args.with_lfd
         return func(with_lfd=with_lfd, repo=args.repo)
-    if args.command == "run-ios":
-        return func(device=args.device)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
     return func()

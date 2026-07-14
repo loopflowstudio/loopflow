@@ -496,28 +496,20 @@ This deletes the app's `Run`, `PullRequest`, and `StepRun` types. The required
 `runs` field in the `lf status` wire snapshot remains decoded but deliberately
 unprojected until the Rust status contract can drop it separately.
 
-## Current reduction: make the iOS surface truthful
+## Current reduction: remove the unshippable mobile shell
 
-The Mac now speaks to the Wave through its replayable chat endpoint. The iOS
-detail still offered a `Chat` tab backed by the retired generic agent-session
-API, referenced a view that no longer exists, and presented a PR as if it
-belonged to the Wave. Its orphaned selectable-message renderer also depended
-on a reaction model deleted long ago. The target had stopped compiling, but
-the normal Swift gate never built it.
+The Mac speaks to the Wave through its replayable local chat endpoint. The iOS
+app still targeted the retired generic agent-session HTTP API: its remote
+handshake returned no repositories, it had no registry query, and output
+streaming ended immediately. Setup could never reach a real Wave. Its `run-ios`
+helper made this harder to see by asking Xcode to build the macOS scheme for an
+iOS destination.
 
-Do not recreate the old session path to make the affordance look alive:
-
-- iOS shows the Wave output it can still read and no nonfunctional Chat tab;
-- PR navigation remains attached to Task delivery, never Wave identity;
-- the unused quote/reaction renderer is deleted instead of restoring its dead
-  dependency;
-- the iOS simulator target joins the explicit build gate;
-- a future mobile Wave Chat must use the same typed Wave conversation and
-  child-observation contract as Mac, with an explicit remote discovery and
-  transport story rather than generic exec/session HTTP.
-
-That last item is an actual product question. Removing a broken control is not
-the mobile Wave Chat design; it makes the missing design visible.
+Remove the iOS app target, shell, simulator helper, and stage verifier. Keep the
+shared library iOS-compatible so a future mobile product can reuse the typed
+models. Reintroduce mobile only with an explicit remote Wave discovery/chat
+transport and the same child-observation contract as Mac; do not revive generic
+exec/session HTTP to make a screen connect.
 
 ## Current reduction: process sessions are not product sessions
 

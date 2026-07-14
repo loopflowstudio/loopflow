@@ -2,9 +2,7 @@
 
 import PackageDescription
 
-// SwiftPM builds the cross-platform `Loopflow` library and the macOS app
-// (`LoopflowMac`) — the `swift build` / `swift test` / CI path. The iOS app
-// (`LoopflowiOS`) is built through xcodegen + Xcode; see project.yml.
+// SwiftPM builds the cross-platform `Loopflow` library and the macOS app.
 let package = Package(
     name: "LoopflowSwift",
     platforms: [

@@ -84,12 +84,10 @@ See `LoopflowMac/Services/Ghostty/README.md` for integration details.
 
 ## Architecture
 
-- `Loopflow/State/RepoState.swift` — shared app orchestrator for waves, connection, and stores
-- `Loopflow/State/*.swift` — shared state containers (`WaveStore`, `RunStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`, `SessionState`)
+- `Loopflow/State/RepoState.swift` — shared connection and Wave discovery state
+- `Loopflow/State/*.swift` — shared state containers (`WaveStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`)
 - `Loopflow/Models` + `Loopflow/Services` — shared API models and transport/services
-- `Loopflow/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveSessionView`)
-- `LoopflowMac` — macOS-only views, services, and keyboard handling
-- `LoopflowiOS` — iOS-only views (`DiscoveryView`, `MobileWaveDetailView`, `MobileWaveListView`)
+- `LoopflowMac` — the macOS product surface and platform services
 - `LoopflowMac/Services/Ghostty` — embedded terminal integration (macOS-only)
 
 ## Multiplatform Boundary Rules
@@ -104,7 +102,6 @@ Use these rules for every new Swift change. The goal is low long-term `#if` foot
 ### 2) Keep platform code in shell files
 
 - Put macOS-only code under `LoopflowMac/` (or existing macOS-specific folders such as `Services/Ghostty/`).
-- Put iOS-only code under `LoopflowiOS/`.
 - Prefer whole-file platform splits over inline branching.
 
 ### 3) Minimize `#if` usage

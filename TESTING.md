@@ -186,7 +186,6 @@ Nightly package artifacts are verification only. They are uploaded for 14 days a
 
 ```bash
 uv run python scripts/loopflow-dev.py run-debug     # build and launch lfd + Loopflow (macOS)
-uv run python scripts/loopflow-dev.py run-ios        # build and launch in iOS Simulator
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 uv run python scripts/test_auth_live_contract.py --providers github,claude,codex  # live provider-auth contract + evidence capture
 uv run python scripts/test_remote_smoke.py --url https://lfd.example.com --token "$LFD_AUTH_TOKEN" --repo /remote/repo/path  # remote TLS smoke (repo required on fresh hosts)

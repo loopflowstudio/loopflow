@@ -69,25 +69,6 @@ targets:
         # GhosttyKit is disabled in Xcode project - use SPM build for full terminal support
         # To enable locally, build Ghostty and add GHOSTTY_ENABLED to compilation conditions
 
-  LoopflowiOS:
-    type: application
-    platform: iOS
-    sources:
-      - path: LoopflowiOS
-    dependencies:
-      - target: Loopflow
-    settings:
-      base:
-        PRODUCT_NAME: Loopflow
-        PRODUCT_MODULE_NAME: LoopflowiOS
-        GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.ios
-        CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: 2V3M244HF2
-        INFOPLIST_KEY_CFBundleDisplayName: Loopflow
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-
   LoopflowTests:
     type: bundle.unit-test
     platform: macOS

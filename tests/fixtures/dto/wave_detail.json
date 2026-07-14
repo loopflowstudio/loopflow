@@ -86,7 +86,7 @@
             "empty": false,
             "publication": {
               "requested_at": "2026-07-13T18:45:00Z",
-              "after_merge": {"kind": "complete_task"},
+              "after_merge": "complete_task",
               "next_slug": null,
               "github": {
                 "number": 912,

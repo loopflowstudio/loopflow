@@ -531,7 +531,7 @@ private struct ChildControlActivityCard: View {
         case .incorporated: "checkmark.circle.fill"
         case .decisionRequired: "questionmark.circle.fill"
         case .decisionResolved: "checkmark.bubble.fill"
-        case .pullRequestOpened: "arrow.triangle.pull"
+        case .prOpened: "arrow.triangle.pull"
         case .completed: "checkmark.seal.fill"
         case .failed: "exclamationmark.triangle.fill"
         case .controlUncertain: "questionmark.diamond.fill"

@@ -190,11 +190,7 @@ public struct PrPublicationSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public struct PrAfterMerge: Decodable, Sendable, Hashable {
-    public let kind: PrAfterMergeKind
-}
-
-public enum PrAfterMergeKind: String, Decodable, Sendable, Hashable {
+public enum PrAfterMerge: String, Decodable, Sendable, Hashable {
     case review
     case completeTask = "complete_task"
 }

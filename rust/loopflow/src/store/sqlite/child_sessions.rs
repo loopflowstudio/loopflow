@@ -246,11 +246,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        task_pr_on(&conn, pr_id)
-    }
-
     pub fn task_prs(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(

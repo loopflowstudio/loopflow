@@ -11,7 +11,7 @@ use crate::project_session::{
     ProjectSessionStatus,
 };
 use crate::task::{
-    TaskEvent, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+    TaskEvent, TaskEventKind, TaskPr, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -104,11 +104,6 @@ impl Store {
     pub async fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
-    }
-
-    pub async fn get_task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
-        let pr_id = pr_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_pr(&pr_id)).await
     }
 
     pub async fn task_prs(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskPr>> {

@@ -53,7 +53,7 @@ public func isConversational(_ activity: ChildControlActivity) -> Bool {
     case .stateChanged, .controlApplied, .directed, .incorporated:
         return false
     case .controlUncertain, .decisionRequired, .decisionResolved,
-         .pullRequestOpened, .completed, .failed:
+         .prOpened, .completed, .failed:
         return true
     }
 }

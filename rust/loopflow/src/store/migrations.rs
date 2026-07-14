@@ -481,6 +481,7 @@ mod tests {
     #[test]
     fn existing_task_rows_become_sequence_one_prs_without_losing_events() {
         let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_set(&conn, &MIGRATIONS[..2]).unwrap();
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at)

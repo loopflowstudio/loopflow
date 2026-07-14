@@ -133,7 +133,7 @@ impl PrPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum AfterMerge {
     Review,
     CompleteTask,

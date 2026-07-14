@@ -220,14 +220,10 @@ async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
     Ok(())
 }
 
-/// Nudge a live Wave server to fold one authoritative Task ledger event. A
-/// stopped Wave needs no direct journal writer: its store observer catches up
-/// from the durable Task ledger on the next serve.
-pub(crate) async fn post_task_observation_to_named_wave(
-    wave: &str,
-    session_id: &crate::task::TaskSessionId,
-    event_id: i64,
-) -> Result<bool> {
+/// Nudge a live Wave server to drain its authoritative child-observation
+/// outbox. A stopped Wave needs no direct journal writer: its store observer
+/// catches up from the durable outbox on the next serve.
+pub(crate) async fn nudge_child_observations(wave: &str) -> Result<bool> {
     let context = CliContext::detect().await;
     let target = WaveTargetArgs {
         wave: Some(wave.to_string()),
@@ -245,11 +241,7 @@ pub(crate) async fn post_task_observation_to_named_wave(
     let Some(endpoint) = resolved.endpoint else {
         return Ok(false);
     };
-    let body = crate::wave::wire::ObserveTaskRequest {
-        session_id: session_id.clone(),
-        event_id,
-    };
-    post_json(&endpoint, "/tasks/observe", &serde_json::to_value(body)?).await?;
+    post_json(&endpoint, "/observations", &serde_json::json!({})).await?;
     Ok(true)
 }
 

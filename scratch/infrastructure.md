@@ -363,33 +363,29 @@ opens PRs, and merges code, so it requires an explicit human-authorized run.
 Until that gate runs, keep the provider acceptance window and live UX quality
 as evidence gaps—not reasons to invent more architecture.
 
-## Current reduction: one child control implementation
+## Current reduction: make the outbox the one child-to-Wave path
 
-The dead generic Worker observer is gone. Historical `RunObserved` journal
-rows still decode, but live Wave state now comes only from Wave turns and typed
-Project/Task observations.
+Provider control is now one private implementation shared by Project and Task
+Sessions. Their runners retain checkout, convergence, observation, PR, and PM
+policy; follow-up, steer, interrupt, decide, and receipt settlement cannot
+drift by domain.
 
-The next top-down fault is inside the native hierarchy: Project and Task
-runners independently implement the same provider-control state machine.
-Their copies already disagree on bare interrupt settlement, replacement queue
-clearing, decision prompt shape, claimed events, and error sanitization. That
-is precisely the seam where steerability must be strongest and least
-provider-dependent.
+The next fault is the return path. Both child kinds commit observable events
+and an outbox row in one transaction, but only Tasks have an immediate HTTP
+door into the Wave. That door accepts a Task event id and resolves the ledger
+again, duplicating the outbox observer. Project events wait for the ten-second
+poll. The asymmetry makes Project supervision feel slower precisely where the
+Wave needs to remain in control.
 
-Keep Project and Task lifecycle policy separate, but reduce provider control
-to one private core:
+Use the outbox as the only authority:
 
-- one `ChildCommandKind` interpretation for follow-up, live steer,
-  interrupt-and-replace, resume, decide, and abandon;
-- one pending-input shape and FIFO/supersession check;
-- one Harness capability decision: steer live when supported, otherwise
-  interrupt and continue the same provider session;
-- one durable receipt path for claimed, accepted, failed, and actual effect;
-- one decision prompt and resolution path;
-- a concrete `Project | Task` target enum for domain event persistence, not a
-  factory trait or public generic session framework.
+- replace the Task-specific event door with one bodyless child-observation
+  nudge;
+- have the live Wave drain every pending Project/Task outbox row through the
+  same typed, idempotent observer;
+- issue the same best-effort nudge after observable Project and Task events;
+- let a stopped Wave do nothing—the durable rows drain on its next serve;
+- delete the Task-only wire DTO and direct ledger lookup.
 
-Task and Project runners should retain only their real differences: checkout
-policy, flow seed, outcome inspection, status transitions, observation
-consumption, PR/PM reconciliation, and convergence. Provider conformance tests
-must exercise both persistence adapters against the shared semantics.
+This is not a generic execution API. It is a wake signal over already-durable
+facts, and it cannot inject prose or choose an event payload.

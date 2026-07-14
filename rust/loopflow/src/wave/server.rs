@@ -76,10 +76,10 @@
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
-//! - `POST /tasks/observe {session_id, event_id}` resolves an authoritative
-//!   Task ledger event through the store observer, journals it idempotently,
-//!   and wakes or queues the resident as a typed inbox item. Loopback-only
-//!   internal door; Tasks never write the Wave journal.
+//! - `POST /observations` drains the Wave's authoritative child-observation
+//!   outbox, journals each pending Project/Task event idempotently, and wakes
+//!   or queues the resident with typed inbox items. Loopback-only internal
+//!   door; child sessions never write the Wave journal.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
@@ -121,9 +121,8 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InboxFrame, ObserveTaskRequest,
-    ObserveTaskResponse, PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE,
-    RESIDENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, InboxFrame, PostDeltasRequest,
+    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -369,7 +368,7 @@ pub fn router(
         .route("/playhead", get(playhead_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
-        .route("/tasks/observe", post(task_observe_handler))
+        .route("/observations", post(observations_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
@@ -379,21 +378,17 @@ pub fn router(
         .with_state(state)
 }
 
-async fn task_observe_handler(
+async fn observations_handler(
     State(state): State<ServerState>,
-    Json(request): Json<ObserveTaskRequest>,
-) -> Result<Json<ObserveTaskResponse>, (StatusCode, String)> {
+) -> Result<StatusCode, (StatusCode, String)> {
     let observer = state.observer.as_ref().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            "Task observation requires the shared Loopflow registry".to_string(),
+            "child observations require the shared Loopflow registry".to_string(),
         )
     })?;
-    let observed = observer
-        .observe_task_event(&request.session_id, request.event_id)
-        .await
-        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
-    Ok(Json(ObserveTaskResponse { observed }))
+    observer.poll_once().await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn stop_handler(State(state): State<ServerState>) -> StatusCode {
@@ -947,6 +942,33 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
         requested.wait().await;
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn observation_nudge_fails_loudly_without_the_shared_registry() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let app = router(
+            runtime,
+            ResidentDoor::new("resident"),
+            None,
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/observations"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
         server.abort();
     }
 

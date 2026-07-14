@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project_session::ProjectObservation;
-use crate::task::{TaskObservation, TaskSessionId};
+use crate::task::TaskObservation;
 use crate::wave::journal::MessageOp;
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 
@@ -194,17 +194,6 @@ pub enum InboxFrame {
     },
     Interrupt,
     Skip,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObserveTaskRequest {
-    pub session_id: TaskSessionId,
-    pub event_id: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObserveTaskResponse {
-    pub observed: bool,
 }
 
 #[cfg(test)]

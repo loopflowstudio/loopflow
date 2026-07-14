@@ -42,7 +42,7 @@ use crate::lfd::types::{
     WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
 use crate::lfdb::{SharedStore, StoreResult};
-use crate::task::{TaskObservation, TaskSessionId};
+use crate::task::TaskObservation;
 use crate::wave::runtime::WaveRuntime;
 
 /// How often the observer re-reads the store between turns. Modest by
@@ -365,39 +365,6 @@ impl StoreObserver {
     /// and retried on the next poll.
     pub async fn poll_once(&self) {
         self.poll_child_observations().await;
-    }
-
-    /// Resolve a narrow `(session_id, event_id)` door request against the Task
-    /// ledger, enforce Wave ownership, and journal it idempotently.
-    pub async fn observe_task_event(
-        &self,
-        session_id: &TaskSessionId,
-        event_id: i64,
-    ) -> StoreResult<bool> {
-        let session = self
-            .store
-            .get_task_session(session_id)
-            .await?
-            .ok_or(crate::lfdb::StoreError::NotFound)?;
-        if session.wave_id != self.wave_id {
-            return Err(crate::lfdb::StoreError::InvalidData(format!(
-                "Task Session {session_id} belongs to a different Wave"
-            )));
-        }
-        let event = self
-            .store
-            .get_task_event(session_id, event_id)
-            .await?
-            .ok_or(crate::lfdb::StoreError::NotFound)?;
-        if !event.kind.is_wave_observable() {
-            return Ok(false);
-        }
-        Ok(self.runtime.deliver_task_observation(TaskObservation {
-            session_id: session.id,
-            issue_identifier: session.issue.identifier,
-            event_id: event.id,
-            event: event.kind,
-        }))
     }
 
     async fn poll_child_observations(&self) {

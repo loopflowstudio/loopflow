@@ -486,24 +486,8 @@ impl Store {
         .await?;
         if kind.is_wave_observable() {
             if let Some(session) = self.get_task_session(&session_id).await? {
-                match &session.supervisor {
-                    SessionSupervisor::Wave { .. } => {
-                        if let Err(error) =
-                            crate::lf::commands::chat::post_task_observation_to_named_wave(
-                                &session.wave,
-                                &session_id,
-                                event.id,
-                            )
-                            .await
-                        {
-                            tracing::debug!(
-                                %error,
-                                %session_id,
-                                event_id = event.id,
-                                "live Task observation delivery failed; Wave observer will retry"
-                            );
-                        }
-                    }
+                let nudge_wave = match &session.supervisor {
+                    SessionSupervisor::Wave { .. } => true,
                     SessionSupervisor::Project {
                         session_id: project_session_id,
                     } => {
@@ -518,23 +502,19 @@ impl Store {
                                 "Task observation wake failed; Project lifecycle touch will retry"
                             );
                         }
-                        if kind.is_root_wave_observable() {
-                            if let Err(error) =
-                                crate::lf::commands::chat::post_task_observation_to_named_wave(
-                                    &session.wave,
-                                    &session_id,
-                                    event.id,
-                                )
-                                .await
-                            {
-                                tracing::debug!(
-                                    %error,
-                                    %session_id,
-                                    event_id = event.id,
-                                    "live descendant observation delivery failed; Wave observer will retry"
-                                );
-                            }
-                        }
+                        kind.is_root_wave_observable()
+                    }
+                };
+                if nudge_wave {
+                    if let Err(error) =
+                        crate::lf::commands::chat::nudge_child_observations(&session.wave).await
+                    {
+                        tracing::debug!(
+                            %error,
+                            %session_id,
+                            event_id = event.id,
+                            "live Task observation delivery failed; Wave observer will retry"
+                        );
                     }
                 }
             }
@@ -752,10 +732,27 @@ impl Store {
     ) -> StoreResult<ProjectEvent> {
         let session_id = session_id.clone();
         let kind = kind.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.append_project_event(&session_id, &kind)
+        let write_session_id = session_id.clone();
+        let write_kind = kind.clone();
+        let event = run_sqlite(&self.sqlite, move |store| {
+            store.append_project_event(&write_session_id, &write_kind)
         })
-        .await
+        .await?;
+        if kind.is_wave_observable() {
+            if let Some(session) = self.get_project_session(&session_id).await? {
+                if let Err(error) =
+                    crate::lf::commands::chat::nudge_child_observations(&session.wave).await
+                {
+                    tracing::debug!(
+                        %error,
+                        %session_id,
+                        event_id = event.id,
+                        "live Project observation delivery failed; Wave observer will retry"
+                    );
+                }
+            }
+        }
+        Ok(event)
     }
 
     pub async fn project_events_after(

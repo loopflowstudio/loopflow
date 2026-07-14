@@ -1,69 +1,23 @@
-use std::fmt;
+//! Durable delivery of one Linear Task.
+//!
+//! A Task Session is the sole domain owner of its immutable worktree, branch,
+//! provider transcript, one PR to main, and review-through-merge lifecycle.
+//! Process generations may stop and resume without changing Task identity.
+
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::child_session::{
-    ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId, ChildDirectiveId,
-    ChildProcess, DirectiveKind, SessionSupervisor,
+    prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
+    ChildDirectiveId, ChildProcessGeneration, DirectiveKind, SessionSupervisor,
 };
 use crate::lfd::id::LfdId;
+use crate::session_context::{LinearIssueSnapshot, LinearProjectSnapshot};
 
 pub mod runner;
-
-macro_rules! string_id {
-    ($name:ident, $prefix:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new() -> Self {
-                Self(format!("{}{}", $prefix, Uuid::new_v4().simple()))
-            }
-
-            pub fn parse(value: &str) -> Result<Self, TaskDataError> {
-                let suffix = value
-                    .strip_prefix($prefix)
-                    .ok_or_else(|| TaskDataError::InvalidId(format!("expected {} id", $prefix)))?;
-                Uuid::parse_str(suffix)
-                    .map_err(|error| TaskDataError::InvalidId(error.to_string()))?;
-                Ok(Self::from_raw(value.to_string()))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
-            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-
-        impl FromStr for $name {
-            type Err = TaskDataError;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Self::parse(value)
-            }
-        }
-    };
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskDataError {
@@ -73,58 +27,12 @@ pub enum TaskDataError {
     InvalidStatus(String),
 }
 
-string_id!(TaskSessionId, "ts_");
-
-/// Opaque Linear identifier: non-empty, provider-assigned (no prefix grammar of
-/// our own, so distinct from `string_id!`).
-macro_rules! validated_string_id {
-    ($name:ident, $label:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Result<Self, TaskDataError> {
-                let value = value.into();
-                if value.trim().is_empty() {
-                    return Err(TaskDataError::InvalidId(format!(
-                        "{} cannot be empty",
-                        $label
-                    )));
-                }
-                Ok(Self(value))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
-            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-    };
-}
-
-validated_string_id!(LinearIssueId, "Linear issue id");
-validated_string_id!(LinearProjectId, "Linear project id");
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinearIssueRef {
-    pub id: LinearIssueId,
-    pub identifier: String,
-    pub title: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinearProjectRef {
-    pub id: LinearProjectId,
-    pub slug: String,
-    pub name: String,
-    /// Definition and proof-shaped KRs captured when the Task Session starts.
-    pub context: String,
-}
+prefixed_uuid_id!(
+    TaskSessionId,
+    "ts_",
+    TaskDataError,
+    TaskDataError::InvalidId
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -209,13 +117,13 @@ pub enum PmWritebackState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSession {
     pub id: TaskSessionId,
-    pub issue: LinearIssueRef,
-    pub project: LinearProjectRef,
+    pub issue: LinearIssueSnapshot,
+    pub project: LinearProjectSnapshot,
     pub pm_snapshot_synced_at: i64,
-    pub pm_snapshot_warning: Option<String>,
     pub pm_writeback: PmWritebackState,
     pub wave_id: LfdId,
-    pub wave: String,
+    #[serde(rename = "wave")]
+    pub wave_name: String,
     pub supervisor: SessionSupervisor,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
@@ -229,7 +137,9 @@ pub struct TaskSession {
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process: Option<ChildProcess>,
+    /// Latest launch generation, retained after that process exits.
+    #[serde(rename = "process")]
+    pub latest_process: Option<ChildProcessGeneration>,
     pub pull_request: Option<PullRequestRef>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -246,11 +156,11 @@ impl TaskSession {
 
     pub fn begin_generation(&mut self, tmux_name: String) -> u32 {
         let generation = self
-            .process
+            .latest_process
             .as_ref()
             .map_or(1, |process| process.generation + 1);
         let now = OffsetDateTime::now_utc();
-        self.process = Some(ChildProcess {
+        self.latest_process = Some(ChildProcessGeneration {
             generation,
             pid: None,
             tmux_name,

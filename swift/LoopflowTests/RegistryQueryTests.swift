@@ -63,7 +63,7 @@ struct RegistryQueryTests {
               "runtime":{"session_id":"ts_1","supervisor":{"kind":"wave","wave_id":"wave-1"},"status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
-              "delivery":{"kind":"pull_request","base":"main","pr_number":null,"pr_url":null}
+              "pull_request":null
             }]
           }],
           "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]
@@ -77,9 +77,9 @@ struct RegistryQueryTests {
         let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
         #expect(result.loopState == "turning")
         #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
-        #expect(result.workMap.projects[0].runtime?.status == "waiting")
+        #expect(result.workMap.projects[0].runtime?.status == .waiting)
         #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
-        #expect(result.workMap.projects[0].tasks[0].runtime?.supervisor.kind == "wave")
+        #expect(result.workMap.projects[0].tasks[0].runtime?.supervisor == .wave(id: "wave-1"))
         #expect(result.attention.map(\.id) == ["att-1"])
         #expect(result.attention[0].waveId == "wave-1")
         #expect(result.attention[0].kind == .interactive)

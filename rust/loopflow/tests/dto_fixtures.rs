@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use loopflow::chat::turns::{ChatRole, ChatTurn, ChildActivityKind, ChildControlActivity};
 use loopflow::chat::types::{ConversationItem, Lifecycle};
+use loopflow::child_session::ChildCommandEffect;
 use loopflow::lf::commands::waves::WaveDetailSnapshot;
 use loopflow::lfd::http::dto::{SessionDto, WaveDto};
 use loopflow::wave::playhead::StepOutcome;
@@ -70,9 +71,9 @@ fn wave_detail_fixture_preserves_the_native_work_hierarchy() {
     );
     assert_eq!(
         detail.projects[0].tasks[0]
-            .delivery
+            .pull_request
             .as_ref()
-            .and_then(|delivery| delivery.pr_number),
+            .map(|pull_request| pull_request.number),
         Some(912)
     );
     assert_eq!(
@@ -150,9 +151,9 @@ fn child_control_activity_fixture_pins_structured_motion() {
         serde_json::from_value(value.clone()).expect("child activity should parse");
 
     assert_eq!(activity.subject_id, "INF-123");
-    assert_eq!(activity.kind, ChildActivityKind::Incorporated);
-    assert_eq!(activity.directive_version, Some(2));
-    assert_eq!(activity.effect.as_deref(), Some("live_steer"));
+    assert_eq!(activity.kind, ChildActivityKind::ControlApplied);
+    assert_eq!(activity.directive_version, None);
+    assert_eq!(activity.effect, Some(ChildCommandEffect::LiveSteer));
     assert_eq!(serde_json::to_value(activity).unwrap(), value);
 }
 

@@ -1,8 +1,8 @@
 import SwiftUI
 
 public struct WaveViewModel: Sendable, Identifiable, Hashable {
-    public var api: Wave
-    public var plan: WavePlan?
+    public let api: Wave
+    public let plan: WavePlan?
 
     public init(api: Wave, plan: WavePlan? = nil) {
         self.api = api
@@ -11,20 +11,11 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var id: String { api.id }
 
-    public var name: String {
-        get { api.name }
-        set { api.name = newValue }
-    }
+    public var name: String { api.name }
 
-    public var repo: String {
-        get { api.repo }
-        set { api.repo = newValue }
-    }
+    public var repo: String { api.repo }
 
-    public var status: WaveStatus {
-        get { api.status }
-        set { api.status = newValue }
-    }
+    public var status: WaveStatus { api.status }
 
     public var displayName: String { name }
 
@@ -38,9 +29,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var statusText: String {
         switch status {
         case .running: "Running"
-        case .waiting: "Waiting"
         case .idle: "Idle"
-        case .failed: "Failed"
         case .paused: "Paused"
         }
     }

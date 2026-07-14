@@ -77,11 +77,9 @@
             "incorporated_summary": "Verification failures are now first."
           },
           "next_move": {"owner": "review", "reason": "waiting for review"},
-          "delivery": {
-            "kind": "pull_request",
-            "base": "main",
-            "pr_number": 912,
-            "pr_url": "https://github.com/loopflowstudio/loopflow/pull/912"
+          "pull_request": {
+            "number": 912,
+            "url": "https://github.com/loopflowstudio/loopflow/pull/912"
           }
         },
         {
@@ -97,7 +95,7 @@
           "runtime": null,
           "directive": null,
           "next_move": {"owner": "project", "reason": "Task is ready to start"},
-          "delivery": null
+          "pull_request": null
         }
       ]
     }

@@ -12,9 +12,9 @@ struct WaveWorkSelection: Equatable {
     let id: String
 }
 
-/// The wave detail pane: a header over the local wave plan and live WaveChat
-/// transcript. The wave still runs in its own `lf serve` process; Loopflow frames
-/// the objective and projects around the vendor-owned conversation.
+/// One Wave surface: current Project/Task state beside the durable conversation.
+/// `lf status` supplies the work map; the Wave listener streams ordered chat and
+/// child activity from its journal.
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
@@ -217,7 +217,7 @@ private struct WaveProjectWorkView: View {
                     .font(Typography.sectionTitle(17))
                     .foregroundStyle(palette.text)
                 Spacer()
-                Text(project.runtime?.status ?? "unstarted")
+                Text(project.runtime?.status.rawValue ?? "unstarted")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
             }
@@ -317,7 +317,7 @@ private struct WaveTaskWorkView: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
-                Text("\(task.runtime?.status ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                Text("\(task.runtime?.status.rawValue ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 if let directive = task.directive {
@@ -325,8 +325,8 @@ private struct WaveTaskWorkView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
                 }
-                if let url = task.delivery?.prURL {
-                    Link("PR #\(task.delivery?.prNumber.map(String.init) ?? "—")", destination: url)
+                if let pullRequest = task.pullRequest {
+                    Link("PR #\(pullRequest.number)", destination: pullRequest.url)
                         .font(Typography.caption(10))
                 }
             }
@@ -374,11 +374,11 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: project.directive,
-                    status: project.runtime?.status ?? "unstarted",
+                    status: project.runtime?.status.rawValue ?? "unstarted",
                     reason: project.nextMove.reason,
                     provider: project.runtime?.provider,
                     location: nil,
-                    delivery: nil
+                    pullRequest: nil
                 )
             } else if let task {
                 Text("\(task.task.identifier) · \(task.task.name)")
@@ -386,11 +386,11 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: task.directive,
-                    status: task.runtime?.status ?? "unstarted",
+                    status: task.runtime?.status.rawValue ?? "unstarted",
                     reason: task.nextMove.reason,
                     provider: task.runtime?.provider,
                     location: task.runtime.map { "\($0.worktree)\n\($0.branch)" },
-                    delivery: task.delivery
+                    pullRequest: task.pullRequest
                 )
             }
         }
@@ -418,7 +418,7 @@ private struct WaveWorkInspector: View {
         reason: String,
         provider: String?,
         location: String?,
-        delivery: TaskDeliverySnapshot?
+        pullRequest: PullRequestSnapshot?
     ) -> some View {
         Text("\(status) · \(reason)")
             .font(Typography.caption(11))
@@ -446,8 +446,8 @@ private struct WaveWorkInspector: View {
                 .foregroundStyle(palette.textSecondary)
                 .textSelection(.enabled)
         }
-        if let url = delivery?.prURL {
-            Link("PR #\(delivery?.prNumber.map(String.init) ?? "—")", destination: url)
+        if let pullRequest {
+            Link("PR #\(pullRequest.number)", destination: pullRequest.url)
                 .font(Typography.caption(10))
         }
     }

@@ -18,7 +18,6 @@ struct WaveRowViewTests {
                 id: "test-wave-id",
                 name: name,
                 repo: "/tmp/repo",
-                goal: "wave",
                 status: status
             )
         )

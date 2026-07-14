@@ -1,14 +1,6 @@
-// The exposed main window: a burgundy repo rail (left) filtering a burgundy wave
-// list (center), with a "+" new-wave launcher, and a WaveChat detail (right) that
-// streams the selected wave's live conversation from its `lf serve` chat server.
-//
-// Reshaped from the battle-tested PortfolioWindow: keeps its connection / daemon
-// plumbing, swaps the multi-repo card grid for the sidebar+list+terminal shape
-// sketched by RepoSidebarWindow, and reuses WaveRow + WaveSidebar's burgundy
-// treatment so the style matches the app. Discovery is a registry QUERY
-// (`RegistryQuery`/`lf ls`), re-run on a cadence — not a streaming center; a
-// wave's live conversation + run motion is its own per-wave SSE in the detail
-// pane.
+// Repository rail, Wave list, and the selected Wave's work map + conversation.
+// Discovery is a periodic registry query (`lf ls`); live conversation and
+// resident motion stream directly from that Wave's listener.
 
 import SwiftUI
 import Loopflow
@@ -61,9 +53,8 @@ struct WavesView: View {
         repos.flatMap { mergedWaves(for: $0) }
     }
 
-    /// lfd's live waves for a repo, plus idle placeholders for any authored wave
-    /// (a `<repo>/wave/<name>/GOAL.md` on disk) that isn't already live. Sorted
-    /// attention-first, then by name.
+    /// Registered waves plus idle placeholders for authored GOAL.md files that
+    /// have not been served yet. Running Waves sort first, then paused and idle.
     private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
         let live = repoStates[repo.path]?.waves ?? []
         let liveNames = Set(live.map(\.name))
@@ -85,18 +76,15 @@ struct WavesView: View {
             id: "\(Self.authoredIdPrefix)\(repoPath)#\(snapshot.name)",
             name: snapshot.name,
             repo: repoPath,
-            goal: "wave",
             status: snapshot.status
         ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)])
     }
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
         switch status {
-        case .failed: 0
-        case .waiting: 1
-        case .running: 2
-        case .paused: 3
-        case .idle: 4
+        case .running: 0
+        case .paused: 1
+        case .idle: 2
         }
     }
 

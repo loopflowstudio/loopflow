@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::child_session::{
     ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDecisionId, ChildDirective, ChildProcess, ChildRef, SessionSupervisor,
+    ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef, SessionSupervisor,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{get_default_branch, rev_parse};
@@ -17,9 +17,11 @@ use crate::engine::worktrees::{
 use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
+use crate::session_context::{
+    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+};
 use crate::task::{
-    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
-    PmWritebackState, TaskEventKind, TaskSession, TaskSessionStatus,
+    PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
 
@@ -82,12 +84,6 @@ pub struct TaskDecisionResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TaskDeliveryView {
-    pub kind: String,
-    pub base: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TaskSessionSnapshot {
     pub issue_id: String,
     pub issue_identifier: String,
@@ -95,24 +91,23 @@ pub struct TaskSessionSnapshot {
     pub project_id: String,
     pub project: String,
     pub pm_snapshot_synced_at: i64,
-    pub pm_snapshot_warning: Option<String>,
     pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
     pub supervisor: SessionSupervisor,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
-    pub status: String,
+    pub status: TaskSessionStatus,
     pub status_reason: String,
     pub status_at: time::OffsetDateTime,
     pub worktree: String,
     pub branch: String,
     pub base_commit: String,
-    pub delivery: TaskDeliveryView,
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub process: Option<ChildProcess>,
+    #[serde(rename = "process")]
+    pub latest_process: Option<ChildProcessGeneration>,
     pub pull_request: Option<crate::task::PullRequestRef>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
@@ -175,7 +170,7 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
         ambient,
         &session.wave_id,
         &session.issue.identifier,
-        &session.wave,
+        &session.wave_name,
     )
 }
 
@@ -287,14 +282,14 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
         let supervisor = task_supervisor(&store, wave.id(), &resolved.project.id).await?;
         let mut session = TaskSession {
             id: crate::task::TaskSessionId::new(),
-            issue: LinearIssueRef {
+            issue: LinearIssueSnapshot {
                 id: LinearIssueId::new(resolved.item.id.clone())
                     .map_err(|error| task_error(error.to_string()))?,
                 identifier: resolved.item.identifier.clone(),
                 title: resolved.item.name.clone(),
                 description: resolved.item.description.clone(),
             },
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new(resolved.project.id.clone())
                     .map_err(|error| task_error(error.to_string()))?,
                 slug: resolved.project.slug.clone(),
@@ -306,13 +301,8 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             current_directive_version: 1,
             incorporated_directive_version: 0,
             pm_snapshot_synced_at: resolved.snapshot.synced_at,
-            // TODO(product-pm): main's `load_show_snapshot` logs a soft-stale
-            // fallback to progress but does not return it on `PmShowResult`, so
-            // there is no warning to capture at launch yet. Restore this once the
-            // PM read surfaces the stale-cache warning on its result.
-            pm_snapshot_warning: None,
             pm_writeback: PmWritebackState::Current,
-            wave: resolved.snapshot.wave.clone(),
+            wave_name: resolved.snapshot.wave.clone(),
             status: TaskSessionStatus::Created,
             status_reason: "Linear task reserved before placement".to_string(),
             status_at: now,
@@ -322,7 +312,7 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             agent,
             provider,
             provider_session_id: None,
-            process: None,
+            latest_process: None,
             pull_request: None,
             created_at: now,
             updated_at: now,
@@ -417,7 +407,7 @@ async fn task_supervisor(
             if &project.wave_id != wave_id || project.project.id.as_str() != project_id {
                 return Err(task_error(format!(
                     "Project Session {session_id} cannot supervise a Task outside {}/{}",
-                    project.wave, project.project.slug
+                    project.wave_name, project.project.slug
                 )));
             }
             Ok(SessionSupervisor::Project { session_id })
@@ -518,7 +508,12 @@ pub(crate) async fn relaunch_inactive_process(
         .get_wave(&session.wave_id)
         .await
         .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
-        .ok_or_else(|| task_error(format!("owning wave/{} is not registered", session.wave)))?;
+        .ok_or_else(|| {
+            task_error(format!(
+                "owning wave/{} is not registered",
+                session.wave_name
+            ))
+        })?;
     launch_task_process(store, session, Some(wave.task_capacity)).await
 }
 
@@ -567,7 +562,7 @@ async fn launch_task_process(
             }
             return Err(task_error(format!(
                 "wave/{} has reached its {max_active} active Task Session limit",
-                session.wave
+                session.wave_name
             )));
         }
     } else {
@@ -657,7 +652,7 @@ async fn reconcile_process_liveness(
     if !session.status.is_process_active() {
         return Ok(());
     }
-    let alive = match session.process.as_ref() {
+    let alive = match session.latest_process.as_ref() {
         Some(process) => tmux_session_exists(&process.tmux_name)
             .await
             .map_err(|error| task_error(error.to_string()))?,
@@ -764,7 +759,7 @@ pub(crate) async fn reconcile_pm_writeback(session: &mut TaskSession) {
     session.pm_writeback = writeback_state(
         crate::ops::task_pm::complete_task(
             &session.worktree,
-            &session.wave,
+            &session.wave_name,
             session.issue.id.as_str(),
             &pull_request.url,
         )
@@ -779,7 +774,7 @@ async fn retry_pm_writeback(session: &mut TaskSession) {
     session.pm_writeback = writeback_state(
         crate::ops::task_pm::retry_complete_task(
             &session.worktree,
-            &session.wave,
+            &session.wave_name,
             session.issue.id.as_str(),
             &pull_request.url,
         )
@@ -793,7 +788,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     block_on_task(async move {
         let store = task_store().await?;
         let process_alive = if session.status.is_process_active() {
-            match session.process.as_ref() {
+            match session.latest_process.as_ref() {
                 Some(process) => tmux_session_exists(&process.tmux_name)
                     .await
                     .map_err(|error| task_error(error.to_string()))?,
@@ -815,27 +810,22 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             project_id: session.project.id.as_str().to_string(),
             project: session.project.slug,
             pm_snapshot_synced_at: session.pm_snapshot_synced_at,
-            pm_snapshot_warning: session.pm_snapshot_warning,
             pm_writeback: session.pm_writeback,
-            wave: session.wave,
+            wave: session.wave_name,
             supervisor: session.supervisor,
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,
-            status: session.status.as_str().to_string(),
+            status: session.status,
             status_reason: session.status_reason,
             status_at: session.status_at,
             worktree: session.worktree.display().to_string(),
             branch: session.branch,
             base_commit: session.base_commit,
-            delivery: TaskDeliveryView {
-                kind: "pull_request".to_string(),
-                base: "main".to_string(),
-            },
             agent: session.agent,
             provider: session.provider,
             provider_session_id: session.provider_session_id,
             process_alive,
-            process: session.process,
+            latest_process: session.latest_process,
             pull_request: session.pull_request,
             latest_event,
             created_at: session.created_at,
@@ -1143,7 +1133,7 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
         )));
     }
     let tmux_name = session
-        .process
+        .latest_process
         .as_ref()
         .map(|process| process.tmux_name.as_str())
         .filter(|name| !name.is_empty())

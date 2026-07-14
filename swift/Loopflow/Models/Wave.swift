@@ -3,15 +3,11 @@ import SwiftUI
 public enum WaveStatus: String, Sendable, Codable {
     case idle
     case running
-    case waiting
-    case failed
     case paused
 
     public var color: Color {
         switch self {
         case .running: .statusSuccess
-        case .waiting: .statusWarning
-        case .failed: .statusError
         case .idle, .paused: .statusNeutral
         }
     }
@@ -19,8 +15,6 @@ public enum WaveStatus: String, Sendable, Codable {
     public var icon: String {
         switch self {
         case .running: "circle.fill"
-        case .waiting: "circle.lefthalf.filled"
-        case .failed: "xmark.circle.fill"
         case .paused: "pause.circle"
         case .idle: "circle"
         }
@@ -31,22 +25,19 @@ public enum WaveStatus: String, Sendable, Codable {
 /// shipping state; a Wave itself has no worktree, branch, diff, or PR.
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
-    public var name: String
-    public var repo: String
-    public var goal: String
-    public var status: WaveStatus
+    public let name: String
+    public let repo: String
+    public let status: WaveStatus
 
     public init(
         id: String,
         name: String,
         repo: String,
-        goal: String,
         status: WaveStatus
     ) {
         self.id = id
         self.name = name
         self.repo = repo
-        self.goal = goal
         self.status = status
     }
 }

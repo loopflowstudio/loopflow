@@ -260,7 +260,7 @@ async fn complete_merged_task_sessions(
         );
         session.pm_writeback = match crate::ops::task_pm::complete_task(
             Path::new(wave.repo()),
-            &session.wave,
+            &session.wave_name,
             session.issue.id.as_str(),
             &pull_request.url,
         )
@@ -653,10 +653,10 @@ mod tests {
     use super::*;
     use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
     use crate::lfdb::{open_store, StorageConfig};
-    use crate::task::{
-        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
-        PullRequestRef, TaskSession, TaskSessionId,
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
     };
+    use crate::task::{PmWritebackState, PullRequestRef, TaskSession, TaskSessionId};
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -706,23 +706,22 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         TaskSession {
             id: TaskSessionId::new(),
-            issue: LinearIssueRef {
+            issue: LinearIssueSnapshot {
                 id: LinearIssueId::new("issue-uuid").expect("issue id"),
                 identifier: "INF-123".to_string(),
                 title: "Ship task sessions".to_string(),
                 description: String::new(),
             },
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new("project-uuid").expect("project id"),
                 slug: "delivery".to_string(),
                 name: "Delivery".to_string(),
                 context: "Definition:\nShip task sessions.".to_string(),
             },
             pm_snapshot_synced_at: now.unix_timestamp(),
-            pm_snapshot_warning: None,
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            wave: wave.name().to_string(),
+            wave_name: wave.name().to_string(),
             supervisor: crate::child_session::SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
@@ -737,7 +736,7 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: Some("thread-1".to_string()),
-            process: None,
+            latest_process: None,
             pull_request: Some(PullRequestRef {
                 number: pr_number,
                 url: format!("https://example.test/pr/{pr_number}"),

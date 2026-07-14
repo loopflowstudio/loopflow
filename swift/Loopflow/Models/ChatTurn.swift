@@ -28,6 +28,13 @@ public enum ChildActivityKind: String, Codable, Sendable, Hashable {
     case failed
 }
 
+public enum ChildCommandEffect: String, Codable, Sendable, Hashable {
+    case liveSteer = "live_steer"
+    case nextTurn = "next_turn"
+    case replacement
+    case decision
+}
+
 public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let subject: ChildActivitySubject
@@ -38,7 +45,7 @@ public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
     public let summary: String
     public let directiveVersion: UInt32?
     public let commandId: String?
-    public let effect: String?
+    public let effect: ChildCommandEffect?
     public let decisionId: String?
     public let options: [String]
 

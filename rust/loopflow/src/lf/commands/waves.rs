@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::child_session::{ChildRef, SessionSupervisor};
+use crate::child_session::{ChildRef, DirectiveKind, SessionSupervisor};
 use crate::lf::output::Colors;
 use crate::lfd::pm::{PmItem, PmKr, PmProject};
 use crate::lfd::types::{AttentionItem, AttentionStatus, Wave};
@@ -19,6 +19,30 @@ use crate::lfdb::{open_existing_store, SharedStore};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
 use crate::task::{TaskSession, TaskSessionStatus};
 use crate::wave::server::live_endpoint;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WavePresence {
+    Idle,
+    Running,
+    Paused,
+}
+
+impl WavePresence {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Paused => "paused",
+        }
+    }
+}
+
+impl std::fmt::Display for WavePresence {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
 /// `lf status`. Wire type consumed by Loopflow: every field is required or
@@ -29,7 +53,7 @@ pub struct WaveSnapshot {
     pub name: String,
     /// Wave presence (`idle | running | paused`). Detailed resident condition
     /// is reported separately by `WaveDetailSnapshot::loop_state`.
-    pub status: String,
+    pub status: WavePresence,
     pub paused: bool,
     pub goal: String,
     /// Primary repo path.
@@ -111,7 +135,7 @@ pub struct NextMove {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectiveSnapshot {
     pub version: u32,
-    pub kind: String,
+    pub kind: DirectiveKind,
     pub text: String,
     pub applied_at: Option<String>,
     pub incorporated_at: Option<String>,
@@ -121,7 +145,7 @@ pub struct DirectiveSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectRuntimeSnapshot {
     pub session_id: String,
-    pub status: String,
+    pub status: ProjectSessionStatus,
     pub reason: String,
     pub status_at: String,
     pub iteration: u32,
@@ -134,7 +158,7 @@ pub struct ProjectRuntimeSnapshot {
 pub struct TaskRuntimeSnapshot {
     pub session_id: String,
     pub supervisor: SessionSupervisor,
-    pub status: String,
+    pub status: TaskSessionStatus,
     pub reason: String,
     pub status_at: String,
     pub worktree: String,
@@ -144,20 +168,12 @@ pub struct TaskRuntimeSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskDeliverySnapshot {
-    pub kind: String,
-    pub base: String,
-    pub pr_number: Option<u32>,
-    pub pr_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDetailSnapshot {
     pub task: PmTaskSummary,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub directive: Option<DirectiveSnapshot>,
     pub next_move: NextMove,
-    pub delivery: Option<TaskDeliverySnapshot>,
+    pub pull_request: Option<crate::task::PullRequestRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,16 +303,16 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     let paused = config.and_then(|config| config.paused).unwrap_or(false);
     let live = endpoint.is_some();
     let status = if paused {
-        "paused"
+        WavePresence::Paused
     } else if live {
-        "running"
+        WavePresence::Running
     } else {
-        "idle"
+        WavePresence::Idle
     };
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
         name: wave.name().to_string(),
-        status: status.to_string(),
+        status,
         paused,
         goal: crate::engine::wave_config::read_wave_summary(Path::new(&repo), wave.name())
             .unwrap_or_else(|_| wave.name().to_string()),
@@ -313,7 +329,7 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
 
 async fn snapshot_task_runtime(task: &TaskSession) -> TaskRuntimeSnapshot {
     let process_alive = if task.status.is_process_active() {
-        match task.process.as_ref() {
+        match task.latest_process.as_ref() {
             Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
                 .await
                 .unwrap_or(false),
@@ -325,7 +341,7 @@ async fn snapshot_task_runtime(task: &TaskSession) -> TaskRuntimeSnapshot {
     TaskRuntimeSnapshot {
         session_id: task.id.to_string(),
         supervisor: task.supervisor.clone(),
-        status: task.status.as_str().to_string(),
+        status: task.status,
         reason: task.status_reason.clone(),
         status_at: format_time(task.status_at).unwrap_or_default(),
         worktree: task.worktree.display().to_string(),
@@ -340,7 +356,7 @@ async fn snapshot_project_runtime(
     project: &ProjectSession,
 ) -> Result<ProjectRuntimeSnapshot> {
     let process_alive = if project.status.is_process_active() {
-        match project.process.as_ref() {
+        match project.latest_process.as_ref() {
             Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
                 .await
                 .unwrap_or(false),
@@ -358,7 +374,7 @@ async fn snapshot_project_runtime(
         .len() as u32;
     Ok(ProjectRuntimeSnapshot {
         session_id: project.id.to_string(),
-        status: project.status.as_str().to_string(),
+        status: project.status,
         reason: project.status_reason.clone(),
         status_at: format_time(project.status_at).unwrap_or_default(),
         iteration: project.iteration,
@@ -518,18 +534,7 @@ async fn snapshot_task_detail(
             reason: "Task is ready to start".to_string(),
         },
     };
-    let delivery = session.map(|session| TaskDeliverySnapshot {
-        kind: "pull_request".to_string(),
-        base: "main".to_string(),
-        pr_number: session
-            .pull_request
-            .as_ref()
-            .map(|pull_request| pull_request.number),
-        pr_url: session
-            .pull_request
-            .as_ref()
-            .map(|pull_request| pull_request.url.clone()),
-    });
+    let pull_request = session.and_then(|session| session.pull_request.clone());
     let directive = match session {
         Some(session) => {
             current_directive(
@@ -546,7 +551,7 @@ async fn snapshot_task_detail(
         runtime,
         directive,
         next_move,
-        delivery,
+        pull_request,
     })
 }
 
@@ -573,7 +578,7 @@ async fn current_directive(
         })?;
     Ok(Some(DirectiveSnapshot {
         version: directive.version,
-        kind: directive.kind.as_str().to_string(),
+        kind: directive.kind,
         text: directive.text,
         applied_at: directive.applied_at.and_then(format_time),
         incorporated_at: directive.incorporated_at.and_then(format_time),
@@ -923,7 +928,7 @@ mod tests {
         let snapshot = WaveSnapshot {
             id: "wave-1".into(),
             name: "goals".into(),
-            status: "running".into(),
+            status: WavePresence::Running,
             paused: false,
             goal: "ship the roadmap".into(),
             repo: "/repo".into(),
@@ -953,7 +958,7 @@ mod tests {
             wave: WaveSnapshot {
                 id: "wave-1".into(),
                 name: "goals".into(),
-                status: "waiting".into(),
+                status: WavePresence::Idle,
                 paused: false,
                 goal: "g".into(),
                 repo: "/repo".into(),
@@ -1000,7 +1005,7 @@ mod tests {
                         owner: NextMoveOwner::Project,
                         reason: "Task is ready to start".into(),
                     },
-                    delivery: None,
+                    pull_request: None,
                 }],
             }],
             attention: vec![AttentionSnapshot {

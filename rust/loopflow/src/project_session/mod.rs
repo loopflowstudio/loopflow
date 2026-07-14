@@ -1,69 +1,24 @@
-use std::fmt;
+//! Durable pursuit of one Linear Project's KRs.
+//!
+//! A Project Session coordinates Task Sessions from the owning Wave's clean
+//! control checkout. It owns no worktree, shipping branch, PR, permanent
+//! memory, cadence, or human chat. Waiting persists without a process; child
+//! observations wake the same provider transcript when judgment is useful.
+
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::child_session::{
-    ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId, ChildDirectiveId,
-    ChildProcess, ChildRef, DirectiveKind, SessionSupervisor,
+    prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
+    ChildDirectiveId, ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
 };
 use crate::lfd::id::LfdId;
-use crate::task::{LinearProjectRef, TaskEventKind, TaskSessionId};
+use crate::session_context::LinearProjectSnapshot;
+use crate::task::{TaskEventKind, TaskSessionId};
 
 pub mod runner;
-
-macro_rules! string_id {
-    ($name:ident, $prefix:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new() -> Self {
-                Self(format!("{}{}", $prefix, Uuid::new_v4().simple()))
-            }
-
-            pub fn parse(value: &str) -> Result<Self, ProjectDataError> {
-                let suffix = value.strip_prefix($prefix).ok_or_else(|| {
-                    ProjectDataError::InvalidId(format!("expected {} id", $prefix))
-                })?;
-                Uuid::parse_str(suffix)
-                    .map_err(|error| ProjectDataError::InvalidId(error.to_string()))?;
-                Ok(Self::from_raw(value.to_string()))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
-            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-
-        impl FromStr for $name {
-            type Err = ProjectDataError;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Self::parse(value)
-            }
-        }
-    };
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProjectDataError {
@@ -73,7 +28,12 @@ pub enum ProjectDataError {
     InvalidStatus(String),
 }
 
-string_id!(ProjectSessionId, "ps_");
+prefixed_uuid_id!(
+    ProjectSessionId,
+    "ps_",
+    ProjectDataError,
+    ProjectDataError::InvalidId
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -133,10 +93,14 @@ impl FromStr for ProjectSessionStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSession {
     pub id: ProjectSessionId,
-    pub project: LinearProjectRef,
+    /// Linear Project context captured when this pursuit session was created.
+    pub project: LinearProjectSnapshot,
     pub wave_id: LfdId,
-    pub wave: String,
-    pub repo: String,
+    #[serde(rename = "wave")]
+    pub wave_name: String,
+    /// Canonical Wave checkout used as the read-only Project control plane.
+    #[serde(rename = "repo")]
+    pub control_repo: String,
     pub pm_snapshot_synced_at: i64,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
@@ -145,11 +109,14 @@ pub struct ProjectSession {
     pub status_at: OffsetDateTime,
     pub iteration: u32,
     pub observation_cursor: i64,
-    pub state_fingerprint: Option<String>,
+    #[serde(rename = "state_fingerprint")]
+    pub last_state_fingerprint: Option<String>,
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process: Option<ChildProcess>,
+    /// Latest launch generation, retained after that process exits.
+    #[serde(rename = "process")]
+    pub latest_process: Option<ChildProcessGeneration>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -165,11 +132,11 @@ impl ProjectSession {
 
     pub fn begin_generation(&mut self, tmux_name: String) -> u32 {
         let generation = self
-            .process
+            .latest_process
             .as_ref()
             .map_or(1, |process| process.generation + 1);
         let now = OffsetDateTime::now_utc();
-        self.process = Some(ChildProcess {
+        self.latest_process = Some(ChildProcessGeneration {
             generation,
             pid: None,
             tmux_name,

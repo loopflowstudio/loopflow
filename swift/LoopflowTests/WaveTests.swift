@@ -10,7 +10,6 @@ struct WaveTests {
             id: "wave-123",
             name: "infrastructure",
             repo: "/tmp/repo",
-            goal: "wave",
             status: .running
         ))
 
@@ -27,7 +26,6 @@ struct WaveTests {
                 id: "wave-123",
                 name: "infrastructure",
                 repo: "/tmp/repo",
-                goal: "wave",
                 status: .idle
             ),
             plan: WavePlan(objective: "\nMake releases boring.\nKeep them observable.")
@@ -40,8 +38,6 @@ struct WaveTests {
     func statusOwnsVisualTreatment() {
         #expect(WaveStatus.running.icon == "circle.fill")
         #expect(WaveStatus.running.color == .statusSuccess)
-        #expect(WaveStatus.waiting.color == .statusWarning)
-        #expect(WaveStatus.failed.color == .statusError)
         #expect(WaveStatus.paused.icon == "pause.circle")
     }
 }

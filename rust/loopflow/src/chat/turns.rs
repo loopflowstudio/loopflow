@@ -14,6 +14,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::child_session::ChildCommandEffect;
 use crate::project_session::{ProjectEventKind, ProjectObservation};
 use crate::task::{TaskEventKind, TaskObservation};
 use crate::wave::playhead::{now_rfc3339, BodyProvenance};
@@ -58,7 +59,7 @@ pub struct ChildControlActivity {
     pub summary: String,
     pub directive_version: Option<u32>,
     pub command_id: Option<String>,
-    pub effect: Option<String>,
+    pub effect: Option<ChildCommandEffect>,
     pub decision_id: Option<String>,
     pub options: Vec<String>,
 }
@@ -192,7 +193,7 @@ type ActivityFields = (
     String,
     Option<u32>,
     Option<String>,
-    Option<String>,
+    Option<ChildCommandEffect>,
     Option<String>,
     Vec<String>,
 );
@@ -216,7 +217,7 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             error.clone().unwrap_or_default(),
             None,
             Some(command_id.to_string()),
-            effect.map(|value| value.as_str().to_string()),
+            *effect,
             None,
             Vec::new(),
         ),
@@ -299,7 +300,7 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             error.clone().unwrap_or_default(),
             None,
             Some(command_id.to_string()),
-            effect.map(|value| value.as_str().to_string()),
+            *effect,
             None,
             Vec::new(),
         ),
@@ -459,5 +460,27 @@ mod tests {
         assert_eq!(activity.kind, ChildActivityKind::DecisionRequired);
         assert_eq!(activity.decision_id.as_deref(), Some(decision_id.as_str()));
         assert_eq!(activity.options, ["strict", "permissive"]);
+    }
+
+    #[test]
+    fn command_activity_keeps_the_applied_effect() {
+        let command_id = crate::child_session::ChildCommandId::new();
+        let observation = TaskObservation {
+            session_id: crate::task::TaskSessionId::new(),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 10,
+            event: TaskEventKind::CommandChanged {
+                command_id: command_id.clone(),
+                state: crate::child_session::ChildCommandState::Accepted,
+                effect: Some(ChildCommandEffect::LiveSteer),
+                error: None,
+            },
+        };
+
+        let activity = ChildControlActivity::from_task(&observation);
+        assert_eq!(activity.kind, ChildActivityKind::ControlApplied);
+        assert_eq!(activity.command_id.as_deref(), Some(command_id.as_str()));
+        assert_eq!(activity.effect, Some(ChildCommandEffect::LiveSteer));
+        assert_eq!(activity.directive_version, None);
     }
 }

@@ -44,12 +44,11 @@ final class PortfolioRepoState {
         self.registryQuery = registryQuery
     }
 
-    /// Create a wave file-first: a wave IS its markdown. Write
-    /// `wave/<name>/GOAL.md` (+ an empty MEMORY.md) into the repo — the same
-    /// shape the registry overlays when the wave is started (`lf serve <name>`,
-    /// the Start button). No POST; the row is not the wave.
+    /// Author a Wave before it is served. `lf serve` later registers the
+    /// coordination row; GOAL.md and MEMORY.md remain the authored objective
+    /// and durable learning.
     ///
-    /// Wave state lives at the ORIGIN repo: every reader (endpoint discovery,
+    /// Wave files live at the ORIGIN repo: every reader (endpoint discovery,
     /// launcher, session probe) resolves a worktree to its main checkout, so
     /// the write must land there too — a GOAL.md written into a worktree is a
     /// wave no reader ever finds.
@@ -124,10 +123,6 @@ final class PortfolioRepoState {
         "\(repoPath.normalizedFilePath)#\(waveName)"
     }
 
-    var blockedCount: Int {
-        waves.filter { $0.status == .waiting }.count
-    }
-
     private static func sortWaves(_ waves: [WaveViewModel]) -> [WaveViewModel] {
         waves.sorted { lhs, rhs in
             let lhsPriority = statusPriority(lhs.status)
@@ -141,11 +136,9 @@ final class PortfolioRepoState {
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
         switch status {
-        case .failed: 0
-        case .waiting: 1
-        case .running: 2
-        case .paused: 3
-        case .idle: 4
+        case .running: 0
+        case .paused: 1
+        case .idle: 2
         }
     }
 

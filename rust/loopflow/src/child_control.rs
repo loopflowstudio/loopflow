@@ -14,13 +14,13 @@ use crate::child_session::{
 };
 use crate::harness::Harness;
 use crate::lfdb::SharedStore;
-use crate::project_session::{ProjectEventKind, ProjectSession};
-use crate::task::{TaskEventKind, TaskSession};
+use crate::project_session::{ProjectEventKind, ProjectSessionId};
+use crate::task::{TaskEventKind, TaskSessionId};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChildTarget<'a> {
-    Project(&'a ProjectSession),
-    Task(&'a TaskSession),
+    Project(&'a ProjectSessionId),
+    Task(&'a TaskSessionId),
 }
 
 impl ChildTarget<'_> {
@@ -34,10 +34,10 @@ impl ChildTarget<'_> {
             .await?
             .is_some_and(|command| {
                 let targets_match = match (self, &command.target) {
-                    (Self::Project(session), ChildRef::Project(session_id)) => {
-                        &session.id == session_id
+                    (Self::Project(target_id), ChildRef::Project(command_id)) => {
+                        target_id == command_id
                     }
-                    (Self::Task(session), ChildRef::Task(session_id)) => &session.id == session_id,
+                    (Self::Task(target_id), ChildRef::Task(command_id)) => target_id == command_id,
                     _ => false,
                 };
                 targets_match && command.state == ChildCommandState::Claimed
@@ -96,10 +96,10 @@ impl ChildTarget<'_> {
         error: Option<String>,
     ) -> Result<()> {
         match self {
-            Self::Project(session) => {
+            Self::Project(session_id) => {
                 store
                     .append_project_event(
-                        &session.id,
+                        session_id,
                         &ProjectEventKind::CommandChanged {
                             command_id,
                             state,
@@ -109,10 +109,10 @@ impl ChildTarget<'_> {
                     )
                     .await?;
             }
-            Self::Task(session) => {
+            Self::Task(session_id) => {
                 store
                     .append_task_event(
-                        &session.id,
+                        session_id,
                         &TaskEventKind::CommandChanged {
                             command_id,
                             state,
@@ -132,10 +132,10 @@ impl ChildTarget<'_> {
         decision: DecisionResolution,
     ) -> Result<()> {
         match self {
-            Self::Project(session) => {
+            Self::Project(session_id) => {
                 store
                     .append_project_event(
-                        &session.id,
+                        session_id,
                         &ProjectEventKind::DecisionResolved {
                             decision_id: decision.decision_id,
                             choice: decision.choice,
@@ -144,10 +144,10 @@ impl ChildTarget<'_> {
                     )
                     .await?;
             }
-            Self::Task(session) => {
+            Self::Task(session_id) => {
                 store
                     .append_task_event(
-                        &session.id,
+                        session_id,
                         &TaskEventKind::DecisionResolved {
                             decision_id: decision.decision_id,
                             choice: decision.choice,

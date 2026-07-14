@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::child_session::{
     ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDecisionId, ChildDirective, ChildProcess, ChildRef,
+    ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -19,7 +19,7 @@ use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
-use crate::task::{LinearProjectId, LinearProjectRef};
+use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ProjectSessionSnapshot {
@@ -30,7 +30,7 @@ pub struct ProjectSessionSnapshot {
     pub wave: String,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
-    pub status: String,
+    pub status: ProjectSessionStatus,
     pub status_reason: String,
     pub status_at: time::OffsetDateTime,
     pub iteration: u32,
@@ -40,7 +40,8 @@ pub struct ProjectSessionSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub process: Option<ChildProcess>,
+    #[serde(rename = "process")]
+    pub latest_process: Option<ChildProcessGeneration>,
     pub latest_event: Option<crate::project_session::ProjectEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -200,7 +201,7 @@ pub fn project_run(
         let context = crate::ops::task::project_context(&resolved.project);
         let mut session = ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new(resolved.project.id.clone())
                     .map_err(|error| project_error(error.to_string()))?,
                 slug: resolved.project.slug,
@@ -208,8 +209,8 @@ pub fn project_run(
                 context,
             },
             wave_id: wave.id().clone(),
-            wave: resolved.snapshot.wave,
-            repo: repo.display().to_string(),
+            wave_name: resolved.snapshot.wave,
+            control_repo: repo.display().to_string(),
             pm_snapshot_synced_at: resolved.snapshot.synced_at,
             current_directive_version: 1,
             incorporated_directive_version: 0,
@@ -218,11 +219,11 @@ pub fn project_run(
             status_at: now,
             iteration: 0,
             observation_cursor: 0,
-            state_fingerprint: None,
+            last_state_fingerprint: None,
             agent,
             provider,
             provider_session_id: None,
-            process: None,
+            latest_process: None,
             created_at: now,
             updated_at: now,
         };
@@ -321,7 +322,7 @@ pub(crate) async fn launch_project_process(
 ) -> OpsResult<()> {
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
-    ensure_clean_main(Path::new(&session.repo), "Project turn")?;
+    ensure_clean_main(Path::new(&session.control_repo), "Project turn")?;
     let tmux_name = format!(
         "lf-project-{}-{}",
         tmux_session_slug(&session.project.slug),
@@ -375,8 +376,13 @@ pub(crate) async fn launch_project_process(
         ("LFD_PROJECT_SESSION_ID", session.id.as_str()),
         ("LFD_PROJECT_GENERATION", generation_text.as_str()),
     ];
-    if let Err(error) =
-        start_lf_session_with_env(&tmux_name, Path::new(&session.repo), &argv, &environment).await
+    if let Err(error) = start_lf_session_with_env(
+        &tmux_name,
+        Path::new(&session.control_repo),
+        &argv,
+        &environment,
+    )
+    .await
     {
         let reason = format!("project process launch failed: {error}");
         session.set_status(ProjectSessionStatus::Failed, reason.clone());
@@ -437,7 +443,7 @@ async fn reconcile_project_liveness(
     if !session.status.is_process_active() {
         return Ok(());
     }
-    let alive = match session.process.as_ref() {
+    let alive = match session.latest_process.as_ref() {
         Some(process) => tmux_session_exists(&process.tmux_name)
             .await
             .map_err(|error| project_error(error.to_string()))?,
@@ -487,7 +493,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
     block_on_project(async move {
         let store = project_store().await?;
         let process_alive = if session.status.is_process_active() {
-            match session.process.as_ref() {
+            match session.latest_process.as_ref() {
                 Some(process) => tmux_session_exists(&process.tmux_name)
                     .await
                     .map_err(|error| project_error(error.to_string()))?,
@@ -514,10 +520,10 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             project_slug: session.project.slug,
             project_name: session.project.name,
             session_id: session.id.to_string(),
-            wave: session.wave,
+            wave: session.wave_name,
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,
-            status: session.status.as_str().to_string(),
+            status: session.status,
             status_reason: session.status_reason,
             status_at: session.status_at,
             iteration: session.iteration,
@@ -527,7 +533,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             provider: session.provider,
             provider_session_id: session.provider_session_id,
             process_alive,
-            process: session.process,
+            latest_process: session.latest_process,
             latest_event,
             created_at: session.created_at,
             updated_at: session.updated_at,
@@ -543,7 +549,7 @@ fn project_command_source(session: &ProjectSession) -> OpsResult<ChildCommandSou
             if wave_id != session.wave_id {
                 return Err(project_error(format!(
                     "Wave {wave_id} cannot control Project {} owned by wave/{}",
-                    session.project.slug, session.wave
+                    session.project.slug, session.wave_name
                 )));
             }
             Ok(ChildCommandSource::Wave(wave_id))
@@ -853,7 +859,7 @@ pub fn project_wait(
 
 pub fn project_attach(project: &str) -> OpsResult<()> {
     let session = project_status(project)?;
-    let process = session.process.ok_or_else(|| {
+    let process = session.latest_process.ok_or_else(|| {
         project_error(format!(
             "Project {} has no process; run `lf project resume {}` first",
             session.project.slug,

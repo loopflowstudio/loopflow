@@ -473,13 +473,13 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::child_session::{
-        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcess,
+        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcessGeneration,
     };
     use crate::lfd::id::LfdId;
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, StorageConfig};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-    use crate::task::{LinearProjectId, LinearProjectRef};
+    use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
 
     use super::{queue_command, ChildSession};
 
@@ -493,15 +493,15 @@ mod tests {
         let active = status.is_process_active();
         ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new(format!("project-{}", LfdId::new())).unwrap(),
                 slug: format!("project-{}", LfdId::new()),
                 name: "Child control".to_string(),
                 context: "Keep one control protocol.".to_string(),
             },
             wave_id: wave.id().clone(),
-            wave: wave.name().to_string(),
-            repo: wave.repo().to_string(),
+            wave_name: wave.name().to_string(),
+            control_repo: wave.repo().to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
             current_directive_version: 0,
             incorporated_directive_version: 0,
@@ -510,11 +510,11 @@ mod tests {
             status_at: now,
             iteration: 1,
             observation_cursor: 0,
-            state_fingerprint: None,
+            last_state_fingerprint: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: active.then(|| "thread-project".to_string()),
-            process: active.then_some(ChildProcess {
+            latest_process: active.then_some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
                 tmux_name: "lf-project-test".to_string(),
@@ -585,6 +585,6 @@ mod tests {
 
         assert_eq!(result.state, ChildCommandState::Accepted);
         assert_eq!(persisted.status, ProjectSessionStatus::Abandoned);
-        assert_eq!(persisted.process, None);
+        assert_eq!(persisted.latest_process, None);
     }
 }

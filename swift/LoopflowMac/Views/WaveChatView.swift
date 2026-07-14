@@ -536,7 +536,7 @@ private struct ChildControlActivityCard: View {
                                 .lineLimit(3)
                         }
                         if let version = activity.directiveVersion {
-                            Text("directive v\(version)\(activity.effect.map { " · \($0)" } ?? "")")
+                            Text("directive v\(version)\(activity.effect.map { " · \($0.rawValue)" } ?? "")")
                                 .font(Typography.caption(10))
                                 .foregroundStyle(palette.textSecondary)
                         }

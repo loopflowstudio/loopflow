@@ -199,7 +199,7 @@ public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
 struct WaveSnapshot: Decodable {
     let id: String
     let name: String
-    let status: String
+    let status: WaveStatus
     let paused: Bool
     let goal: String
     let repo: String
@@ -226,8 +226,7 @@ struct WaveSnapshot: Decodable {
             id: id,
             name: name,
             repo: repo,
-            goal: goal,
-            status: WaveStatus(rawValue: status) ?? .idle
+            status: status
         )
     }
 }

@@ -46,10 +46,15 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         .get_project_session(&session_id)
         .await?
         .ok_or_else(|| anyhow!("Project Session {session_id} not found"))?;
-    if session.process.as_ref().map(|process| process.generation) != Some(generation) {
+    if session
+        .latest_process
+        .as_ref()
+        .map(|process| process.generation)
+        != Some(generation)
+    {
         anyhow::bail!("Project Session {session_id} generation {generation} is not current");
     }
-    if let Some(process) = &mut session.process {
+    if let Some(process) = &mut session.latest_process {
         process.pid = Some(std::process::id());
     }
     set_and_record_status(
@@ -64,7 +69,10 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         .await?;
 
     let observations = consume_task_observations(&store, &mut session).await?;
-    let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(&session.repo), "project")?);
+    let (mut flow, _) = Playhead::new(QueuedInvocation::load(
+        Path::new(&session.control_repo),
+        "project",
+    )?);
     let prepared = prepare_project_flow_step(&store, &mut session, &flow, &observations).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -154,7 +162,9 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         if status == Lifecycle::Failed {
                             return finish_failed(&store, &mut session, harness.as_mut(), "provider turn failed").await;
                         }
-                        if let Err(error) = verify_control_plane_checkout(Path::new(&session.repo)) {
+                        if let Err(error) =
+                            verify_control_plane_checkout(Path::new(&session.control_repo))
+                        {
                             return finish_failed(
                                 &store,
                                 &mut session,
@@ -247,7 +257,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             );
                         }
                         if outcome.status == ProjectSessionStatus::Running {
-                            session.state_fingerprint = Some(outcome.fingerprint);
+                            session.last_state_fingerprint = Some(outcome.fingerprint);
                             session.updated_at = time::OffsetDateTime::now_utc();
                             store.update_project_session(&session).await?;
                             last_text.clear();
@@ -269,7 +279,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             flow_turn_active = true;
                             continue;
                         }
-                        session.state_fingerprint = Some(outcome.fingerprint);
+                        session.last_state_fingerprint = Some(outcome.fingerprint);
                         store.update_project_session(&session).await?;
                         let boundary = store
                             .claim_project_commands_or_stop(
@@ -412,8 +422,12 @@ async fn prepare_project_flow_step(
     );
     store.update_project_session(session).await?;
     let seed = project_seed(session, directive, observations);
-    let mut prepared =
-        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, &session.wave, None)?;
+    let mut prepared = crate::lf::commands::run::prepare_harness_turn(
+        &step.step,
+        &seed,
+        &session.wave_name,
+        None,
+    )?;
     prepared.config.agent = Some(session.agent.clone());
     Ok(prepared)
 }
@@ -425,7 +439,10 @@ fn open_project_flow_body(flow: &mut Playhead, session: &ProjectSession) -> Resu
     if step.kind != StepKind::Skill {
         anyhow::bail!("Project flow step {} is not a skill", step.step);
     }
-    flow.start_body(BodyProvenance::for_step(&step, Path::new(&session.repo)))?;
+    flow.start_body(BodyProvenance::for_step(
+        &step,
+        Path::new(&session.control_repo),
+    ))?;
     Ok(())
 }
 
@@ -616,7 +633,7 @@ async fn take_current_input(
     session: &ProjectSession,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<PendingInput>> {
-    take_child_input(store, ChildTarget::Project(session), pending).await
+    take_child_input(store, ChildTarget::Project(&session.id), pending).await
 }
 
 struct ProjectOutcome {
@@ -626,7 +643,7 @@ struct ProjectOutcome {
 }
 
 async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Result<ProjectOutcome> {
-    let repo = session.repo.clone();
+    let repo = session.control_repo.clone();
     let project_id = session.project.id.as_str().to_string();
     let resolved = tokio::task::spawn_blocking(move || {
         crate::ops::task_pm::resolve_project(
@@ -683,7 +700,7 @@ async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Resul
             fingerprint,
         });
     }
-    if session.state_fingerprint.as_deref() == Some(&fingerprint) {
+    if session.last_state_fingerprint.as_deref() == Some(&fingerprint) {
         return Ok(ProjectOutcome {
             status: ProjectSessionStatus::Blocked,
             reason: "open KRs remain but a complete iteration changed no PM or Task state"
@@ -741,7 +758,7 @@ async fn absorb_commands(
 ) -> Result<Option<CommandStop>> {
     absorb_child_commands(
         store,
-        ChildTarget::Project(session),
+        ChildTarget::Project(&session.id),
         commands,
         harness,
         turn_active,
@@ -756,7 +773,7 @@ async fn apply_input(
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
-    apply_child_input(store, ChildTarget::Project(session), harness, input).await
+    apply_child_input(store, ChildTarget::Project(&session.id), harness, input).await
 }
 
 async fn set_and_record_status(
@@ -850,7 +867,11 @@ async fn record_unhandled_failure(
     let Ok(Some(mut session)) = store.get_project_session(session_id).await else {
         return;
     };
-    if session.process.as_ref().map(|process| process.generation) != Some(generation)
+    if session
+        .latest_process
+        .as_ref()
+        .map(|process| process.generation)
+        != Some(generation)
         || !session.status.is_process_active()
     {
         return;
@@ -878,7 +899,7 @@ fn project_seed(
         "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf project acknowledge {project_id} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
         name = session.project.name,
         project_id = session.project.id.as_str(),
-        wave = session.wave,
+        wave = session.wave_name,
         context = session.project.context,
         directive_version = directive.version,
         directive_kind = directive.kind.as_str(),
@@ -914,7 +935,7 @@ mod tests {
     };
     use crate::child_session::{
         ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildProcess, ChildRef,
+        ChildDecisionId, ChildProcessGeneration, ChildRef,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
@@ -922,7 +943,7 @@ mod tests {
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-    use crate::task::{LinearProjectId, LinearProjectRef};
+    use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
 
     struct ScriptedHarness {
         supports_steer: bool,
@@ -995,15 +1016,15 @@ mod tests {
             .unwrap();
         let session = ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
                 slug: "control".to_string(),
                 name: "Control".to_string(),
                 context: "Provider-neutral control".to_string(),
             },
             wave_id: wave.id().clone(),
-            wave: wave.name().to_string(),
-            repo: "/repo".to_string(),
+            wave_name: wave.name().to_string(),
+            control_repo: "/repo".to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
             current_directive_version: 0,
             incorporated_directive_version: 0,
@@ -1012,11 +1033,11 @@ mod tests {
             status_at: now,
             iteration: 0,
             observation_cursor: 0,
-            state_fingerprint: None,
+            last_state_fingerprint: None,
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
-            process: Some(ChildProcess {
+            latest_process: Some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
                 tmux_name: format!("project-{provider}"),

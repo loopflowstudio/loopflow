@@ -253,7 +253,8 @@ impl Store {
                 };
                 if nudge_wave {
                     if let Err(error) =
-                        crate::lf::commands::chat::nudge_child_observations(&session.wave).await
+                        crate::lf::commands::chat::nudge_child_observations(&session.wave_name)
+                            .await
                     {
                         tracing::debug!(
                             %error,
@@ -396,7 +397,7 @@ impl Store {
         if kind.is_wave_observable() {
             if let Some(session) = self.get_project_session(&session_id).await? {
                 if let Err(error) =
-                    crate::lf::commands::chat::nudge_child_observations(&session.wave).await
+                    crate::lf::commands::chat::nudge_child_observations(&session.wave_name).await
                 {
                     tracing::debug!(
                         %error,

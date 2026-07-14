@@ -42,7 +42,10 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         .get_task_session(&session_id)
         .await?
         .ok_or_else(|| anyhow!("Task Session {session_id} not found"))?;
-    let recorded_generation = session.process.as_ref().map(|process| process.generation);
+    let recorded_generation = session
+        .latest_process
+        .as_ref()
+        .map(|process| process.generation);
     if recorded_generation != Some(generation) {
         anyhow::bail!(
             "Task Session {session_id} generation mismatch: expected {:?}, got {generation}",
@@ -50,7 +53,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         );
     }
 
-    if let Some(process) = &mut session.process {
+    if let Some(process) = &mut session.latest_process {
         process.pid = Some(std::process::id());
     }
     set_and_record_status(
@@ -460,8 +463,12 @@ async fn prepare_task_flow_step(
     );
     store.update_task_session(session).await?;
     let seed = task_seed(session, directive);
-    let mut prepared =
-        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, &session.wave, None)?;
+    let mut prepared = crate::lf::commands::run::prepare_harness_turn(
+        &step.step,
+        &seed,
+        &session.wave_name,
+        None,
+    )?;
     prepared.config.agent = Some(session.agent.clone());
     Ok(prepared)
 }
@@ -522,7 +529,7 @@ async fn pending_input_is_current(
     session: &TaskSession,
     input: &PendingInput,
 ) -> Result<bool> {
-    input_is_current(store, ChildTarget::Task(session), input).await
+    input_is_current(store, ChildTarget::Task(&session.id), input).await
 }
 
 async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: String) -> Result<()> {
@@ -645,7 +652,7 @@ async fn absorb_commands(
 ) -> Result<Option<CommandStop>> {
     absorb_child_commands(
         store,
-        ChildTarget::Task(session),
+        ChildTarget::Task(&session.id),
         commands,
         harness,
         turn_active,
@@ -688,7 +695,11 @@ async fn record_unhandled_failure(
         return;
     };
     if !session.status.is_process_active()
-        || session.process.as_ref().map(|process| process.generation) != Some(generation)
+        || session
+            .latest_process
+            .as_ref()
+            .map(|process| process.generation)
+            != Some(generation)
     {
         return;
     }
@@ -735,7 +746,7 @@ async fn apply_input(
         .unwrap_or((None, ChildCommandEffect::NextTurn));
     apply_child_input(
         store,
-        ChildTarget::Task(session),
+        ChildTarget::Task(&session.id),
         harness,
         PendingInput {
             command_id,
@@ -830,13 +841,8 @@ async fn finish_command_stop(
 }
 
 fn task_seed(session: &TaskSession, directive: &ChildDirective) -> String {
-    let snapshot_warning = session
-        .pm_snapshot_warning
-        .as_deref()
-        .map(|warning| format!("\nPM snapshot warning: {warning}"))
-        .unwrap_or_default();
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}{snapshot_warning}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. The runner plays clarify, pursue, and mutate through this same provider session, then decides whether the whole Task flow repeats. Opening the PR submits the task; completion is merge or explicit abandonment.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. The runner plays clarify, pursue, and mutate through this same provider session, then decides whether the whole Task flow repeats. Opening the PR submits the task; completion is merge or explicit abandonment.",
         identifier = session.issue.identifier,
         title = session.issue.title,
         description = session.issue.description,
@@ -847,7 +853,7 @@ fn task_seed(session: &TaskSession, directive: &ChildDirective) -> String {
         directive_kind = directive.kind.as_str(),
         directive_text = directive.text,
         snapshot_synced_at = session.pm_snapshot_synced_at,
-        wave = session.wave,
+        wave = session.wave_name,
         session_id = session.id,
         worktree = session.worktree.display(),
         base_commit = session.base_commit,
@@ -878,16 +884,18 @@ mod tests {
     use super::{absorb_commands, apply_input, handle_attachment, progress_summary, CommandStop};
     use crate::child_session::{
         ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildProcess, ChildRef, SessionSupervisor,
+        ChildDecisionId, ChildProcessGeneration, ChildRef, SessionSupervisor,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+    };
     use crate::task::{
-        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
-        TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+        PmWritebackState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
     };
 
     struct ScriptedHarness {
@@ -961,23 +969,22 @@ mod tests {
             .unwrap();
         let session = TaskSession {
             id: TaskSessionId::new(),
-            issue: LinearIssueRef {
+            issue: LinearIssueSnapshot {
                 id: LinearIssueId::new(format!("issue-{provider}")).unwrap(),
                 identifier: format!("{provider}-123"),
                 title: "Conformance".to_string(),
                 description: "Exercise provider-neutral control".to_string(),
             },
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
                 slug: "control".to_string(),
                 name: "Control".to_string(),
                 context: "Provider-neutral control".to_string(),
             },
             pm_snapshot_synced_at: now.unix_timestamp(),
-            pm_snapshot_warning: None,
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            wave: wave.name().to_string(),
+            wave_name: wave.name().to_string(),
             supervisor: SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
@@ -992,7 +999,7 @@ mod tests {
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
-            process: Some(ChildProcess {
+            latest_process: Some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
                 tmux_name: format!("task-{provider}"),

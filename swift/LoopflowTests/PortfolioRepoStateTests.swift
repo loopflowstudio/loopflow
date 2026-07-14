@@ -6,21 +6,6 @@ import Testing
 @MainActor
 @Suite("Portfolio Repo State")
 struct PortfolioRepoStateTests {
-    @Test("summary metrics count blocked Waves")
-    func summaryMetrics() {
-        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-state")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo)
-
-        state.applyConnectedWaves([
-            makeWave(id: "running", repoPath: repo.path, status: .running),
-            makeWave(id: "waiting", repoPath: repo.path, status: .waiting),
-            makeWave(id: "failed", repoPath: repo.path, status: .failed),
-        ])
-
-        #expect(state.blockedCount == 1)
-    }
-
     @Test("connected waves keep only this repo's rows")
     func connectedWavesScopedToRepo() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-scope")
@@ -38,20 +23,20 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
-    @Test("waves sort by attention priority")
-    func wavesSortByAttentionPriority() {
+    @Test("waves sort by presence before name")
+    func wavesSortByPresenceBeforeName() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo)
 
         state.applyConnectedWaves([
-            makeWave(id: "running", repoPath: repo.path, status: .running),
+            makeWave(id: "running-b", repoPath: repo.path, status: .running),
             makeWave(id: "idle", repoPath: repo.path, status: .idle),
-            makeWave(id: "waiting", repoPath: repo.path, status: .waiting),
-            makeWave(id: "failed", repoPath: repo.path, status: .failed),
+            makeWave(id: "paused", repoPath: repo.path, status: .paused),
+            makeWave(id: "running-a", repoPath: repo.path, status: .running),
         ])
 
-        #expect(state.waves.map(\.id) == ["failed", "waiting", "running", "idle"])
+        #expect(state.waves.map(\.id) == ["running-a", "running-b", "paused", "idle"])
     }
 
     @Test("wave agent session name mirrors lf tmux handle")
@@ -153,7 +138,6 @@ struct PortfolioRepoStateTests {
             id: id,
             name: id,
             repo: repoPath,
-            goal: "wave",
             status: status
         )
     }

@@ -32,11 +32,12 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let runtime: TaskRuntimeSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
-    public let delivery: TaskDeliverySnapshot?
+    public let pullRequest: PullRequestSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case task, runtime, directive, delivery
+        case task, runtime, directive
         case nextMove = "next_move"
+        case pullRequest = "pull_request"
     }
 }
 
@@ -68,7 +69,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
 
 public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let sessionId: String
-    public let status: String
+    public let status: ProjectSessionStatus
     public let reason: String
     public let statusAt: String
     public let iteration: UInt32
@@ -88,7 +89,7 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let sessionId: String
     public let supervisor: WorkController
-    public let status: String
+    public let status: TaskSessionStatus
     public let reason: String
     public let statusAt: String
     public let worktree: String
@@ -104,21 +105,42 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public struct WorkController: Decodable, Sendable, Hashable {
-    public let kind: String
-    public let waveId: String?
-    public let sessionId: String?
+public enum ProjectSessionStatus: String, Decodable, Sendable, Hashable {
+    case created, starting, running, waiting, blocked, failed, completed, abandoned
+}
 
-    enum CodingKeys: String, CodingKey {
+public enum TaskSessionStatus: String, Decodable, Sendable, Hashable {
+    case created, starting, running, waiting, submitted, blocked, failed, merged, abandoned
+}
+
+public enum WorkController: Decodable, Sendable, Hashable {
+    case wave(id: String)
+    case project(sessionId: String)
+
+    private enum Kind: String, Decodable {
+        case wave, project
+    }
+
+    private enum CodingKeys: String, CodingKey {
         case kind
         case waveId = "wave_id"
         case sessionId = "session_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Kind.self, forKey: .kind) {
+        case .wave:
+            self = .wave(id: try values.decode(String.self, forKey: .waveId))
+        case .project:
+            self = .project(sessionId: try values.decode(String.self, forKey: .sessionId))
+        }
     }
 }
 
 public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {
     public let version: UInt32
-    public let kind: String
+    public let kind: WorkDirectiveKind
     public let text: String
     public let appliedAt: String?
     public let incorporatedAt: String?
@@ -130,6 +152,12 @@ public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {
         case incorporatedAt = "incorporated_at"
         case incorporatedSummary = "incorporated_summary"
     }
+}
+
+public enum WorkDirectiveKind: String, Decodable, Sendable, Hashable {
+    case initial
+    case replacement
+    case workRevised = "work_revised"
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
@@ -147,17 +175,9 @@ public struct WorkNextMove: Decodable, Sendable, Hashable {
     public let reason: String
 }
 
-public struct TaskDeliverySnapshot: Decodable, Sendable, Hashable {
-    public let kind: String
-    public let base: String
-    public let prNumber: UInt32?
-    public let prURL: URL?
-
-    enum CodingKeys: String, CodingKey {
-        case kind, base
-        case prNumber = "pr_number"
-        case prURL = "pr_url"
-    }
+public struct PullRequestSnapshot: Decodable, Sendable, Hashable {
+    public let number: UInt32
+    public let url: URL
 }
 
 public struct WaveStatusResult: Sendable {

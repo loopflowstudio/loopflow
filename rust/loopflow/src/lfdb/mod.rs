@@ -631,7 +631,7 @@ mod tests {
     use super::{open_store, PmSnapshotRow, RunEventRow, StorageConfig};
     use crate::child_session::{
         BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource,
-        ChildCommandState, ChildDecisionId, ChildDirective, ChildProcess, ChildRef,
+        ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
         SessionSupervisor,
     };
     use crate::lfd::id::LfdId;
@@ -639,9 +639,12 @@ mod tests {
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+    };
     use crate::task::{
-        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
-        PmWritebackState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+        PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionId,
+        TaskSessionStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -657,23 +660,22 @@ mod tests {
             .expect("current unix time");
         TaskSession {
             id: TaskSessionId::new(),
-            issue: LinearIssueRef {
+            issue: LinearIssueSnapshot {
                 id: LinearIssueId::new("issue-uuid").unwrap(),
                 identifier: "INF-123".to_string(),
                 title: "Add hello world".to_string(),
                 description: "Ship one command".to_string(),
             },
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new("project-uuid").unwrap(),
                 slug: "developer-efficiency".to_string(),
                 name: "Developer Efficiency".to_string(),
                 context: "Definition:\nKeep local work fast.".to_string(),
             },
             pm_snapshot_synced_at: now.unix_timestamp(),
-            pm_snapshot_warning: None,
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            wave: wave.name().to_string(),
+            wave_name: wave.name().to_string(),
             supervisor: SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
@@ -688,7 +690,7 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            process: None,
+            latest_process: None,
             pull_request: None,
             created_at: now,
             updated_at: now,
@@ -700,15 +702,15 @@ mod tests {
             .expect("current unix time");
         ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectRef {
+            project: LinearProjectSnapshot {
                 id: LinearProjectId::new("project-uuid").unwrap(),
                 slug: "developer-efficiency".to_string(),
                 name: "Developer Efficiency".to_string(),
                 context: "Definition:\nKeep local work fast.".to_string(),
             },
             wave_id: wave.id().clone(),
-            wave: wave.name().to_string(),
-            repo: wave.repo().to_string(),
+            wave_name: wave.name().to_string(),
+            control_repo: wave.repo().to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
             current_directive_version: 0,
             incorporated_directive_version: 0,
@@ -717,11 +719,11 @@ mod tests {
             status_at: now,
             iteration: 1,
             observation_cursor: 0,
-            state_fingerprint: None,
+            last_state_fingerprint: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: Some("thread-project".to_string()),
-            process: Some(ChildProcess {
+            latest_process: Some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
                 tmux_name: "lf-project-test".to_string(),
@@ -1113,7 +1115,6 @@ mod tests {
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let mut session = make_task_session(&wave);
-        session.pm_snapshot_warning = Some("using cached snapshot".to_string());
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: "Linear unavailable".to_string(),
@@ -1439,7 +1440,7 @@ mod tests {
 
         let loaded = store.get_task_session(&session.id).await.unwrap().unwrap();
         assert_eq!(loaded.status, TaskSessionStatus::Starting);
-        assert_eq!(loaded.process.unwrap().generation, 1);
+        assert_eq!(loaded.latest_process.unwrap().generation, 1);
     }
 
     async fn run_store_basic_suite(store: &super::Store) {

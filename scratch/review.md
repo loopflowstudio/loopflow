@@ -86,7 +86,7 @@ Presentation derives rather than persists current state:
 
 ```rust
 pub struct WaveSnapshot {
-    pub status: String,       // idle | running | paused
+    pub status: WavePresence, // idle | running | paused
     pub paused: bool,         // GOAL policy
     pub goal: String,         // first Objective paragraph
     pub live: bool,           // listener answered /health
@@ -176,10 +176,10 @@ pub enum ProjectSessionStatus {
 
 pub struct ProjectSession {
     pub id: ProjectSessionId,
-    pub project: LinearProjectRef,
+    pub project: LinearProjectSnapshot,
     pub wave_id: LfdId,
-    pub wave: String,
-    pub repo: String,
+    pub wave_name: String,
+    pub control_repo: String,
     pub pm_snapshot_synced_at: i64,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
@@ -188,11 +188,11 @@ pub struct ProjectSession {
     pub status_at: OffsetDateTime,
     pub iteration: u32,
     pub observation_cursor: i64,
-    pub state_fingerprint: Option<String>,
+    pub last_state_fingerprint: Option<String>,
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process: Option<ChildProcess>,
+    pub latest_process: Option<ChildProcessGeneration>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -201,7 +201,7 @@ pub struct ProjectSession {
 Process generation is embedded in the aggregate:
 
 ```rust
-pub struct ChildProcess {
+pub struct ChildProcessGeneration {
     pub generation: u32,
     pub pid: Option<u32>,
     pub tmux_name: String,
@@ -220,21 +220,25 @@ pub struct ChildProcess {
 
 ### What is unclear
 
-- `wave_id` and `wave` duplicate Wave identity. The name can drift after a Wave
-  rename unless it is explicitly named as a launch-time label.
-- `repo` duplicates the owning Wave's canonical repo. It may be a useful launch
-  receipt, but its frozen/current semantics are unstated.
+- `wave_id` is current ownership; `wave_name` is the captured human address used
+  to resume and nudge the same Wave. A future Wave rename needs an explicit
+  migration rather than silently changing child history.
+- `control_repo` captures the canonical Wave checkout used for read-only Project
+  turns. It is placement, not another repository source of truth.
 - `project.context` and `pm_snapshot_synced_at` are launch context, while the
   runner later reads current PM truth. The field names do not distinguish the
   captured launch receipt from authoritative current Project state.
 - `observation_cursor` now names the outbox coordinate it stores. The existing
   SQLite column remains `task_event_cursor` for production migration stability;
   it is an internal storage name rather than the Rust/API contract.
-- A public `status` plus optional `process` permits `Completed + Some(process)`
-  and `Running + None`. Store methods defend some transitions, but the aggregate
-  does not demonstrate the invariant.
-- `state_fingerprint: Option<String>` carries an important no-progress decision
-  in an opaque string without naming what was fingerprinted.
+- `latest_process` is a durable generation receipt, not a claim that its tmux
+  process is still alive. Retaining it in Waiting, Failed, or terminal states
+  is what makes the next generation monotonic and rejects a stale runner.
+- An active status still requires a latest generation. Status/read boundaries
+  reconcile a missing tmux process to resumable failure rather than trusting a
+  persisted PID.
+- `last_state_fingerprint` now names its temporal role, but the hash still hides
+  which PM/Task input changed from an operator reading the row.
 
 ### Review question
 
@@ -262,13 +266,12 @@ pub enum TaskSessionStatus {
 
 pub struct TaskSession {
     pub id: TaskSessionId,
-    pub issue: LinearIssueRef,
-    pub project: LinearProjectRef,
+    pub issue: LinearIssueSnapshot,
+    pub project: LinearProjectSnapshot,
     pub pm_snapshot_synced_at: i64,
-    pub pm_snapshot_warning: Option<String>,
     pub pm_writeback: PmWritebackState,
     pub wave_id: LfdId,
-    pub wave: String,
+    pub wave_name: String,
     pub supervisor: SessionSupervisor,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
@@ -281,7 +284,7 @@ pub struct TaskSession {
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process: Option<ChildProcess>,
+    pub latest_process: Option<ChildProcessGeneration>,
     pub pull_request: Option<PullRequestRef>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -297,7 +300,7 @@ pub enum PmWritebackState {
     },
 }
 
-pub struct ChildProcess {
+pub struct ChildProcessGeneration {
     pub generation: u32,
     pub pid: Option<u32>,
     pub tmux_name: String,
@@ -316,12 +319,11 @@ pub struct ChildProcess {
 
 ### What is unclear
 
-- `wave_id`/`wave`, captured `project`, and PM snapshot fields have the same
-  frozen-versus-current ambiguity as Project Session.
-- Project and Task now use the same `ChildProcess` generation record.
-- Process/status contradictions are representable here too.
-- `pm_snapshot_warning` is durable session data even though it describes a
-  launch-time read warning. Decide whether it is an audit fact or transient UX.
+- `wave_id` is root ownership; `wave_name`, captured `project`, issue text, and
+  PM timestamp are explicit launch facts used to resume the same work.
+- Project and Task use the same `ChildProcessGeneration` receipt. The field is
+  `latest_process` internally while Serde keeps `process` on the established
+  CLI wire shape.
 - `PullRequestRef` records only number and URL; PR lifecycle is inferred from
   Task status. This is simple if one invariant owns every transition, but the
   relationship should be explicit in the lifecycle review.
@@ -355,7 +357,7 @@ sources in observations. Its Serde shape is the one durable representation.
 ### Verdict
 
 There is now one child-session reference. `SessionSupervisor`, `ChildRef`,
-`ChildProcess`, commands, directives, decisions, receipts, and the shared
+`ChildProcessGeneration`, commands, directives, decisions, receipts, and the shared
 boundary result live in `child_session`. Project and Task retain their statuses,
 aggregates, events, and lifecycle policy.
 
@@ -449,12 +451,12 @@ pub struct ChildCommand {
 
 ### What is unclear
 
-- Session-id macros remain independently implemented in Child, Project, and
-  Task. They are small but still candidates for a private macro once the error
-  vocabulary is reviewed.
-- `Resume { message }` combines process lifecycle with optional next-turn
-  input. Check every caller for whether it needs one command or an atomic
-  resume-plus-directive operation.
+- Session, command, decision, and directive ids remain distinct newtypes while
+  one private macro owns their prefix + UUID parsing and formatting.
+- `Resume { message }` is one atomic user intent. The same durable command both
+  forces a stopped nonterminal Session to launch and, when present, becomes its
+  first next-turn input. Splitting it into `follow-up` plus process launch would
+  reintroduce a boundary where only one half could survive.
 - `Abandon` is a lifecycle terminal command, while the other variants mostly
   describe provider input. Keeping one durable command channel is defensible,
   but the runner—not the harness—must visibly own this distinction.
@@ -576,8 +578,8 @@ Source: `rust/loopflow/src/child_control.rs`
 
 ```rust
 pub(crate) enum ChildTarget<'a> {
-    Project(&'a ProjectSession),
-    Task(&'a TaskSession),
+    Project(&'a ProjectSessionId),
+    Task(&'a TaskSessionId),
 }
 ```
 
@@ -595,10 +597,10 @@ domain event ledger.
 
 ### What is unclear
 
-- `ChildTarget` borrows the full aggregate mainly to recover id and event kind.
-  After one `ChildRef` exists, test whether a smaller target plus an explicit
-  event write is clearer. Do not add a trait or callback framework merely to
-  remove a `match`.
+- `ChildTarget` is the small borrowed counterpart of persisted `ChildRef`. It
+  carries only the typed Session id needed to verify command ownership and
+  append the correct domain event; provider control no longer borrows either
+  full aggregate.
 - The remaining exact-once limit must stay documented: a process can die after
   provider acceptance but before the local receipt records acceptance. Local
   transactions cannot solve provider-side idempotency.
@@ -677,15 +679,115 @@ PR delivery. A sibling worktree—or an explicitly selected feature branch in
 the canonical checkout—remains a valid low-level Git surface. This preserves
 `lf wt` without teaching Waves to ship from their homes.
 
+## 11. Wave Chat
+
+Sources: `rust/loopflow/src/chat/turns.rs`,
+`rust/loopflow/src/wave/{journal,runtime}.rs`,
+`swift/Loopflow/Models/{ChatTurn,WaveWorkMap}.swift`,
+`swift/LoopflowMac/Views/{WaveChatView,WaveDetailPane}.swift`
+
+Wave Chat combines two projections with different jobs:
+
+```text
+child event ledger
+  → observation outbox
+  → Wave journal TaskObserved / ProjectObserved
+  → ChatTurn.activity
+  → Wave SSE
+  → linked activity card                 historical motion
+
+Linear PM snapshot + Project/Task Sessions
+  → lf status <wave> --json
+  → WaveWorkMap
+  → Project/Task list + inspector         current truth
+```
+
+The historical card carries a human-facing address and a durable session id:
+
+```rust
+pub struct ChildControlActivity {
+    pub id: String,
+    pub subject: ChildActivitySubject,
+    pub subject_id: String, // Project slug or Linear issue identifier
+    pub session_id: String,
+    pub kind: ChildActivityKind,
+    pub title: String,
+    pub summary: String,
+    pub directive_version: Option<u32>,
+    pub command_id: Option<String>,
+    pub effect: Option<ChildCommandEffect>,
+    pub decision_id: Option<String>,
+    pub options: Vec<String>,
+}
+```
+
+The current-state side remains domain-shaped:
+
+```swift
+public struct WaveProjectWork {
+    public let project: ProjectPlanningSnapshot
+    public let runtime: ProjectRuntimeSnapshot?
+    public let directive: WorkDirectiveSnapshot?
+    public let nextMove: WorkNextMove
+    public let tasks: [WaveTaskWork]
+}
+```
+
+### What is clear
+
+- The transcript answers “what happened?” and preserves ordering across human,
+  Wave, Project, and Task motion.
+- The work map answers “what is true now?” from Linear plus durable Sessions.
+- Project slugs and Task identifiers are the normal human addresses. Canonical
+  Linear ids and Session ids remain available for disambiguation and audit.
+- Clicking an activity selects the same object in the work map.
+- Decision buttons compose a message to the Wave; they do not let the Mac app
+  mutate a child behind the Wave's back. Human → Wave conversation ownership
+  therefore remains intact.
+- Command acceptance and directive incorporation render as separate activity
+  cards. The former carries `ChildCommandEffect`; the latter carries the
+  directive version and incorporation summary. One card never claims both.
+- Routine Task decisions stop at their immediate Project. Significant Task
+  state, PR, completion, and failure events also reach the root Wave directly.
+  The Project's internal `TaskObserved` wrapper is not delivered again, so the
+  Wave does not receive a duplicate roll-up card.
+
+### What is unclear
+
+- `ChatTurn` represents ordinary human turns, assistant turns, and child
+  activity with `role` plus optional `body` and `activity`. Invalid combinations
+  are representable. A discriminated `ThreadEntry` may express the product more
+  directly, but that wire migration should follow real UI behavior rather than
+  precede it.
+- The work map polls every five seconds while the transcript streams. This is
+  operationally simple, but selection can briefly point at an event whose
+  current session row has not appeared in the next poll.
+- Significant Project-supervised Task events are intentionally visible at both
+  responsibility levels: the Project consumes them to pursue KRs and the Wave
+  sees the Task outcome directly. The UI should show one Task card, not invent a
+  second Project narration unless the Project itself reaches a new conclusion.
+- Transport receipt, semantic directive incorporation, and current lifecycle
+  state are three facts. The UI currently exposes all three, but the visual
+  hierarchy still needs real dogfood: direction should read as an instruction
+  awaiting/incorporating evidence, not as generic event noise.
+
+### Verdict
+
+Keep one screen and two projections. Do not create a separate Project console
+or Task chat surface yet. Make the work map the durable inspector and the Wave
+transcript the place where humans direct the system and receive consequential
+motion. Join them through typed ids; do not merge current state into historical
+turns or make the transcript poll lifecycle truth.
+
 ## First simplification slice — implemented
 
 This slice preserves schemas and behavior:
 
 1. `child_session` owns `SessionSupervisor`, one `ChildRef`,
-   `ChildProcess`, child ids, commands, directives, decisions, and generic
+   `ChildProcessGeneration`, child ids, commands, directives, decisions, and generic
    `BoundaryResult<S>`.
 2. The observation outbox uses `ChildRef`.
-3. Project and Task use `ChildProcess`.
+3. Project and Task use `ChildProcessGeneration`.
 4. Both boundary methods return `BoundaryResult<S>`.
 5. `TaskSessionStatus`, `ProjectSessionStatus`, both aggregates, both event
    enums, and both runners remain domain-specific.
@@ -742,21 +844,142 @@ passes 49 Python tests, 1,283 Rust tests with 3 intentional skips, 59 website
 tests with 3 intentional skips, 84 Swift tests, the CLI smoke test, the signed
 macOS build-for-testing, clippy, format, Swift boundaries, and `git diff --check`.
 
+## Fourth simplification slice — implemented
+
+The app now uses the same Wave presence model as the Rust contract:
+
+1. `WaveStatus` contains only `running`, `paused`, and `idle`.
+2. Removed `waiting` and `failed` from Wave rows, sorting, summary state, and
+   tests. Waiting/failure belong to Project/Task Sessions; a resident failure is
+   `WaveLoopState.failed` in Wave Chat.
+3. `WaveSnapshot.status` decodes directly as `WaveStatus`; an unknown server
+   value is a contract error instead of silently becoming idle.
+4. UI comments now describe registry queries, Wave journal streaming, and the
+   work map without the removed generic-run/daemon model.
+5. The app's `Wave` and `WaveViewModel` are immutable query snapshots. The dead
+   `Wave.goal` copy is removed; objective remains in WavePlan and WaveWorkMap,
+   where the UI actually renders it.
+
+The focused Swift gate passes 83 tests.
+
+## Fifth simplification slice — implemented
+
+The child aggregate vocabulary now exposes launch semantics directly:
+
+1. One private macro implements all prefixed UUID newtypes while Project,
+   Task, command, directive, and decision ids remain incompatible Rust types.
+2. Project and Task Sessions name the captured Wave address `wave_name`.
+3. Project Session names its stable read-only checkout `control_repo`.
+4. Project no-progress state is `last_state_fingerprint`, making clear that it
+   compares the completed prior iteration with current PM/Task input.
+5. Serde names and SQLite columns stay `wave`, `repo`, and
+   `state_fingerprint`, preserving stored values and existing wire consumers.
+
+The focused Rust build and format checks pass.
+
+## Sixth simplification slice — implemented
+
+The Wave work map and child-activity wire types now carry domain facts rather
+than stringly or speculative shapes:
+
+1. Project and Task runtime status fields use their Rust enums and matching
+   exhaustive Swift enums. JSON remains the same snake-case values.
+2. Swift `WorkController` is `.wave(id)` or `.project(sessionId)`; impossible
+   kind/id combinations no longer decode.
+3. Removed generic Task `delivery { kind, base, pr_* }`. The one real variable
+   is `pull_request: { number, url } | null`; one PR to `main` remains a Task
+   lifecycle invariant rather than repeated payload data.
+4. Child control effects stay `ChildCommandEffect` through Rust, JSON, and
+   Swift. Wave Chat can distinguish live steer, next turn, replacement, and
+   decision without parsing strings.
+5. The child-activity fixture now represents a real command-acceptance event.
+   Transport acceptance and directive incorporation are tested as distinct
+   facts instead of one impossible combined card.
+
+Rust format/build, the focused activity mapping test, all 83 Swift tests, and
+`git diff --check` pass.
+
+## Seventh simplification slice — implemented
+
+The latest runtime receipt and displayed direction now use their actual domain
+types:
+
+1. `ChildProcess` is now `ChildProcessGeneration`, and each aggregate stores it
+   as `latest_process`. A completed Session retaining this record is valid
+   recovery history, not an apparently live process.
+2. Active status plus current tmux liveness remains the definition of a live
+   process. Missing liveness is reconciled to a visible resumable failure.
+3. Work-map directive kind is `DirectiveKind` in Rust and
+   `WorkDirectiveKind` in Swift instead of an unconstrained string.
+4. Wave presence is `WavePresence` in Rust and `WaveStatus` in Swift. The old
+   Rust fixture could still construct a nonexistent `waiting` Wave; it no
+   longer can.
+5. Standalone `project status` and `task status` snapshots also carry their
+   domain status enums internally. Their JSON values remain unchanged.
+6. The standalone Task snapshot no longer repeats the constant
+   `delivery: { kind: pull_request, base: main }`. Its status plus optional PR
+   are the complete variable delivery state.
+7. Existing database columns and JSON field names remain stable.
+
+Rust test compilation, format, all 83 Swift tests, and `git diff --check` pass.
+
+## Eighth simplification slice — implemented
+
+Task launch state no longer carries a never-populated freshness warning:
+
+1. Both Project and Task Sessions capture `pm_snapshot_synced_at`, the durable
+   fact needed to audit which Linear snapshot seeded the child.
+2. Auto reads already reject hard-stale snapshots. Soft-stale fallback is
+   reported by the PM read operation; it is not copied as a Task-only string
+   that production always set to `None`.
+3. The legacy SQLite warning column stays neutral until a table rebuild earns
+   the migration risk.
+4. Rust test targets compile with the reduced aggregate and snapshot API.
+
+## Ninth simplification slice — implemented
+
+Shared provider control now depends on child identity, not aggregate shape:
+
+1. `ChildTarget` borrows only `ProjectSessionId` or `TaskSessionId`.
+2. Command target verification and domain-event routing remain exhaustive.
+3. Project/Task lifecycle, PM context, worktree state, and delivery state cannot
+   leak into the provider steering core by convenience.
+4. No trait, callback registry, or generic child lifecycle was introduced.
+
+Rust build, format, and `git diff --check` pass.
+
+## Tenth simplification slice — implemented
+
+Captured planning context has a neutral owner and an honest name:
+
+1. `session_context` owns `LinearIssueId`, `LinearProjectId`,
+   `LinearIssueSnapshot`, and `LinearProjectSnapshot`.
+2. Project Session no longer imports its Project representation from the Task
+   module.
+3. The snapshots explicitly mean immutable launch facts used to resume a child;
+   current Project/KR/Task truth still comes from the Wave PM snapshot.
+4. The Task and Project modules now start with the ownership contract that must
+   survive after this scratch review is deleted.
+5. The governance scan skill reads `lf status` and domain Sessions instead of
+   detached loops, Wave branches, queue state, and local item files.
+
+The full Rust suite, clippy, format, and `git diff --check` pass. `scratch/`
+contains only this review.
+
 ## Questions to resolve as we move outward
 
-1. Are Wave name, repo, Linear context, and snapshot warning intentionally
-   frozen launch receipts on child Sessions? If yes, name them that way.
-2. Which descendant Task events should reach the root Wave directly, and which
+1. Which descendant Task events should reach the root Wave directly, and which
    should arrive only through Project interpretation?
-3. Can Project Session no-progress detection be represented as typed input
-   state rather than an opaque serialized fingerprint?
-4. Is `Resume { message }` one atomic user intent, or two operations joined for
-   convenience?
-5. How does Wave Chat show transport receipt, directive incorporation, decision
+2. Can Project Session no-progress detection expose inspectable evidence rather
+   than only an opaque hash?
+3. How does Wave Chat show transport receipt, directive incorporation, decision
    lineage, provider transcript, worktree, and PR without becoming three
    separate consoles?
-6. Where should the provider-side exactly-once limitation be visible to an
+4. Where should the provider-side exactly-once limitation be visible to an
    operator retrying a command after a crash?
+5. Should the ordered Wave thread eventually use a discriminated entry enum for
+   human messages, Wave turns, and child activity, or is the current optional
+   activity field the smaller honest wire contract?
 
 ## Review ledger
 
@@ -766,6 +989,8 @@ macOS build-for-testing, clippy, format, Swift boundaries, and `git diff --check
 - Task is the sole roadmap runtime that owns worktree and PR delivery.
 - Shared steering is durable and provider-neutral, not terminal input.
 - Command acceptance and directive incorporation are different facts.
+- Resume-with-message is one durable command so relaunch and first input cannot
+  split across a crash boundary.
 - Event + outbox and Project consume + acknowledge transaction boundaries are
   the correct durability shape.
 - `lf wt create` remains available below the domain workflow.
@@ -775,11 +1000,14 @@ macOS build-for-testing, clippy, format, Swift boundaries, and `git diff --check
   not every branch that happens to use the canonical checkout path.
 - The minimal Wave registry aggregate is six fields; authored policy and live
   runtime state belong elsewhere.
+- Wave Chat needs one historical stream and one current work projection, not a
+  separate console for each domain runtime.
 
 ### Implemented code reductions
 
 - One child reference instead of two.
-- One child process type instead of Project/Task copies.
+- One explicitly historical child-process generation type instead of
+  Project/Task copies or an ambiguous live-process field.
 - One boundary result shape instead of enum versus tuple.
 - Shared child types moved out of the Task namespace.
 - The observation cursor now matches its stored id.
@@ -792,10 +1020,17 @@ macOS build-for-testing, clippy, format, Swift boundaries, and `git diff --check
 - Unowned HTTP Wave mutation routes removed.
 - Low-level `lf wt create` smoke coverage restored after the domain-instruction
   cleanup accidentally changed it to a no-op listing.
+- Swift Wave presence reduced to running/paused/idle; resident failure and
+  child blockers remain in their actual runtime owners.
+- Prefixed child ids share one implementation; child launch fields now name
+  captured Wave placement and prior-iteration state explicitly.
+- Work-map statuses, supervisors, PRs, and control effects now use the smallest
+  valid domain types across Rust and Swift.
+- Work-map directive kind is typed through Rust and Swift.
+- Wave presence is exhaustive on both sides of the wire.
 
 ### Held open
 
-- Frozen launch receipt versus duplicated source-of-truth fields.
 - Root Wave visibility versus Project-owned interpretation of Task events.
-- Whether status/process invariants warrant a stronger runtime-state type or
-  are clearer as explicit validation at persistence boundaries.
+- Whether the Project no-progress hash needs inspectable evidence when it
+  blocks pursuit.

@@ -7,8 +7,8 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId, ChildProcess,
-    ChildRef, DirectiveKind, SessionSupervisor,
+    ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId,
+    ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
 };
 use crate::lfd::id::LfdId;
 use crate::lfdb::rows::now_unix;
@@ -17,9 +17,11 @@ use crate::project_session::{
     ChildEventPayload, ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession,
     ProjectSessionId, ProjectSessionStatus,
 };
+use crate::session_context::{
+    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+};
 use crate::task::{
-    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskEvent,
-    TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+    PullRequestRef, TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 use super::SqliteStore;
@@ -143,16 +145,19 @@ impl SqliteStore {
                 session.status_reason,
                 session.status_at.unix_timestamp(),
                 session
-                    .process
+                    .latest_process
                     .as_ref()
                     .map(|process| i64::from(process.generation)),
                 session
-                    .process
+                    .latest_process
                     .as_ref()
                     .and_then(|process| process.pid.map(i64::from)),
-                session.process.as_ref().map(|process| &process.tmux_name),
                 session
-                    .process
+                    .latest_process
+                    .as_ref()
+                    .map(|process| &process.tmux_name),
+                session
+                    .latest_process
                     .as_ref()
                     .map(|process| process.started_at.unix_timestamp()),
                 session.updated_at.unix_timestamp(),
@@ -385,7 +390,11 @@ impl SqliteStore {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        if session.process.as_ref().map(|process| process.generation) != Some(generation)
+        if session
+            .latest_process
+            .as_ref()
+            .map(|process| process.generation)
+            != Some(generation)
             || !session.status.is_process_active()
         {
             return Err(StoreError::InvalidData(format!(
@@ -663,16 +672,19 @@ impl SqliteStore {
                 session.status_reason,
                 session.status_at.unix_timestamp(),
                 session
-                    .process
+                    .latest_process
                     .as_ref()
                     .map(|process| i64::from(process.generation)),
                 session
-                    .process
+                    .latest_process
                     .as_ref()
                     .and_then(|process| process.pid.map(i64::from)),
-                session.process.as_ref().map(|process| &process.tmux_name),
                 session
-                    .process
+                    .latest_process
+                    .as_ref()
+                    .map(|process| &process.tmux_name),
+                session
+                    .latest_process
                     .as_ref()
                     .map(|process| process.started_at.unix_timestamp()),
                 session.updated_at.unix_timestamp(),
@@ -764,7 +776,11 @@ impl SqliteStore {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        if session.process.as_ref().map(|process| process.generation) != Some(generation)
+        if session
+            .latest_process
+            .as_ref()
+            .map(|process| process.generation)
+            != Some(generation)
             || !session.status.is_process_active()
         {
             return Err(StoreError::InvalidData(format!(
@@ -1314,7 +1330,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.project.name.clone()),
         Box::new(session.project.context.clone()),
         Box::new(session.wave_id.clone()),
-        Box::new(session.wave.clone()),
+        Box::new(session.wave_name.clone()),
         Box::new(session.status.as_str().to_string()),
         Box::new(session.status_reason.clone()),
         Box::new(session.status_at.unix_timestamp()),
@@ -1326,25 +1342,25 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.provider_session_id.clone()),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .map(|process| i64::from(process.generation)),
         ),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .and_then(|process| process.pid.map(i64::from)),
         ),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .map(|process| process.tmux_name.clone()),
         ),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .map(|process| process.started_at.unix_timestamp()),
         ),
@@ -1363,7 +1379,9 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
         Box::new(session.pm_snapshot_synced_at),
-        Box::new(session.pm_snapshot_warning.clone()),
+        // Legacy column retained until the next table rebuild. Freshness is
+        // represented by the captured synced_at timestamp; hard-stale reads fail.
+        Box::new(None::<String>),
         Box::new(
             serde_json::to_string(&session.pm_writeback)
                 .expect("Task Session PM writeback state must serialize"),
@@ -1401,7 +1419,7 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
     let process_generation: Option<i64> = row.get(20)?;
     let process_started_at: Option<i64> = row.get(23)?;
     let process = match (process_generation, process_started_at) {
-        (Some(generation), Some(started_at)) => Some(ChildProcess {
+        (Some(generation), Some(started_at)) => Some(ChildProcessGeneration {
             generation: generation as u32,
             pid: row.get::<_, Option<i64>>(21)?.map(|pid| pid as u32),
             tmux_name: row.get::<_, Option<String>>(22)?.unwrap_or_default(),
@@ -1420,24 +1438,23 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
     };
     Ok(TaskSession {
         id: TaskSessionId::from_raw(row.get::<_, String>(0)?),
-        issue: LinearIssueRef {
+        issue: LinearIssueSnapshot {
             id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
             identifier: row.get(2)?,
             title: row.get(3)?,
             description: row.get(4)?,
         },
-        project: LinearProjectRef {
+        project: LinearProjectSnapshot {
             id: LinearProjectId::from_raw(row.get::<_, String>(5)?),
             slug: row.get(6)?,
             name: row.get(7)?,
             context: row.get(8)?,
         },
         pm_snapshot_synced_at: row.get(28)?,
-        pm_snapshot_warning: row.get(29)?,
         pm_writeback: serde_json::from_str(&row.get::<_, String>(30)?)
             .map_err(|error| invalid_column(30, error))?,
         wave_id: LfdId::from_raw(row.get::<_, String>(9)?),
-        wave: row.get(10)?,
+        wave_name: row.get(10)?,
         supervisor: match row.get::<_, String>(31)?.as_str() {
             "wave" => SessionSupervisor::Wave {
                 wave_id: LfdId::from_raw(row.get::<_, String>(32)?),
@@ -1468,7 +1485,7 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         agent: row.get(17)?,
         provider: row.get(18)?,
         provider_session_id: row.get(19)?,
-        process,
+        latest_process: process,
         pull_request,
         created_at: crate::lfdb::rows::unix_to_datetime(row.get(26)?),
         updated_at: crate::lfdb::rows::unix_to_datetime(row.get(27)?),
@@ -1575,39 +1592,39 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.project.name.clone()),
         Box::new(session.project.context.clone()),
         Box::new(session.wave_id.clone()),
-        Box::new(session.wave.clone()),
-        Box::new(session.repo.clone()),
+        Box::new(session.wave_name.clone()),
+        Box::new(session.control_repo.clone()),
         Box::new(session.pm_snapshot_synced_at),
         Box::new(session.status.as_str().to_string()),
         Box::new(session.status_reason.clone()),
         Box::new(session.status_at.unix_timestamp()),
         Box::new(i64::from(session.iteration)),
         Box::new(session.observation_cursor),
-        Box::new(session.state_fingerprint.clone()),
+        Box::new(session.last_state_fingerprint.clone()),
         Box::new(session.agent.clone()),
         Box::new(session.provider.clone()),
         Box::new(session.provider_session_id.clone()),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .map(|process| i64::from(process.generation)),
         ),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .and_then(|process| process.pid.map(i64::from)),
         ),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .map(|process| process.tmux_name.clone()),
         ),
         Box::new(
             session
-                .process
+                .latest_process
                 .as_ref()
                 .map(|process| process.started_at.unix_timestamp()),
         ),
@@ -1626,7 +1643,7 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
     let process_generation: Option<i64> = row.get(18)?;
     let process_started_at: Option<i64> = row.get(21)?;
     let process = match (process_generation, process_started_at) {
-        (Some(generation), Some(started_at)) => Some(ChildProcess {
+        (Some(generation), Some(started_at)) => Some(ChildProcessGeneration {
             generation: generation as u32,
             pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
             tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
@@ -1636,15 +1653,15 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
     };
     Ok(ProjectSession {
         id: ProjectSessionId::from_raw(row.get::<_, String>(0)?),
-        project: LinearProjectRef {
+        project: LinearProjectSnapshot {
             id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
             slug: row.get(2)?,
             name: row.get(3)?,
             context: row.get(4)?,
         },
         wave_id: LfdId::from_raw(row.get::<_, String>(5)?),
-        wave: row.get(6)?,
-        repo: row.get(7)?,
+        wave_name: row.get(6)?,
+        control_repo: row.get(7)?,
         pm_snapshot_synced_at: row.get(8)?,
         current_directive_version: row.get::<_, i64>(24)? as u32,
         incorporated_directive_version: row.get::<_, i64>(25)? as u32,
@@ -1653,11 +1670,11 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         status_at: crate::lfdb::rows::unix_to_datetime(row.get(11)?),
         iteration: row.get::<_, i64>(12)? as u32,
         observation_cursor: row.get(13)?,
-        state_fingerprint: row.get(14)?,
+        last_state_fingerprint: row.get(14)?,
         agent: row.get(15)?,
         provider: row.get(16)?,
         provider_session_id: row.get(17)?,
-        process,
+        latest_process: process,
         created_at: crate::lfdb::rows::unix_to_datetime(row.get(22)?),
         updated_at: crate::lfdb::rows::unix_to_datetime(row.get(23)?),
     })

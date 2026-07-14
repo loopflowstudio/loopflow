@@ -130,6 +130,8 @@ fn build_session_command(
                 args.push("--add-dir".to_string());
                 args.push(dir.to_string_lossy().to_string());
             }
+            // Claude's variadic --add-dir otherwise consumes the positional prompt.
+            args.push("--".to_string());
             args.push(prompt.to_string());
             Ok(SessionCommand {
                 program: "claude".to_string(),
@@ -333,7 +335,7 @@ mod tests {
             launch.command,
             SessionCommand {
                 program: "claude".to_string(),
-                args: args(&["--model", "sonnet", "fix it"]),
+                args: args(&["--model", "sonnet", "--", "fix it"]),
                 cwd: path(),
             }
         );
@@ -365,6 +367,7 @@ mod tests {
                 .unwrap(),
             main.canonicalize().unwrap()
         );
+        assert!(launch.command.args.ends_with(&args(&["--", "fix it"])));
     }
 
     #[test]

@@ -47,7 +47,7 @@ fn main() {
 
     // One live SSE subscriber, so every delta pays the broadcast serialization
     // the wire pays.
-    let mut sub = runtime.subscribe_with_snapshot();
+    let mut sub = runtime.subscribe_with_snapshot(None);
     // `/events` replays every turn in the thread before the first live frame:
     // this is what a reader waits through to see its first new token.
     let replay: usize = sub

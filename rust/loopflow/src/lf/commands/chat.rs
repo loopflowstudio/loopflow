@@ -130,7 +130,7 @@ async fn follow_thread(resolved: &ResolvedWave, steer: bool) -> Result<()> {
     // The stream replays on connect. Use the resolved family-head name so an
     // ambient hand or --parent follows the same wave that receives speech.
     let wave_name = resolved.name.clone();
-    let stream = tokio::spawn(async move { thread::follow(Some(wave_name.as_str()), false).await });
+    let stream = tokio::spawn(async move { thread::follow(Some(wave_name.as_str())).await });
 
     // stdin blocks, so it reads on its own thread and hands lines to the loop.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(16);

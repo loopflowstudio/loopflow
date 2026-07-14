@@ -13,17 +13,20 @@
 //! wave with no live server yet) it reconnects on a backoff ladder,
 //! re-resolving the endpoint each attempt — server restarts change ports.
 //!
-//! Output renders from the WIRE frames (never journal internals): human lines
-//! by default (chat bylines, turn open/items/close, state transitions, memory
-//! curation/adds), or raw frames as NDJSON with `--json`.
+//! Output renders from the WIRE frames (never journal internals) as the
+//! conversation: what the human and Wave said. Decisions and delivery reports
+//! arrive as speech; tool calls, shell commands, file edits, thoughts, states,
+//! and turn boundaries stay out of chat.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::chat::turns::{ChatRole, ChatTurn};
-use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::chat::turns::{
+    ChatRole, ChatTurn, ChildActivityKind, ChildActivitySubject, ChildControlActivity,
+};
+use crate::chat::types::Lifecycle;
 use crate::lf::commands::chat::{resolve_target, CliContext};
 use crate::lf::WaveTargetArgs;
 use crate::wave::journal::ellipsize;
@@ -39,12 +42,12 @@ const BACKOFF_CEIL: Duration = Duration::from_secs(30);
 
 /// Follow the thread until the process ends. `lf chat --follow` runs this as a
 /// task so one terminal both monitors and steers.
-pub(crate) async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
+pub(crate) async fn follow(wave: Option<&str>) -> Result<()> {
     let target = WaveTargetArgs {
         wave: wave.map(str::to_string),
         parent: false,
     };
-    let mut renderer = Renderer::new(json);
+    let mut renderer = Renderer::new();
     let mut backoff = BACKOFF_FLOOR;
     let mut waiting_note_shown = false;
     loop {
@@ -97,7 +100,6 @@ pub(crate) async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
 struct TurnProgress {
     opened: bool,
     text_chars: usize,
-    items: usize,
     finished: bool,
 }
 
@@ -105,14 +107,12 @@ struct TurnProgress {
 /// half (`lines_for`) is what tests pin.
 #[derive(Debug)]
 struct Renderer {
-    json: bool,
     turns: HashMap<String, TurnProgress>,
 }
 
 impl Renderer {
-    fn new(json: bool) -> Self {
+    fn new() -> Self {
         Self {
-            json,
             turns: HashMap::new(),
         }
     }
@@ -123,17 +123,12 @@ impl Renderer {
         }
     }
 
-    /// The output lines for one frame — NDJSON raw, or the human console
-    /// flavor (chat bylines, turn open/items/close, state, memory
-    /// curation/adds).
+    /// The conversational output lines for one wire frame.
     fn lines_for(&mut self, frame: &Frame) -> Vec<String> {
-        if self.json {
-            let data: serde_json::Value = serde_json::from_str(&frame.data)
-                .unwrap_or(serde_json::Value::String(frame.data.clone()));
-            return vec![serde_json::json!({ "event": frame.event, "data": data }).to_string()];
-        }
         match frame.event.as_str() {
-            "state" => vec![format!("state {}", frame.data)],
+            // A state transition is loop bookkeeping; the conversation shows
+            // motion through the turns themselves.
+            "state" => Vec::new(),
             "memory" => vec![format!("memory curated: {}", ellipsize(&frame.data, 70))],
             "memory-add" => vec![format!("memory added: {}", frame.data)],
             "turn" => {
@@ -157,83 +152,76 @@ impl Renderer {
         }
         let mut lines = Vec::new();
 
-        if turn.role == ChatRole::User {
+        if let Some(activity) = &turn.activity {
             if !progress.opened {
                 progress.opened = true;
                 progress.finished = true;
-                let byline = turn
-                    .from
-                    .as_ref()
-                    .map(|from| format!("[{from}] "))
-                    .unwrap_or_default();
-                lines.push(format!(
-                    "chat ← {byline}\"{}\" ({})",
-                    ellipsize(&turn.text, 60),
-                    turn.id
-                ));
+                if let Some(line) = child_activity_line(activity) {
+                    lines.push(line);
+                }
             }
             return lines;
         }
 
-        if !progress.opened {
-            progress.opened = true;
-            lines.push(format!("turn {} opened", turn.id));
+        if turn.role == ChatRole::User {
+            if !progress.opened {
+                progress.opened = true;
+                progress.finished = true;
+                // The speaker, not the turn id: the thread exposes no runtime
+                // identifiers.
+                let who = turn.from.as_deref().unwrap_or("you");
+                lines.push(format!("{who} › {}", turn.text));
+            }
+            return lines;
         }
+
+        progress.opened = true;
+
         // New prose since the last frame of this id, one line per fragment.
+        // The wave's speech is the content: it prints whole, never elided.
         if turn.text.chars().count() > progress.text_chars {
             let fresh: String = turn.text.chars().skip(progress.text_chars).collect();
             progress.text_chars = turn.text.chars().count();
             for fragment in fresh.split('\n').filter(|f| !f.trim().is_empty()) {
-                lines.push(format!("  loop: \"{}\"", ellipsize(fragment, 100)));
+                lines.push(format!("wave › {fragment}"));
             }
         }
-        for item in turn.items.iter().skip(progress.items) {
-            if let Some(line) = item_line(item) {
-                lines.push(line);
-            }
-        }
-        progress.items = turn.items.len();
 
         if turn.status != Lifecycle::Running && turn.status != Lifecycle::Pending {
             progress.finished = true;
-            let items = turn.items.len();
-            let plural = if items == 1 { "" } else { "s" };
-            lines.push(format!(
-                "turn {} {} · {items} item{plural}",
-                turn.id,
-                turn.status.name()
-            ));
+            if turn.status == Lifecycle::Failed {
+                lines.push("wave › Turn failed.".into());
+            } else if turn.status == Lifecycle::Interrupted {
+                lines.push("wave › Turn interrupted.".into());
+            }
         }
         lines
     }
 }
 
-/// One console line per item, Narrator flavor. Thoughts stay off the default
-/// feed (they ride the journal's DEBUG level for the same reason).
-fn item_line(item: &ConversationItem) -> Option<String> {
-    match item {
-        ConversationItem::Command {
-            command, status, ..
-        } => Some(format!(
-            "  $ {} → {}",
-            ellipsize(&command.join(" "), 70),
-            status.name()
-        )),
-        ConversationItem::Tool { name, status, .. } => {
-            Some(format!("  tool {name} → {}", status.name()))
-        }
-        ConversationItem::File {
-            changes, status, ..
-        } => {
-            let what = match changes.as_slice() {
-                [only] => only.path.clone(),
-                many => format!("{} files", many.len()),
-            };
-            Some(format!("  edit {what} → {}", status.name()))
-        }
-        // Prose fragments already rode in as turn text; thoughts are debug.
-        ConversationItem::Message { .. } | ConversationItem::Thought { .. } => None,
+fn child_activity_line(activity: &ChildControlActivity) -> Option<String> {
+    match activity.kind {
+        ChildActivityKind::StateChanged
+        | ChildActivityKind::ControlApplied
+        | ChildActivityKind::Directed
+        | ChildActivityKind::Incorporated => return None,
+        ChildActivityKind::ControlUncertain
+        | ChildActivityKind::DecisionRequired
+        | ChildActivityKind::DecisionResolved
+        | ChildActivityKind::PullRequestOpened
+        | ChildActivityKind::Completed
+        | ChildActivityKind::Failed => {}
     }
+    let subject = match activity.subject {
+        ChildActivitySubject::Project => "project",
+        ChildActivitySubject::Task => "task",
+    };
+    let message = if activity.summary.is_empty() {
+        activity.title.clone()
+    } else {
+        format!("{} — {}", activity.title, activity.summary)
+    };
+    Some(format!("{subject} {} › {message}", activity.subject_id))
 }
 
 #[cfg(test)]
@@ -257,6 +245,17 @@ mod tests {
         format!(
             "{{\"id\":\"{id}\",\"role\":\"{role}\",\"text\":\"{text}\",\"status\":\"{status}\",\
              \"items\":{items},\"created_at\":\"2026-07-04T00:00:00Z\",\"from\":null}}"
+        )
+    }
+
+    fn activity_turn_json(id: &str, kind: &str, title: &str, summary: &str) -> String {
+        format!(
+            "{{\"id\":\"{id}\",\"role\":\"user\",\"text\":\"\",\"status\":\"completed\",\
+             \"items\":[],\"created_at\":\"2026-07-04T00:00:00Z\",\"from\":\"task\",\
+             \"activity\":{{\"id\":\"activity-{id}\",\"subject\":\"task\",\"subject_id\":\"W2-132\",\
+             \"session_id\":\"ts_1\",\"kind\":\"{kind}\",\"title\":\"{title}\",\"summary\":\"{summary}\",\
+             \"directive_version\":null,\"command_id\":null,\"effect\":null,\"source\":null,\
+             \"decision_id\":null,\"options\":[]}}}}"
         )
     }
 
@@ -292,33 +291,127 @@ mod tests {
         assert!(frames("event: turn\ndata: {\"id\":1}\n").is_empty());
     }
 
+    /// The failure case this task exists to fix, in one transcript: a
+    /// long-running `task` flow that clarifies, builds, hits a red test,
+    /// recovers, and reports. The default view must read as what the wave SAID
+    /// and what needs a human — the twenty-odd tool calls and shell commands
+    /// underneath it never become chat.
     #[test]
-    fn json_mode_emits_raw_frames_as_ndjson() {
-        let mut renderer = Renderer::new(true);
-        let lines = renderer.lines_for(&Frame {
-            event: "state".into(),
-            data: "turning".into(),
-        });
-        assert_eq!(lines, vec!["{\"data\":\"turning\",\"event\":\"state\"}"]);
+    fn a_long_running_task_reads_as_conversation_not_a_build_log() {
+        let cmd = |id: &str, argv: &str, exit: i64| {
+            format!(
+                "{{\"type\":\"command\",\"id\":\"{id}\",\"command\":[\"sh\",\"-c\",\"{argv}\"],\
+                 \"cwd\":\"/repo\",\"status\":\"completed\",\"output\":\"…\",\"exit_code\":{exit},\
+                 \"duration_ms\":900}}"
+            )
+        };
+        let tool = |id: &str, name: &str| {
+            format!(
+                "{{\"type\":\"tool\",\"id\":\"{id}\",\"name\":\"{name}\",\"status\":\"completed\",\
+                 \"input\":null,\"output\":\"ok\"}}"
+            )
+        };
+        let edit = |id: &str, path: &str| {
+            format!(
+                "{{\"type\":\"file\",\"id\":\"{id}\",\"changes\":[{{\"path\":\"{path}\",\
+                 \"kind\":\"modified\",\"diff\":null}}],\"status\":\"completed\"}}"
+            )
+        };
+        let think = |id: &str| {
+            format!("{{\"type\":\"thought\",\"id\":\"{id}\",\"text\":\"weighing the options\"}}")
+        };
 
-        let lines = renderer.lines_for(&Frame {
-            event: "turn".into(),
-            data: turn_json("turn-3", "assistant", "hi", "completed", "[]"),
-        });
-        let parsed: serde_json::Value = serde_json::from_str(&lines[0]).expect("valid NDJSON");
-        assert_eq!(parsed["event"], "turn");
-        assert_eq!(parsed["data"]["id"], "turn-3", "turn data stays JSON");
+        let mut renderer = Renderer::new();
+        let mut out = Vec::new();
+        let mut feed = |renderer: &mut Renderer, event: &str, data: String| {
+            out.extend(renderer.lines_for(&Frame {
+                event: event.into(),
+                data,
+            }));
+        };
+
+        // The human asks for the work.
+        feed(
+            &mut renderer,
+            "turn",
+            turn_json(
+                "turn-1",
+                "user",
+                "make wave chat human-first",
+                "completed",
+                "[]",
+            ),
+        );
+        feed(&mut renderer, "state", "turning".into());
+
+        // task_clarify: reads the repo, writes a design note, says what it found.
+        let clarify_items = format!(
+            "[{},{},{},{},{}]",
+            think("h0"),
+            tool("t0", "Read"),
+            tool("t1", "Grep"),
+            cmd("c0", "git log --oneline -3", 0),
+            edit("f0", "scratch/w2-129.md")
+        );
+        feed(
+            &mut renderer,
+            "turn",
+            turn_json("turn-2", "assistant", "", "running", "[]"),
+        );
+        feed(
+            &mut renderer,
+            "turn",
+            turn_json(
+                "turn-2",
+                "assistant",
+                "The transcript renders every tool call as a card. I'll keep them out of the conversation.",
+                "completed",
+                &clarify_items,
+            ),
+        );
+
+        // task_pursue: builds, and the test run goes red.
+        let pursue_items = format!(
+            "[{},{},{},{},{},{}]",
+            edit("f1", "swift/Loopflow/Models/WaveChatTranscript.swift"),
+            edit("f2", "swift/LoopflowMac/Views/MessageRow.swift"),
+            cmd("c1", "cargo build", 0),
+            cmd("c2", "swift test", 1),
+            tool("t2", "Edit"),
+            cmd("c3", "swift test", 0)
+        );
+        feed(
+            &mut renderer,
+            "turn",
+            turn_json(
+                "turn-3",
+                "assistant",
+                "Projection landed. One test caught a stale signature; fixed and green.",
+                "completed",
+                &pursue_items,
+            ),
+        );
+
+        assert_eq!(
+            out,
+            vec![
+                "you › make wave chat human-first",
+                "wave › The transcript renders every tool call as a card. I'll keep them out of the conversation.",
+                "wave › Projection landed. One test caught a stale signature; fixed and green.",
+            ],
+            "the conversation is prose; backend evidence remains in the journal"
+        );
     }
 
     #[test]
-    fn human_mode_renders_chat_state_and_memory_lines() {
-        let mut renderer = Renderer::new(false);
+    fn conversation_renders_chat_and_memory_without_backend_state() {
+        let mut renderer = Renderer::new();
         assert_eq!(
             renderer.lines_for(&Frame {
                 event: "state".into(),
                 data: "turning".into()
             }),
-            vec!["state turning"]
+            Vec::<String>::new()
         );
         assert_eq!(
             renderer.lines_for(&Frame {
@@ -333,7 +426,7 @@ mod tests {
                 event: "turn".into(),
                 data: user.clone()
             }),
-            vec!["chat ← \"how goes it?\" (turn-1)"]
+            vec!["you › how goes it?"]
         );
         // Replay of the same user turn (reconnect) prints nothing.
         assert!(renderer
@@ -345,8 +438,39 @@ mod tests {
     }
 
     #[test]
-    fn human_mode_prints_only_the_growth_of_a_repeating_turn_id() {
-        let mut renderer = Renderer::new(false);
+    fn conversation_shows_child_outcomes_but_not_lifecycle_churn() {
+        let mut renderer = Renderer::new();
+        let state = activity_turn_json(
+            "turn-1",
+            "state_changed",
+            "Task is running",
+            "provider turn is active",
+        );
+        assert!(renderer
+            .lines_for(&Frame {
+                event: "turn".into(),
+                data: state,
+            })
+            .is_empty());
+
+        let opened = activity_turn_json(
+            "turn-2",
+            "pull_request_opened",
+            "Opened PR #877",
+            "https://github.com/loopflowstudio/loopflow/pull/877",
+        );
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "turn".into(),
+                data: opened,
+            }),
+            vec!["task W2-132 › Opened PR #877 — https://github.com/loopflowstudio/loopflow/pull/877"]
+        );
+    }
+
+    #[test]
+    fn conversation_prints_only_the_growth_of_a_repeating_turn_id() {
+        let mut renderer = Renderer::new();
         let running =
             |text: &str, items: &str| turn_json("turn-2", "assistant", text, "running", items);
         let tool = "[{\"type\":\"tool\",\"id\":\"t0\",\"name\":\"Bash\",\"status\":\"completed\",\
@@ -356,20 +480,21 @@ mod tests {
             event: "turn".into(),
             data: running("", "[]"),
         });
-        assert_eq!(lines, vec!["turn turn-2 opened"]);
+        assert!(lines.is_empty());
 
         let lines = renderer.lines_for(&Frame {
             event: "turn".into(),
             data: running("thinking", "[]"),
         });
-        assert_eq!(lines, vec!["  loop: \"thinking\""]);
+        assert_eq!(lines, vec!["wave › thinking"]);
 
-        // Same text re-sent with a new item: only the item prints.
+        // Same text re-sent with a successful item: backend machinery stays
+        // quiet.
         let lines = renderer.lines_for(&Frame {
             event: "turn".into(),
             data: running("thinking", tool),
         });
-        assert_eq!(lines, vec!["  tool Bash → completed"]);
+        assert!(lines.is_empty());
 
         // The terminal frame closes the turn; replays of it are quiet.
         let terminal = turn_json("turn-2", "assistant", "thinking", "completed", tool);
@@ -377,7 +502,7 @@ mod tests {
             event: "turn".into(),
             data: terminal.clone(),
         });
-        assert_eq!(lines, vec!["turn turn-2 completed · 1 item"]);
+        assert!(lines.is_empty());
         assert!(renderer
             .lines_for(&Frame {
                 event: "turn".into(),
@@ -410,6 +535,11 @@ mod tests {
             axum::serve(listener, app).await.ok();
         });
 
+        for i in 0..20 {
+            runtime
+                .deliver(crate::wave::journal::MessageOp::Message, format!("old {i}"))
+                .expect("older user turn");
+        }
         runtime
             .deliver(crate::wave::journal::MessageOp::Message, "replayed".into())
             .expect("user turn");
@@ -427,7 +557,14 @@ mod tests {
 
         // Wait for the replay to land, then publish a live fact.
         for _ in 0..200 {
-            if seen.lock().unwrap().iter().any(|f| f.event == "turn") {
+            if seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|f| f.event == "turn")
+                .count()
+                == 12
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -455,6 +592,17 @@ mod tests {
                 .iter()
                 .any(|f| f.event == "turn" && f.data.contains("replayed")),
             "replayed turn arrives: {frames:?}"
+        );
+        assert!(
+            frames
+                .iter()
+                .all(|f| f.event != "turn" || !f.data.contains("old 0")),
+            "the default bounded replay omits older turns: {frames:?}"
+        );
+        assert_eq!(
+            frames.iter().filter(|f| f.event == "turn").count(),
+            12,
+            "human subscriptions replay the recent 12 turns"
         );
         assert!(
             frames.iter().any(|f| {

@@ -98,13 +98,11 @@ struct WaveChatView: View {
             playhead: connection?.playhead,
             loopState: connection?.loopState ?? .idle
         )
+        let visible = turns.filter(isVisibleTurn)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                    ForEach(turns) { turn in
-                        if let body = turn.body, turn.role == .assistant {
-                            bodyBoundary(body, status: turn.status)
-                        }
+                    ForEach(visible) { turn in
                         if let activity = turn.activity {
                             ChildControlActivityCard(
                                 activity: activity,
@@ -141,7 +139,7 @@ struct WaveChatView: View {
             }
             .accessibilityIdentifier("wave-chat-transcript")
             .overlay {
-                if turns.isEmpty {
+                if visible.isEmpty {
                     statusOverlay
                 }
             }
@@ -180,9 +178,6 @@ struct WaveChatView: View {
             Text(waveName)
                 .font(Typography.caption().weight(.semibold))
                 .foregroundStyle(palette.text)
-            Text(connection?.loopState.rawValue ?? "idle")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
             Spacer()
             Button {
                 confirmStop = true
@@ -204,53 +199,6 @@ struct WaveChatView: View {
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
         .background(palette.surfaceMuted.opacity(0.45))
-    }
-
-    private func bodyBoundary(_ body: BodyProvenance, status: Lifecycle) -> some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("body  \(body.bodyId)")
-                Text("invocation  \(body.invocationId)")
-                Text("step index  \(body.stepIndex)")
-                Text("session  \(body.sessionId ?? "—")")
-                Text("harness  \(body.harness ?? "—") · model  \(body.model ?? "—")")
-                Text("host  \(body.host)")
-                Text("worktree  \(body.worktree)")
-                Text("started  \(body.startedAt)")
-                Text("finished  \(body.endedAt ?? "—")")
-                if let reason = body.terminationReason {
-                    Text("reason  \(reason)")
-                }
-            }
-            .font(Typography.caption())
-            .foregroundStyle(palette.textSecondary)
-            .textSelection(.enabled)
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Rectangle()
-                    .fill(palette.border)
-                    .frame(height: 1)
-                Text("\(body.flow) / \(body.step) · \(bodyLabel(status, body))")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-                    .fixedSize()
-                Rectangle()
-                    .fill(palette.border)
-                    .frame(height: 1)
-            }
-        }
-        .accessibilityIdentifier("wave-chat-body-\(body.bodyId)")
-    }
-
-    private func bodyLabel(_ status: Lifecycle, _ body: BodyProvenance) -> String {
-        if body.terminationReason == "skipped by user" { return "skipped" }
-        switch status {
-        case .running: return "now playing"
-        case .completed: return "completed"
-        case .interrupted: return "interrupted"
-        case .failed: return "failed"
-        default: return String(describing: status)
-        }
     }
 
     private func stopWave() {

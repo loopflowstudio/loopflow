@@ -185,7 +185,7 @@ lf memory update < MEMORY.md                # replace it from stdin
 
 | Command | What it does |
 |---------|--------------|
-| `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays and follows while typed lines post, `/status` reads health, and `/quit` leaves. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
+| `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
 Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
@@ -196,7 +196,7 @@ Waves sharing `main`.
 |------|-------------|
 | `-w, --wave NAME` | Target a wave by name |
 | `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
-| `--follow` | Replay and follow the selected thread while typed lines post into it (`lf chat`) |
+| `--follow` | Replay the selected thread's latest 12 turns and continue live while typed lines post (`lf chat`) |
 
 ## The Agent Bus
 

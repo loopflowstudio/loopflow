@@ -15,8 +15,10 @@ machine registry.
 Create a Wave with the `+` button. The app writes `GOAL.md` and `MEMORY.md`
 in the repository's main checkout. Selecting a Wave opens Wave Chat; sending a
 message launches or reconnects to `lf wave`, then streams that Wave's turns.
-The detail pane reads Projects, Tasks, decisions, PR delivery, and attention
-from `lf status --json`.
+Wave Chat opens on the recent conversation. Commands, tools, file edits, and
+loop bookkeeping stay in the journal; decisions, deliveries, and human-level
+failures remain visible. The detail pane reads Projects, Tasks, decisions, PR
+delivery, and attention from `lf status --json`.
 
 Select a Task, then open its workspace to review changed files, per-file
 patches, or current contents. The same sheet keeps multiple embedded
@@ -41,7 +43,8 @@ codebase tree, and registry health.
   `lf ls/status/runs/usage/doctor/tokens --json`; the app does not maintain a
   second roadmap or lifecycle database.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` connects only to the
-  selected Wave's `/events` stream.
+  selected Wave's `/events` stream; human subscriptions replay the latest 12
+  turns before continuing live.
 
 ## Code map
 

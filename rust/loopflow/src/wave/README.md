@@ -49,7 +49,9 @@ listener per Wave; `--force` explicitly takes over a live endpoint.
 
 `lf chat` writes to the durable human thread. `--steer` injects into a compatible
 active provider turn and otherwise queues the message for the next pass.
-`lf chat --follow` replays the thread and follows new turns.
+`lf chat --follow` replays the latest 12 turns and follows new turns. The
+conversation shows human and Wave prose plus human-level failures; commands and
+tools stay in the journal, which retains the complete thread.
 
 `lf radio pub` and `lf radio sub` use the SQLite bus. The bus is a short-lived,
 prefix-addressed transport between Wave, Project, and Task work; it is not a
@@ -65,7 +67,7 @@ do not require the resident token:
 | --- | --- |
 | `GET /health` | Reports listener and resident state. |
 | `GET /conversation` | Returns the durable thread; `?limit=N` tails it. |
-| `GET /events` | Streams thread, state, playhead, and memory events over SSE. |
+| `GET /events` | Replays the latest 12 human-thread turns, then streams thread, state, playhead, and memory events over SSE; `?limit=N` overrides the replay tail. |
 | `POST /messages` | Sends `message`, `steer`, or `interrupt`. |
 | `GET /playhead` | Returns the durable pass cursor. |
 | `GET /memory` | Reads the Wave checkpoint. |

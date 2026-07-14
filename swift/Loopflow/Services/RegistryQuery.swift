@@ -59,7 +59,9 @@ public struct RegistryQuery: Sendable {
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
         return WaveStatusResult(
             workMap: WaveWorkMap(objective: snapshot.wave.goal, projects: snapshot.projects),
-            loopState: snapshot.loopState
+            loopState: snapshot.loopState,
+            runs: snapshot.runs,
+            attention: snapshot.attention
         )
     }
 
@@ -257,14 +259,16 @@ struct WaveSnapshot: Decodable {
     }
 }
 
-/// `lf status <wave>` snapshot. Mirrors Rust `WaveStatusSnapshot`.
+/// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot`.
 struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
     let projects: [WaveProjectWork]
+    let runs: WorkEvidence<RunLedgerEntry>
+    let attention: WorkEvidence<WaveAttentionItem>
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects
+        case wave, projects, runs, attention
         case loopState = "loop_state"
     }
 }
@@ -272,7 +276,7 @@ struct WaveStatusSnapshot: Decodable {
 /// One folded run from `lf runs --json`. Mirrors Rust `RunLedgerEntry`
 /// (`lf/commands/runs.rs`): a ledger timeline entry, `started`/`ended` in unix
 /// seconds, `wave` a name (not an id).
-public struct RunLedgerEntry: Decodable, Sendable, Identifiable {
+public struct RunLedgerEntry: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
     public let runId: String
     public let processId: String

@@ -88,8 +88,12 @@ pub(crate) fn shell_escape(value: &str) -> String {
 }
 
 pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
+    // A missing session is the answer, not an error: tmux's "can't find session"
+    // on stderr would otherwise scribble over a caller's own output.
     let status = tokio::process::Command::new("tmux")
         .args(["has-session", "-t", session_name])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .await
         .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;

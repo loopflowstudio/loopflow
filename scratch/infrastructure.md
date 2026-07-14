@@ -543,3 +543,17 @@ Delete that application layer:
 Keep the Swift terminal `Session` DTO mirror because Rust and Python still
 publish that lfd contract. The important boundary is behavioral: a technical
 process record does not imply a user-facing Session lifecycle.
+
+## Current reduction: remove the unreachable command shell
+
+The generic session hierarchy had a matching shell: a keyboard router,
+command palette, help overlay, area typeahead, and multiplexer shortcuts. The
+app injected the router and posted a ⌘K notification, but no production view
+read either one. The views existed only in previews and the shortcuts existed
+only in tests; several commands targeted the multiplexer just deleted.
+
+Delete the whole disconnected surface. A command or shortcut belongs in the
+app only when it invokes a live Wave, Project, or Task behavior. Reintroducing
+a palette later should start from the current product actions—select a Wave,
+message it, inspect its work map, and prepare a child directive—not from the
+retired generic terminal/workspace model.

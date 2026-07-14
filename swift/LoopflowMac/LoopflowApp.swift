@@ -28,7 +28,6 @@ private enum TmuxTerminationCleanup {
 @main
 struct LoopflowApp: App {
     @State private var portfolioService = PortfolioService()
-    @State private var keyboardRouter = KeyboardRouter()
     @Environment(\.openWindow) private var openWindow
     @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
@@ -62,7 +61,6 @@ struct LoopflowApp: App {
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
-            .environment(keyboardRouter)
             .onOpenURL { handleDeepLink($0) }
         }
         .windowStyle(.automatic)
@@ -76,7 +74,6 @@ struct LoopflowApp: App {
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
-            .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -86,7 +83,6 @@ struct LoopflowApp: App {
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(theme.preferredScheme)
                 .environment(\.palette, theme.palette)
-                .environment(keyboardRouter)
         }
         .defaultSize(width: 1080, height: 760)
 
@@ -128,13 +124,6 @@ struct LoopflowApp: App {
                     snapshotCurrentWindow()
                 }
                 .keyboardShortcut("4", modifiers: [.command])
-            }
-
-            CommandGroup(after: .sidebar) {
-                Button("Command Palette") {
-                    NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
-                }
-                .keyboardShortcut("k", modifiers: .command)
             }
 
             CommandMenu("Go") {

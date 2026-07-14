@@ -114,7 +114,9 @@ pub struct ProjectSession {
     /// Latest launch generation, retained after that process exits.
     pub latest_process: Option<ChildProcessGeneration>,
     /// The binary and store every generation of this Session relaunches with.
-    pub execution: ChildExecutionContext,
+    /// `None` only for a Session created before the context was pinned; see
+    /// [`crate::task::TaskSession::execution`].
+    pub execution: Option<ChildExecutionContext>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a process for a Session carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -334,7 +336,7 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
-            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

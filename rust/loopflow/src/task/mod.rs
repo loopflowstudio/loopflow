@@ -145,7 +145,10 @@ pub struct TaskSession {
     pub latest_process: Option<ChildProcessGeneration>,
     pub pull_request: Option<PullRequestRef>,
     /// The binary and store every generation of this Session relaunches with.
-    pub execution: ChildExecutionContext,
+    /// `None` only for a Session created before the context was pinned: nothing
+    /// recorded which `lf` spawned it, so it refuses to launch rather than let
+    /// the calling process guess.
+    pub execution: Option<ChildExecutionContext>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a process for a Session carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -412,7 +415,7 @@ mod tests {
             provider_session_id: None,
             latest_process: None,
             pull_request: None,
-            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

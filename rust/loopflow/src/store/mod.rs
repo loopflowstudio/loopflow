@@ -96,13 +96,27 @@ impl StorageConfig {
     }
 }
 
+/// A debug build's default home. An `lf` built from a worktree must not open the
+/// live ledger by accident: its schema is in flight, and applying an unreleased
+/// migration to the real registry is not something the operator asked for.
+///
+/// This is not hypothetical. While W2-130 was being tested, a `cargo test` run of
+/// this very branch applied its own unreleased migration to `~/.lf/loopflow.db` —
+/// the bug reproducing itself inside its own fix. An explicit `LF_HOME` or
+/// `LF_DB_PATH` still points a debug build wherever the operator says, including
+/// at the live store; only the *silent default* moves.
+#[cfg(debug_assertions)]
+const DEFAULT_HOME_DIR: &str = ".lf-dev";
+#[cfg(not(debug_assertions))]
+const DEFAULT_HOME_DIR: &str = ".lf";
+
 pub(crate) fn lf_home_dir() -> PathBuf {
     std::env::var_os("LF_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".lf")
+                .join(DEFAULT_HOME_DIR)
         })
 }
 
@@ -445,7 +459,7 @@ mod tests {
             provider_session_id: None,
             latest_process: None,
             pull_request: None,
-            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -484,7 +498,7 @@ mod tests {
                 tmux_name: "lf-project-test".to_string(),
                 started_at: now,
             }),
-            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

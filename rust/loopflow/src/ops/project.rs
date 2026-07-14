@@ -263,8 +263,10 @@ pub(crate) fn reserve_project_session(
             provider,
             provider_session_id: None,
             latest_process: None,
-            execution: crate::engine::process::pinned_execution_context()
-                .map_err(|error| project_error(error.to_string()))?,
+            execution: Some(
+                crate::engine::process::pinned_execution_context()
+                    .map_err(|error| project_error(error.to_string()))?,
+            ),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -388,6 +390,17 @@ pub(crate) async fn launch_project_process(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> OpsResult<()> {
+    // Resolve the pinned context first: a Session that cannot name its own binary
+    // is not launchable at all, so say that before probing git or reserving a
+    // generation it will never use.
+    let execution = session.execution.clone().ok_or_else(|| {
+        project_error(format!(
+            "Project {} predates pinned execution context and cannot be relaunched safely; \
+             abandon it and pursue the Linear project again to create a Session that records \
+             its own `lf` and database",
+            session.launch.project.slug
+        ))
+    })?;
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, session).await?;
@@ -434,15 +447,15 @@ pub(crate) async fn launch_project_process(
 
     // argv[0] and the store come from the Session, never from this process.
     let argv = vec![
-        session.execution.lf_bin.to_string_lossy().to_string(),
+        execution.lf_bin.to_string_lossy().to_string(),
         "__project".to_string(),
         session.id.to_string(),
         "--generation".to_string(),
         generation.to_string(),
     ];
     let generation_text = generation.to_string();
-    let db_path = session.execution.db_path.to_string_lossy().to_string();
-    let lf_home = session.execution.lf_home.to_string_lossy().to_string();
+    let db_path = execution.db_path.to_string_lossy().to_string();
+    let lf_home = execution.lf_home.to_string_lossy().to_string();
     let environment = [
         (
             crate::engine::wave_context::WAVE_ID_ENV,

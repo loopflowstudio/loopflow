@@ -368,8 +368,10 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             provider_session_id: None,
             latest_process: None,
             pull_request: None,
-            execution: crate::engine::process::pinned_execution_context()
-                .map_err(|error| task_error(error.to_string()))?,
+            execution: Some(
+                crate::engine::process::pinned_execution_context()
+                    .map_err(|error| task_error(error.to_string()))?,
+            ),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -544,6 +546,16 @@ pub(crate) async fn relaunch_inactive_process(
 }
 
 async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
+    // Resolve the pinned context before reserving anything: a Session that cannot
+    // name its own binary must not burn a generation discovering that.
+    let execution = session.execution.clone().ok_or_else(|| {
+        task_error(format!(
+            "Task {} predates pinned execution context and cannot be relaunched safely; \
+             abandon it and run the Linear task again to create a Session that records \
+             its own `lf` and database",
+            session.launch.issue.identifier
+        ))
+    })?;
     let tmux_name = format!(
         "lf-task-{}-{}",
         tmux_session_slug(&session.launch.issue.identifier),
@@ -597,15 +609,15 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     // whoever queued the command does not get to choose the child's binary or
     // its database.
     let argv = vec![
-        session.execution.lf_bin.to_string_lossy().to_string(),
+        execution.lf_bin.to_string_lossy().to_string(),
         "__task".to_string(),
         session.id.to_string(),
         "--generation".to_string(),
         generation.to_string(),
     ];
     let generation_text = generation.to_string();
-    let db_path = session.execution.db_path.to_string_lossy().to_string();
-    let lf_home = session.execution.lf_home.to_string_lossy().to_string();
+    let db_path = execution.db_path.to_string_lossy().to_string();
+    let lf_home = execution.lf_home.to_string_lossy().to_string();
     let environment = [
         (
             crate::engine::wave_context::WAVE_ID_ENV,

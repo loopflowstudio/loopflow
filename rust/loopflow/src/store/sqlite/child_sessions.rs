@@ -217,6 +217,53 @@ impl SqliteStore {
         insert_child_command(&conn, command)
     }
 
+    /// Queue an Abandon command and stamp the Session's abandon intent in the
+    /// same transaction.
+    ///
+    /// These two writes must not be separable. The intent is what every launch
+    /// path reads to refuse a restart; if the command could land without it, the
+    /// window between "abandon queued" and "runner consumed it" would still be a
+    /// window in which a supervisor revives the Session.
+    pub fn insert_child_abandon_command(
+        &self,
+        command: &ChildCommand,
+        intent: &AbandonIntent,
+    ) -> StoreResult<()> {
+        let ChildCommandKind::Abandon { .. } = &command.kind else {
+            return Err(StoreError::InvalidData(
+                "abandon command required".to_string(),
+            ));
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        insert_child_command(&transaction, command)?;
+        let table = match command.target {
+            ChildRef::Project(_) => "project_sessions",
+            ChildRef::Task(_) => "task_sessions",
+        };
+        let updated = transaction.execute(
+            &format!(
+                "UPDATE {table} SET abandon_requested_at=?2, abandon_reason=?3, updated_at=?4
+                 WHERE id=?1"
+            ),
+            params![
+                command.target.target_id(),
+                intent.requested_at.unix_timestamp(),
+                intent.reason,
+                now_unix(),
+            ],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "{} {} not found",
+                command.target.target_kind(),
+                command.target.target_id()
+            )));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn ensure_child_decision_command(
         &self,
         command: &ChildCommand,
@@ -1262,6 +1309,32 @@ const CHILD_COMMAND_COLUMNS: &str = "SELECT
     claimed_by_generation, accepted_at, state, effect, error
     FROM child_commands";
 
+/// A Session's pinned context, or `None` for a row written before it was pinned.
+/// The three columns are written together, so a partial row is corruption rather
+/// than a legacy Session, and is read as unpinned — refusing to launch is the
+/// safe reading either way.
+fn execution_context(
+    row: &rusqlite::Row<'_>,
+    lf_bin: usize,
+    db_path: usize,
+    lf_home: usize,
+) -> rusqlite::Result<Option<ChildExecutionContext>> {
+    Ok(
+        match (
+            row.get::<_, Option<String>>(lf_bin)?,
+            row.get::<_, Option<String>>(db_path)?,
+            row.get::<_, Option<String>>(lf_home)?,
+        ) {
+            (Some(lf_bin), Some(db_path), Some(lf_home)) => Some(ChildExecutionContext {
+                lf_bin: PathBuf::from(lf_bin),
+                db_path: PathBuf::from(db_path),
+                lf_home: PathBuf::from(lf_home),
+            }),
+            _ => None,
+        },
+    )
+}
+
 fn ensure_directive_target(
     directive: &ChildDirective,
     target_kind: &str,
@@ -1484,9 +1557,24 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.project_session_id.as_str().to_string()),
         Box::new(i64::from(session.current_directive_version)),
         Box::new(i64::from(session.incorporated_directive_version)),
-        Box::new(session.execution.lf_bin.display().to_string()),
-        Box::new(session.execution.db_path.display().to_string()),
-        Box::new(session.execution.lf_home.display().to_string()),
+        Box::new(
+            session
+                .execution
+                .as_ref()
+                .map(|execution| execution.lf_bin.display().to_string()),
+        ),
+        Box::new(
+            session
+                .execution
+                .as_ref()
+                .map(|execution| execution.db_path.display().to_string()),
+        ),
+        Box::new(
+            session
+                .execution
+                .as_ref()
+                .map(|execution| execution.lf_home.display().to_string()),
+        ),
         Box::new(
             session
                 .abandon_intent
@@ -1539,11 +1627,7 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         }),
         _ => None,
     };
-    let execution = ChildExecutionContext {
-        lf_bin: PathBuf::from(row.get::<_, String>(32)?),
-        db_path: PathBuf::from(row.get::<_, String>(33)?),
-        lf_home: PathBuf::from(row.get::<_, String>(34)?),
-    };
+    let execution = execution_context(row, 32, 33, 34)?;
     let abandon_intent = match (
         row.get::<_, Option<i64>>(35)?,
         row.get::<_, Option<String>>(36)?,
@@ -1738,9 +1822,24 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.updated_at.unix_timestamp()),
         Box::new(i64::from(session.current_directive_version)),
         Box::new(i64::from(session.incorporated_directive_version)),
-        Box::new(session.execution.lf_bin.display().to_string()),
-        Box::new(session.execution.db_path.display().to_string()),
-        Box::new(session.execution.lf_home.display().to_string()),
+        Box::new(
+            session
+                .execution
+                .as_ref()
+                .map(|execution| execution.lf_bin.display().to_string()),
+        ),
+        Box::new(
+            session
+                .execution
+                .as_ref()
+                .map(|execution| execution.db_path.display().to_string()),
+        ),
+        Box::new(
+            session
+                .execution
+                .as_ref()
+                .map(|execution| execution.lf_home.display().to_string()),
+        ),
         Box::new(
             session
                 .abandon_intent
@@ -1772,11 +1871,7 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         }),
         _ => None,
     };
-    let execution = ChildExecutionContext {
-        lf_bin: PathBuf::from(row.get::<_, String>(24)?),
-        db_path: PathBuf::from(row.get::<_, String>(25)?),
-        lf_home: PathBuf::from(row.get::<_, String>(26)?),
-    };
+    let execution = execution_context(row, 24, 25, 26)?;
     let abandon_intent = match (
         row.get::<_, Option<i64>>(27)?,
         row.get::<_, Option<String>>(28)?,

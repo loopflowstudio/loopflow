@@ -65,15 +65,26 @@ impl Migration {
 /// Every migration, in id order. A new one is appended here and to the
 /// directory; `scripts/new_migration.py` picks the next free ordinal in the
 /// active namespace.
-const MIGRATIONS: &[Migration] = &[Migration {
-    id: MigrationId {
-        major: 0,
-        minor: 10,
-        ordinal: 1,
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 10,
+            ordinal: 1,
+        },
+        name: "initial",
+        sql: include_str!("migrations/0.10.001_initial.sql"),
     },
-    name: "initial",
-    sql: include_str!("migrations/0.10.001_initial.sql"),
-}];
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 10,
+            ordinal: 2,
+        },
+        name: "session_execution_context",
+        sql: include_str!("migrations/0.10.002_session_execution_context.sql"),
+    },
+];
 
 /// Databases written before release-scoped ids stamped the baseline under this
 /// name. The file is byte-identical to `0.10.001_initial.sql`, so adoption is a
@@ -377,7 +388,10 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_sqlite(&conn).unwrap();
 
-        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.10.001_initial");
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.10.002_session_execution_context"
+        );
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
@@ -386,7 +400,10 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             applied_versions(&conn).unwrap(),
-            vec!["0.10.001_initial".to_string()]
+            vec![
+                "0.10.001_initial".to_string(),
+                "0.10.002_session_execution_context".to_string()
+            ]
         );
     }
 
@@ -542,7 +559,10 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_sqlite(&conn).unwrap();
-        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.10.001_initial");
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.10.002_session_execution_context"
+        );
     }
 
     #[test]

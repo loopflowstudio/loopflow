@@ -1052,7 +1052,7 @@ mod tests {
                 tmux_name: format!("project-{provider}"),
                 started_at: now,
             }),
-            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

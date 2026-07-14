@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use crate::child_session::{
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDirective, ChildRef,
+    AbandonIntent, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
+    ChildCommandSource, ChildCommandState, ChildDirective, ChildRef,
 };
 use crate::project_session::{ProjectEventKind, ProjectSession, ProjectSessionStatus};
 use crate::store::SharedStore;
@@ -103,6 +103,13 @@ impl ChildSession {
             )),
         };
         Ok(())
+    }
+
+    fn record_abandon_intent(&mut self, intent: AbandonIntent) {
+        match self {
+            Self::Project(session) => session.abandon_intent = Some(intent),
+            Self::Task(session) => session.abandon_intent = Some(intent),
+        }
     }
 
     fn abandon_intent_reason(&self) -> Option<String> {
@@ -405,6 +412,19 @@ pub(crate) async fn queue_command(
             .await
             .map_err(child_error)?;
         (command, true, superseded, None)
+    } else if let ChildCommandKind::Abandon { reason } = &command.kind {
+        // The intent lands with the command, in one transaction. From here on
+        // every launch path reads it and refuses to start a process.
+        let intent = AbandonIntent {
+            requested_at: time::OffsetDateTime::now_utc(),
+            reason: reason.clone(),
+        };
+        store
+            .create_child_abandon_command(&command, &intent)
+            .await
+            .map_err(child_error)?;
+        session.record_abandon_intent(intent);
+        (command, true, Vec::new(), None)
     } else {
         store
             .create_child_command(&command)
@@ -613,8 +633,12 @@ mod tests {
     };
     use crate::id::WaveId;
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-    use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+        ProjectLaunchReceipt, TaskLaunchReceipt,
+    };
     use crate::store::{open_store, StorageConfig};
+    use crate::task::{PullRequestRef, TaskSessionStatus};
     use crate::wave::Wave;
 
     use super::{queue_command, ChildSession};
@@ -656,7 +680,55 @@ mod tests {
                 tmux_name: "lf-project-test".to_string(),
                 started_at: now,
             }),
-            execution: crate::child_session::ChildExecutionContext::for_tests(),
+            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn make_task(
+        wave: &Wave,
+        project: &ProjectSession,
+        status: TaskSessionStatus,
+    ) -> crate::task::TaskSession {
+        let now = OffsetDateTime::now_utc();
+        let active = status.is_process_active();
+        let id = WaveId::new();
+        crate::task::TaskSession {
+            id: crate::task::TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(format!("issue-{id}")).unwrap(),
+                    identifier: "W2-129".to_string(),
+                    title: "Terminal intent dominates process liveness".to_string(),
+                    description: "Delivered work must not restart itself.".to_string(),
+                },
+                project: project.launch.project.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: crate::task::PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_session_id: project.id.clone(),
+            current_directive_version: 1,
+            incorporated_directive_version: 0,
+            status,
+            status_reason: "test task session".to_string(),
+            status_at: now,
+            worktree: std::path::PathBuf::from(format!("/tmp/loopflow.{id}")),
+            branch: format!("test/{id}"),
+            base_commit: "0".repeat(40),
+            agent: "claude".to_string(),
+            provider: "claude".to_string(),
+            provider_session_id: active.then(|| "thread-task".to_string()),
+            latest_process: active.then_some(ChildProcessGeneration {
+                generation: 1,
+                pid: None,
+                tmux_name: "lf-task-test".to_string(),
+                started_at: now,
+            }),
+            pull_request: None,
+            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -757,5 +829,180 @@ mod tests {
         assert_eq!(result.state, ChildCommandState::Accepted);
         assert_eq!(persisted.status, ProjectSessionStatus::Waiting);
         assert_eq!(persisted.latest_process, None);
+    }
+
+    /// A Session created before the execution context was pinned cannot say which
+    /// `lf` or which database it belongs to. Relaunching it means letting the
+    /// calling process supply both — which is the original W2-127 failure. It
+    /// refuses, and says what to do instead.
+    #[tokio::test]
+    async fn a_session_with_no_pinned_context_refuses_to_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project(&wave, ProjectSessionStatus::Waiting);
+        project.execution = None;
+        store.create_project_session(&project).await.unwrap();
+
+        let error = queue_command(
+            &store,
+            ChildSession::Project(Box::new(project)),
+            ChildCommandSource::Human,
+            ChildCommandKind::Resume { message: None },
+        )
+        .await
+        .expect_err("an unpinned Session must not be relaunched by whoever holds it");
+
+        assert!(
+            error
+                .to_string()
+                .contains("predates pinned execution context"),
+            "got: {error}"
+        );
+    }
+
+    /// The 2026-07-14 W2-129 sequence, preserved as a regression.
+    ///
+    /// Task Session `ts_c33d8dc7…` emitted `pull_request_opened` for #878 and went
+    /// `submitted` with no live process. Supervision then launched generation 2
+    /// and drove it back to `running` at `task_clarify` — re-deriving a design
+    /// whose PR was already open for review, because `Submitted` is neither
+    /// terminal nor process-active and so reads exactly like a Session that
+    /// merely stopped.
+    ///
+    /// Terminal intent dominates process liveness: delivered work is not a
+    /// restart candidate, whatever the liveness fields say.
+    #[tokio::test]
+    async fn a_submitted_task_with_an_open_pr_is_never_restarted_by_supervision() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+
+        let mut task = make_task(&wave, &project, TaskSessionStatus::Submitted);
+        task.pull_request = Some(PullRequestRef {
+            number: 878,
+            url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+        });
+        let task_id = task.id.clone();
+        store.create_task_session(&task).await.unwrap();
+
+        // The supervisor's steer: exactly the path the Project wake took.
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task)),
+            ChildCommandSource::Project(project.id.clone()),
+            ChildCommandKind::Steer {
+                text: "Keep going on the design".to_string(),
+            },
+        )
+        .await
+        .expect_err("supervision must not restart a submitted Task");
+
+        assert!(
+            error.to_string().contains("#878"),
+            "the refusal should name the open PR, got: {error}"
+        );
+
+        // No generation 2, and the Session still reads as delivered.
+        let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskSessionStatus::Submitted);
+        assert_eq!(persisted.latest_process, None);
+    }
+
+    /// A human may still answer review on a submitted Task. The bar is on the
+    /// supervisor, not the operator — otherwise delivered work becomes unreachable.
+    #[tokio::test]
+    async fn an_operator_may_still_resume_a_submitted_task_to_answer_review() {
+        let task = {
+            let wave = make_wave("/tmp");
+            let project = make_project(&wave, ProjectSessionStatus::Running);
+            let mut task = make_task(&wave, &project, TaskSessionStatus::Submitted);
+            task.pull_request = Some(PullRequestRef {
+                number: 878,
+                url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+            });
+            task
+        };
+
+        // The supervisor is barred...
+        assert!(task.supervisor_restart_bar().is_some());
+        // ...but nothing about the Session itself is terminal, so an explicit
+        // `lf task resume` still has a Session to resume.
+        assert!(!task.status.is_terminal());
+        assert!(task.abandon_intent.is_none());
+    }
+
+    /// Abandonment is decided when it is *queued*, not when a runner consumes it.
+    /// Until this landed, the intent lived only in the command row while the
+    /// Session still read `Running` — so anything that launched in that window
+    /// revived work someone had already ended.
+    #[tokio::test]
+    async fn queueing_abandon_stamps_intent_and_bars_every_later_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        // Active: the abandon command stays pending rather than being applied,
+        // which is exactly the window the race used to live in.
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        let project_id = project.id.clone();
+        store.create_project_session(&project).await.unwrap();
+
+        queue_command(
+            &store,
+            ChildSession::Project(Box::new(project)),
+            ChildCommandSource::Human,
+            ChildCommandKind::Abandon {
+                reason: "Superseded by a different bet".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let persisted = store
+            .get_project_session(&project_id)
+            .await
+            .unwrap()
+            .unwrap();
+        // The runner has not consumed the command, so the Session is not yet
+        // Abandoned — but the intent is durable and already dominates.
+        assert_eq!(persisted.status, ProjectSessionStatus::Running);
+        let intent = persisted
+            .abandon_intent
+            .as_ref()
+            .expect("abandon intent is stamped when the command is queued");
+        assert_eq!(intent.reason, "Superseded by a different bet");
+        assert!(persisted.supervisor_restart_bar().is_some());
+
+        let error = queue_command(
+            &store,
+            ChildSession::Project(Box::new(persisted)),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
+                text: "One more thing".to_string(),
+            },
+        )
+        .await
+        .expect_err("a Session being abandoned accepts nothing else");
+        assert!(
+            error.to_string().contains("being abandoned"),
+            "got: {error}"
+        );
     }
 }

@@ -2,14 +2,17 @@
 """Verify the migration set before it can be released.
 
 Fails when a migration is malformed, namespaced ahead of the package version,
-collides with another id, regresses the order, or — the rule that matters — when
-a migration that already shipped has been edited, renamed, or deleted.
+collides with another id, is not registered in Rust (or is registered under a
+different id or name), or — the rule that matters — when a migration that already
+shipped has been edited, renamed, or deleted.
 
 A shipped migration is immutable: databases in the wild have already run it, so
 changing it changes their history, not their schema. Repair a shipped schema with
 a new forward migration.
 
     uv run python scripts/check_migrations.py
+
+Stdlib only, so `lf release` can run it directly without a Python environment.
 """
 
 from __future__ import annotations
@@ -21,9 +24,23 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
+MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
 VERSION_LINE = re.compile(r'^version = "([^"]+)"', re.MULTILINE)
 
+# One `Migration { .. }` entry of the MIGRATIONS registry in migrations.rs.
+REGISTRY_ENTRY = re.compile(
+    r"""Migration\s*\{\s*
+        id:\s*MigrationId\s*\{\s*
+            major:\s*(?P<major>\d+),\s*
+            minor:\s*(?P<minor>\d+),\s*
+            ordinal:\s*(?P<ordinal>\d+),?\s*
+        \},\s*
+        name:\s*"(?P<name>[a-z0-9_]+)",\s*
+        sql:\s*include_str!\("migrations/(?P<file>[^"]+)"\),?\s*
+    \}""",
+    re.VERBOSE,
+)
 
 
 def _package_version() -> tuple[int, int]:
@@ -43,6 +60,60 @@ def _package_version() -> tuple[int, int]:
     if len(parts) != 3 or not all(part.isdigit() for part in parts):
         _fail(f"version {version!r} is not major.minor.patch")
     return int(parts[0]), int(parts[1])
+
+
+def _registry() -> list[tuple[tuple[int, int, int], str, str]]:
+    """The MIGRATIONS registry in Rust, as `(id, name, file)` in declaration order.
+
+    Read from the source rather than from a build, so the release gate needs no
+    toolchain — and so a migration file that nobody registered, which would never
+    run, is caught here rather than shipping as a silent no-op.
+    """
+    source = MIGRATIONS_RS.read_text()
+    start = source.find("const MIGRATIONS: &[Migration] = &[")
+    if start == -1:
+        _fail(f"{MIGRATIONS_RS.name} declares no MIGRATIONS registry")
+    end = source.find("];", start)
+    if end == -1:
+        _fail(f"the MIGRATIONS registry in {MIGRATIONS_RS.name} is unterminated")
+
+    entries = []
+    for match in REGISTRY_ENTRY.finditer(source[start:end]):
+        key = (
+            int(match.group("major")),
+            int(match.group("minor")),
+            int(match.group("ordinal")),
+        )
+        entries.append((key, match.group("name"), match.group("file")))
+    return entries
+
+
+def _check_registry(files: dict[tuple[int, int, int], str]) -> None:
+    """The registry and the directory must name the same migrations, identically."""
+    entries = _registry()
+
+    registered: dict[tuple[int, int, int], str] = {}
+    for key, name, file in entries:
+        expected = f"{key[0]}.{key[1]}.{key[2]:03d}_{name}.sql"
+        if file != expected:
+            _fail(
+                f"registry entry {expected} includes {file} "
+                "— the id, the name, and the file must agree"
+            )
+        if not (MIGRATIONS_DIR / file).is_file():
+            _fail(f"registry entry {file} has no file in {MIGRATIONS_DIR.name}/")
+        registered[key] = file
+
+    for key, name in sorted(files.items()):
+        if key not in registered:
+            _fail(
+                f"{name} is not in the MIGRATIONS registry in {MIGRATIONS_RS.name} "
+                "— an unregistered migration never runs"
+            )
+
+    order = [key for key, _, _ in entries]
+    if order != sorted(order):
+        _fail(f"the MIGRATIONS registry in {MIGRATIONS_RS.name} is not in id order")
 
 
 def _last_release_tag() -> str | None:
@@ -119,11 +190,12 @@ def main() -> None:
     if not ids:
         _fail("no migrations found")
 
+    _check_registry(ids)
+
     # Deterministic order across namespaces is the numeric tuple, never the string:
     # `0.10.001` sorts before `0.9.001` lexically.
-    order = sorted(ids)
     print("migration order:")
-    for key in order:
+    for key in sorted(ids):
         print(f"  {ids[key]}")
 
     tag = _last_release_tag()

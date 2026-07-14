@@ -13,10 +13,32 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check_migrations.py"
 MIGRATIONS = "rust/loopflow/src/store/migrations"
+MIGRATIONS_RS = "rust/loopflow/src/store/migrations.rs"
 
 
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _registry(*entries: tuple[int, int, int, str]) -> str:
+    """A MIGRATIONS registry in Rust, shaped as migrations.rs writes it."""
+    body = "".join(
+        f"""Migration {{
+    id: MigrationId {{
+        major: {major},
+        minor: {minor},
+        ordinal: {ordinal},
+    }},
+    name: "{name}",
+    sql: include_str!("migrations/{major}.{minor}.{ordinal:03d}_{name}.sql"),
+}}, """
+        for major, minor, ordinal, name in entries
+    )
+    return f"const MIGRATIONS: &[Migration] = &[{body}];\n"
+
+
+def _register(repo: Path, *entries: tuple[int, int, int, str]) -> None:
+    (repo / MIGRATIONS_RS).write_text(_registry(*entries))
 
 
 @pytest.fixture
@@ -28,6 +50,7 @@ def repo(tmp_path: Path) -> Path:
     (tmp_path / "Cargo.toml").write_text('[workspace.package]\nversion = "0.10.1"\n')
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.10.1"\n')
     (tmp_path / MIGRATIONS / "0.10.001_initial.sql").write_text("CREATE TABLE waves (id TEXT);\n")
+    _register(tmp_path, (0, 10, 1, "initial"))
 
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "test@example.com")
@@ -55,9 +78,60 @@ def test_a_shipped_migration_left_alone_passes(repo: Path):
 
 def test_appending_a_migration_to_the_active_namespace_passes(repo: Path):
     (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "add_note"))
 
     result = check(repo)
     assert result.returncode == 0, result.stderr
+
+
+def test_a_migration_file_nobody_registered_fails(repo: Path):
+    """An unregistered migration never runs — shipping one is shipping a no-op."""
+    (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
+
+    result = check(repo)
+    assert result.returncode == 1
+    assert "not in the MIGRATIONS registry" in result.stderr
+
+
+def test_a_registry_entry_without_its_file_fails(repo: Path):
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "add_note"))
+
+    result = check(repo)
+    assert result.returncode == 1
+    assert "has no file" in result.stderr
+
+
+def test_a_registry_entry_whose_id_disagrees_with_its_file_fails(repo: Path):
+    (repo / MIGRATIONS_RS).write_text(
+        _registry((0, 10, 2, "initial")).replace(
+            "migrations/0.10.002_initial.sql", "migrations/0.10.001_initial.sql"
+        )
+    )
+
+    result = check(repo)
+    assert result.returncode == 1
+    assert "must agree" in result.stderr
+
+
+def test_a_registry_entry_whose_name_disagrees_with_its_file_fails(repo: Path):
+    (repo / MIGRATIONS_RS).write_text(
+        _registry((0, 10, 1, "setup")).replace(
+            "migrations/0.10.001_setup.sql", "migrations/0.10.001_initial.sql"
+        )
+    )
+
+    result = check(repo)
+    assert result.returncode == 1
+    assert "must agree" in result.stderr
+
+
+def test_a_registry_out_of_id_order_fails(repo: Path):
+    (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
+    _register(repo, (0, 10, 2, "add_note"), (0, 10, 1, "initial"))
+
+    result = check(repo)
+    assert result.returncode == 1
+    assert "not in id order" in result.stderr
 
 
 def test_editing_a_shipped_migration_fails(repo: Path):
@@ -69,7 +143,9 @@ def test_editing_a_shipped_migration_fails(repo: Path):
 
 
 def test_renaming_a_shipped_migration_fails(repo: Path):
+    """Even a rename the registry agrees with: the id is what shipped."""
     (repo / MIGRATIONS / "0.10.001_initial.sql").rename(repo / MIGRATIONS / "0.10.001_setup.sql")
+    _register(repo, (0, 10, 1, "setup"))
 
     result = check(repo)
     assert result.returncode == 1

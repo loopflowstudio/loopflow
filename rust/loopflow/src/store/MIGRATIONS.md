@@ -17,6 +17,18 @@ Repair a shipped schema with a new forward migration. `check_migrations.py`
 compares every migration against the last release tag and fails the build if one
 moved.
 
+## What the check enforces
+
+- The directory and the `MIGRATIONS` registry name the same migrations, with the
+  same ids and names. A file nobody registered never runs; a registry entry whose
+  id, name, and file disagree is a lie about what a database applied.
+- The registry is in id order, and no id is namespaced ahead of the package version.
+- Nothing that shipped in the last release tag has changed.
+
+It runs in CI, and — because `lf release` cuts a tag from local state and never
+reads a CI result — `lf release check` and `lf release run` run it themselves
+before anything is cut. Same script, both paths.
+
 ## Identity
 
 ```

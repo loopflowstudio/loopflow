@@ -218,6 +218,7 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Vec<Me
     }
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    verify_migrations(&main_repo)?;
 
     let prev_tag = match latest_tag_optional(&main_repo, &target)? {
         Some(tag) => tag,
@@ -225,6 +226,41 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Vec<Me
     };
 
     merged_prs_since(&main_repo, &prev_tag, &target)
+}
+
+/// The repo's own migration gate, run before anything is cut.
+///
+/// Loopflow's rejects a migration that is malformed, unregistered, namespaced
+/// ahead of the version, or edited after it shipped. A repo without the script —
+/// any other release target — has no migrations to gate and skips this.
+///
+/// The release path runs it directly rather than trusting the CI job of the same
+/// name: `lf release` cuts a tag from local state and never reads that job's
+/// result, so a green CI run is not a gate the release actually holds.
+const MIGRATION_CHECK: &str = "scripts/check_migrations.py";
+
+fn verify_migrations(repo: &Path) -> OpsResult<()> {
+    let script = repo.join(MIGRATION_CHECK);
+    if !script.is_file() {
+        return Ok(());
+    }
+
+    // The script is stdlib-only by design, so the release needs no Python
+    // environment — only an interpreter.
+    let output = Command::new("python3")
+        .arg(&script)
+        .current_dir(repo)
+        .output()
+        .map_err(|err| OpsError::Message(format!("failed to run {MIGRATION_CHECK}: {err}")))?;
+
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = detail.trim();
+        return Err(OpsError::Message(format!(
+            "migration verification failed; nothing released\n{detail}"
+        )));
+    }
+    Ok(())
 }
 
 /// Generate release notes for the given version.
@@ -303,6 +339,10 @@ pub fn release_run(
     }
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+
+    progress.status("Verifying migrations...");
+    verify_migrations(&main_repo)?;
+
     let prev_tag = latest_tag(&main_repo, &target)?;
     let merged_prs = merged_prs_since(&main_repo, &prev_tag, &target)?;
     if merged_prs.is_empty() {
@@ -2118,5 +2158,44 @@ version = "2.0.0"
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    // ======================================================================
+    // verify_migrations
+    // ======================================================================
+
+    /// Stand in for the real check: the release must hold whatever verdict the
+    /// repo's own gate reaches, so the test drives the verdict, not the checker.
+    fn repo_with_migration_check(exit: u8, message: &str) -> tempfile::TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        let scripts = repo.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        fs::write(
+            scripts.join("check_migrations.py"),
+            format!("import sys\nprint({message:?}, file=sys.stderr)\nsys.exit({exit})\n"),
+        )
+        .unwrap();
+        repo
+    }
+
+    #[test]
+    fn a_repo_without_a_migration_check_releases() {
+        let repo = tempfile::tempdir().unwrap();
+        verify_migrations(repo.path()).expect("no gate, nothing to hold");
+    }
+
+    #[test]
+    fn a_passing_migration_check_releases() {
+        let repo = repo_with_migration_check(0, "all good");
+        verify_migrations(repo.path()).expect("a clean gate releases");
+    }
+
+    #[test]
+    fn a_failing_migration_check_stops_the_release() {
+        let repo = repo_with_migration_check(1, "0.10.001_initial.sql has been edited");
+
+        let error = verify_migrations(repo.path()).unwrap_err().to_string();
+        assert!(error.contains("nothing released"), "{error}");
+        assert!(error.contains("has been edited"), "{error}");
     }
 }

@@ -148,8 +148,8 @@ const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $pr
   }
 }"#;
 
-const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $title: String, $description: String) {
-  issueUpdate(id: $id, input: { title: $title, description: $description }) {
+const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) {
     issue {
       id
     }
@@ -540,14 +540,20 @@ impl LinearClient {
         let Some(update) = update.text_update() else {
             return Ok(());
         };
+        let mut input = serde_json::Map::new();
+        if let Some(name) = update.name {
+            input.insert("title".to_string(), json!(name));
+        }
+        if let Some(description) = update.description {
+            input.insert("description".to_string(), json!(description));
+        }
 
         let _: Value = self
             .graphql(
                 UPDATE_ITEM_MUTATION,
                 json!({
                     "id": item_id,
-                    "title": update.name,
-                    "description": update.description,
+                    "input": input,
                 }),
             )
             .await?;
@@ -1247,6 +1253,45 @@ mod tests {
         let create_body: Value =
             serde_json::from_str(&requests[1].body).expect("create body is json");
         assert_eq!(create_body["variables"]["stateId"], json!("state-todo"));
+        let update_body: Value =
+            serde_json::from_str(&requests[2].body).expect("update body is json");
+        assert_eq!(
+            update_body["variables"]["input"],
+            json!({
+                "title": "Implement Linear client",
+                "description": "Build the GraphQL adapter and tests",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn update_item_omits_absent_text_fields() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "issueUpdate": { "issue": { "id": "issue-123" } } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        client
+            .update_item(
+                "issue-123",
+                &PmItemUpdate {
+                    name: None,
+                    description: Some("Only the description changes".to_string()),
+                },
+            )
+            .await
+            .expect("description-only update succeeds");
+
+        let requests = requests.lock().await;
+        let update_body: Value =
+            serde_json::from_str(&requests[0].body).expect("update body is json");
+        assert_eq!(
+            update_body["variables"]["input"],
+            json!({ "description": "Only the description changes" })
+        );
+        assert!(update_body["variables"]["input"].get("title").is_none());
     }
 
     #[tokio::test]

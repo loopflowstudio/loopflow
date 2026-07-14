@@ -85,7 +85,6 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
         executables=(
             swift / ".build" / "release" / "LoopflowMac",
             cargo_release / "lf",
-            cargo_release / "lfd",
         ),
         info_plist=swift / "LoopflowMac" / "Info.plist",
         resources=(
@@ -429,12 +428,12 @@ def _codesign_identity() -> str:
 
 
 def _verify_bundle_layout(spec: BundleSpec) -> None:
-    """Mirror Bundle.main.url(forAuxiliaryExecutable:) expectations.
+    """Verify the app executable and bundled `lf` helper.
 
-    Checks every executable that Loopflow will look up in Contents/MacOS/:
-    it must exist, be executable, and be a Mach-O binary that includes the
-    current architecture. Catches missing files, wrong-arch copies, and
-    non-executable placeholders before we hand the bundle to codesign.
+    Every declared executable must exist, be executable, and be a Mach-O binary
+    that includes the current architecture. Catches missing files, wrong-arch
+    copies, and non-executable placeholders before we hand the bundle to
+    codesign.
     """
     current_arch = platform.machine()
     problems: list[str] = []

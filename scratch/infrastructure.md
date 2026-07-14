@@ -643,3 +643,11 @@ Make that boundary literal:
 This leaves the word `Session` in two honest places: Project/Task Session is a
 durable domain runtime, while the lfd session row is explicitly a technical
 process record. The latter is not creatable or steerable as a product object.
+
+The same review found one packaging split-brain. Release and development app
+builders had stopped bundling `lfd`, but `scripts/install.py local` still put it
+inside `Loopflow.app` and tests cited the already-deleted
+`BundledDaemonManager` as the reason. Keep `lfd` as a separately installed
+optional gatekeeper binary; bundle only `lf`, which the app actually invokes
+for registry snapshots and status. All three app build paths should now have
+the same Contents/MacOS contract.

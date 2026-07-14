@@ -147,8 +147,8 @@ enum LocalWaveAgentLauncher {
         ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "serve", waveName]
     }
 
-    /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app
-    /// (shipped next to the bundled lfd), each `lf` on the enriched PATH, then
+    /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app,
+    /// each `lf` on the enriched PATH, then
     /// `<origin>/target/release/lf` — the dev-tree build, for a Loopflow pointed
     /// at a loopflow checkout where the freshest lf is the one just compiled.
     static func lfCandidates(

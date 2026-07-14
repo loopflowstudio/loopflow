@@ -64,7 +64,7 @@ pub fn create_or_update_pr(
     options: &PrOptions,
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
-    reject_control_plane_delivery(repo)?;
+    reject_control_plane_pr(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -101,6 +101,7 @@ pub fn create_or_update_pr(
     let body = copy.body.trim();
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    crate::ops::task::request_task_pr_publication(repo, crate::task::AfterMerge::Review, None)?;
 
     let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
         progress.status("Updating PR...");
@@ -148,12 +149,7 @@ pub fn create_or_update_pr(
             info,
         )
     };
-    crate::ops::task::configure_task_pull_request(
-        repo,
-        pr.as_ref(),
-        crate::task::AfterMerge::Review,
-        None,
-    )?;
+    crate::ops::task::attach_task_github_pr(repo, pr.as_ref())?;
     Ok(result)
 }
 
@@ -175,7 +171,7 @@ fn pr_number_from_url(url: &str) -> Option<u64> {
     url.trim_end_matches('/').rsplit('/').next()?.parse().ok()
 }
 
-pub(crate) fn reject_control_plane_delivery(repo: &Path) -> OpsResult<()> {
+pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
     let main_repo = main_repo_root(repo)?;
     let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
     let main_repo = main_repo.canonicalize().unwrap_or(main_repo);

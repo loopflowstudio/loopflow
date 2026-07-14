@@ -32,12 +32,13 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let runtime: TaskRuntimeSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
-    public let pullRequests: [PullRequestSnapshot]
+    public let prs: [PrSnapshot]
+    public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, runtime, directive
+        case task, runtime, directive, prs
         case nextMove = "next_move"
-        case pullRequests = "pull_requests"
+        case activePr = "active_pr"
     }
 }
 
@@ -151,7 +152,54 @@ public struct WorkNextMove: Decodable, Sendable, Hashable {
     public let reason: String
 }
 
-public struct PullRequestSnapshot: Decodable, Sendable, Hashable {
+public enum PrPhase: String, Decodable, Sendable, Hashable {
+    case working, publishing, open, merged, abandoned
+}
+
+public struct PrSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let sequence: UInt32
+    public let slug: String
+    public let branch: String
+    public let baseCommit: String
+    public let phase: PrPhase
+    public let empty: Bool?
+    public let publication: PrPublicationSnapshot?
+    public let mergeCommit: String?
+    public let abandonedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, sequence, slug, branch, phase, empty, publication
+        case baseCommit = "base_commit"
+        case mergeCommit = "merge_commit"
+        case abandonedAt = "abandoned_at"
+    }
+}
+
+public struct PrPublicationSnapshot: Decodable, Sendable, Hashable {
+    public let requestedAt: String
+    public let afterMerge: PrAfterMerge
+    public let nextSlug: String?
+    public let github: GithubPrSnapshot?
+
+    enum CodingKeys: String, CodingKey {
+        case github
+        case requestedAt = "requested_at"
+        case afterMerge = "after_merge"
+        case nextSlug = "next_slug"
+    }
+}
+
+public struct PrAfterMerge: Decodable, Sendable, Hashable {
+    public let kind: PrAfterMergeKind
+}
+
+public enum PrAfterMergeKind: String, Decodable, Sendable, Hashable {
+    case review
+    case completeTask = "complete_task"
+}
+
+public struct GithubPrSnapshot: Decodable, Sendable, Hashable {
     public let number: UInt32
     public let url: URL
 }

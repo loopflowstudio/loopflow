@@ -1,8 +1,8 @@
-//! Durable delivery of one Linear Task.
+//! Durable execution of one Linear Task.
 //!
-//! A Task Session owns one durable worktree and provider transcript. Ordered
-//! deliveries own the serial branches and pull requests that advance the Task.
-//! Process generations and deliveries may change without changing Task identity.
+//! A Task Session owns one durable worktree and provider transcript. Ordered PRs
+//! own the serial branches that advance the Task. Publication intent is recorded
+//! before GitHub is called, then the GitHub receipt is attached to that intent.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -27,8 +27,6 @@ pub enum TaskDataError {
     InvalidId(String),
     #[error("invalid task session status: {0}")]
     InvalidStatus(String),
-    #[error("invalid task delivery status: {0}")]
-    InvalidDeliveryStatus(String),
     #[error("invalid task session: {0}")]
     InvalidInvariant(String),
 }
@@ -40,12 +38,7 @@ prefixed_uuid_id!(
     TaskDataError::InvalidId
 );
 
-prefixed_uuid_id!(
-    TaskDeliveryId,
-    "td_",
-    TaskDataError,
-    TaskDataError::InvalidId
-);
+prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,7 +96,7 @@ impl FromStr for TaskSessionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PullRequestRef {
+pub struct GithubPr {
     pub number: u32,
     pub url: String,
 }
@@ -111,43 +104,31 @@ pub struct PullRequestRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TaskDeliveryStatus {
+pub enum PrPhase {
     Working,
-    Submitted,
+    Publishing,
+    Open,
     Merged,
     Abandoned,
 }
 
-impl TaskDeliveryStatus {
+impl PrPhase {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Working => "working",
-            Self::Submitted => "submitted",
+            Self::Publishing => "publishing",
+            Self::Open => "open",
             Self::Merged => "merged",
             Self::Abandoned => "abandoned",
         }
     }
 
     pub fn is_active(self) -> bool {
-        matches!(self, Self::Working | Self::Submitted)
+        matches!(self, Self::Working | Self::Publishing | Self::Open)
     }
 
     pub fn is_settled(self) -> bool {
         matches!(self, Self::Merged | Self::Abandoned)
-    }
-}
-
-impl FromStr for TaskDeliveryStatus {
-    type Err = TaskDataError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "working" => Ok(Self::Working),
-            "submitted" => Ok(Self::Submitted),
-            "merged" => Ok(Self::Merged),
-            "abandoned" => Ok(Self::Abandoned),
-            _ => Err(TaskDataError::InvalidDeliveryStatus(value.to_string())),
-        }
     }
 }
 
@@ -182,74 +163,113 @@ impl FromStr for AfterMerge {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskDelivery {
-    pub id: TaskDeliveryId,
+pub struct PrPublication {
+    pub requested_at: OffsetDateTime,
+    pub after_merge: AfterMerge,
+    pub next_slug: Option<String>,
+    pub github: Option<GithubPr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskPr {
+    pub id: TaskPrId,
     pub task_session_id: TaskSessionId,
     pub sequence: u32,
     pub slug: String,
     pub branch: String,
     pub base_commit: String,
-    pub status: TaskDeliveryStatus,
-    pub after_merge: AfterMerge,
-    pub next_slug: Option<String>,
-    pub pull_request: Option<PullRequestRef>,
+    pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
+    pub abandoned_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
 
-impl TaskDelivery {
+impl TaskPr {
+    pub fn phase(&self) -> PrPhase {
+        if self.abandoned_at.is_some() {
+            PrPhase::Abandoned
+        } else if self.merge_commit.is_some() {
+            PrPhase::Merged
+        } else if self
+            .publication
+            .as_ref()
+            .is_some_and(|publication| publication.github.is_some())
+        {
+            PrPhase::Open
+        } else if self.publication.is_some() {
+            PrPhase::Publishing
+        } else {
+            PrPhase::Working
+        }
+    }
+
+    pub fn github(&self) -> Option<&GithubPr> {
+        self.publication
+            .as_ref()
+            .and_then(|publication| publication.github.as_ref())
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.phase().is_active()
+    }
+
+    pub fn is_settled(&self) -> bool {
+        self.phase().is_settled()
+    }
+
     pub fn validate(&self) -> Result<(), TaskDataError> {
         if self.sequence == 0 {
             return Err(TaskDataError::InvalidInvariant(
-                "task delivery sequence starts at 1".to_string(),
+                "task pull request sequence starts at 1".to_string(),
             ));
         }
         if self.slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(
-                "task delivery slug cannot be empty".to_string(),
+                "task PR slug cannot be empty".to_string(),
             ));
         }
         if self.branch.trim().is_empty() || self.base_commit.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(
-                "task delivery requires a branch and base commit".to_string(),
+                "task PR requires a branch and base commit".to_string(),
             ));
         }
-        if self.next_slug.as_deref().is_some_and(|slug| {
-            slug.split('-').any(|word| {
-                word.is_empty()
-                    || !word
-                        .bytes()
-                        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-            })
-        }) {
+        if let Some(publication) = &self.publication {
+            if publication.next_slug.as_deref().is_some_and(|slug| {
+                slug.split('-').any(|word| {
+                    word.is_empty()
+                        || !word
+                            .bytes()
+                            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+                })
+            }) {
+                return Err(TaskDataError::InvalidInvariant(
+                    "next branch slug must be lowercase kebab-case".to_string(),
+                ));
+            }
+            if publication.after_merge == AfterMerge::CompleteTask
+                && publication.next_slug.is_some()
+            {
+                return Err(TaskDataError::InvalidInvariant(
+                    "a completing pull request cannot name a next branch".to_string(),
+                ));
+            }
+            if let Some(github) = &publication.github {
+                if github.number == 0 || github.url.trim().is_empty() {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "GitHub PR number and URL cannot be empty".to_string(),
+                    ));
+                }
+            }
+        }
+        if self.merge_commit.is_some() && self.github().is_none() {
             return Err(TaskDataError::InvalidInvariant(
-                "next delivery slug must be lowercase kebab-case".to_string(),
+                "merged PR requires a GitHub PR".to_string(),
             ));
         }
-        if self.after_merge == AfterMerge::CompleteTask && self.next_slug.is_some() {
+        if self.merge_commit.is_some() && self.abandoned_at.is_some() {
             return Err(TaskDataError::InvalidInvariant(
-                "a completing delivery cannot name a next delivery".to_string(),
-            ));
-        }
-        if matches!(
-            self.status,
-            TaskDeliveryStatus::Submitted | TaskDeliveryStatus::Merged
-        ) && self.pull_request.is_none()
-        {
-            return Err(TaskDataError::InvalidInvariant(format!(
-                "{} delivery requires a pull request",
-                self.status.as_str()
-            )));
-        }
-        if self.status == TaskDeliveryStatus::Merged && self.merge_commit.is_none() {
-            return Err(TaskDataError::InvalidInvariant(
-                "merged delivery requires a merge commit".to_string(),
-            ));
-        }
-        if self.status != TaskDeliveryStatus::Merged && self.merge_commit.is_some() {
-            return Err(TaskDataError::InvalidInvariant(
-                "only a merged delivery may record a merge commit".to_string(),
+                "a PR cannot be both merged and abandoned".to_string(),
             ));
         }
         Ok(())
@@ -317,18 +337,19 @@ impl TaskSession {
     /// - the Session is `Completed` or `Abandoned` — the work is over;
     /// - abandonment has been *requested* — the runner has not consumed the
     ///   command yet, but the decision is made;
-    /// - the active delivery is `Submitted` — the work is delivered
+    /// - the active PR is `Publishing` or `Open` — publication was requested
+    ///   and the work must not restart from clarification
     ///   and belongs to review.
     ///
-    /// The third was the 2026-07-14 W2-129 failure: `Submitted` is not terminal
+    /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
     /// and carries no live process, so it reads exactly like a Session that
     /// merely stopped. A wake therefore launched generation 2, which reopened
     /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
-    /// already open for review. Delivery is not an invitation to start over.
+    /// already open for review. An open PR is not an invitation to start over.
     ///
     /// A human may still `lf task resume` a submitted Session to answer review;
     /// this bars the supervisor, not the operator.
-    pub fn supervisor_restart_bar(&self, active_delivery: Option<&TaskDelivery>) -> Option<String> {
+    pub fn supervisor_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if self.status.is_terminal() {
             return Some(format!(
                 "Task {} is {}; terminal Task Sessions do not restart",
@@ -342,17 +363,24 @@ impl TaskSession {
                 self.launch.issue.identifier, intent.reason
             ));
         }
-        if let Some(delivery) = active_delivery {
-            if delivery.status == TaskDeliveryStatus::Submitted {
-                let pull_request = delivery
-                    .pull_request
-                    .as_ref()
-                    .expect("submitted delivery passed validation");
-                return Some(format!(
-                    "Task {} submitted pull request #{} and is awaiting review; \
-                     resume it explicitly with `lf task resume {}` to answer review",
-                    self.launch.issue.identifier, pull_request.number, self.launch.issue.identifier,
-                ));
+        if let Some(pr) = active_pr {
+            match pr.phase() {
+                PrPhase::Publishing => {
+                    return Some(format!(
+                        "Task {} requested PR publication but has no GitHub receipt; \
+                         resume it explicitly with `lf task resume {}` to retry publication",
+                        self.launch.issue.identifier, self.launch.issue.identifier,
+                    ));
+                }
+                PrPhase::Open => {
+                    let number = pr.github().expect("open Task PR passed validation").number;
+                    return Some(format!(
+                        "Task {} submitted pull request #{} and is awaiting review; \
+                         resume it explicitly with `lf task resume {}` to answer review",
+                        self.launch.issue.identifier, number, self.launch.issue.identifier,
+                    ));
+                }
+                PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
             }
         }
         None
@@ -449,19 +477,21 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
-    DeliveryStarted {
-        delivery_id: TaskDeliveryId,
+    PrStarted {
+        pr_id: TaskPrId,
         sequence: u32,
         branch: String,
         base_commit: String,
     },
-    PullRequestOpened {
-        delivery_id: TaskDeliveryId,
+    PrOpened {
+        pr_id: TaskPrId,
+        sequence: u32,
         number: u32,
         url: String,
     },
-    DeliveryMerged {
-        delivery_id: TaskDeliveryId,
+    PrMerged {
+        pr_id: TaskPrId,
+        sequence: u32,
         number: u32,
         url: String,
         merge_commit: String,
@@ -535,9 +565,9 @@ impl TaskObservation {
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState,
-        PullRequestRef, TaskDelivery, TaskDeliveryId, TaskDeliveryStatus, TaskEventKind,
-        TaskObservation, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, ChildCommandId, ChildCommandState, GithubPr, PmWritebackOperation,
+        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskObservation, TaskPr, TaskPrId,
+        TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::child_session::ChildDecisionId;
     use crate::session_context::{
@@ -589,8 +619,8 @@ mod tests {
     fn task_ids_are_prefixed_and_round_trip() {
         let session = TaskSessionId::new();
         assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
-        let delivery = TaskDeliveryId::new();
-        assert_eq!(TaskDeliveryId::parse(delivery.as_str()).unwrap(), delivery);
+        let pr = TaskPrId::new();
+        assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
     }
 
     #[test]
@@ -678,46 +708,78 @@ mod tests {
     }
 
     #[test]
-    fn delivery_invariants_separate_work_from_task_completion() {
+    fn pr_phase_is_derived_from_durable_evidence() {
         let now = time::OffsetDateTime::now_utc();
-        let mut delivery = TaskDelivery {
-            id: TaskDeliveryId::new(),
+        let mut pr = TaskPr {
+            id: TaskPrId::new(),
             task_session_id: TaskSessionId::new(),
             sequence: 1,
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
             base_commit: "abc".to_string(),
-            status: TaskDeliveryStatus::Working,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            pull_request: None,
+            publication: None,
             merge_commit: None,
+            abandoned_at: None,
             created_at: now,
             updated_at: now,
         };
-        assert!(delivery.validate().is_ok());
+        assert_eq!(pr.phase(), PrPhase::Working);
 
-        delivery.status = TaskDeliveryStatus::Submitted;
-        assert!(delivery.validate().is_err());
-        delivery.pull_request = Some(PullRequestRef {
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: None,
+        });
+        assert_eq!(pr.phase(), PrPhase::Publishing);
+
+        pr.publication.as_mut().unwrap().github = Some(GithubPr {
             number: 872,
             url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
         });
-        assert!(delivery.validate().is_ok());
+        assert_eq!(pr.phase(), PrPhase::Open);
 
-        delivery.status = TaskDeliveryStatus::Merged;
-        assert!(delivery.validate().is_err());
-        delivery.merge_commit = Some("def".to_string());
-        assert!(delivery.validate().is_ok());
+        pr.merge_commit = Some("def".to_string());
+        assert_eq!(pr.phase(), PrPhase::Merged);
+        assert!(pr.validate().is_ok());
 
-        delivery.status = TaskDeliveryStatus::Submitted;
-        delivery.merge_commit = None;
-        delivery.next_slug = Some("released_upgrade".to_string());
-        assert!(delivery.validate().is_err());
-        delivery.next_slug = Some("released-upgrade".to_string());
-        assert!(delivery.validate().is_ok());
-        delivery.after_merge = AfterMerge::CompleteTask;
-        assert!(delivery.validate().is_err());
+        pr.abandoned_at = Some(now);
+        assert_eq!(pr.phase(), PrPhase::Abandoned);
+        assert!(pr.validate().is_err());
+    }
+
+    #[test]
+    fn publication_contains_its_github_receipt_and_disposition() {
+        let now = time::OffsetDateTime::now_utc();
+        let mut pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: Some("released_upgrade".to_string()),
+                github: Some(GithubPr {
+                    number: 872,
+                    url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert!(pr.validate().is_err());
+
+        let publication = pr.publication.as_mut().unwrap();
+        publication.next_slug = Some("released-upgrade".to_string());
+        assert!(pr.validate().is_ok());
+
+        pr.publication.as_mut().unwrap().after_merge = AfterMerge::CompleteTask;
+        assert!(pr.validate().is_err());
     }
 
     #[test]

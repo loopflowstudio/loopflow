@@ -1,4 +1,4 @@
--- Separate durable Task identity from each serial branch and pull request.
+-- Model every published or abandoned serial Task branch as a PR.
 
 CREATE TABLE task_sessions_next (
     id TEXT PRIMARY KEY,
@@ -70,55 +70,57 @@ SELECT
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason
 FROM task_sessions;
 
-CREATE TABLE task_deliveries (
+CREATE TABLE task_prs (
     id TEXT PRIMARY KEY,
     task_session_id TEXT NOT NULL REFERENCES task_sessions(id) ON DELETE CASCADE,
     sequence INTEGER NOT NULL CHECK (sequence >= 1),
     slug TEXT NOT NULL,
     branch TEXT NOT NULL UNIQUE,
     base_commit TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('working', 'submitted', 'merged', 'abandoned')),
-    after_merge TEXT NOT NULL CHECK (after_merge IN ('review', 'complete_task')),
+    publication_requested_at INTEGER,
+    after_merge TEXT CHECK (after_merge IN ('review', 'complete_task')),
     next_slug TEXT,
-    pr_number INTEGER,
-    pr_url TEXT,
+    github_number INTEGER CHECK (github_number > 0),
+    github_url TEXT,
     merge_commit TEXT,
+    abandoned_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     UNIQUE (task_session_id, sequence),
-    CHECK ((pr_number IS NULL) = (pr_url IS NULL)),
-    CHECK (after_merge = 'review' OR next_slug IS NULL),
-    CHECK (status NOT IN ('submitted', 'merged') OR pr_number IS NOT NULL),
-    CHECK (status != 'merged' OR merge_commit IS NOT NULL),
-    CHECK (status = 'merged' OR merge_commit IS NULL)
+    CHECK ((publication_requested_at IS NULL) = (after_merge IS NULL)),
+    CHECK ((github_number IS NULL) = (github_url IS NULL)),
+    CHECK (github_number IS NULL OR publication_requested_at IS NOT NULL),
+    CHECK (after_merge != 'complete_task' OR next_slug IS NULL),
+    CHECK (merge_commit IS NULL OR github_number IS NOT NULL),
+    CHECK (merge_commit IS NULL OR abandoned_at IS NULL)
 );
 
-INSERT INTO task_deliveries (
-    id, task_session_id, sequence, slug, branch, base_commit, status,
-    after_merge, next_slug, pr_number, pr_url, merge_commit, created_at, updated_at
+INSERT INTO task_prs (
+    id, task_session_id, sequence, slug, branch, base_commit,
+    publication_requested_at, after_merge, next_slug,
+    github_number, github_url, merge_commit, abandoned_at,
+    created_at, updated_at
 )
 SELECT
-    'td_' || lower(hex(randomblob(16))), id, 1,
+    'pr_' || lower(hex(randomblob(16))), id, 1,
     CASE
         WHEN instr(branch, '/') > 0 THEN substr(branch, instr(branch, '/') + 1)
         ELSE branch
     END,
     branch, base_commit,
-    CASE status
-        WHEN 'submitted' THEN 'submitted'
-        WHEN 'merged' THEN 'merged'
-        WHEN 'abandoned' THEN 'abandoned'
-        ELSE 'working'
+    CASE WHEN pr_number IS NOT NULL THEN updated_at ELSE NULL END,
+    CASE
+        WHEN status = 'merged' THEN 'complete_task'
+        WHEN pr_number IS NOT NULL THEN 'review'
+        ELSE NULL
     END,
-    CASE status WHEN 'merged' THEN 'complete_task' ELSE 'review' END, NULL,
-    pr_number, pr_url,
+    NULL, pr_number, pr_url,
     CASE status WHEN 'merged' THEN 'legacy-unknown' ELSE NULL END,
+    CASE status WHEN 'abandoned' THEN updated_at ELSE NULL END,
     created_at, updated_at
 FROM task_sessions;
 
--- Rewrite persisted event payloads to the delivery-aware wire shape. These
--- columns are durable JSON, so changing only the Rust enum would strand old
--- observations as deserialize errors.
+-- Rewrite persisted event payloads to the PR-history wire shape.
 UPDATE task_events
 SET kind_json = json_set(
     kind_json,
@@ -138,10 +140,12 @@ WHERE json_extract(kind_json, '$.kind') = 'status_changed';
 UPDATE task_events
 SET kind_json = json_set(
     kind_json,
-    '$.delivery_id', (
-        SELECT id FROM task_deliveries
+    '$.kind', 'pr_opened',
+    '$.pr_id', (
+        SELECT id FROM task_prs
         WHERE task_session_id = task_events.session_id AND sequence = 1
-    )
+    ),
+    '$.sequence', 1
 )
 WHERE json_extract(kind_json, '$.kind') = 'pull_request_opened';
 
@@ -169,10 +173,12 @@ WHERE source_kind = 'task'
 UPDATE observation_outbox
 SET payload_json = json_set(
     payload_json,
-    '$.event.delivery_id', (
-        SELECT id FROM task_deliveries
+    '$.event.kind', 'pr_opened',
+    '$.event.pr_id', (
+        SELECT id FROM task_prs
         WHERE task_session_id = observation_outbox.source_id AND sequence = 1
-    )
+    ),
+    '$.event.sequence', 1
 )
 WHERE source_kind = 'task'
   AND json_extract(payload_json, '$.event.kind') = 'pull_request_opened';
@@ -202,11 +208,13 @@ WHERE json_extract(kind_json, '$.kind') = 'task_observed'
 UPDATE project_events
 SET kind_json = json_set(
     kind_json,
-    '$.event.delivery_id', (
-        SELECT id FROM task_deliveries
+    '$.event.kind', 'pr_opened',
+    '$.event.pr_id', (
+        SELECT id FROM task_prs
         WHERE task_session_id = json_extract(project_events.kind_json, '$.task_session_id')
           AND sequence = 1
-    )
+    ),
+    '$.event.sequence', 1
 )
 WHERE json_extract(kind_json, '$.kind') = 'task_observed'
   AND json_extract(kind_json, '$.event.kind') = 'pull_request_opened';
@@ -237,13 +245,15 @@ WHERE source_kind = 'project'
 UPDATE observation_outbox
 SET payload_json = json_set(
     payload_json,
-    '$.event.event.delivery_id', (
-        SELECT id FROM task_deliveries
+    '$.event.event.kind', 'pr_opened',
+    '$.event.event.pr_id', (
+        SELECT id FROM task_prs
         WHERE task_session_id = json_extract(
             observation_outbox.payload_json,
             '$.event.task_session_id'
         ) AND sequence = 1
-    )
+    ),
+    '$.event.event.sequence', 1
 )
 WHERE source_kind = 'project'
   AND json_extract(payload_json, '$.event.kind') = 'task_observed'
@@ -260,6 +270,6 @@ ALTER TABLE task_sessions_next RENAME TO task_sessions;
 
 CREATE INDEX idx_task_sessions_wave_status
     ON task_sessions(wave_id, status, updated_at DESC);
-CREATE UNIQUE INDEX idx_task_deliveries_active
-    ON task_deliveries(task_session_id)
-    WHERE status IN ('working', 'submitted');
+CREATE UNIQUE INDEX idx_task_prs_open
+    ON task_prs(task_session_id)
+    WHERE merge_commit IS NULL AND abandoned_at IS NULL;

@@ -22,7 +22,7 @@ use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{TaskDelivery, TaskDeliveryStatus, TaskSession, TaskSessionStatus};
+use crate::task::{AfterMerge, PrPhase, TaskPr, TaskSession, TaskSessionStatus};
 use crate::wave::server::live_endpoint;
 use crate::wave::Wave;
 
@@ -240,7 +240,65 @@ pub struct TaskDetailSnapshot {
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub directive: Option<DirectiveSnapshot>,
     pub next_move: NextMove,
-    pub pull_requests: Vec<crate::task::PullRequestRef>,
+    pub prs: Vec<PrSnapshot>,
+    pub active_pr: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrSnapshot {
+    pub id: String,
+    pub sequence: u32,
+    pub slug: String,
+    pub branch: String,
+    pub base_commit: String,
+    pub phase: PrPhase,
+    pub empty: Option<bool>,
+    pub publication: Option<PrPublicationSnapshot>,
+    pub merge_commit: Option<String>,
+    pub abandoned_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrPublicationSnapshot {
+    pub requested_at: String,
+    pub after_merge: AfterMerge,
+    pub next_slug: Option<String>,
+    pub github: Option<GithubPrSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GithubPrSnapshot {
+    pub number: u32,
+    pub url: String,
+}
+
+impl PrSnapshot {
+    fn new(pr: &TaskPr, empty: Option<bool>) -> Self {
+        Self {
+            id: pr.id.to_string(),
+            sequence: pr.sequence,
+            slug: pr.slug.clone(),
+            branch: pr.branch.clone(),
+            base_commit: pr.base_commit.clone(),
+            phase: pr.phase(),
+            empty,
+            publication: pr
+                .publication
+                .as_ref()
+                .map(|publication| PrPublicationSnapshot {
+                    requested_at: format_time(publication.requested_at)
+                        .expect("PR publication timestamp formats as RFC 3339"),
+                    after_merge: publication.after_merge,
+                    next_slug: publication.next_slug.clone(),
+                    github: publication.github.as_ref().map(|github| GithubPrSnapshot {
+                        number: github.number,
+                        url: github.url.clone(),
+                    }),
+                }),
+            merge_commit: pr.merge_commit.clone(),
+            abandoned_at: pr.abandoned_at.and_then(format_time),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -515,7 +573,7 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
 
 async fn snapshot_task_runtime(
     task: &TaskSession,
-    active_delivery: Option<&TaskDelivery>,
+    active_pr: Option<&TaskPr>,
 ) -> TaskRuntimeSnapshot {
     let process_alive = if task.status.is_process_active() {
         match task.latest_process.as_ref() {
@@ -534,7 +592,7 @@ async fn snapshot_task_runtime(
         reason: task.status_reason.clone(),
         status_at: format_time(task.status_at).unwrap_or_default(),
         worktree: task.worktree.display().to_string(),
-        branch: active_delivery.map(|delivery| delivery.branch.clone()),
+        branch: active_pr.map(|pr| pr.branch.clone()),
         provider: task.provider.clone(),
         process_alive,
     }
@@ -707,21 +765,19 @@ async fn snapshot_task_detail(
     item: PmItem,
     session: Option<&TaskSession>,
 ) -> Result<TaskDetailSnapshot> {
-    let deliveries = match session {
-        Some(session) => store.task_deliveries(&session.id).await?,
+    let prs = match session {
+        Some(session) => store.task_prs(&session.id).await?,
         None => Vec::new(),
     };
-    let active_delivery = deliveries
-        .iter()
-        .find(|delivery| delivery.status.is_active());
+    let active = prs.iter().find(|pr| pr.is_active());
     let runtime = match session {
-        Some(session) => Some(snapshot_task_runtime(session, active_delivery).await),
+        Some(session) => Some(snapshot_task_runtime(session, active).await),
         None => None,
     };
     let next_move = match session {
         Some(session) => next_move_for_task(
             session.status,
-            active_delivery.map(|delivery| delivery.status),
+            active.map(TaskPr::phase),
             &session.status_reason,
         ),
         None if item.completed => NextMove {
@@ -733,10 +789,6 @@ async fn snapshot_task_detail(
             reason: "Task is ready to start".to_string(),
         },
     };
-    let pull_requests = deliveries
-        .iter()
-        .filter_map(|delivery| delivery.pull_request.clone())
-        .collect();
     let directive = match session {
         Some(session) => {
             current_directive(
@@ -753,8 +805,32 @@ async fn snapshot_task_detail(
         runtime,
         directive,
         next_move,
-        pull_requests,
+        prs: prs
+            .iter()
+            .map(|pr| {
+                let empty = match (session, active) {
+                    (Some(session), Some(active)) if active.id == pr.id => {
+                        task_pr_empty(session, pr)
+                    }
+                    _ => None,
+                };
+                PrSnapshot::new(pr, empty)
+            })
+            .collect(),
+        active_pr: active.map(|pr| pr.id.to_string()),
     })
+}
+
+fn task_pr_empty(session: &TaskSession, pr: &TaskPr) -> Option<bool> {
+    if !session.worktree.exists() {
+        return None;
+    }
+    let clean = crate::engine::git::is_clean(&session.worktree).ok()?;
+    if !clean {
+        return Some(false);
+    }
+    let head = crate::engine::git::rev_parse(&session.worktree, "HEAD").ok()?;
+    Some(head == pr.base_commit)
 }
 
 async fn current_directive(
@@ -849,10 +925,10 @@ fn next_move_for_project(status: ProjectSessionStatus, reason: &str) -> NextMove
 
 fn next_move_for_task(
     status: TaskSessionStatus,
-    delivery_status: Option<TaskDeliveryStatus>,
+    pr_phase: Option<PrPhase>,
     reason: &str,
 ) -> NextMove {
-    let owner = if delivery_status == Some(TaskDeliveryStatus::Submitted) {
+    let owner = if pr_phase == Some(PrPhase::Open) {
         NextMoveOwner::Review
     } else {
         match status {
@@ -1091,6 +1167,34 @@ mod tests {
     use crate::store::{open_store, PmSnapshotRow, StorageConfig};
 
     #[test]
+    fn swift_fixture_preserves_active_pr_publication_disposition() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/wave_detail.json"
+        ));
+        let snapshot: WaveDetailSnapshot = serde_json::from_str(fixture).unwrap();
+        let task = &snapshot.projects[0].tasks[0];
+        let pr = &task.prs[0];
+
+        assert_eq!(task.active_pr.as_deref(), Some(pr.id.as_str()));
+        assert_eq!(pr.phase, PrPhase::Open);
+        assert_eq!(
+            pr.publication.as_ref().unwrap().after_merge,
+            AfterMerge::CompleteTask
+        );
+        assert_eq!(
+            pr.publication
+                .as_ref()
+                .unwrap()
+                .github
+                .as_ref()
+                .unwrap()
+                .number,
+            912
+        );
+    }
+
+    #[test]
     fn unknown_project_is_a_snapshot_error_not_a_synthetic_project() {
         let error = project_index(&[], "project-1", "missing")
             .expect_err("unknown Project must fail loudly");
@@ -1257,7 +1361,8 @@ mod tests {
                         owner: NextMoveOwner::Project,
                         reason: "Task is ready to start".into(),
                     },
-                    pull_requests: Vec::new(),
+                    prs: Vec::new(),
+                    active_pr: None,
                 }],
             }],
         };
@@ -1337,7 +1442,8 @@ mod tests {
             runtime,
             directive: None,
             next_move,
-            pull_requests: Vec::new(),
+            prs: Vec::new(),
+            active_pr: None,
         }
     }
 

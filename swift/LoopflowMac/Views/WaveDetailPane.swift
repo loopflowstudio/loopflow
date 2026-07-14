@@ -339,9 +339,8 @@ private struct WaveTaskWorkView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
                 }
-                ForEach(task.pullRequests, id: \.url) { pullRequest in
-                    Link("PR #\(pullRequest.number)", destination: pullRequest.url)
-                        .font(Typography.caption(10))
+                ForEach(task.prs) { pr in
+                    PrLink(pr: pr)
                 }
             }
         }
@@ -395,7 +394,7 @@ private struct WaveWorkInspector: View {
                     reason: project.nextMove.reason,
                     provider: project.runtime?.provider,
                     location: nil,
-                    pullRequests: []
+                    prs: []
                 )
             } else if let task {
                 Text("\(task.task.identifier) · \(task.task.name)")
@@ -407,7 +406,7 @@ private struct WaveWorkInspector: View {
                     reason: task.nextMove.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
-                    pullRequests: task.pullRequests
+                    prs: task.prs
                 )
                 if task.runtime != nil {
                     Button("Open Task workspace") { showsTaskWorkspace = true }
@@ -455,7 +454,7 @@ private struct WaveWorkInspector: View {
         reason: String,
         provider: String?,
         location: String?,
-        pullRequests: [PullRequestSnapshot]
+        prs: [PrSnapshot]
     ) -> some View {
         Text("\(status) · \(reason)")
             .font(Typography.caption(11))
@@ -483,9 +482,28 @@ private struct WaveWorkInspector: View {
                 .foregroundStyle(palette.textSecondary)
                 .textSelection(.enabled)
         }
-        ForEach(pullRequests, id: \.url) { pullRequest in
-            Link("PR #\(pullRequest.number)", destination: pullRequest.url)
+        ForEach(prs) { pr in
+            PrLink(pr: pr)
+        }
+    }
+}
+
+private struct PrLink: View {
+    let pr: PrSnapshot
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        if let github = pr.publication?.github {
+            Link(
+                "PR #\(github.number) · \(pr.phase.rawValue)\(pr.publication?.afterMerge.kind == .completeTask ? " · completes Task" : "")",
+                destination: github.url
+            )
+            .font(Typography.caption(10))
+        } else {
+            Text("PR \(pr.sequence) · \(pr.phase.rawValue) · \(pr.branch)")
                 .font(Typography.caption(10))
+                .foregroundStyle(palette.textSecondary)
         }
     }
 }

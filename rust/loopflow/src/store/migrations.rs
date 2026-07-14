@@ -90,8 +90,8 @@ const MIGRATIONS: &[Migration] = &[
             minor: 11,
             ordinal: 1,
         },
-        name: "task_deliveries",
-        sql: include_str!("migrations/0.11.001_task_deliveries.sql"),
+        name: "task_prs",
+        sql: include_str!("migrations/0.11.001_task_prs.sql"),
     },
 ];
 
@@ -337,6 +337,7 @@ mod tests {
         active_namespace, applied_versions, apply_set, apply_sqlite, latest_version_sqlite,
         product_schema, validate_set, Migration, MigrationId, MIGRATIONS,
     };
+    use crate::task::TaskEventKind;
 
     /// Stand-ins for the releases that have not happened yet: one more migration
     /// in the baseline's minor, and the first of the next minor.
@@ -421,10 +422,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_sqlite(&conn).unwrap();
 
-        assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            "0.11.001_task_deliveries"
-        );
+        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.001_task_prs");
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
@@ -436,7 +434,7 @@ mod tests {
             vec![
                 "0.10.001_initial".to_string(),
                 "0.10.002_session_execution_context".to_string(),
-                "0.11.001_task_deliveries".to_string()
+                "0.11.001_task_prs".to_string()
             ]
         );
     }
@@ -481,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_task_rows_become_sequence_one_deliveries_without_losing_events() {
+    fn existing_task_rows_become_sequence_one_prs_without_losing_events() {
         let conn = open();
         apply_set(&conn, &MIGRATIONS[..2]).unwrap();
         conn.execute(
@@ -543,10 +541,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(session, ("completed".to_string(), "inf-123".to_string()));
-        let delivery: (i64, String, String, String, String) = conn
+        let pr: (i64, String, i64, String, i64, String, String, Option<i64>) = conn
             .query_row(
-                "SELECT sequence, branch, status, after_merge, merge_commit
-                 FROM task_deliveries WHERE task_session_id='ts_legacy'",
+                "SELECT sequence, branch, publication_requested_at, after_merge,
+                        github_number, github_url, merge_commit, abandoned_at
+                 FROM task_prs WHERE task_session_id='ts_legacy'",
                 [],
                 |row| {
                     Ok((
@@ -555,18 +554,24 @@ mod tests {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
                     ))
                 },
             )
             .unwrap();
         assert_eq!(
-            delivery,
+            pr,
             (
                 1,
                 "jack/inf-123".to_string(),
-                "merged".to_string(),
+                20,
                 "complete_task".to_string(),
+                101,
+                "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
                 "legacy-unknown".to_string(),
+                None,
             )
         );
         let events: i64 = conn
@@ -577,23 +582,26 @@ mod tests {
             )
             .unwrap();
         assert_eq!(events, 3);
-        let event_shape: (String, String, String) = conn
+        let event_shape: (String, String, String, String) = conn
             .query_row(
                 "SELECT
-                    json_extract(kind_json, '$.delivery_id'),
+                    kind_json,
+                    json_extract(kind_json, '$.pr_id'),
                     (SELECT json_extract(kind_json, '$.from') FROM task_events
                      WHERE json_extract(kind_json, '$.kind')='status_changed'),
                     (SELECT json_extract(kind_json, '$.to') FROM task_events
                      WHERE json_extract(kind_json, '$.kind')='status_changed')
                  FROM task_events
-                 WHERE json_extract(kind_json, '$.kind')='pull_request_opened'",
+                 WHERE json_extract(kind_json, '$.kind')='pr_opened'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert!(event_shape.0.starts_with("td_"));
-        assert_eq!(event_shape.1, "waiting");
-        assert_eq!(event_shape.2, "completed");
+        let event: TaskEventKind = serde_json::from_str(&event_shape.0).unwrap();
+        assert!(matches!(event, TaskEventKind::PrOpened { sequence: 1, .. }));
+        assert!(event_shape.1.starts_with("pr_"));
+        assert_eq!(event_shape.2, "waiting");
+        assert_eq!(event_shape.3, "completed");
     }
 
     #[test]
@@ -709,10 +717,7 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_sqlite(&conn).unwrap();
-        assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            "0.11.001_task_deliveries"
-        );
+        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.001_task_prs");
     }
 
     #[test]

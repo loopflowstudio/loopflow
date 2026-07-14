@@ -416,8 +416,8 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::task::{
-        AfterMerge, PmWritebackState, TaskDelivery, TaskDeliveryId, TaskDeliveryStatus,
-        TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
+        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
     use std::env;
@@ -466,19 +466,17 @@ mod tests {
         }
     }
 
-    fn make_task_delivery(session: &TaskSession) -> TaskDelivery {
-        TaskDelivery {
-            id: TaskDeliveryId::new(),
+    fn make_task_pr(session: &TaskSession) -> TaskPr {
+        TaskPr {
+            id: TaskPrId::new(),
             task_session_id: session.id.clone(),
             sequence: 1,
             slug: session.workspace_slug.clone(),
             branch: format!("jack/{}", session.workspace_slug),
             base_commit: "deadbeef".to_string(),
-            status: TaskDeliveryStatus::Working,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            pull_request: None,
+            publication: None,
             merge_commit: None,
+            abandoned_at: None,
             created_at: session.created_at,
             updated_at: session.updated_at,
         }
@@ -555,7 +553,7 @@ mod tests {
             ChildCommandSource::Wave(wave.id().clone()),
         );
         store
-            .reserve_task_session_with_directive(&task, &make_task_delivery(&task), &task_initial)
+            .reserve_task_session_with_directive(&task, &make_task_pr(&task), &task_initial)
             .await
             .unwrap();
         assert_eq!(store.child_directives(&task_target).await.unwrap().len(), 1);
@@ -712,7 +710,7 @@ mod tests {
 
         let task = make_task_session(&wave, &project);
         store
-            .create_task_session(&task, &make_task_delivery(&task))
+            .create_task_session(&task, &make_task_pr(&task))
             .await
             .unwrap();
         store
@@ -785,7 +783,7 @@ mod tests {
         let task = make_task_session(&wave, &project);
 
         let missing = store
-            .create_task_session(&task, &make_task_delivery(&task))
+            .create_task_session(&task, &make_task_pr(&task))
             .await
             .unwrap_err();
         assert!(missing.to_string().contains("requires Project Session"));
@@ -794,7 +792,7 @@ mod tests {
         let mut wrong_project = make_task_session(&wave, &project);
         wrong_project.launch.project.id = LinearProjectId::new("another-project").unwrap();
         let mismatched = store
-            .create_task_session(&wrong_project, &make_task_delivery(&wrong_project))
+            .create_task_session(&wrong_project, &make_task_pr(&wrong_project))
             .await
             .unwrap_err();
         assert!(mismatched.to_string().contains("does not own Task"));
@@ -803,7 +801,7 @@ mod tests {
         store.create_wave(&other_wave).await.unwrap();
         let wrong_wave = make_task_session(&other_wave, &project);
         let mismatched = store
-            .create_task_session(&wrong_wave, &make_task_delivery(&wrong_wave))
+            .create_task_session(&wrong_wave, &make_task_pr(&wrong_wave))
             .await
             .unwrap_err();
         assert!(mismatched.to_string().contains("does not own Task"));
@@ -821,7 +819,7 @@ mod tests {
         store.create_project_session(&project).await.unwrap();
         let task = make_task_session(&wave, &project);
         store
-            .create_task_session(&task, &make_task_delivery(&task))
+            .create_task_session(&task, &make_task_pr(&task))
             .await
             .unwrap();
 
@@ -908,7 +906,7 @@ mod tests {
         store.create_project_session(&project).await.unwrap();
         let session = make_task_session(&wave, &project);
         store
-            .create_task_session(&session, &make_task_delivery(&session))
+            .create_task_session(&session, &make_task_pr(&session))
             .await
             .unwrap();
 
@@ -1048,7 +1046,7 @@ mod tests {
         second.launch.issue.identifier = "INF-124".to_string();
         second.worktree = PathBuf::from("/repo.inf-124");
         store
-            .create_task_session(&second, &make_task_delivery(&second))
+            .create_task_session(&second, &make_task_pr(&second))
             .await
             .unwrap();
         assert!(store
@@ -1059,7 +1057,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_deliveries_are_ordered_and_rotation_is_atomic() {
+    async fn task_prs_are_ordered_and_rotation_is_atomic() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
             .await
@@ -1069,96 +1067,123 @@ mod tests {
         let project = make_project_session(&wave);
         store.create_project_session(&project).await.unwrap();
         let session = make_task_session(&wave, &project);
-        let mut first = make_task_delivery(&session);
+        let mut first = make_task_pr(&session);
         store.create_task_session(&session, &first).await.unwrap();
 
-        first.status = TaskDeliveryStatus::Merged;
-        first.pull_request = Some(crate::task::PullRequestRef {
-            number: 101,
-            url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+        first.publication = Some(PrPublication {
+            requested_at: first.updated_at,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 101,
+                url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+            }),
         });
         first.merge_commit = Some("merge-101".to_string());
         first.updated_at = OffsetDateTime::now_utc();
         let now = OffsetDateTime::now_utc();
-        let second = TaskDelivery {
-            id: TaskDeliveryId::new(),
+        let second = TaskPr {
+            id: TaskPrId::new(),
             task_session_id: session.id.clone(),
             sequence: 2,
             slug: "released-proof".to_string(),
             branch: format!("jack/{}-released-proof", session.workspace_slug),
             base_commit: "main-after-101".to_string(),
-            status: TaskDeliveryStatus::Working,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            pull_request: None,
+            publication: None,
             merge_commit: None,
+            abandoned_at: None,
             created_at: now,
             updated_at: now,
         };
-        store
-            .settle_task_delivery(&first, Some(&second))
-            .await
-            .unwrap();
-        store
-            .settle_task_delivery(&first, Some(&second))
-            .await
-            .unwrap();
+        store.settle_task_pr(&first, Some(&second)).await.unwrap();
+        store.settle_task_pr(&first, Some(&second)).await.unwrap();
 
         assert_eq!(
             store
-                .task_deliveries(&session.id)
+                .task_prs(&session.id)
                 .await
                 .unwrap()
                 .iter()
-                .map(|delivery| delivery.sequence)
+                .map(|pr| pr.sequence)
                 .collect::<Vec<_>>(),
             vec![1, 2]
         );
         assert_eq!(
-            store
-                .active_task_delivery(&session.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .id,
+            store.active_task_pr(&session.id).await.unwrap().unwrap().id,
             second.id
         );
 
         let mut abandoned = second.clone();
-        abandoned.status = TaskDeliveryStatus::Abandoned;
-        abandoned.updated_at = OffsetDateTime::now_utc();
-        let conflicting = TaskDelivery {
-            id: TaskDeliveryId::new(),
+        let abandoned_at = OffsetDateTime::now_utc();
+        abandoned.abandoned_at = Some(abandoned_at);
+        abandoned.updated_at = abandoned_at;
+        let conflicting = TaskPr {
+            id: TaskPrId::new(),
             task_session_id: session.id.clone(),
             sequence: 3,
             slug: "conflict".to_string(),
             branch: first.branch.clone(),
             base_commit: "main-after-102".to_string(),
-            status: TaskDeliveryStatus::Working,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            pull_request: None,
+            publication: None,
             merge_commit: None,
+            abandoned_at: None,
             created_at: now,
             updated_at: now,
         };
         assert!(store
-            .settle_task_delivery(&abandoned, Some(&conflicting))
+            .settle_task_pr(&abandoned, Some(&conflicting))
             .await
             .is_err());
         assert_eq!(
             store
-                .active_task_delivery(&session.id)
+                .active_task_pr(&session.id)
                 .await
                 .unwrap()
                 .unwrap()
-                .status,
-            TaskDeliveryStatus::Working
+                .phase(),
+            PrPhase::Working
         );
     }
 
     #[tokio::test]
-    async fn empty_delivery_and_task_complete_atomically() {
+    async fn pr_publication_round_trips_before_github_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let session = make_task_session(&wave, &project);
+        let mut pr = make_task_pr(&session);
+        store.create_task_session(&session, &pr).await.unwrap();
+
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+            github: None,
+        });
+        store.update_task_pr(&pr).await.unwrap();
+
+        let publishing = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        assert_eq!(publishing.phase(), PrPhase::Publishing);
+        assert_eq!(publishing.publication, pr.publication);
+
+        pr.publication.as_mut().unwrap().github = Some(GithubPr {
+            number: 101,
+            url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+        });
+        store.update_task_pr(&pr).await.unwrap();
+
+        let open = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        assert_eq!(open.phase(), PrPhase::Open);
+        assert_eq!(open.publication, pr.publication);
+    }
+
+    #[tokio::test]
+    async fn empty_pr_is_skipped_when_task_completes() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
             .await
@@ -1168,17 +1193,12 @@ mod tests {
         let project = make_project_session(&wave);
         store.create_project_session(&project).await.unwrap();
         let mut session = make_task_session(&wave, &project);
-        let mut delivery = make_task_delivery(&session);
-        store
-            .create_task_session(&session, &delivery)
-            .await
-            .unwrap();
+        let pr = make_task_pr(&session);
+        store.create_task_session(&session, &pr).await.unwrap();
 
-        delivery.status = TaskDeliveryStatus::Abandoned;
-        delivery.updated_at = OffsetDateTime::now_utc();
         session.set_status(TaskSessionStatus::Completed, "investigation recorded");
         store
-            .complete_task_session(&session, Some(&delivery))
+            .complete_task_session(&session, Some(&pr))
             .await
             .unwrap();
 
@@ -1191,10 +1211,8 @@ mod tests {
                 .status,
             TaskSessionStatus::Completed
         );
-        let stored = store.task_deliveries(&session.id).await.unwrap();
-        assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].id, delivery.id);
-        assert_eq!(stored[0].status, TaskDeliveryStatus::Abandoned);
+        let stored = store.task_prs(&session.id).await.unwrap();
+        assert!(stored.is_empty());
     }
 
     #[tokio::test]
@@ -1209,7 +1227,7 @@ mod tests {
         store.create_project_session(&project).await.unwrap();
         let session = make_task_session(&wave, &project);
         store
-            .create_task_session(&session, &make_task_delivery(&session))
+            .create_task_session(&session, &make_task_pr(&session))
             .await
             .unwrap();
         let target = ChildRef::Task(session.id.clone());
@@ -1261,7 +1279,7 @@ mod tests {
         with_command.begin_generation("task-a".to_string());
         with_command.set_status(TaskSessionStatus::Running, "provider active");
         store
-            .create_task_session(&with_command, &make_task_delivery(&with_command))
+            .create_task_session(&with_command, &make_task_pr(&with_command))
             .await
             .unwrap();
         let command = ChildCommand::new(
@@ -1304,7 +1322,7 @@ mod tests {
         without_command.begin_generation("task-b".to_string());
         without_command.set_status(TaskSessionStatus::Running, "provider active");
         store
-            .create_task_session(&without_command, &make_task_delivery(&without_command))
+            .create_task_session(&without_command, &make_task_pr(&without_command))
             .await
             .unwrap();
         let stopped = store
@@ -1335,7 +1353,7 @@ mod tests {
         store.create_project_session(&project).await.unwrap();
         let session = make_task_session(&wave, &project);
         store
-            .create_task_session(&session, &make_task_delivery(&session))
+            .create_task_session(&session, &make_task_pr(&session))
             .await
             .unwrap();
         let decision_id = ChildDecisionId::new();
@@ -1391,7 +1409,7 @@ mod tests {
         let mut session = make_task_session(&wave, &project);
         session.set_status(TaskSessionStatus::Waiting, "waiting for review");
         store
-            .create_task_session(&session, &make_task_delivery(&session))
+            .create_task_session(&session, &make_task_pr(&session))
             .await
             .unwrap();
 
@@ -1415,7 +1433,7 @@ mod tests {
         second.worktree = PathBuf::from("/repo.inf-124");
         second.set_status(TaskSessionStatus::Waiting, "waiting for work");
         store
-            .create_task_session(&second, &make_task_delivery(&second))
+            .create_task_session(&second, &make_task_pr(&second))
             .await
             .unwrap();
         second.begin_generation("task-two".to_string());

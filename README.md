@@ -89,8 +89,8 @@ lf task wait INF-123
 ```
 
 The Linear task exists before its worktree. One durable Task Session retains
-that immutable sibling worktree and provider history through review, CI repair,
-and merge. Every Task PR targets `main`.
+that stable sibling worktree and provider history through serial PRs, review,
+CI repair, and explicit completion. Every Task PR targets `main`.
 
 Task Sessions inherit the Wave objective, curated memory, Project definition,
 and KRs. Typed, idempotent Task observations keep the Wave informed without
@@ -126,8 +126,8 @@ lf task run INF-123 --name release-scoped-migrations
 lf pr land -c
 ```
 
-The Task keeps one worktree and provider history. Each serial delivery owns one
-branch and at most one PR. Use bare `lf pr land --next <slug>` when another PR
+The Task keeps one worktree and an ordered PR history. Each serial PR owns one
+branch. Use bare `lf pr land --next <slug>` when another PR
 follows; use `-c` only when this merge completes the Task. Finish clean
 investigation work without a PR using `lf task complete INF-123 --summary "..."`.
 

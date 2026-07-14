@@ -62,7 +62,7 @@ fn prepare_pr(
         ));
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
-    crate::ops::pr::reject_control_plane_delivery(&repo_root)?;
+    crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     prepare_land(&repo_root, options, progress)?;
@@ -85,6 +85,15 @@ fn prepare_pr(
         return Ok(None);
     }
 
+    crate::ops::task::request_task_pr_publication(
+        &repo_root,
+        if options.complete {
+            crate::task::AfterMerge::CompleteTask
+        } else {
+            crate::task::AfterMerge::Review
+        },
+        options.next_slug.as_deref(),
+    )?;
     ensure_pr(
         &repo_root,
         pr_exists,
@@ -96,16 +105,7 @@ fn prepare_pr(
         progress,
     )?;
     let pr = crate::ops::pr::current_pr(&repo_root)?;
-    crate::ops::task::configure_task_pull_request(
-        &repo_root,
-        pr.as_ref(),
-        if options.complete {
-            crate::task::AfterMerge::CompleteTask
-        } else {
-            crate::task::AfterMerge::Review
-        },
-        options.next_slug.as_deref(),
-    )?;
+    crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref())?;
     finalize_remote(
         &repo_root,
         pr_title.as_deref(),

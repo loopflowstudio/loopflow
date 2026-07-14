@@ -76,10 +76,27 @@
             "incorporated_summary": "Verification failures are now first."
           },
           "next_move": {"owner": "review", "reason": "waiting for review"},
-          "pull_requests": [{
-            "number": 912,
-            "url": "https://github.com/loopflowstudio/loopflow/pull/912"
-          }]
+          "prs": [{
+            "id": "pr_33333333333333333333333333333333",
+            "sequence": 1,
+            "slug": "infrastructure-task",
+            "branch": "jack/infrastructure.task.20260713_1200",
+            "base_commit": "1111111111111111111111111111111111111111",
+            "phase": "open",
+            "empty": false,
+            "publication": {
+              "requested_at": "2026-07-13T18:45:00Z",
+              "after_merge": {"kind": "complete_task"},
+              "next_slug": null,
+              "github": {
+                "number": 912,
+                "url": "https://github.com/loopflowstudio/loopflow/pull/912"
+              }
+            },
+            "merge_commit": null,
+            "abandoned_at": null
+          }],
+          "active_pr": "pr_33333333333333333333333333333333"
         },
         {
           "task": {
@@ -94,7 +111,8 @@
           "runtime": null,
           "directive": null,
           "next_move": {"owner": "project", "reason": "Task is ready to start"},
-          "pull_requests": []
+          "prs": [],
+          "active_pr": null
         }
       ]
     }

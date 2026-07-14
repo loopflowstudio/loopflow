@@ -68,11 +68,11 @@ impl ChildSession {
         match self {
             Self::Project(session) => Ok(session.supervisor_restart_bar()),
             Self::Task(session) => {
-                let delivery = store
-                    .active_task_delivery(&session.id)
+                let pr = store
+                    .active_task_pr(&session.id)
                     .await
                     .map_err(child_error)?;
-                Ok(session.supervisor_restart_bar(delivery.as_ref()))
+                Ok(session.supervisor_restart_bar(pr.as_ref()))
             }
         }
     }
@@ -228,7 +228,7 @@ impl ChildSession {
     /// Without this the command is accepted silently: the receipt says `accepted`
     /// while `lf task show` still reads whatever it read before, so an operator
     /// cannot tell an interrupt that landed from one that evaporated. A delivered
-    /// (`Submitted`) Session keeps its status — interrupting it must not erase the
+    /// (`Open`) Session keeps its status — interrupting it must not erase the
     /// fact that its PR is open.
     async fn record_interrupt_of_inactive_process(&mut self, store: &SharedStore) -> OpsResult<()> {
         let reason = "interrupted while no process was running; \
@@ -256,12 +256,10 @@ impl ChildSession {
             }
             Self::Task(session) => {
                 let submitted = store
-                    .active_task_delivery(&session.id)
+                    .active_task_pr(&session.id)
                     .await
                     .map_err(child_error)?
-                    .is_some_and(|delivery| {
-                        delivery.status == crate::task::TaskDeliveryStatus::Submitted
-                    });
+                    .is_some_and(|pr| pr.phase() == crate::task::PrPhase::Open);
                 if submitted {
                     return Ok(());
                 }
@@ -651,10 +649,7 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::store::{open_store, StorageConfig};
-    use crate::task::{
-        AfterMerge, PullRequestRef, TaskDelivery, TaskDeliveryId, TaskDeliveryStatus,
-        TaskSessionStatus,
-    };
+    use crate::task::{GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
     use crate::wave::Wave;
 
     use super::{queue_command, ChildSession};
@@ -749,19 +744,17 @@ mod tests {
         }
     }
 
-    fn make_task_delivery(task: &crate::task::TaskSession) -> TaskDelivery {
-        TaskDelivery {
-            id: TaskDeliveryId::new(),
+    fn make_task_pr(task: &crate::task::TaskSession) -> TaskPr {
+        TaskPr {
+            id: TaskPrId::new(),
             task_session_id: task.id.clone(),
             sequence: 1,
             slug: task.workspace_slug.clone(),
             branch: format!("test/{}", task.workspace_slug),
             base_commit: "0".repeat(40),
-            status: TaskDeliveryStatus::Working,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            pull_request: None,
+            publication: None,
             merge_commit: None,
+            abandoned_at: None,
             created_at: task.created_at,
             updated_at: task.updated_at,
         }
@@ -903,7 +896,7 @@ mod tests {
     /// Task Session `ts_c33d8dc7…` emitted `pull_request_opened` for #878 and went
     /// `submitted` with no live process. Supervision then launched generation 2
     /// and drove it back to `running` at `task_clarify` — re-deriving a design
-    /// whose PR was already open for review, because `Submitted` is neither
+    /// whose PR was already open for review, because `Open` is neither
     /// terminal nor process-active and so reads exactly like a Session that
     /// merely stopped.
     ///
@@ -923,14 +916,18 @@ mod tests {
         store.create_project_session(&project).await.unwrap();
 
         let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
-        let mut delivery = make_task_delivery(&task);
-        store.create_task_session(&task, &delivery).await.unwrap();
-        delivery.status = TaskDeliveryStatus::Submitted;
-        delivery.pull_request = Some(PullRequestRef {
-            number: 878,
-            url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+        let mut pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: crate::task::AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 878,
+                url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+            }),
         });
-        store.update_task_delivery(&delivery).await.unwrap();
+        store.update_task_pr(&pr).await.unwrap();
         let task_id = task.id.clone();
 
         // The supervisor's steer: exactly the path the Project wake took.
@@ -960,21 +957,25 @@ mod tests {
     /// supervisor, not the operator — otherwise delivered work becomes unreachable.
     #[tokio::test]
     async fn an_operator_may_still_resume_a_submitted_task_to_answer_review() {
-        let (task, delivery) = {
+        let (task, pr) = {
             let wave = make_wave("/tmp");
             let project = make_project(&wave, ProjectSessionStatus::Running);
             let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
-            let mut delivery = make_task_delivery(&task);
-            delivery.status = TaskDeliveryStatus::Submitted;
-            delivery.pull_request = Some(PullRequestRef {
-                number: 878,
-                url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+            let mut pr = make_task_pr(&task);
+            pr.publication = Some(PrPublication {
+                requested_at: pr.updated_at,
+                after_merge: crate::task::AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number: 878,
+                    url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+                }),
             });
-            (task, delivery)
+            (task, pr)
         };
 
         // The supervisor is barred...
-        assert!(task.supervisor_restart_bar(Some(&delivery)).is_some());
+        assert!(task.supervisor_restart_bar(Some(&pr)).is_some());
         // ...but nothing about the Session itself is terminal, so an explicit
         // `lf task resume` still has a Session to resume.
         assert!(!task.status.is_terminal());

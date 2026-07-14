@@ -12,7 +12,7 @@ Human ── Wave Chat ──▶ Wave
                  Project Session
                        │ supervises
                        ▼
-                   Task Session ──▶ worktree + PR to main
+                   Task Session ──▶ stable worktree + serial PRs to main
                        │
                        └──────────▶ diff/file/terminal inspector
 
@@ -29,13 +29,13 @@ cadence, memory, and project selection. There is no global service.
 |---|---|---|
 | Wave | `wave/<name>/GOAL.md`, `MEMORY.md`, registry row | Choose Projects, converse, remember, and stay resident |
 | Project | Linear Project + local Project Session | Pursue measurable KRs across Tasks |
-| Task | Linear issue + local Task Session | Deliver one change through a worktree and PR |
+| Task | Linear issue + local Task Session | Advance concrete work through zero or more serial PRs |
 | Directive | local store | Preserve child direction and incorporation proof |
 | Trace | local store + `~/.lf/traces` | Record agent launch and conversation evidence |
 
 Every Project belongs to one Wave. Every Task belongs to one Project and one
-durable Project Session. Only a Task Session owns a worktree, branch, and pull
-request.
+durable Project Session. Only a Task Session owns a worktree. Its ordered PRs
+own the serial branches and GitHub history that advance it.
 
 There is one supervision path: Wave → Project Session → Task Session. The Wave
 retains root authority to inspect or override any descendant, but that command
@@ -65,7 +65,8 @@ Git primitives; Wave, Project, and Task controllers own lifecycle decisions.
 Each controller runs one bounded `clarify → pursue → mutate` flow. The three
 skills remain separate because they have separate jobs; no skill owns a loop
 bit. After the pass, the domain controller inspects durable truth. A Task
-continues, waits for review, or ends on merge/abandonment. A Project repeats,
+continues, rotates after a merged or abandoned PR, waits for review, or ends on
+explicit Task completion. A Project repeats,
 waits on Tasks, blocks on no progress, or completes when every current KR
 holds. A Wave returns to its resident idle state and wakes on human input,
 cadence, or child observations.
@@ -81,9 +82,15 @@ Important paths:
 ## Local store
 
 SQLite coordinates Wave identity, PM snapshots, Project and Task Sessions,
-commands, directives, event ledgers, provider credentials, and traces. Callers
-open it directly. The default path is `~/.lf/loopflow.db`; set `LF_DB_PATH` to
-use another path.
+ordered Task PRs, commands, directives, event ledgers, provider credentials,
+and traces. Callers open it directly. The default path is
+`~/.lf/loopflow.db`; set `LF_DB_PATH` to use another path.
+
+A Task PR persists evidence, not a mutable state label. No publication evidence
+means Working. A publication request without a GitHub receipt means Publishing;
+the receipt makes it Open; merge and abandonment have their own terminal
+evidence. The GitHub receipt is nested under publication, so GitHub cannot exist
+without the durable request that explains `after_merge`.
 
 Important path:
 
@@ -107,17 +114,26 @@ multiplexer never owns Task lifecycle or worktree identity.
 Project and Task Sessions are explicit child processes. They share the local
 store and durable control channel; they do not call a global HTTP API.
 
-## Delivery truth
+## PR truth
 
 Task runners and status commands reconcile pull-request state through `gh`.
-Merge correctness does not depend on webhook delivery. A merged Task remains
-visible until Linear writeback succeeds or exposes a pending reconciliation.
+Merge correctness does not depend on webhook delivery. A merge settles one PR;
+its recorded `after_merge` disposition decides whether the runner rotates the
+same worktree or completes the Task. A completed Task remains visible until
+Linear writeback succeeds or exposes a pending reconciliation. A completing
+merge settles the PR and completes the Task in one SQLite transaction.
 
 ## Wire contracts
 
 The Mac app invokes `lf --json`. Shared fixtures keep Rust and Swift
 representations aligned. Wire fields have no implicit defaults: absence is
 either a parse error or an explicit optional value.
+
+Task snapshots expose ordered `prs` plus `active_pr`. Each PR includes its
+derived phase, active-worktree emptiness when knowable, publication disposition,
+nested GitHub receipt, merge commit, and abandonment time. Rust and Swift can
+therefore answer whether the current PR exists on GitHub and whether merging it
+completes the Task.
 
 Important paths:
 

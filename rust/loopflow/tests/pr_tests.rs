@@ -2,9 +2,11 @@ mod support;
 
 use std::process::Command;
 
+use loopflow::ops::task::task_status;
 use loopflow::ops::{create_or_update_pr, current_pr, NullProgress, OpsError, PrOptions};
+use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication, TaskSessionStatus};
 use loopflow_test_support::TestRepo;
-use support::EnvGuard;
+use support::{register_task, EnvGuard};
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
     let diff = pr_diff.unwrap_or("");
@@ -29,6 +31,36 @@ fn write_gh_script_reject_base(expected_reject: &str) -> String {
     format!(
         "#!/bin/sh\ncase \"$1 $2\" in\n  'pr list')\n    echo '[]'; exit 0;;\n  'pr diff') exit 1;;\n  'pr create')\n    base=\"\"\n    while [ \"$#\" -gt 0 ]; do\n      if [ \"$1\" = \"--base\" ]; then\n        shift\n        base=\"$1\"\n      fi\n      shift\n    done\n    if [ \"$base\" = \"{expected_reject}\" ]; then\n      echo \"base branch matches head\" >&2\n      exit 1\n    fi\n    echo 'https://example.com/pr/1'\n    exit 0;;\n  'pr edit') exit 0;;\n  'pr ready') exit 0;;\n  'pr view') echo 'OPEN'; exit 0;;\nesac\nexit 0\n"
     )
+}
+
+fn gh_create_failure_script() -> &'static str {
+    r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+if [ "$1 $2" = "pr create" ]; then
+  echo 'GitHub is unavailable' >&2
+  exit 1
+fi
+exit 0
+"#
+}
+
+fn gh_merged_pr_script() -> &'static str {
+    r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1 $2" = "pr list" ]; then
+  echo '[{"url":"https://example.com/pr/912","state":"MERGED","isDraft":false,"number":912,"mergeCommit":{"oid":"merge-912"}}]'
+  exit 0
+fi
+exit 0
+"#
 }
 
 fn push_branch(repo: &TestRepo, name: &str) {
@@ -70,7 +102,108 @@ fn pr_create_calls_gh() {
 }
 
 #[test]
-fn canonical_checkout_refuses_delivery_before_committing_or_pushing() {
+fn github_failure_leaves_publication_intent_observable() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", gh_create_failure_script()), ("open", noop_script())],
+        home.path(),
+    );
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    repo.create_file("proof.txt", "publication intent\n");
+    repo.stage_all();
+    repo.commit("add publication proof");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("Persist publication first".to_string()),
+            body: Some("The GitHub call will fail.".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+    assert!(result.is_err());
+
+    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.session.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert_eq!(pr.phase(), PrPhase::Publishing);
+    let publication = pr.publication.expect("durable publication request");
+    assert_eq!(publication.after_merge, AfterMerge::Review);
+    assert!(publication.github.is_none());
+}
+
+#[test]
+fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    let session = task_status("INF-123").expect("reconcile Task PR");
+    assert_ne!(session.status, loopflow::task::TaskSessionStatus::Completed);
+
+    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.session.id))
+        .expect("read Task PRs");
+    assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].phase(), PrPhase::Merged);
+    let publication = prs[0].publication.as_ref().expect("adopted publication");
+    assert_eq!(publication.after_merge, AfterMerge::Review);
+    assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
+}
+
+#[test]
+fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        after_merge: AfterMerge::CompleteTask,
+        next_slug: None,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("mark PR as completing");
+
+    let session = task_status("INF-123").expect("reconcile completing PR");
+    assert_eq!(session.status, TaskSessionStatus::Completed);
+    let stored_session = runtime
+        .block_on(task.store.get_task_session(&task.session.id))
+        .expect("read completed Task")
+        .expect("completed Task");
+    assert_eq!(stored_session.status, TaskSessionStatus::Completed);
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.session.id))
+        .expect("read completing PR");
+    assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].phase(), PrPhase::Merged);
+}
+
+#[test]
+fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
     let repo = TestRepo::new();
 
     let result = create_or_update_pr(

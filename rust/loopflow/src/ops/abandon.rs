@@ -20,8 +20,7 @@ pub fn abandon_branch(
     options: &AbandonOptions,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    if options.branch.is_none()
-        && crate::ops::task::abandon_task_delivery(repo, options.force, progress)?
+    if options.branch.is_none() && crate::ops::task::abandon_task_pr(repo, options.force, progress)?
     {
         return Ok(());
     }

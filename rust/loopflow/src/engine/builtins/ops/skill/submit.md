@@ -30,7 +30,7 @@ lf pr submit [--create-pr] [--complete|-c] [--next <slug>] [-m "commit message"]
 ```
 
 Inside a Task, bare submit leaves the Task open. Use `--next <slug>` when
-another serial delivery follows, or `-c` when this merge completes the Task.
+another serial PR follows, or `-c` when this merge completes the Task.
 Do not combine them; a retry before merge may change the disposition.
 
 **Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.

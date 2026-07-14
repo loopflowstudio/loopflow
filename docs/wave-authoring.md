@@ -184,9 +184,9 @@ lf pm task create --wave infra --project stability --title "Daemon data integrit
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 ```
 
-Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels
-like it needs splitting, it does. Give it a clear finish line and name the
-Project it advances so its Task Session knows when to stop.
+Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial PRs,
+but it still needs one concrete finish line. Split independent outcomes into
+separate Tasks and name the Project each advances.
 
 ### Goal Frontmatter
 
@@ -250,7 +250,7 @@ lf task attach INF-123      # audited Task control prompt
 ```
 
 In **Loopflow**, a wave's detail view renders its native Project → Task work
-map, including current direction, next-move ownership, Task delivery, and
+map, including current direction, next-move ownership, Task PR history, and
 anything needing attention.
 
 ### Crons
@@ -279,7 +279,8 @@ A `wave/billing/` directory for a billing rewrite. **`GOAL.md`** sets the intent
 - Invoices generate correctly for all plan types
 - Legacy endpoints return the same responses during migration
 
-The backing **Linear project** holds the tasks, each scoped to one PR:
+The backing **Linear project** holds concrete Tasks. Most finish in one PR;
+larger coherent outcomes can advance through several serial PRs:
 
 ```
 Usage events       → Event capture and storage

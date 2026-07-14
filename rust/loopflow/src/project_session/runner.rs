@@ -678,18 +678,16 @@ async fn inspect_outcome(
         if task.status.is_terminal() {
             continue;
         }
-        let observed = crate::ops::task::reconcile_task_delivery(store, task)
+        let observed = crate::ops::task::reconcile_task_pr(store, task)
             .await
             .map_err(|error| anyhow!(error.to_string()))?;
         crate::ops::task::reconcile_process_liveness(store, task)
             .await
             .map_err(|error| anyhow!(error.to_string()))?;
-        let settled = observed
-            .as_ref()
-            .is_some_and(|delivery| delivery.status.is_settled())
-            || (observed.is_none() && store.active_task_delivery(&task.id).await?.is_none());
+        let settled = observed.as_ref().is_some_and(|pr| pr.is_settled())
+            || (observed.is_none() && store.active_task_pr(&task.id).await?.is_none());
         if settled && !task.status.is_terminal() {
-            crate::ops::task::ensure_working_delivery(store, task)
+            crate::ops::task::ensure_working_pr(store, task)
                 .await
                 .map_err(|error| anyhow!(error.to_string()))?;
             if !task.status.is_process_active() {
@@ -718,14 +716,14 @@ async fn inspect_outcome(
             fingerprint,
         });
     }
-    let mut has_submitted_delivery = false;
+    let mut has_open_pr = false;
     for task in &tasks {
-        has_submitted_delivery |= store
-            .active_task_delivery(&task.id)
+        has_open_pr |= store
+            .active_task_pr(&task.id)
             .await?
-            .is_some_and(|delivery| delivery.status == crate::task::TaskDeliveryStatus::Submitted);
+            .is_some_and(|pr| pr.phase() == crate::task::PrPhase::Open);
     }
-    if has_submitted_delivery
+    if has_open_pr
         || tasks.iter().any(|task| {
             matches!(
                 task.status,
@@ -1200,7 +1198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attached_project_direction_is_versioned_before_delivery() {
+    async fn attached_project_direction_is_versioned_before_provider_input() {
         let (store, session) = session("codex").await;
 
         handle_attachment(&store, &session, "pursue the parser first".to_string())

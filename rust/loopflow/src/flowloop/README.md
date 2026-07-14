@@ -15,7 +15,7 @@ lf task wait INF-123
 ```
 
 Each Task Session owns one stable sibling worktree and provider transcript.
-Ordered deliveries own its serial branches and PRs; a merge settles one
-delivery, while only `lf pr land -c` or `lf task complete` completes the Task.
+Ordered PRs own its serial branches; a merge settles one PR, while only
+`lf pr land -c` or `lf task complete` completes the Task.
 A Project Session owns the bounded KR-pursuit process that creates and
 supervises Tasks, but no worktree, branch, or PR.

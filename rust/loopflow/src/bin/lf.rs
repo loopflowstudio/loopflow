@@ -579,15 +579,10 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             }
         };
         let branch = snapshot
-            .active_delivery
+            .active_pr
             .as_ref()
-            .and_then(|active| {
-                snapshot
-                    .deliveries
-                    .iter()
-                    .find(|delivery| &delivery.id == active)
-            })
-            .map(|delivery| delivery.branch.as_str())
+            .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
+            .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
         println!(
             "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
@@ -600,18 +595,17 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             pm_writeback,
             session.status_reason,
         );
-        for delivery in &snapshot.deliveries {
-            let pr = delivery
-                .pull_request
-                .as_ref()
-                .map(|pull_request| format!("PR #{}", pull_request.number))
-                .unwrap_or_else(|| "no PR".to_string());
+        for pr in &snapshot.prs {
+            let provider = pr
+                .github()
+                .map(|github| format!("GitHub #{}", github.number))
+                .unwrap_or_else(|| "not opened on GitHub".to_string());
             println!(
-                "  delivery {}: {}  {}  {}",
-                delivery.sequence,
-                delivery.status.as_str(),
-                pr,
-                delivery.branch
+                "  PR {}: {}  {}  {}",
+                pr.sequence,
+                pr.phase().as_str(),
+                provider,
+                pr.branch
             );
         }
     }
@@ -1047,7 +1041,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             json,
         } => {
             let until = if until == "submitted" {
-                loopflow::ops::task::TaskWaitUntil::Submitted
+                loopflow::ops::task::TaskWaitUntil::Open
             } else {
                 loopflow::ops::task::TaskWaitUntil::Terminal
             };

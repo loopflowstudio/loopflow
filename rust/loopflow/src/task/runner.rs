@@ -19,9 +19,7 @@ use crate::child_session::{
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{
-    TaskDeliveryStatus, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
-};
+use crate::task::{PrPhase, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
@@ -272,8 +270,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 session.current_directive_version,
                                 session.incorporated_directive_version,
                             );
-                            let observed_delivery =
-                                crate::ops::task::reconcile_task_delivery(&store, &mut session)
+                            let observed_pr =
+                                crate::ops::task::reconcile_task_pr(&store, &mut session)
                                     .await
                                     .map_err(|error| anyhow!(error.to_string()))?;
                             if session.status == TaskSessionStatus::Completed {
@@ -290,13 +288,13 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 }
                                 return Ok(());
                             }
-                            let needs_rotation = if observed_delivery
+                            let needs_rotation = if observed_pr
                                 .as_ref()
-                                .is_some_and(|delivery| delivery.status.is_settled())
+                                .is_some_and(|pr| pr.is_settled())
                             {
                                 true
-                            } else if observed_delivery.is_none() {
-                                store.active_task_delivery(&session.id).await?.is_none()
+                            } else if observed_pr.is_none() {
+                                store.active_task_pr(&session.id).await?.is_none()
                             } else {
                                 false
                             };
@@ -313,11 +311,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
                             } else if needs_rotation {
-                                crate::ops::task::ensure_working_delivery(&store, &mut session)
+                                crate::ops::task::ensure_working_pr(&store, &mut session)
                                     .await
                                     .map_err(|error| anyhow!(error.to_string()))?;
                                 session.status_reason =
-                                    "Task delivery settled; starting the next delivery".to_string();
+                                    "Task PR settled; starting the next PR".to_string();
                                 store.update_task_session(&session).await?;
                                 let prepared = prepare_task_flow_step(
                                     &store,
@@ -337,15 +335,14 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 flow_turn_active = true;
                                 last_text.clear();
                                 continue 'runner;
-                            } else if let Some(delivery) = observed_delivery
+                            } else if let Some(pr) = observed_pr
                                 .as_ref()
-                                .filter(|delivery| delivery.status == TaskDeliveryStatus::Submitted)
+                                .filter(|pr| pr.phase() == PrPhase::Open)
                             {
-                                let number = delivery
-                                    .pull_request
-                                    .as_ref()
-                                    .map(|pull_request| pull_request.number)
-                                    .expect("submitted delivery requires a pull request");
+                                let number = pr
+                                    .github()
+                                    .expect("open Task PR requires a GitHub receipt")
+                                    .number;
                                 (
                                     TaskSessionStatus::Waiting,
                                     format!("pull request #{number} is open for review"),
@@ -532,11 +529,11 @@ async fn prepare_task_flow_step(
         step.step
     );
     store.update_task_session(session).await?;
-    let delivery = store
-        .active_task_delivery(&session.id)
+    let pr = store
+        .active_task_pr(&session.id)
         .await?
-        .ok_or_else(|| anyhow!("Task Session {} has no active delivery", session.id))?;
-    let seed = task_seed(session, &delivery, wave_name, directive);
+        .ok_or_else(|| anyhow!("Task Session {} has no active PR", session.id))?;
+    let seed = task_seed(session, &pr, wave_name, directive);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
@@ -912,12 +909,12 @@ async fn finish_command_stop(
 
 fn task_seed(
     session: &TaskSession,
-    delivery: &crate::task::TaskDelivery,
+    pr: &crate::task::TaskPr,
     wave_name: &str,
     directive: &ChildDirective,
 ) -> String {
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nDelivery {delivery_sequence}: {delivery_branch}\nBase commit: {base_commit}\n\nThis delivery owns one serial branch and at most one PR. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` completes the Task after merge. `lf pr abandon` discards only this delivery. `lf task complete {identifier} --summary \"...\"` completes clean work that needs no PR. The runner owns branch rotation between deliveries.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` completes the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` completes clean work that needs no PR. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,
@@ -931,9 +928,9 @@ fn task_seed(
         wave = wave_name,
         session_id = session.id,
         worktree = session.worktree.display(),
-        delivery_sequence = delivery.sequence,
-        delivery_branch = delivery.branch,
-        base_commit = delivery.base_commit,
+        pr_sequence = pr.sequence,
+        pr_branch = pr.branch,
+        base_commit = pr.base_commit,
     )
 }
 
@@ -973,8 +970,8 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        AfterMerge, PmWritebackState, TaskDelivery, TaskDeliveryId, TaskDeliveryStatus,
-        TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+        PmWritebackState, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId,
+        TaskSessionStatus,
     };
     use crate::wave::Wave;
 
@@ -1114,25 +1111,20 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let delivery = TaskDelivery {
-            id: TaskDeliveryId::new(),
+        let pr = TaskPr {
+            id: TaskPrId::new(),
             task_session_id: session.id.clone(),
             sequence: 1,
             slug: session.workspace_slug.clone(),
             branch: format!("test/{provider}"),
             base_commit: "deadbeef".to_string(),
-            status: TaskDeliveryStatus::Working,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            pull_request: None,
+            publication: None,
             merge_commit: None,
+            abandoned_at: None,
             created_at: now,
             updated_at: now,
         };
-        store
-            .create_task_session(&session, &delivery)
-            .await
-            .unwrap();
+        store.create_task_session(&session, &pr).await.unwrap();
         (store, session)
     }
 
@@ -1144,7 +1136,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attached_task_direction_is_versioned_before_delivery() {
+    async fn attached_task_direction_is_versioned_before_provider_input() {
         let (store, session) = conformance_session("codex").await;
 
         handle_attachment(&store, &session, "fix the parser first".to_string())

@@ -21,7 +21,7 @@ re-derive what these already record.
 
 ## API
 
-`lf pr land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge. In a Task worktree, bare land settles one delivery and keeps the Task open.
+`lf pr land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge. In a Task worktree, bare land settles one PR and keeps the Task open.
 
 ```
 lf pr land [--create-pr] [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
@@ -70,7 +70,7 @@ lf pr land --create-pr
 Inside a Task, choose the disposition explicitly:
 
 ```bash
-lf pr land --next released-upgrade-proof  # another serial delivery follows
+lf pr land --next released-upgrade-proof  # another serial PR follows
 lf pr land -c                             # this merge completes the Task
 ```
 

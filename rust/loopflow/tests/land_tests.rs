@@ -5,8 +5,9 @@ use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
+use loopflow::task::{AfterMerge, PrPhase};
 use loopflow_test_support::TestRepo;
-use support::EnvGuard;
+use support::{register_task, EnvGuard};
 
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
@@ -78,6 +79,26 @@ if [ "$1 $2" = "pr view" ]; then
   exit 0
 fi
 
+exit 0
+"#
+    )
+}
+
+fn gh_existing_pr_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+echo "$@" >> "{log_path}"
+if [ "$1 $2" = "pr list" ]; then
+  echo '[{{"url":"https://example.com/pr/912","state":"OPEN","isDraft":false,"number":912,"mergeCommit":null}}]'
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'https://example.com/pr/912'
+  exit 0
+fi
 exit 0
 "#
     )
@@ -380,6 +401,73 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     // Marks the PR ready, but does NOT arm auto-merge.
     assert!(log.contains("pr ready"));
     assert!(!log.contains("merge --auto"));
+}
+
+#[test]
+fn latest_land_disposition_wins_before_merge() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let log_path = home.path().join("gh.log");
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: true,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("land as completing PR");
+
+    land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: Some("follow-up-proof".to_string()),
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("revise land disposition");
+
+    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.session.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert_eq!(pr.phase(), PrPhase::Open);
+    let publication = pr.publication.expect("publication");
+    assert_eq!(publication.after_merge, AfterMerge::Review);
+    assert_eq!(publication.next_slug.as_deref(), Some("follow-up-proof"));
+    assert_eq!(publication.github.map(|pr| pr.number), Some(912));
 }
 
 #[test]

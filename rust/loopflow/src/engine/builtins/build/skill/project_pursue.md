@@ -32,7 +32,7 @@ lf pm task create --project <project> --title "..." --notes "..."
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
   same Task Session through review and merge.
-- The Project Session owns no worktree or delivery branch. Never edit, commit,
+- The Project Session owns no worktree or PR branch. Never edit, commit,
   test, or open a PR from the canonical main checkout; delegate every
   repository mutation to a Task Session.
 - Use `lf task follow-up`, `steer`, `interrupt`, `wait`, and `resume`. Do not

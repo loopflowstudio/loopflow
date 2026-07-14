@@ -230,7 +230,7 @@ fn orchestration_discipline(wave: &str) -> String {
          delegate anonymous work or the whole wave objective.\n\
          - Supervise durable Task Sessions with `lf task status`, `follow-up`, \
          `steer`, `interrupt`, `wait`, and `resume`. Each task owns one stable \
-         worktree; ordered deliveries own its serial branches and PRs to main. \
+         worktree; ordered PRs own its serial branches to main. \
          Keep the Wave home free of shipping edits.\n\
          - Keep turns centered on selection, direct progress, sequencing, and \
          authored reports.\n\

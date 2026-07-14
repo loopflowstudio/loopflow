@@ -126,7 +126,7 @@ pub struct ProjectSession {
 
 impl ProjectSession {
     /// Why a supervisor must not start another process generation, if it must not.
-    /// A Project has no PR, so delivery does not apply — see
+    /// A Project has no PR, so PR review does not apply — see
     /// [`crate::task::TaskSession::supervisor_restart_bar`].
     pub fn supervisor_restart_bar(&self) -> Option<String> {
         if self.status.is_terminal() {

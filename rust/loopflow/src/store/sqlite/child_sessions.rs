@@ -28,7 +28,7 @@ use crate::session_context::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    PullRequestRef, TaskDelivery, TaskDeliveryId, TaskDeliveryStatus, TaskEvent, TaskEventKind,
+    AfterMerge, GithubPr, PrPhase, PrPublication, TaskEvent, TaskEventKind, TaskPr, TaskPrId,
     TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
@@ -38,14 +38,10 @@ impl SqliteStore {
     // Durable task sessions: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
-    pub fn insert_task_session(
-        &self,
-        session: &TaskSession,
-        delivery: &TaskDelivery,
-    ) -> StoreResult<()> {
+    pub fn insert_task_session(&self, session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, session, delivery)?;
+        insert_initial_task(&transaction, session, pr)?;
         transaction.commit()?;
         Ok(())
     }
@@ -53,13 +49,13 @@ impl SqliteStore {
     pub fn reserve_task_session_with_directive(
         &self,
         session: &TaskSession,
-        delivery: &TaskDelivery,
+        pr: &TaskPr,
         directive: &ChildDirective,
     ) -> StoreResult<()> {
         ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, session, delivery)?;
+        insert_initial_task(&transaction, session, pr)?;
         insert_child_directive(&transaction, directive)?;
         transaction.commit()?;
         Ok(())
@@ -83,7 +79,7 @@ impl SqliteStore {
     pub fn complete_task_session(
         &self,
         session: &TaskSession,
-        empty_delivery: Option<&TaskDelivery>,
+        skipped_pr: Option<&TaskPr>,
     ) -> StoreResult<()> {
         validate_task_session(session)?;
         if session.status != TaskSessionStatus::Completed {
@@ -91,23 +87,26 @@ impl SqliteStore {
                 "Task completion transaction requires a Completed Session".to_string(),
             ));
         }
-        if let Some(delivery) = empty_delivery {
-            validate_task_delivery(delivery)?;
-            if delivery.task_session_id != session.id
-                || delivery.status != TaskDeliveryStatus::Abandoned
-                || delivery.pull_request.is_some()
-            {
+        if let Some(pr) = skipped_pr {
+            validate_task_pr(pr)?;
+            if pr.task_session_id != session.id || pr.phase() != PrPhase::Working {
                 return Err(StoreError::InvalidData(
-                    "empty completion delivery must be an abandoned PR-less delivery for the Task"
-                        .to_string(),
+                    "empty completion requires an unpublished Working Task PR".to_string(),
                 ));
             }
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project_session(&transaction, session)?;
-        if let Some(delivery) = empty_delivery {
-            if update_task_delivery(&transaction, delivery)? == 0 {
+        if let Some(pr) = skipped_pr {
+            if transaction.execute(
+                "DELETE FROM task_prs
+                 WHERE id=?1 AND task_session_id=?2
+                   AND publication_requested_at IS NULL
+                   AND merge_commit IS NULL AND abandoned_at IS NULL",
+                params![pr.id.as_str(), pr.task_session_id.as_str()],
+            )? == 0
+            {
                 return Err(StoreError::NotFound);
             }
         }
@@ -237,105 +236,118 @@ impl SqliteStore {
         Ok(sessions)
     }
 
-    pub fn update_task_delivery(&self, delivery: &TaskDelivery) -> StoreResult<()> {
-        validate_task_delivery(delivery)?;
+    pub fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
+        validate_task_pr(pr)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = update_task_delivery(&conn, delivery)?;
+        let changed = update_task_pr(&conn, pr)?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
         Ok(())
     }
 
-    pub fn task_delivery(&self, delivery_id: &TaskDeliveryId) -> StoreResult<Option<TaskDelivery>> {
+    pub fn task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        task_delivery_on(&conn, delivery_id)
+        task_pr_on(&conn, pr_id)
     }
 
-    pub fn task_deliveries(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskDelivery>> {
+    pub fn task_prs(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(
-            "{TASK_DELIVERY_COLUMNS} WHERE task_session_id=?1 ORDER BY sequence"
+            "{TASK_PR_COLUMNS} WHERE task_session_id=?1 ORDER BY sequence"
         ))?;
-        let rows = statement.query_map(params![session_id.as_str()], map_task_delivery_row)?;
+        let rows = statement.query_map(params![session_id.as_str()], map_task_pr_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub fn active_task_delivery(
-        &self,
-        session_id: &TaskSessionId,
-    ) -> StoreResult<Option<TaskDelivery>> {
+    pub fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
-            "{TASK_DELIVERY_COLUMNS}
-             WHERE task_session_id=?1 AND status IN ('working', 'submitted')"
+            "{TASK_PR_COLUMNS}
+             WHERE task_session_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL"
         );
-        conn.query_row(&query, params![session_id.as_str()], map_task_delivery_row)
+        conn.query_row(&query, params![session_id.as_str()], map_task_pr_row)
             .optional()
             .map_err(StoreError::from)
     }
 
-    pub fn settle_task_delivery(
-        &self,
-        settled: &TaskDelivery,
-        next: Option<&TaskDelivery>,
-    ) -> StoreResult<()> {
-        validate_task_delivery(settled)?;
-        if !settled.status.is_settled() {
+    pub fn settle_task_pr(&self, settled: &TaskPr, next: Option<&TaskPr>) -> StoreResult<()> {
+        validate_task_pr(settled)?;
+        if !settled.is_settled() {
             return Err(StoreError::InvalidData(
-                "task delivery transition requires a settled delivery".to_string(),
+                "Task PR transition requires a settled PR".to_string(),
             ));
         }
         if let Some(next) = next {
-            validate_task_delivery(next)?;
+            validate_task_pr(next)?;
             if next.task_session_id != settled.task_session_id
                 || next.sequence != settled.sequence + 1
-                || next.status != TaskDeliveryStatus::Working
+                || next.phase() != PrPhase::Working
             {
                 return Err(StoreError::InvalidData(
-                    "next task delivery must be the following Working delivery for the same Task"
-                        .to_string(),
+                    "next Task PR must be the following Working PR for the same Task".to_string(),
                 ));
             }
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = task_delivery_on(&transaction, &settled.id)?.ok_or(StoreError::NotFound)?;
-        if current.status.is_settled() {
-            if !same_task_delivery(&current, settled) {
-                return Err(StoreError::InvalidData(format!(
-                    "task delivery {} is already settled differently",
-                    settled.id
-                )));
-            }
-        } else {
-            let changed = update_task_delivery(&transaction, settled)?;
-            if changed == 0 {
-                return Err(StoreError::NotFound);
-            }
-        }
+        settle_task_pr_on(&transaction, settled)?;
         if let Some(next) = next {
             let existing = {
-                let query =
-                    format!("{TASK_DELIVERY_COLUMNS} WHERE task_session_id=?1 AND sequence=?2");
+                let query = format!("{TASK_PR_COLUMNS} WHERE task_session_id=?1 AND sequence=?2");
                 transaction
                     .query_row(
                         &query,
                         params![next.task_session_id.as_str(), i64::from(next.sequence)],
-                        map_task_delivery_row,
+                        map_task_pr_row,
                     )
                     .optional()?
             };
             match existing {
-                Some(existing) if same_task_delivery(&existing, next) => {}
+                Some(existing) if same_task_pr(&existing, next) => {}
                 Some(existing) => {
                     return Err(StoreError::InvalidData(format!(
-                        "task delivery sequence {} already belongs to {}",
+                        "Task PR sequence {} already belongs to {}",
                         next.sequence, existing.id
                     )))
                 }
-                None => insert_task_delivery(&transaction, next)?,
+                None => insert_task_pr(&transaction, next)?,
             }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn complete_task_session_after_pr(
+        &self,
+        session: &TaskSession,
+        pr: &TaskPr,
+    ) -> StoreResult<()> {
+        validate_task_session(session)?;
+        validate_task_pr(pr)?;
+        if session.status != TaskSessionStatus::Completed
+            || pr.task_session_id != session.id
+            || pr.phase() != PrPhase::Merged
+            || pr
+                .publication
+                .as_ref()
+                .is_none_or(|publication| publication.after_merge != AfterMerge::CompleteTask)
+        {
+            return Err(StoreError::InvalidData(
+                "Task completion after merge requires its merged CompleteTask PR".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project_session(&transaction, session)?;
+        settle_task_pr_on(&transaction, pr)?;
+        let parameters = task_session_params(session);
+        if transaction.execute(
+            TASK_SESSION_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
         }
         transaction.commit()?;
         Ok(())
@@ -1352,42 +1364,31 @@ fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
-fn validate_task_delivery(delivery: &TaskDelivery) -> StoreResult<()> {
-    delivery
-        .validate()
+fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
+    pr.validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
-fn validate_initial_task_delivery(
-    session: &TaskSession,
-    delivery: &TaskDelivery,
-) -> StoreResult<()> {
-    validate_task_delivery(delivery)?;
-    if delivery.task_session_id != session.id
-        || delivery.sequence != 1
-        || delivery.status != TaskDeliveryStatus::Working
-    {
+fn validate_initial_task_pr(session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
+    validate_task_pr(pr)?;
+    if pr.task_session_id != session.id || pr.sequence != 1 || pr.phase() != PrPhase::Working {
         return Err(StoreError::InvalidData(
-            "Task Session requires its sequence-1 Working delivery".to_string(),
+            "Task Session requires its sequence-1 Working PR".to_string(),
         ));
     }
     Ok(())
 }
 
-fn insert_initial_task(
-    conn: &Connection,
-    session: &TaskSession,
-    delivery: &TaskDelivery,
-) -> StoreResult<()> {
+fn insert_initial_task(conn: &Connection, session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
     validate_task_session(session)?;
-    validate_initial_task_delivery(session, delivery)?;
+    validate_initial_task_pr(session, pr)?;
     validate_task_project_session(conn, session)?;
     let parameters = task_session_params(session);
     conn.execute(
         TASK_SESSION_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
-    insert_task_delivery(conn, delivery)
+    insert_task_pr(conn, pr)
 }
 
 fn validate_task_project_session(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
@@ -1471,14 +1472,16 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     lf_bin=?30, db_path=?31, lf_home=?32,
     abandon_requested_at=?33, abandon_reason=?34
     WHERE id=?1";
-const TASK_DELIVERY_COLUMNS: &str = "SELECT
-    id, task_session_id, sequence, slug, branch, base_commit, status,
-    after_merge, next_slug, pr_number, pr_url, merge_commit, created_at, updated_at
-    FROM task_deliveries";
-const TASK_DELIVERY_SELECT: &str = "SELECT
-    id, task_session_id, sequence, slug, branch, base_commit, status,
-    after_merge, next_slug, pr_number, pr_url, merge_commit, created_at, updated_at
-    FROM task_deliveries WHERE id=?1";
+const TASK_PR_COLUMNS: &str = "SELECT
+    id, task_session_id, sequence, slug, branch, base_commit,
+    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    merge_commit, abandoned_at, created_at, updated_at
+    FROM task_prs";
+const TASK_PR_SELECT: &str = "SELECT
+    id, task_session_id, sequence, slug, branch, base_commit,
+    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    merge_commit, abandoned_at, created_at, updated_at
+    FROM task_prs WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
     claimed_by_generation, accepted_at, state, effect, error
@@ -1752,98 +1755,101 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     ]
 }
 
-fn insert_task_delivery(conn: &Connection, delivery: &TaskDelivery) -> StoreResult<()> {
-    validate_task_delivery(delivery)?;
+fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
+    validate_task_pr(pr)?;
+    let publication = pr.publication.as_ref();
+    let github = publication.and_then(|publication| publication.github.as_ref());
     conn.execute(
-        "INSERT INTO task_deliveries (
-            id, task_session_id, sequence, slug, branch, base_commit, status,
-            after_merge, next_slug, pr_number, pr_url, merge_commit, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        "INSERT INTO task_prs (
+            id, task_session_id, sequence, slug, branch, base_commit,
+            publication_requested_at, after_merge, next_slug,
+            github_number, github_url, merge_commit, abandoned_at,
+            created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
-            delivery.id.as_str(),
-            delivery.task_session_id.as_str(),
-            i64::from(delivery.sequence),
-            delivery.slug,
-            delivery.branch,
-            delivery.base_commit,
-            delivery.status.as_str(),
-            delivery.after_merge.as_str(),
-            delivery.next_slug,
-            delivery
-                .pull_request
-                .as_ref()
-                .map(|pull_request| i64::from(pull_request.number)),
-            delivery
-                .pull_request
-                .as_ref()
-                .map(|pull_request| pull_request.url.as_str()),
-            delivery.merge_commit,
-            delivery.created_at.unix_timestamp(),
-            delivery.updated_at.unix_timestamp(),
+            pr.id.as_str(),
+            pr.task_session_id.as_str(),
+            i64::from(pr.sequence),
+            pr.slug,
+            pr.branch,
+            pr.base_commit,
+            publication.map(|publication| publication.requested_at.unix_timestamp()),
+            publication.map(|publication| publication.after_merge.as_str()),
+            publication.and_then(|publication| publication.next_slug.as_deref()),
+            github.map(|github| i64::from(github.number)),
+            github.map(|github| github.url.as_str()),
+            pr.merge_commit,
+            pr.abandoned_at.map(OffsetDateTime::unix_timestamp),
+            pr.created_at.unix_timestamp(),
+            pr.updated_at.unix_timestamp(),
         ],
     )?;
     Ok(())
 }
 
-fn update_task_delivery(conn: &Connection, delivery: &TaskDelivery) -> StoreResult<usize> {
-    validate_task_delivery(delivery)?;
+fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
+    validate_task_pr(pr)?;
+    let publication = pr.publication.as_ref();
+    let github = publication.and_then(|publication| publication.github.as_ref());
     conn.execute(
-        "UPDATE task_deliveries SET
-            status=?7, after_merge=?8, next_slug=?9, pr_number=?10, pr_url=?11,
-            merge_commit=?12, updated_at=?14
+        "UPDATE task_prs SET
+            publication_requested_at=?7, after_merge=?8, next_slug=?9,
+            github_number=?10, github_url=?11, merge_commit=?12,
+            abandoned_at=?13, updated_at=?15
          WHERE id=?1 AND task_session_id=?2 AND sequence=?3 AND slug=?4
-           AND branch=?5 AND base_commit=?6 AND created_at=?13",
+           AND branch=?5 AND base_commit=?6 AND created_at=?14",
         params![
-            delivery.id.as_str(),
-            delivery.task_session_id.as_str(),
-            i64::from(delivery.sequence),
-            delivery.slug,
-            delivery.branch,
-            delivery.base_commit,
-            delivery.status.as_str(),
-            delivery.after_merge.as_str(),
-            delivery.next_slug,
-            delivery
-                .pull_request
-                .as_ref()
-                .map(|pull_request| i64::from(pull_request.number)),
-            delivery
-                .pull_request
-                .as_ref()
-                .map(|pull_request| pull_request.url.as_str()),
-            delivery.merge_commit,
-            delivery.created_at.unix_timestamp(),
-            delivery.updated_at.unix_timestamp(),
+            pr.id.as_str(),
+            pr.task_session_id.as_str(),
+            i64::from(pr.sequence),
+            pr.slug,
+            pr.branch,
+            pr.base_commit,
+            publication.map(|publication| publication.requested_at.unix_timestamp()),
+            publication.map(|publication| publication.after_merge.as_str()),
+            publication.and_then(|publication| publication.next_slug.as_deref()),
+            github.map(|github| i64::from(github.number)),
+            github.map(|github| github.url.as_str()),
+            pr.merge_commit,
+            pr.abandoned_at.map(OffsetDateTime::unix_timestamp),
+            pr.created_at.unix_timestamp(),
+            pr.updated_at.unix_timestamp(),
         ],
     )
     .map_err(StoreError::from)
 }
 
-fn task_delivery_on(
-    conn: &Connection,
-    delivery_id: &TaskDeliveryId,
-) -> StoreResult<Option<TaskDelivery>> {
-    conn.query_row(
-        TASK_DELIVERY_SELECT,
-        params![delivery_id.as_str()],
-        map_task_delivery_row,
-    )
-    .optional()
-    .map_err(StoreError::from)
+fn task_pr_on(conn: &Connection, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
+    conn.query_row(TASK_PR_SELECT, params![pr_id.as_str()], map_task_pr_row)
+        .optional()
+        .map_err(StoreError::from)
 }
 
-fn same_task_delivery(left: &TaskDelivery, right: &TaskDelivery) -> bool {
+fn settle_task_pr_on(conn: &Connection, settled: &TaskPr) -> StoreResult<()> {
+    let current = task_pr_on(conn, &settled.id)?.ok_or(StoreError::NotFound)?;
+    if current.is_settled() {
+        if !same_task_pr(&current, settled) {
+            return Err(StoreError::InvalidData(format!(
+                "Task PR {} is already settled differently",
+                settled.id
+            )));
+        }
+    } else if update_task_pr(conn, settled)? == 0 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+fn same_task_pr(left: &TaskPr, right: &TaskPr) -> bool {
     left.id == right.id
         && left.task_session_id == right.task_session_id
         && left.sequence == right.sequence
         && left.slug == right.slug
         && left.branch == right.branch
         && left.base_commit == right.base_commit
-        && left.status == right.status
-        && left.after_merge == right.after_merge
-        && left.next_slug == right.next_slug
-        && left.pull_request == right.pull_request
+        && left.publication == right.publication
         && left.merge_commit == right.merge_commit
+        && left.abandoned_at == right.abandoned_at
 }
 
 fn invalid_column(
@@ -1924,53 +1930,62 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
     })
 }
 
-fn map_task_delivery_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskDelivery> {
-    let status_text: String = row.get(6)?;
-    let status = status_text
-        .parse()
-        .map_err(|error| invalid_column(6, error))?;
-    let after_merge_text: String = row.get(7)?;
-    let after_merge = after_merge_text
-        .parse()
+fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
+    let publication_requested_at = row.get::<_, Option<i64>>(6)?;
+    let after_merge = row
+        .get::<_, Option<String>>(7)?
+        .map(|value| value.parse())
+        .transpose()
         .map_err(|error| invalid_column(7, error))?;
-    let pull_request = match (
-        row.get::<_, Option<i64>>(9)?,
-        row.get::<_, Option<String>>(10)?,
-    ) {
-        (Some(number), Some(url)) => Some(PullRequestRef {
-            number: number as u32,
-            url,
+    let github_number = row.get::<_, Option<i64>>(9)?.map(|number| number as u32);
+    let github_url = row.get::<_, Option<String>>(10)?;
+    let publication = match (publication_requested_at, after_merge) {
+        (Some(requested_at), Some(after_merge)) => Some(PrPublication {
+            requested_at: crate::store::rows::unix_to_datetime(requested_at),
+            after_merge,
+            next_slug: row.get(8)?,
+            github: match (github_number, github_url) {
+                (Some(number), Some(url)) => Some(GithubPr { number, url }),
+                (None, None) => None,
+                _ => {
+                    return Err(invalid_column(
+                        9,
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "GitHub PR number and URL must both be present or absent",
+                        ),
+                    ))
+                }
+            },
         }),
         (None, None) => None,
         _ => {
             return Err(invalid_column(
-                8,
+                6,
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "task delivery has a partial pull request reference",
+                    "PR publication timestamp and disposition must both be present or absent",
                 ),
             ))
         }
     };
-    let delivery = TaskDelivery {
-        id: TaskDeliveryId::from_raw(row.get::<_, String>(0)?),
+    let pr = TaskPr {
+        id: TaskPrId::from_raw(row.get::<_, String>(0)?),
         task_session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
         sequence: row.get::<_, i64>(2)? as u32,
         slug: row.get(3)?,
         branch: row.get(4)?,
         base_commit: row.get(5)?,
-        status,
-        after_merge,
-        next_slug: row.get(8)?,
-        pull_request,
+        publication,
         merge_commit: row.get(11)?,
-        created_at: crate::store::rows::unix_to_datetime(row.get(12)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(13)?),
+        abandoned_at: row
+            .get::<_, Option<i64>>(12)?
+            .map(crate::store::rows::unix_to_datetime),
+        created_at: crate::store::rows::unix_to_datetime(row.get(13)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(14)?),
     };
-    delivery
-        .validate()
-        .map_err(|error| invalid_column(6, error))?;
-    Ok(delivery)
+    pr.validate().map_err(|error| invalid_column(6, error))?;
+    Ok(pr)
 }
 
 fn map_child_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildCommand> {

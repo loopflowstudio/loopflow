@@ -65,13 +65,19 @@ future work." The first claim is false today: `flowloop/wave.rs:864` forwards
 every provider `TextDelta` straight through, one per token. The design's own
 stated condition for revisiting this has been met.
 
-**2. The Mac reads SSE one byte at a time.** `WaveChatClient.stream`
-(`WaveChatClient.swift:287`) does `for try await byte in bytes` over
-`URLSession.AsyncBytes`, feeding `SSEFrameParser.consume` a single `UInt8` per
-async suspension. Measured throughput: **0.14 MB/s**, compiled `-O` (the
-suspension overhead dominates; optimization level does not move it).
+**2. The Mac reads SSE one byte at a time, on the main actor.**
+`WaveChatClient.stream` did `for try await byte in bytes` over
+`URLSession.AsyncBytes`, feeding `SSEFrameParser.consume` one `UInt8` per
+`await`. `WaveChatConnection` is `@MainActor`, so **every byte cost a
+main-actor hop**. Measured on a real connection: **0.14 MB/s**.
 
-Neither alone would be fatal. Together: a 106 KB frame per token, read at
+The isolation is the whole story, and it is easy to measure wrong: the same
+byte loop off the main actor runs at ~20 MB/s, and fed from a `URLProtocol`
+stub instead of a socket it is fast too. A regression test that misses either
+detail passes on the broken path — both were tried, both passed, both were
+thrown away.
+
+Neither fact alone would be fatal. Together: a 106 KB frame per token, read at
 0.14 MB/s, on the main actor.
 
 ## Proposed budgets
@@ -86,35 +92,53 @@ Named before optimizing, so the gate has something to fail against:
 - **No per-token stage may scale with turn length or transcript length.** Both
   violations above are of this rule; it is the one that generalizes.
 
-## The fix, and why it is two changes
+## The fix (landed here)
 
-Measured, not assumed:
+**Read SSE in `Data` chunks, keeping the byte-level parse.** `SSEChunkStream`
+feeds `SSEFrameParser` whole chunks from a `URLSessionDataDelegate`; the byte
+loop inside a chunk is synchronous, so it costs one main-actor hop per network
+read instead of one per byte.
 
-1. **Read SSE by line, not by byte.** An SSE frame is one `data:` line, so
-   `bytes.lines` is a drop-in for the byte loop. Measured: **133 MB/s**, a 950×
-   improvement. Frame read 734 ms → 0.8 ms; connect replay 22.6 s → 0.02 s.
-   This alone takes the reader off the critical path and is a small, contained
-   change to `WaveChatClient`.
+The obvious move — `bytes.lines` — is wrong, and the code already said so:
+`AsyncLineSequence` drops empty lines, and the empty line is exactly what
+terminates an SSE frame. Chunking keeps the parser that handles this correctly
+and changes only how it is fed.
 
-2. **Stop re-broadcasting whole turns per token** — the delta-granular wire the
-   runtime comment already names as future work. Worth doing on its own merits
-   (68.6 MB per turn is absurd regardless of how fast the reader is, and it is
-   what makes `Lagged` frame-drops reachable), but it is a wire-shape change
-   touching Rust, Swift, and the DTO mirrors. It is not needed to hit the
-   budgets above, so it should not ride the same change.
+Post-change, against the pinned baseline:
 
-Order matters: (1) is the one that moves the measured numbers, so it lands
-first with a post-change measurement against this baseline. (2) is filed
-separately.
+| | before | after |
+|---|---|---|
+| SSE read throughput | 0.14 MB/s | >200 MB/s |
+| 106 KB frame | 734 ms | ~0.5 ms |
+| 3.17 MB connect replay (TTFT) | 22.6 s | **0.058 s** |
+| sustained visible-token rate | 1.4 deltas/s | bounded by the provider, not the reader |
+
+Both budgets are met, and the reader is no longer the bottleneck at any point
+in the path.
+
+## Still open: the wire shape
+
+**The listener should stop re-broadcasting whole turns per token** — the
+delta-granular wire `runtime.rs:104` already names as future work. 68.6 MB per
+turn is wrong regardless of how fast the reader is, and it is what makes the
+`Lagged` frame-drop path (`server.rs:711`, which silently swallows lagged
+frames) reachable at all. It is a wire-shape change across Rust, Swift, and the
+DTO mirrors, and it is not needed to hold the budgets above — so it is filed
+separately rather than riding this change.
 
 ## Harnesses (committed, repeatable)
 
+- `swift/LoopflowTests/WaveChatStreamTests.swift` — **the gate**. Streams a
+  3.2 MB replay over a real loopback socket and holds a 5 s budget. Verified to
+  bite: swapped back to the byte-at-a-time transport it takes **21.2 s** and
+  fails.
 - `rust/loopflow/benches/wave_stream.rs` — listener stage. `cargo bench --bench
-  wave_stream`; point `LF_BENCH_JOURNAL` at a real journal to measure the
-  accumulated transcript rather than an empty one.
+  wave_stream`; `LF_BENCH_JOURNAL` points it at a real journal.
 - `swift/Benchmarks/wave_chat_render.swift` — Mac parse + relayout stage,
   replayed delta-by-delta against a recorded real turn.
 
-The reader-throughput measurement (0.14 vs 133 MB/s) is the number the
-regression gate should hold; wiring it into CI comes with the fix, since a gate
-on a known-broken path just fails on day one.
+Two things the gate must not do, both learned by building them and watching
+them pass on the broken path: it must use a **real socket** (over a
+`URLProtocol` stub, `AsyncBytes` is fast) and it must run on the **main actor**
+(off it, the byte loop is ~140x faster). Either mistake yields a green test
+over a 160x regression.

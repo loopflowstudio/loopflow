@@ -251,6 +251,25 @@ struct SSEFrameParserTests {
         #expect(out == [.init(event: "state", data: "idle")])
     }
 
+    /// The transport reads `Data` chunks, not single bytes, and a chunk lands
+    /// wherever the network splits it — mid-frame, mid-line, or mid-UTF-8. The
+    /// frames must come out the same either way, blank-line boundaries included:
+    /// losing those is what ruled out `AsyncBytes.lines`.
+    @Test("chunked feeding yields the same frames as byte-at-a-time, at any split")
+    func chunkedFeedingMatchesByteFeeding() {
+        let raw = "event: state\ndata: turning\n\n: ping\n\nevent: turn\ndata: {\"id\":\"t-1\"}\ndata: more\n\n"
+        let expected = frames(raw)
+        #expect(expected.count == 2)
+
+        let bytes = Array(raw.utf8)
+        for split in 1..<bytes.count {
+            var parser = SSEFrameParser()
+            var out = parser.consume(Data(bytes[..<split]))
+            out += parser.consume(Data(bytes[split...]))
+            #expect(out == expected, "split at \(split) changed the frames")
+        }
+    }
+
     @Test("an unterminated frame stays pending")
     func unterminatedFramePends() {
         let out = frames("event: turn\ndata: {\"id\":1}\n")

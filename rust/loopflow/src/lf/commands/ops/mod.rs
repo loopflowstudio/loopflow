@@ -436,7 +436,11 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 project: project.clone(),
                 refresh,
             };
-            let result = crate::ops::pm::pm_show(&repo_root, &options, progress)?;
+            let result = if *json {
+                crate::ops::pm::pm_show(&repo_root, &options, &crate::ops::NullProgress)?
+            } else {
+                crate::ops::pm::pm_show(&repo_root, &options, progress)?
+            };
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
             } else {

@@ -302,10 +302,12 @@ jobs:
       - name: Publish to crates.io
         run: |
           output=$(cargo publish -p loopflow 2>&1) && exit 0
-          # Tolerate "already uploaded" so re-runs succeed
-          if echo "$output" | grep -q "already uploaded"; then
-            echo "Version already on crates.io, skipping"
+          echo "$output"
+          # Publishing an already-published version is success, not failure: a
+          # re-run of a partially-failed release must reach the steps after it.
+          # Cargo's wording for this has changed over time, so match both.
+          if echo "$output" | grep -Eq "already exists on crates.io index|already uploaded"; then
+            echo "Version already on crates.io, skipping publish"
           else
-            echo "$output"
             exit 1
           fi

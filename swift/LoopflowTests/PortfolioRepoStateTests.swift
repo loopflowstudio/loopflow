@@ -10,7 +10,7 @@ struct PortfolioRepoStateTests {
     func summaryMetrics() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-state")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let state = PortfolioRepoState(repo: repo)
 
         state.applyConnectedWaves([
             makeWave(id: "running", repoPath: repo.path, status: .running),
@@ -25,7 +25,7 @@ struct PortfolioRepoStateTests {
     func connectedWavesScopedToRepo() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-scope")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let state = PortfolioRepoState(repo: repo)
 
         let mine = makeWave(id: "mine", repoPath: repo.path, status: .running)
         let other = makeWave(
@@ -42,7 +42,7 @@ struct PortfolioRepoStateTests {
     func wavesSortByAttentionPriority() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let state = PortfolioRepoState(repo: repo)
 
         state.applyConnectedWaves([
             makeWave(id: "running", repoPath: repo.path, status: .running),
@@ -138,7 +138,7 @@ struct PortfolioRepoStateTests {
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
         let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let state = PortfolioRepoState(repo: repo)
         try await state.createWave(name: "goals")
 
         let originGoal = origin.appendingPathComponent("wave/goals/GOAL.md")

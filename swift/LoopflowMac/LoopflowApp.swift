@@ -25,11 +25,6 @@ struct LoopflowApp: App {
         // through Ghostty surfaces and `--noprofile --norc` shells can find tmux,
         // git, and agent CLIs that live in Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
-        if !AppRuntime.isAutomatedTest {
-            Task { @MainActor in
-                SharedDaemon.eagerStart()
-            }
-        }
     }
 
     var body: some Scene {

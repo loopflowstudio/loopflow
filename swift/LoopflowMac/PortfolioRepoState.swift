@@ -37,15 +37,11 @@ final class PortfolioRepoState {
 
     init(
         repo: PortfolioRepo,
-        connection: ServerConnection,
-        token: String?,
         registryQuery: RegistryQuery? = nil
     ) {
         self.repo = repo
         self.repoPath = repo.path.normalizedFilePath
         self.registryQuery = registryQuery
-        _ = connection
-        _ = token
     }
 
     /// Create a wave file-first: a wave IS its markdown. Write

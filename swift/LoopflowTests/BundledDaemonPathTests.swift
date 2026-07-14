@@ -1,7 +1,6 @@
-// End-to-end checks that any process Loopflow spawns — the bundled lfd and the
-// tmux invocations driving local processes — can actually find user-installed
-// binaries like tmux, which GUI-launched apps lose access to because their
-// inherited PATH is /usr/bin:/bin:/usr/sbin:/sbin.
+// End-to-end checks that local Wave processes can find user-installed binaries
+// like tmux, which GUI-launched apps lose access to because their inherited PATH
+// is /usr/bin:/bin:/usr/sbin:/sbin.
 
 import Foundation
 import Testing

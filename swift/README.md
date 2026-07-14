@@ -42,7 +42,6 @@ codebase tree, and registry health.
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `Loopflow/Services/WaveChatClient.swift` — per-Wave event and message client
-- `LoopflowMac/Services/BundledDaemonManager.swift` — bundled `lfd` lifetime
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
@@ -53,9 +52,9 @@ application target.
 ## Build system
 
 `./dev` uses Swift Package Manager and installs to a stable application path
-so macOS permissions survive rebuilds. Loopflow bundles `lf` and `lfd` and
-starts one localhost daemon for the app. Child processes are marked so stale
-instances can be reaped on the next launch.
+so macOS permissions survive rebuilds. The app queries `lf` directly and starts
+only the selected Wave's `lf serve` process; it has no private machine-wide
+daemon or remote-connection mode.
 
 | Command | What it does |
 | --- | --- |

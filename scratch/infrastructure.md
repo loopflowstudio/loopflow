@@ -593,3 +593,12 @@ remote mutations throw, catalog/worktree reads return empty, and its last auth
 store has no rendered consumer. Delete the façade and the auth/catalog/worktree
 types that only made those dead endpoints appear supported. Keep wire fixtures
 decoded by their actual DTOs rather than routing them through a service parser.
+
+The same ownership test makes the app's bundled/remote connection mode
+untenable. Every durable read is a local `lf` subprocess and every conversation
+uses a locally discovered Wave endpoint. The private bundled `lfd` writes a
+different database and has no consumer; “remote mode” only suppresses that
+unused daemon without making queries or chat remote. Remove both modes, their
+HTTP/TLS/token machinery, and the private daemon. The app now starts no
+machine-wide service: it queries the local registry and launches `lf serve`
+only for the Wave the human opens.

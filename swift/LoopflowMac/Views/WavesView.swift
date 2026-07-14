@@ -35,7 +35,6 @@ struct WavesView: View {
 
     @Environment(\.palette) private var palette
 
-    @State private var connectionStore = ConnectionStore()
     @State private var repoStates: [String: PortfolioRepoState] = [:]
 
     /// Repos shown in the rail: a live `~/src` scan of main (non-worktree) repos.
@@ -147,9 +146,6 @@ struct WavesView: View {
             .environment(\.palette, palette)
         }
         .task {
-            let daemonTask = Task {
-                await prepareConnectionIfNeeded()
-            }
             let initialMain = await registerInitialRepoIfNeeded()
             await refreshRepos()
             await refreshAuthoredWaves()
@@ -161,19 +157,14 @@ struct WavesView: View {
             }
             ensureRepoStates()
             await syncRepoStates()
-            _ = await daemonTask.value
             await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
-                let daemonTask = Task {
-                    await prepareConnectionIfNeeded()
-                }
                 await refreshRepos()
                 await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
-                _ = await daemonTask.value
             }
         }
         .onChange(of: selection) { _, _ in
@@ -388,12 +379,7 @@ struct WavesView: View {
     // MARK: - Header helpers
 
     private var connectionSubtitle: String {
-        switch connectionStore.mode {
-        case .bundled:
-            return "Bundled daemon"
-        case .remote:
-            return connectionStore.activeConnection.displayName
-        }
+        "Local registry"
     }
 
     /// The surface is named after the repo you're in (its GitHub/dir name),
@@ -569,29 +555,11 @@ struct WavesView: View {
             repoStates.removeValue(forKey: stalePath)
         }
 
-        let connection = connectionStore.activeConnection
-        let token = connectionStore.token(for: connection)
-
         for repo in repos where repoStates[repo.path] == nil {
             repoStates[repo.path] = PortfolioRepoState(
                 repo: repo,
-                connection: connection,
-                token: token,
                 registryQuery: RegistryQueryLocal.shared
             )
-        }
-    }
-
-    private func prepareConnectionIfNeeded() async {
-        // UI tests run against mock data; never start a daemon or reach a remote lfd.
-        if AppTestMode.current() != nil { return }
-        guard connectionStore.mode == .bundled else { return }
-        if let current = SharedDaemon.currentConnection {
-            connectionStore.setBundledRuntimeConnection(current)
-            return
-        }
-        if let connection = try? await SharedDaemon.manager.start() {
-            connectionStore.setBundledRuntimeConnection(connection)
         }
     }
 
@@ -599,24 +567,16 @@ struct WavesView: View {
         if AppTestMode.current() != nil { return }
         ensureRepoStates()
 
-        if connectionStore.mode == .bundled {
-            do {
-                let waves = try await RegistryQueryLocal.shared.allWaves()
-                let plans = await buildWavePlanCache(registryWaves: waves)
-                plansByWaveKey = plans
-                for state in repoStates.values {
-                    state.applyConnectedWaves(waves, plans: plans)
-                }
-            } catch {
-                for state in repoStates.values {
-                    state.markRefreshFailed()
-                }
+        do {
+            let waves = try await RegistryQueryLocal.shared.allWaves()
+            let plans = await buildWavePlanCache(registryWaves: waves)
+            plansByWaveKey = plans
+            for state in repoStates.values {
+                state.applyConnectedWaves(waves, plans: plans)
             }
-        } else {
-            await withTaskGroup(of: Void.self) { group in
-                for state in repoStates.values {
-                    group.addTask { await state.refresh() }
-                }
+        } catch {
+            for state in repoStates.values {
+                state.markRefreshFailed()
             }
         }
     }

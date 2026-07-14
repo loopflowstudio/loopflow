@@ -252,15 +252,78 @@ fn sh_quote(value: &str) -> String {
     quoted
 }
 
-/// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
-/// propagating the remote exit code. Agent forwarding (`-A`) is opt-in.
-fn run_ssh(host: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let mut command = Command::new("ssh");
+/// Bound the connect handshake so an unreachable host fails fast instead of
+/// riding the OS TCP timeout (minutes).
+const CONNECT_TIMEOUT_SECS: u32 = 10;
+/// Keepalive probe cadence and tolerance — bounds a stalled *established*
+/// connection (dead network mid-session) to ~30s.
+const SERVER_ALIVE_INTERVAL_SECS: u32 = 10;
+const SERVER_ALIVE_COUNT_MAX: u32 = 3;
+
+/// What the remote process's exit status means for the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SshOutcome {
+    /// Remote command succeeded.
+    Success,
+    /// SSH transport/connection failure (its reserved code `255`, or death by
+    /// signal): unreachable host, unknown key, auth refusal, or a bounded
+    /// timeout firing. Actionable and host-named; never a real remote code.
+    ConnectionFailure,
+    /// The remote command itself exited nonzero — propagate its code verbatim.
+    CommandFailure(i32),
+}
+
+/// Build the `ssh` argument vector with noninteractive bounds. Pure so the
+/// bounds are unit-testable without a live host.
+///
+/// `BatchMode=yes` is the primary hang killer: it refuses every interactive
+/// prompt (password, passphrase, unknown host key) rather than blocking on the
+/// tty forever. The timeouts bound the connect handshake and a stalled session.
+fn ssh_args(host: &str, forward_agent: bool) -> Vec<String> {
+    let mut args: Vec<String> = Vec::new();
     if forward_agent {
-        command.arg("-A");
+        args.push("-A".to_string());
     }
-    let mut child = command
-        .args([host, "bash -s"])
+    args.push("-o".to_string());
+    args.push("BatchMode=yes".to_string());
+    args.push("-o".to_string());
+    args.push(format!("ConnectTimeout={CONNECT_TIMEOUT_SECS}"));
+    args.push("-o".to_string());
+    args.push(format!("ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECS}"));
+    args.push("-o".to_string());
+    args.push(format!("ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}"));
+    args.push(host.to_string());
+    args.push("bash -s".to_string());
+    args
+}
+
+/// Classify an ssh exit code. `255` is ssh's reserved transport-error code;
+/// `None` means death by signal — both are connection-phase failures, distinct
+/// from a real remote command code we must propagate.
+fn classify_exit(code: Option<i32>) -> SshOutcome {
+    match code {
+        Some(0) => SshOutcome::Success,
+        Some(255) | None => SshOutcome::ConnectionFailure,
+        Some(other) => SshOutcome::CommandFailure(other),
+    }
+}
+
+/// A sanitized, host-named error for a transport-phase failure. Carries no
+/// credential value; ssh's own reason is already on the inherited stderr.
+fn connection_error(host: &str) -> anyhow::Error {
+    anyhow!(
+        "lf ssh could not reach '{host}': ssh failed during connection/transport \
+         (bounded by BatchMode + ConnectTimeout={CONNECT_TIMEOUT_SECS}s). See the ssh \
+         error above; check the host is reachable, its key is known, and key auth works."
+    )
+}
+
+/// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
+/// propagating the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
+/// so an unreachable or misconfigured host fails fast instead of hanging.
+fn run_ssh(host: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
+    let mut child = Command::new("ssh")
+        .args(ssh_args(host, forward_agent))
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -275,10 +338,10 @@ fn run_ssh(host: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
         .context("failed to write preamble to ssh")?;
 
     let status = child.wait().context("ssh did not complete")?;
-    if status.success() {
-        Ok(())
-    } else {
-        std::process::exit(status.code().unwrap_or(1));
+    match classify_exit(status.code()) {
+        SshOutcome::Success => Ok(()),
+        SshOutcome::ConnectionFailure => Err(connection_error(host)),
+        SshOutcome::CommandFailure(code) => std::process::exit(code),
     }
 }
 
@@ -356,6 +419,49 @@ mod tests {
     fn sh_quote_escapes_embedded_single_quotes() {
         assert_eq!(sh_quote("plain"), "'plain'");
         assert_eq!(sh_quote("a'b"), r#"'a'\''b'"#);
+    }
+
+    #[test]
+    fn ssh_args_bound_the_connection() {
+        let args = ssh_args("mini-heart", false);
+        // Primary hang killer: never block on an interactive prompt.
+        assert!(args.iter().any(|a| a == "BatchMode=yes"));
+        // Connect handshake and stalled-session bounds.
+        assert!(args.iter().any(|a| a == "ConnectTimeout=10"));
+        assert!(args.iter().any(|a| a == "ServerAliveInterval=10"));
+        assert!(args.iter().any(|a| a == "ServerAliveCountMax=3"));
+        // Still targets the host and runs the piped preamble.
+        assert!(args.iter().any(|a| a == "mini-heart"));
+        assert_eq!(args.last().unwrap(), "bash -s");
+        // Agent forwarding stays opt-out.
+        assert!(!args.iter().any(|a| a == "-A"));
+    }
+
+    #[test]
+    fn ssh_args_opt_in_agent_forwarding() {
+        let args = ssh_args("host", true);
+        assert_eq!(args.first().unwrap(), "-A");
+    }
+
+    #[test]
+    fn classify_exit_separates_transport_from_command_failure() {
+        assert_eq!(classify_exit(Some(0)), SshOutcome::Success);
+        // ssh's reserved transport code and death-by-signal are connection phase.
+        assert_eq!(classify_exit(Some(255)), SshOutcome::ConnectionFailure);
+        assert_eq!(classify_exit(None), SshOutcome::ConnectionFailure);
+        // A real remote command code is propagated, not swallowed as transport.
+        assert_eq!(classify_exit(Some(1)), SshOutcome::CommandFailure(1));
+        assert_eq!(classify_exit(Some(42)), SshOutcome::CommandFailure(42));
+    }
+
+    #[test]
+    fn connection_error_names_host_without_leaking_credentials() {
+        let err = connection_error("mini-heart").to_string();
+        assert!(err.contains("mini-heart"));
+        assert!(err.contains("connection/transport"));
+        // Nothing credential-shaped in the sanitized message.
+        assert!(!err.contains("TOKEN"));
+        assert!(!err.contains("password"));
     }
 
     #[test]

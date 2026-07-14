@@ -363,11 +363,7 @@ pub fn release_run(
     }
 
     let main_branch = get_default_branch(&main_repo)?;
-    let wt_name = if target.name == "default" {
-        format!("release.default.v{version}")
-    } else {
-        format!("release.{}.v{version}", target.name)
-    };
+    let wt_name = release_worktree_name(&target, &version);
 
     progress.status(&format!("Creating release worktree {wt_name}..."));
     let wt = create_named_worktree(&main_repo, &wt_name, Some(&main_branch), true)?;
@@ -402,6 +398,12 @@ pub fn release_run(
         workflow_url,
         release_exists,
     })
+}
+
+fn release_worktree_name(target: &ReleaseTarget, version: &str) -> String {
+    let target_name = target.name.replace('.', "-");
+    let version = version.replace('.', "-");
+    format!("release-{target_name}-v{version}")
 }
 
 #[derive(Debug)]
@@ -1693,6 +1695,31 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_worktree_names_are_flat() {
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: Vec::new(),
+            tag_prefix: "v".to_string(),
+            manifests: Vec::new(),
+            workflow: None,
+        };
+
+        assert_eq!(
+            release_worktree_name(&target, "0.11.0"),
+            "release-default-v0-11-0"
+        );
+
+        let named = ReleaseTarget {
+            name: "rust.cli".to_string(),
+            ..target
+        };
+        assert_eq!(
+            release_worktree_name(&named, "1.2.3-beta.1"),
+            "release-rust-cli-v1-2-3-beta-1"
+        );
+    }
 
     // ======================================================================
     // bump_cargo_toml

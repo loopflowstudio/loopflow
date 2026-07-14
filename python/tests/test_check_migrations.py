@@ -101,6 +101,14 @@ def test_a_registry_entry_without_its_file_fails(repo: Path):
     assert "has no file" in result.stderr
 
 
+def test_duplicate_registry_ids_fail(repo: Path):
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, "initial"))
+
+    result = check(repo)
+    assert result.returncode == 1
+    assert "collides" in result.stderr
+
+
 def test_a_registry_entry_whose_id_disagrees_with_its_file_fails(repo: Path):
     (repo / MIGRATIONS_RS).write_text(
         _registry((0, 10, 2, "initial")).replace(

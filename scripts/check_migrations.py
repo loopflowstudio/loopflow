@@ -102,6 +102,11 @@ def _check_registry(files: dict[tuple[int, int, int], str]) -> None:
             )
         if not (MIGRATIONS_DIR / file).is_file():
             _fail(f"registry entry {file} has no file in {MIGRATIONS_DIR.name}/")
+        if key in registered:
+            _fail(
+                f"registry entry {file} collides with {registered[key]} "
+                f"at {key[0]}.{key[1]}.{key[2]:03d}"
+            )
         registered[key] = file
 
     for key, name in sorted(files.items()):

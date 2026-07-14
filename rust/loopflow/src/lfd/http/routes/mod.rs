@@ -9,7 +9,6 @@ pub mod runs;
 pub mod session_controls;
 pub mod system;
 pub mod waves;
-pub mod worktrees;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

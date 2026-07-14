@@ -8,8 +8,7 @@ use crate::engine::process::{
     resolve_lf_binary, start_lf_session_with_env, tmux_session_exists, tmux_session_slug,
 };
 use crate::engine::worktrees::{
-    create_from_placement_plan, plan_placement, PlacementRequest, PlacementStrategy,
-    WorktreeSegment,
+    create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
 use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};
@@ -240,7 +239,7 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
     let segment = WorktreeSegment::parse(&resolved.item.identifier)
         .map_err(|error| task_error(error.to_string()))?;
-    let plan = plan_placement(&main_repo, PlacementRequest::Main { segment })
+    let plan = plan_placement(&main_repo, segment)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     if plan.strategy != PlacementStrategy::CreateRoot {
         return Err(task_error(format!(

@@ -211,7 +211,7 @@ fn sync_main_from_feature_worktree_keeps_sibling_main_clean() {
     let upstream_sha = git(pusher.path(), &["rev-parse", "HEAD"]);
 
     // Create a feature worktree off the (now stale) main worktree.
-    let feature = repo.create_wave_worktree("myfeature");
+    let feature = repo.create_named_worktree("myfeature");
 
     // Feature worktree calls sync_main to fast-forward local main.
     sync_main(&feature, "main").unwrap();
@@ -249,7 +249,7 @@ fn sync_main_from_feature_preserves_dirty_work_on_main() {
     // Leave uncommitted work in the main worktree.
     std::fs::write(repo.path().join("scratch_note.txt"), "wip").unwrap();
 
-    let feature = repo.create_wave_worktree("myfeature");
+    let feature = repo.create_named_worktree("myfeature");
     sync_main(&feature, "main").unwrap();
 
     // Uncommitted file must be back after stash pop.
@@ -296,7 +296,7 @@ fn sync_main_does_not_revert_rewritten_paths() {
     // Dirty edit on main to the very path the recut rewrote.
     std::fs::write(repo.path().join("old.txt"), "local wip").unwrap();
 
-    let feature = repo.create_wave_worktree("myfeature");
+    let feature = repo.create_named_worktree("myfeature");
     sync_main(&feature, "main").unwrap();
 
     // The synced tree wins: old.txt is gone, new.txt present. No silent revert.

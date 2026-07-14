@@ -206,36 +206,15 @@ the current conflict paths; repeat edit/continue until the rebase completes.
 
 ## lf wt
 
-Worktree helper commands.
-
-### lf wt create
-
-Create or select a worktree from a placement plan.
-
-```bash
-lf wt create my-feature              # independent branch from main
-lf wt create my-feature --plan       # print the plan without creating anything
-```
-
-Manual worktrees are diagnostic escape hatches rooted from `main`. Roadmap work
-starts with `lf task run`, which owns task placement.
-
-| Flag | Description |
-|------|-------------|
-| `--plan` | Print the placement plan without mutating git |
-
-Dots are reserved for identity ancestry. Use `api-v2` as a worktree segment,
-not `api.v2`.
-
-Worktree branches use the fixed identity shape `<user>/<name>`. `bugs` creates
-`<user>/bugs` in `../loopflow.bugs`.
+Inspect, switch, and clean Task worktrees. `lf task run <issue-id>` is the only
+command that creates one.
 
 ### lf wt switch
 
-Switch to a worktree by wave name, chain leaf, or full branch.
+Switch to a worktree by directory name, identity leaf, or full branch.
 
 ```bash
-lf wt switch bugs             # the manually created bugs worktree
+lf wt switch bugs             # the bugs task worktree
 lf wt switch fix-auth         # the …bugs.fix-auth… worktree, by leaf
 lf wt switch jack/bugs.fix-auth.20260316_1856  # exact branch
 ```
@@ -295,20 +274,13 @@ lf pr abandon feature-branch --force   # skip confirmation
 |------|-------------|
 | `-f, --force` | Skip confirmation and force abandon with uncommitted changes |
 
-## Typical Workflow
+## Typical Task Workflow
 
 ```bash
-lf wt create my-feature       # create or select a placed worktree
-lf wt switch my-feature       # switch to worktree from another
-# ... work on feature ...
-lf commit                     # commit with generated message
-lf pr open                         # open PR (CI runs automatically)
-# ... address review feedback ...
-lf commit -p                  # commit and push
-lf wt ci                      # check CI status
-lf pr land                       # submit to merge queue
-# ... wait for CI to pass and merge ...
-lf wt prune                   # cleanup merged worktrees
+lf task run ENG-123
+lf task status ENG-123
+lf task steer ENG-123 "also cover the migration"
+lf task wait ENG-123 --until terminal
 ```
 
 ## See Also

@@ -81,14 +81,13 @@ lf : "add type hints to utils.py"
 
 ## Build Features
 
-Design, implement, gate, ship.
+Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf wt create auth-feature       # create worktree
-lf design: add OAuth login         # discuss approach
-lf implement                       # build it
-lf gate                            # ship-ready check
-lf pr open                           # open PR
+lf task start "add OAuth login" --project <linear-project-id>
+lf task status <issue-id>
+lf task steer <issue-id> "support passkeys too"
+lf task wait <issue-id> --until terminal
 ```
 
 ### Skills chain

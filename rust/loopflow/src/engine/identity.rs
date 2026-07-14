@@ -15,7 +15,6 @@
 //! without the trailing worker stamp) and normalizes. Whatever you hand it, the
 //! emitters produce the right shape for each projection.
 
-use crate::engine::naming::generate_timestamp;
 use crate::engine::worktrees::WorktreeSegment;
 
 /// A worker freshness stamp, `YYYYMMDD_HHMM`. Its presence on a [`WaveId`] is the
@@ -34,12 +33,6 @@ impl Timestamp {
             && time.len() == 4
             && time.bytes().all(|b| b.is_ascii_digit());
         shaped.then(|| Self(raw.to_string()))
-    }
-
-    /// The current local time as a stamp. Real code only; tests use fixed
-    /// strings so they stay deterministic.
-    pub fn now() -> Self {
-        Self(generate_timestamp())
     }
 
     fn as_str(&self) -> &str {
@@ -71,12 +64,6 @@ impl WaveId {
     /// name can't be a segment (empty, or contains a `.`).
     pub fn for_wave(user: impl Into<String>, wave_name: &str) -> Option<Self> {
         Some(Self::wave(user, WorktreeSegment::parse(wave_name).ok()?))
-    }
-
-    /// Attach (or replace) the worker stamp, marking this id ephemeral.
-    pub fn stamped(mut self, stamp: Timestamp) -> Self {
-        self.stamp = Some(stamp);
-        self
     }
 
     /// Descend one level: append `segment` to the chain and set the child's stamp

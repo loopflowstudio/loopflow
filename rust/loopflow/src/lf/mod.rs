@@ -1065,15 +1065,15 @@ pub enum ReleaseCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WtCommand {
-    /// Create a new worktree
+    /// Create a low-level sibling worktree
     Create {
-        /// Worktree name (creates ../NAME)
+        /// Worktree name
         name: String,
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,
     },
-    /// Switch to a worktree by wave name, leaf name, or full branch
+    /// Switch to a worktree by name, identity leaf, or full branch
     Switch {
         /// Worktree name or full branch name to switch to
         name: String,

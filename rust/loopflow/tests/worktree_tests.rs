@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
-    create_wave_worktree, list_worktrees, list_worktrees_local, wave_name_from_worktree_and_main,
+    create_named_worktree, list_worktrees, list_worktrees_local, sibling_worktree_name_with_main,
 };
 use loopflow_test_support::TestRepo;
 
@@ -25,7 +25,7 @@ fn git_stdout(repo: &std::path::Path, args: &[&str]) -> String {
 #[test]
 fn worktree_add_creates_directory() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
     assert!(result.path.exists());
     assert!(
         result.branch.contains("feature"),
@@ -37,7 +37,7 @@ fn worktree_add_creates_directory() {
 #[test]
 fn worktree_add_is_on_correct_branch() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
 
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -51,7 +51,7 @@ fn worktree_add_is_on_correct_branch() {
 #[test]
 fn worktree_remove_deletes_directory() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
     worktree_remove(repo.path(), &result.path).expect("remove");
     assert!(!result.path.exists());
 }
@@ -59,7 +59,7 @@ fn worktree_remove_deletes_directory() {
 #[test]
 fn worktree_list_includes_created() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
     let worktrees = list_worktrees(repo.path()).expect("list");
     assert!(worktrees
         .iter()
@@ -93,7 +93,7 @@ fn worktree_list_preserves_namespaced_upstream_branch() {
 #[test]
 fn worktree_state_detects_dirty() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
     std::fs::write(result.path.join("dirty.txt"), "dirty").expect("write");
     assert!(!is_clean(&result.path).expect("is_clean"));
 }
@@ -101,7 +101,7 @@ fn worktree_state_detects_dirty() {
 #[test]
 fn worktree_move_preserves_content() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
     let file_path = result.path.join("note.txt");
     std::fs::write(&file_path, "content").expect("write");
 
@@ -114,7 +114,7 @@ fn worktree_move_preserves_content() {
 }
 
 #[test]
-fn create_wave_worktree_synced_updates_main_before_creation() {
+fn create_named_worktree_synced_updates_main_before_creation() {
     let repo = TestRepo::new();
     let original_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
 
@@ -160,7 +160,7 @@ fn create_wave_worktree_synced_updates_main_before_creation() {
         .expect("git push");
     assert!(status.success(), "git push should succeed");
 
-    let _ = create_wave_worktree(repo.path(), "sync-check", None, true).expect("create");
+    let _ = create_named_worktree(repo.path(), "sync-check", None, true).expect("create");
 
     let updated_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
     let origin_head = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
@@ -175,18 +175,18 @@ fn create_wave_worktree_synced_updates_main_before_creation() {
 }
 
 #[test]
-fn wt_switch_finds_worktree_by_wave_name() {
+fn wt_switch_finds_worktree_by_sibling_name() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "docs", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "docs", None, false).expect("create");
 
     let worktrees = list_worktrees(repo.path()).expect("list");
     let name =
-        wave_name_from_worktree_and_main(&result.path, repo.path()).expect("should have wave name");
+        sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
 
     let matches: Vec<_> = worktrees
         .iter()
         .filter(|wt| {
-            wave_name_from_worktree_and_main(&wt.path, repo.path()).as_deref()
+            sibling_worktree_name_with_main(&wt.path, repo.path()).as_deref()
                 == Some(name.as_str())
         })
         .collect();
@@ -199,17 +199,18 @@ fn wt_switch_prefix_matching_is_dot_delimited() {
     // Simulate a worktree whose directory has a timestamp suffix (e.g. repo.waves.1772406404)
     // by creating a worktree with a dotted name.
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "waves", None, false).expect("create");
-    let wave_name =
-        wave_name_from_worktree_and_main(&result.path, repo.path()).expect("should have wave name");
+    let result = create_named_worktree(repo.path(), "waves", None, false).expect("create");
+    let worktree_name =
+        sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
+    assert_eq!(worktree_name, "waves");
 
-    // The wave name should be "waves". Searching for "wav" must NOT match.
+    // The worktree name should be "waves". Searching for "wav" must NOT match.
     let worktrees = list_worktrees(repo.path()).expect("list");
     let prefix = "wav";
     let matches: Vec<_> = worktrees
         .iter()
         .filter(|wt| {
-            let wt_name = wave_name_from_worktree_and_main(&wt.path, repo.path());
+            let wt_name = sibling_worktree_name_with_main(&wt.path, repo.path());
             wt_name.as_deref() == Some(prefix)
                 || wt_name
                     .as_ref()
@@ -230,7 +231,7 @@ fn wt_switch_prefix_matching_is_dot_delimited() {
 fn wt_switch_finds_timestamped_worktree_by_short_name() {
     let repo = TestRepo::new();
     // Create worktree — the directory will be <repo>.waves
-    let result = create_wave_worktree(repo.path(), "waves", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "waves", None, false).expect("create");
 
     // Manually rename it to simulate a timestamped directory: <repo>.waves.1772406404
     let timestamped = result.path.with_file_name(format!(
@@ -241,14 +242,14 @@ fn wt_switch_finds_timestamped_worktree_by_short_name() {
 
     let worktrees = list_worktrees(repo.path()).expect("list");
     let wave_name =
-        wave_name_from_worktree_and_main(&timestamped, repo.path()).expect("should have wave name");
+        sibling_worktree_name_with_main(&timestamped, repo.path()).expect("sibling name");
     assert_eq!(wave_name, "waves.1772406404");
 
     // Exact match: "waves.1772406404" should find it
     let exact: Vec<_> = worktrees
         .iter()
         .filter(|wt| {
-            wave_name_from_worktree_and_main(&wt.path, repo.path()).as_deref()
+            sibling_worktree_name_with_main(&wt.path, repo.path()).as_deref()
                 == Some("waves.1772406404")
         })
         .collect();
@@ -258,7 +259,7 @@ fn wt_switch_finds_timestamped_worktree_by_short_name() {
     let prefix: Vec<_> = worktrees
         .iter()
         .filter(|wt| {
-            let n = wave_name_from_worktree_and_main(&wt.path, repo.path());
+            let n = sibling_worktree_name_with_main(&wt.path, repo.path());
             n.as_ref().map(|n| n.starts_with("waves.")).unwrap_or(false)
         })
         .collect();
@@ -397,10 +398,10 @@ fn nested_worktree_not_recognized_as_wave() {
         .join("repo.feature");
     std::fs::create_dir_all(&nested).unwrap();
 
-    let result = wave_name_from_worktree_and_main(&nested, &main_repo);
+    let result = sibling_worktree_name_with_main(&nested, &main_repo);
     assert_eq!(
         result, None,
-        "nested worktree should not produce a wave name"
+        "nested worktree should not produce a sibling name"
     );
 }
 
@@ -408,7 +409,7 @@ fn nested_worktree_not_recognized_as_wave() {
 fn branch_at_main_not_detected_as_squash_merged() {
     let repo = TestRepo::new();
     // Create a worktree whose branch points to the same commit as main.
-    let result = create_wave_worktree(repo.path(), "fresh", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "fresh", None, false).expect("create");
     // Make the worktree dirty (simulates lf ingest writing to scratch/).
     std::fs::write(result.path.join("scratch.txt"), "notes").expect("write");
 
@@ -432,7 +433,7 @@ fn branch_at_main_not_detected_as_squash_merged() {
 #[test]
 fn fresh_worktree_is_not_prunable() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "newwave", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "newwave", None, false).expect("create");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
     let wt = states
@@ -448,7 +449,7 @@ fn fresh_worktree_is_not_prunable() {
 #[test]
 fn fresh_dirty_worktree_is_not_prunable() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "wip", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "wip", None, false).expect("create");
     std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
@@ -465,7 +466,7 @@ fn fresh_dirty_worktree_is_not_prunable() {
 #[test]
 fn worktree_with_commits_is_active_not_fresh() {
     let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "active", None, false).expect("create");
+    let result = create_named_worktree(repo.path(), "active", None, false).expect("create");
     std::fs::write(result.path.join("feature.txt"), "work").expect("write");
     git_stdout(&result.path, &["add", "."]);
     git_stdout(&result.path, &["commit", "-m", "feature work"]);
@@ -486,7 +487,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
     let repo = TestRepo::new();
 
     let landed =
-        create_wave_worktree(repo.path(), "rules-old", None, false).expect("create landed");
+        create_named_worktree(repo.path(), "rules-old", None, false).expect("create landed");
     std::fs::write(landed.path.join("rules.txt"), "rule").expect("write");
     git_stdout(&landed.path, &["add", "."]);
     git_stdout(&landed.path, &["commit", "-m", "add rule"]);
@@ -497,7 +498,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
     git_stdout(repo.path(), &["push", "origin", "main"]);
 
     // Create the next branch from the landed branch tip (land rotation behavior).
-    let fresh = create_wave_worktree(
+    let fresh = create_named_worktree(
         repo.path(),
         "rules-new",
         Some(landed.branch.as_str()),

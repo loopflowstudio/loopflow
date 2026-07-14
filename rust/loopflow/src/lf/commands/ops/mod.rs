@@ -5,8 +5,8 @@ use crate::engine::identity::WaveId;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
     create_from_placement_plan, list_worktrees, main_repo_root, plan_placement,
-    wave_name_from_worktree, wave_name_from_worktree_and_main, worktree_path, PlacementRequest,
-    PlacementStrategy, WorktreeSegment,
+    sibling_worktree_name, sibling_worktree_name_with_main, worktree_path, PlacementStrategy,
+    WorktreeSegment,
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
@@ -950,12 +950,11 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let segment = WorktreeSegment::parse(name)?;
-    let request = PlacementRequest::Main { segment };
 
     let default_branch = get_default_branch(&main_repo)?;
     let _ = sync_main(&main_repo, &default_branch);
 
-    let placement = plan_placement(&main_repo, request)?;
+    let placement = plan_placement(&main_repo, segment)?;
 
     if dry_run {
         print_placement_plan(&placement);
@@ -969,9 +968,7 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
             "op": "wt.create",
             "branch": placement.branch,
             "base_ref": placement.base_ref,
-            "stack_parent": placement.parent_branch,
             "strategy": placement_strategy_name(&placement.strategy),
-            "stack_depth": placement.stack_depth,
             "duration_ms": started.elapsed().as_millis(),
             "exit_status": "ok",
         }),
@@ -986,7 +983,7 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
         println!("Branch: {}", result.branch);
     }
     if let Some(base_branch) = result.base_branch {
-        println!("Base: {}", base_branch);
+        println!("Base: {base_branch}");
     }
 
     if !write_shell_directive(&format!("cd {}", result.path.display()))? {
@@ -1000,11 +997,7 @@ fn wt_create(name: &str, dry_run: bool) -> Result<()> {
 fn print_placement_plan(plan: &crate::engine::worktrees::PlacementPlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
-    if let Some(parent) = plan.parent_branch.as_deref() {
-        println!("parent: {parent}");
-    }
     println!("worktree: {}", plan.worktree_path.display());
-    println!("stack_depth: {}", plan.stack_depth);
     println!("strategy: {}", placement_strategy_name(&plan.strategy));
 }
 
@@ -1055,9 +1048,9 @@ fn wt_switch(name: &str) -> Result<()> {
     {
         exact_branch_match
     } else {
-        // Path-guessing only applies to a bare wave/dir name. A full `user/…`
+        // Path-guessing only applies to a bare sibling/dir name. A full `user/…`
         // branch spec must resolve via an exact branch match (handled above) or
-        // the wave-name match below — never by landing in whatever worktree
+        // the sibling-name match below — never by landing in whatever worktree
         // happens to occupy the guessed directory.
         let target = worktree_path(&main_repo, name);
         if target.exists() && !name.contains('/') {
@@ -1067,8 +1060,8 @@ fn wt_switch(name: &str) -> Result<()> {
             let mut matches = worktrees
                 .into_iter()
                 .filter(|wt| {
-                    let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
-                    // Match a chain leaf or wave name too, so `fix-auth` finds
+                    let wt_name = sibling_worktree_name_with_main(&wt.path, &main_repo);
+                    // Match an identity leaf or root name too, so `fix-auth` finds
                     // the `…bugs.fix-auth…` worktree without the full chain.
                     let id = wt
                         .branch
@@ -1161,7 +1154,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                     id.chain_str(),
                 )
             } else {
-                let name = wave_name_from_worktree(&wt.path).unwrap_or_else(|| {
+                let name = sibling_worktree_name(&wt.path).unwrap_or_else(|| {
                     wt.path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -1265,7 +1258,7 @@ fn wt_remove(name: &str, force: bool) -> Result<()> {
     // Find the worktree by short name or directory name
     let worktrees = list_worktrees(&main_repo)?;
     let target = worktrees.iter().find(|wt| {
-        wave_name_from_worktree(&wt.path).as_deref() == Some(name)
+        sibling_worktree_name(&wt.path).as_deref() == Some(name)
             || wt
                 .path
                 .file_name()

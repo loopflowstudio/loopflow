@@ -924,7 +924,7 @@ mod tests {
     fn explicit_wave_env_overrides_the_worktree_for_ledger_attribution() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
-        let worktree = repo.create_wave_worktree("ambient");
+        let worktree = repo.create_named_worktree("ambient");
         let wave = Wave::new(
             LfdId::new(),
             "context".to_string(),
@@ -1043,7 +1043,7 @@ mod tests {
     fn journal_writes_run_flow_and_skill_events_in_wave_worktree() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
-        let worktree = repo.create_wave_worktree("runtime");
+        let worktree = repo.create_named_worktree("runtime");
         let command = vec!["lf".to_string(), "build".to_string()];
 
         emit(
@@ -1115,7 +1115,7 @@ mod tests {
     fn journal_keeps_worktree_clean() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
-        let worktree = repo.create_wave_worktree("runtime");
+        let worktree = repo.create_named_worktree("runtime");
         let command = vec!["lf".to_string(), "build".to_string()];
 
         emit(
@@ -1132,7 +1132,7 @@ mod tests {
     fn terminal_run_events_clear_context_for_the_next_run() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
-        let worktree = repo.create_wave_worktree("runtime");
+        let worktree = repo.create_named_worktree("runtime");
         let command = vec!["lf".to_string(), "build".to_string()];
 
         emit(
@@ -1170,7 +1170,7 @@ mod tests {
     fn journal_uses_configured_run_id_when_present() {
         with_run_id_env(Some("7c22895f-e4c1-49cc-a95d-2267e2356f16"), || {
             let repo = TestRepo::new();
-            let worktree = repo.create_wave_worktree("runtime");
+            let worktree = repo.create_named_worktree("runtime");
             let command = vec!["lf".to_string(), "build".to_string()];
 
             emit(
@@ -1199,7 +1199,7 @@ mod tests {
     fn invalid_configured_run_id_falls_back_to_generated_id() {
         with_run_id_env(Some("not-a-uuid"), || {
             let repo = TestRepo::new();
-            let worktree = repo.create_wave_worktree("runtime");
+            let worktree = repo.create_named_worktree("runtime");
             let command = vec!["lf".to_string(), "build".to_string()];
 
             emit(

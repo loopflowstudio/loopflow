@@ -49,7 +49,7 @@ fn prepare_pr(
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
-    crate::ops::pr::reject_wave_home_delivery(&repo_root)?;
+    crate::ops::pr::reject_control_plane_delivery(&repo_root)?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     prepare_land(&repo_root, options, progress)?;

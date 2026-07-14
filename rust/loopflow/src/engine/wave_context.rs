@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn a_work_line_worktree_reads_the_waves_thread() {
         let repo = loopflow_test_support::TestRepo::new();
-        let worktree = repo.create_wave_worktree("goals.148e");
+        let worktree = repo.create_named_worktree("goals.148e");
         seed_journal(repo.path(), "goals", "wave-level question?");
 
         let from_work_line =
@@ -519,7 +519,7 @@ mod tests {
     #[test]
     fn wave_origin_of_a_worktree_is_the_main_checkout() {
         let repo = loopflow_test_support::TestRepo::new();
-        let worktree = repo.create_wave_worktree("origin-check");
+        let worktree = repo.create_named_worktree("origin-check");
         let origin = wave_origin(&worktree);
         assert_eq!(
             origin.canonicalize().unwrap(),

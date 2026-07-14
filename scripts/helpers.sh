@@ -256,7 +256,7 @@ loopflow_dispatch() {
             ;;
         next)
             if loopflow_has_cmd lf; then
-                tmux send-keys 'lf wt create "$(basename "$PWD").next"' Enter
+                loopflow_display "create/select a Linear task, then run: lf task run <issue-id>"
             else
                 loopflow_display "lf not found"
             fi

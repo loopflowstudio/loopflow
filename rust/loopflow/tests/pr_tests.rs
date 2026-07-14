@@ -70,15 +70,11 @@ fn pr_create_calls_gh() {
 }
 
 #[test]
-fn wave_home_refuses_delivery_before_committing_or_pushing() {
+fn canonical_checkout_refuses_delivery_before_committing_or_pushing() {
     let repo = TestRepo::new();
-    let wave_dir = repo.path().join("wave/ship");
-    std::fs::create_dir_all(&wave_dir).expect("wave dir");
-    std::fs::write(wave_dir.join("GOAL.md"), "## Objective\n\nShip safely.\n").expect("goal");
-    let worktree = repo.create_wave_worktree("ship");
 
     let result = create_or_update_pr(
-        &worktree,
+        repo.path(),
         &PrOptions {
             title: Some("must not ship".to_string()),
             body: None,
@@ -90,7 +86,7 @@ fn wave_home_refuses_delivery_before_committing_or_pushing() {
     assert!(matches!(
         result,
         Err(OpsError::Message(message))
-            if message.contains("permanent control-plane home")
+            if message.contains("canonical checkout")
                 && message.contains("lf task run")
     ));
 }

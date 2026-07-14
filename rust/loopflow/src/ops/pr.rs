@@ -7,7 +7,7 @@ use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, Process
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, get_default_branch, sync_main};
-use crate::engine::worktrees::{list_worktrees, main_repo_root, wave_name_from_worktree_and_main};
+use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
@@ -56,7 +56,7 @@ pub fn create_or_update_pr(
     options: &PrOptions,
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
-    reject_wave_home_delivery(repo)?;
+    reject_control_plane_delivery(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -122,15 +122,15 @@ pub fn create_or_update_pr(
     }
 }
 
-pub(crate) fn reject_wave_home_delivery(repo: &Path) -> OpsResult<()> {
+pub(crate) fn reject_control_plane_delivery(repo: &Path) -> OpsResult<()> {
     let main_repo = main_repo_root(repo)?;
-    let Some(name) = wave_name_from_worktree_and_main(repo, &main_repo) else {
-        return Ok(());
-    };
-    if main_repo.join("wave").join(&name).join("GOAL.md").is_file() {
-        return Err(OpsError::Message(format!(
-            "wave/{name} is a permanent control-plane home and cannot open a PR; create a Linear task and run it with `lf task run <issue-id>`"
-        )));
+    let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    let main_repo = main_repo.canonicalize().unwrap_or(main_repo);
+    if checkout == main_repo {
+        return Err(OpsError::Message(
+            "the canonical checkout is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf task run <issue-id>`"
+                .to_string(),
+        ));
     }
     Ok(())
 }

@@ -3,8 +3,8 @@ use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
     is_squash_merged, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
-use crate::engine::identity::{Timestamp, WaveId};
-use crate::engine::naming::{generate_word_pair, git_user};
+use crate::engine::identity::WaveId;
+use crate::engine::naming::git_user;
 use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -35,12 +35,6 @@ impl WorktreeSegment {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlacementRequest {
-    /// Root branch off the default branch.
-    Main { segment: WorktreeSegment },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -162,23 +156,6 @@ pub fn short_run_id(run_id: &str) -> String {
     }
 }
 
-/// The identity of a Wave-owned Task Session: the wave, plus the short run id as
-/// its chain segment and a fresh worker stamp. `bugs` + run `a1b2…` →
-/// `bugs.a1b2c3d4.<ts>` on disk, `<user>/bugs.a1b2c3d4.<ts>` on the remote.
-pub fn worker_id(repo: &Path, wave_name: &str, run_id: &str) -> Result<WaveId, GitError> {
-    let user = git_user(repo)?;
-    let wave = WaveId::for_wave(&user, wave_name).ok_or_else(|| GitError::CommandFailed {
-        command: "worker id".to_string(),
-        stderr: format!("invalid wave name: {wave_name}"),
-    })?;
-    let segment =
-        WorktreeSegment::parse(&short_run_id(run_id)).map_err(|e| GitError::CommandFailed {
-            command: "worker id".to_string(),
-            stderr: e.to_string(),
-        })?;
-    Ok(wave.child(segment, Some(Timestamp::now())))
-}
-
 fn short_hash(value: &str, chars: usize) -> String {
     let digest = Sha256::digest(value.as_bytes());
     let mut hash = hex::encode(digest);
@@ -186,22 +163,22 @@ fn short_hash(value: &str, chars: usize) -> String {
     hash
 }
 
-/// Extract the wave name from a worktree directory.
+/// Extract the suffix from a named sibling worktree directory.
 ///
 /// Given a path like `../loopflow.my-feature`, returns `Some("my-feature")`.
 /// Returns `None` if not in a worktree (i.e., in the main repo).
-pub fn wave_name_from_worktree(repo: &Path) -> Option<String> {
+pub fn sibling_worktree_name(repo: &Path) -> Option<String> {
     let main_repo = main_repo_root(repo).ok()?;
-    wave_name_from_worktree_and_main(repo, &main_repo)
+    sibling_worktree_name_with_main(repo, &main_repo)
 }
 
-/// Extract the wave name using an already-resolved main repo path.
+/// Extract the sibling suffix using an already-resolved main repo path.
 ///
 /// Use this to avoid repeatedly shelling out to git when iterating many worktrees.
 /// Only recognizes sibling worktrees (e.g., `../repo.feature`) — the worktree must
 /// share the same parent directory as the main repo. Worktrees elsewhere (e.g.,
 /// `.claude/worktrees/`) return `None`.
-pub fn wave_name_from_worktree_and_main(repo: &Path, main_repo: &Path) -> Option<String> {
+pub fn sibling_worktree_name_with_main(repo: &Path, main_repo: &Path) -> Option<String> {
     if repo == main_repo {
         return None;
     }
@@ -557,9 +534,9 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
 /// This is a low-level compatibility helper for release and diagnostic
 /// worktree operations. Wave and Project runtimes always use the canonical
 /// main checkout; Task placement uses [`plan_placement`].
-pub fn create_wave_worktree(
+pub fn create_named_worktree(
     repo: &Path,
-    wave_name: &str,
+    name: &str,
     base: Option<&str>,
     sync_default_base: bool,
 ) -> Result<CreateWorktreeResult, GitError> {
@@ -570,9 +547,9 @@ pub fn create_wave_worktree(
     }
 
     let user = git_user(repo)?;
-    let id = WaveId::for_wave(&user, wave_name).ok_or_else(|| GitError::CommandFailed {
+    let id = WaveId::for_wave(&user, name).ok_or_else(|| GitError::CommandFailed {
         command: "git worktree add".to_string(),
-        stderr: format!("invalid wave name: {wave_name}"),
+        stderr: format!("invalid worktree name: {name}"),
     })?;
     let branch = id.branch();
     let worktree_path = worktree_dir(repo, &id);
@@ -645,38 +622,16 @@ pub fn create_wave_worktree(
     })
 }
 
-/// A fresh, stamped worker branch for `wave_name`, de-collided against existing
-/// branches with a word-pair segment. Used by branch rotation.
-pub fn fresh_stamped_branch(repo: &Path, wave_name: &str) -> Result<String, GitError> {
-    let user = git_user(repo)?;
-    let wave = WaveId::parse(wave_name, &user)
-        .map(|id| id.wave_name().to_string())
-        .unwrap_or_else(|| wave_name.to_string());
-    let base = WaveId::for_wave(&user, &wave).ok_or_else(|| GitError::CommandFailed {
-        command: "rotate branch".to_string(),
-        stderr: format!("invalid wave name: {wave_name}"),
-    })?;
-    let mut id = base.clone().stamped(Timestamp::now());
-    while branch_exists(repo, &id.branch())? {
-        let pair =
-            WorktreeSegment::parse(&generate_word_pair()).map_err(|e| GitError::CommandFailed {
-                command: "rotate branch".to_string(),
-                stderr: e.to_string(),
-            })?;
-        id = base.child(pair, Some(Timestamp::now()));
-    }
-    Ok(id.branch())
-}
-
-pub fn plan_placement(repo: &Path, request: PlacementRequest) -> Result<PlacementPlan, GitError> {
+pub fn plan_placement(
+    repo: &Path,
+    segment: WorktreeSegment,
+) -> Result<PlacementPlan, GitError> {
     let default_branch = get_default_branch(repo)?;
     let user = git_user(repo)?;
 
-    let (id, base_ref, parent_branch) = match request {
-        PlacementRequest::Main { segment } => {
-            (WaveId::wave(&user, segment), default_branch.clone(), None)
-        }
-    };
+    let id = WaveId::wave(&user, segment);
+    let base_ref = default_branch;
+    let parent_branch = None;
 
     let branch = id.branch();
     let planned_path = worktree_dir(repo, &id);
@@ -815,7 +770,7 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_network_enrichment, plan_placement, worktree_path, PlacementError, PlacementRequest,
+        apply_network_enrichment, plan_placement, worktree_path, PlacementError,
         PlacementStrategy, WorktreeSegment, WorktreeState,
     };
     use std::collections::HashSet;
@@ -915,8 +870,7 @@ mod tests {
     fn main_placement_creates_root_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
-        let plan = plan_placement(repo.path(), PlacementRequest::Main { segment })
-            .expect("plan placement");
+        let plan = plan_placement(repo.path(), segment).expect("plan task worktree");
 
         assert_eq!(plan.branch, "tester/child");
         assert_eq!(plan.base_ref, "main");

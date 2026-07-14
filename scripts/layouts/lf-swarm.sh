@@ -34,7 +34,7 @@ if (( cols < 120 )); then
     # Bottom: worker
     tmux select-pane -t 1
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf wt create a && lf implement" Enter
+        tmux send-keys "# lf task run <issue-id>" Enter
     fi
 else
     # Full layout: top leader + 3 bottom workers
@@ -55,19 +55,19 @@ else
     # Worker 1 (1)
     tmux select-pane -t 1
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf wt create a && lf implement" Enter
+        tmux send-keys "# lf task run <issue-id-a>" Enter
     fi
 
     # Worker 2 (2)
     tmux select-pane -t 2
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf wt create b && lf implement" Enter
+        tmux send-keys "# lf task run <issue-id-b>" Enter
     fi
 
     # Worker 3 (3)
     tmux select-pane -t 3
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf wt create c && lf implement" Enter
+        tmux send-keys "# lf task run <issue-id-c>" Enter
     fi
 
     # Focus worker 1

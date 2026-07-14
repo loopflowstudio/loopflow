@@ -15,7 +15,7 @@ use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
     attention, auth as auth_routes, catalog, flows, hooks, providers, repos, runs,
-    session_controls, system, waves, worktrees,
+    session_controls, system, waves,
 };
 use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfdb::StoreError;
@@ -111,7 +111,6 @@ pub fn router(state: HttpState) -> Router {
             get(runs::list_runs_for_wave_handler),
         )
         .route("/runs", get(runs::list_runs_handler))
-        .route("/worktrees", get(worktrees::list_worktrees_handler))
         .layer(DefaultBodyLimit::max(max_json_body_bytes))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

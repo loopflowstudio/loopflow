@@ -66,40 +66,38 @@ pub struct ChildControlActivity {
 
 impl ChildControlActivity {
     pub fn from_task(observation: &TaskObservation) -> Self {
-        let (kind, title, summary, directive_version, command_id, effect, decision_id, options) =
-            task_activity_fields(&observation.event);
+        let fields = task_activity_fields(&observation.event);
         Self {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Task,
             subject_id: observation.issue_identifier.clone(),
             session_id: observation.session_id.to_string(),
-            kind,
-            title,
-            summary,
-            directive_version,
-            command_id,
-            effect,
-            decision_id,
-            options,
+            kind: fields.kind,
+            title: fields.title,
+            summary: fields.summary,
+            directive_version: fields.directive_version,
+            command_id: fields.command_id,
+            effect: fields.effect,
+            decision_id: fields.decision_id,
+            options: fields.options,
         }
     }
 
     pub fn from_project(observation: &ProjectObservation) -> Self {
-        let (kind, title, summary, directive_version, command_id, effect, decision_id, options) =
-            project_activity_fields(&observation.event);
+        let fields = project_activity_fields(&observation.event);
         Self {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Project,
             subject_id: observation.project.clone(),
             session_id: observation.session_id.to_string(),
-            kind,
-            title,
-            summary,
-            directive_version,
-            command_id,
-            effect,
-            decision_id,
-            options,
+            kind: fields.kind,
+            title: fields.title,
+            summary: fields.summary,
+            directive_version: fields.directive_version,
+            command_id: fields.command_id,
+            effect: fields.effect,
+            decision_id: fields.decision_id,
+            options: fields.options,
         }
     }
 }
@@ -187,16 +185,16 @@ impl ChatTurn {
     }
 }
 
-type ActivityFields = (
-    ChildActivityKind,
-    String,
-    String,
-    Option<u32>,
-    Option<String>,
-    Option<ChildCommandEffect>,
-    Option<String>,
-    Vec<String>,
-);
+struct ActivityFields {
+    kind: ChildActivityKind,
+    title: String,
+    summary: String,
+    directive_version: Option<u32>,
+    command_id: Option<String>,
+    effect: Option<ChildCommandEffect>,
+    decision_id: Option<String>,
+    options: Vec<String>,
+}
 
 fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
     match event {
@@ -211,52 +209,46 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             state,
             effect,
             error,
-        } => (
-            ChildActivityKind::ControlApplied,
-            format!("Control {}", state.as_str()),
-            error.clone().unwrap_or_default(),
-            None,
-            Some(command_id.to_string()),
-            *effect,
-            None,
-            Vec::new(),
-        ),
-        TaskEventKind::DirectiveChanged { version, .. } => (
-            ChildActivityKind::Directed,
-            format!("Direction v{version}"),
-            "Waiting for incorporation".to_string(),
-            Some(*version),
-            None,
-            None,
-            None,
-            Vec::new(),
-        ),
+        } => ActivityFields {
+            command_id: Some(command_id.to_string()),
+            effect: *effect,
+            ..activity(
+                ChildActivityKind::ControlApplied,
+                &format!("Control {}", state.as_str()),
+                error.as_deref().unwrap_or_default(),
+            )
+        },
+        TaskEventKind::DirectiveChanged { version, .. } => ActivityFields {
+            directive_version: Some(*version),
+            ..activity(
+                ChildActivityKind::Directed,
+                &format!("Direction v{version}"),
+                "Waiting for incorporation",
+            )
+        },
         TaskEventKind::DirectiveIncorporated {
             version, summary, ..
-        } => (
-            ChildActivityKind::Incorporated,
-            format!("Incorporated direction v{version}"),
-            summary.clone(),
-            Some(*version),
-            None,
-            None,
-            None,
-            Vec::new(),
-        ),
+        } => ActivityFields {
+            directive_version: Some(*version),
+            ..activity(
+                ChildActivityKind::Incorporated,
+                &format!("Incorporated direction v{version}"),
+                summary,
+            )
+        },
         TaskEventKind::DecisionRequested {
             decision_id,
             prompt,
             options,
-        } => (
-            ChildActivityKind::DecisionRequired,
-            "Decision required".to_string(),
-            prompt.clone(),
-            None,
-            None,
-            None,
-            Some(decision_id.to_string()),
-            options.clone(),
-        ),
+        } => ActivityFields {
+            decision_id: Some(decision_id.to_string()),
+            options: options.clone(),
+            ..activity(
+                ChildActivityKind::DecisionRequired,
+                "Decision required",
+                prompt,
+            )
+        },
         TaskEventKind::DecisionResolved { choice, .. } => activity(
             ChildActivityKind::DecisionResolved,
             "Decision resolved",
@@ -294,53 +286,47 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             state,
             effect,
             error,
-        } => (
-            ChildActivityKind::ControlApplied,
-            format!("Control {}", state.as_str()),
-            error.clone().unwrap_or_default(),
-            None,
-            Some(command_id.to_string()),
-            *effect,
-            None,
-            Vec::new(),
-        ),
-        ProjectEventKind::DirectiveChanged { version, .. } => (
-            ChildActivityKind::Directed,
-            format!("Direction v{version}"),
-            "Waiting for incorporation".to_string(),
-            Some(*version),
-            None,
-            None,
-            None,
-            Vec::new(),
-        ),
+        } => ActivityFields {
+            command_id: Some(command_id.to_string()),
+            effect: *effect,
+            ..activity(
+                ChildActivityKind::ControlApplied,
+                &format!("Control {}", state.as_str()),
+                error.as_deref().unwrap_or_default(),
+            )
+        },
+        ProjectEventKind::DirectiveChanged { version, .. } => ActivityFields {
+            directive_version: Some(*version),
+            ..activity(
+                ChildActivityKind::Directed,
+                &format!("Direction v{version}"),
+                "Waiting for incorporation",
+            )
+        },
         ProjectEventKind::DirectiveIncorporated {
             version, summary, ..
-        } => (
-            ChildActivityKind::Incorporated,
-            format!("Incorporated direction v{version}"),
-            summary.clone(),
-            Some(*version),
-            None,
-            None,
-            None,
-            Vec::new(),
-        ),
+        } => ActivityFields {
+            directive_version: Some(*version),
+            ..activity(
+                ChildActivityKind::Incorporated,
+                &format!("Incorporated direction v{version}"),
+                summary,
+            )
+        },
         ProjectEventKind::TaskObserved { event, .. } => task_activity_fields(event),
         ProjectEventKind::DecisionRequested {
             decision_id,
             prompt,
             options,
-        } => (
-            ChildActivityKind::DecisionRequired,
-            "Decision required".to_string(),
-            prompt.clone(),
-            None,
-            None,
-            None,
-            Some(decision_id.to_string()),
-            options.clone(),
-        ),
+        } => ActivityFields {
+            decision_id: Some(decision_id.to_string()),
+            options: options.clone(),
+            ..activity(
+                ChildActivityKind::DecisionRequired,
+                "Decision required",
+                prompt,
+            )
+        },
         ProjectEventKind::DecisionResolved { choice, .. } => activity(
             ChildActivityKind::DecisionResolved,
             "Decision resolved",
@@ -361,16 +347,16 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
 }
 
 fn activity(kind: ChildActivityKind, title: &str, summary: &str) -> ActivityFields {
-    (
+    ActivityFields {
         kind,
-        title.to_string(),
-        summary.to_string(),
-        None,
-        None,
-        None,
-        None,
-        Vec::new(),
-    )
+        title: title.to_string(),
+        summary: summary.to_string(),
+        directive_version: None,
+        command_id: None,
+        effect: None,
+        decision_id: None,
+        options: Vec::new(),
+    }
 }
 
 #[cfg(test)]

@@ -366,6 +366,22 @@ pub enum Commands {
         #[arg(required = true, value_parser = reject_retired_sub)]
         removed: String,
     },
+    // Same reservation for the retired `lf op` namespace, which held every
+    // operation before the runtime collapsed to waves, projects, and tasks.
+    // Without it, `lf op land` reports a missing skill named `op` instead of
+    // naming the command that replaced it.
+    #[command(
+        name = "op",
+        hide = true,
+        about = "Removed; the operations are top-level (`lf pr`, `lf rebase`, `lf wt`, `lf pm`)",
+        arg_required_else_help = true
+    )]
+    RetiredOp {
+        #[arg(required = true, value_name = "COMMAND", value_parser = reject_retired_op)]
+        removed: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        rest: Vec<String>,
+    },
     /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
     Memory {
         #[command(subcommand)]
@@ -450,6 +466,30 @@ pub enum RadioCommand {
 
 fn reject_retired_sub(_: &str) -> Result<String, String> {
     Err("the top-level subscription command was removed; use `lf radio sub`".to_string())
+}
+
+/// Name the surviving spelling for each retired `lf op` verb. Prompts, `.lf/`
+/// adaptations, and older installed binaries still say `lf op …`; a caller who
+/// types it should learn where the operation went, not that a skill named `op`
+/// is missing. Nothing here executes — it only fails with a memory.
+fn reject_retired_op(sub: &str) -> Result<String, String> {
+    let hint = match sub {
+        // Ephemeral rotation is gone, not renamed: a worker forks from and
+        // targets its parent branch, so no branch rotates through a worktree.
+        "next" | "advance" => {
+            "it has no replacement — dispatch work with `lf task run <issue-id>`, \
+             and the worker forks from and targets its parent branch"
+                .to_string()
+        }
+        "pr" => "use `lf pr open`".to_string(),
+        "submit" => "use `lf pr submit`".to_string(),
+        "land" => "use `lf pr land`".to_string(),
+        "dispatch" => "use `lf task run <issue-id>`".to_string(),
+        "auth" | "commit" | "cron" | "doctor" | "pm" | "rebase" | "release" | "sync-skills"
+        | "wt" => format!("use `lf {sub}`"),
+        _ => "the operations are top-level now — see `lf --help`".to_string(),
+    };
+    Err(format!("`lf op {sub}` was removed; {hint}"))
 }
 
 /// Wave targeting shared by `lf chat` and `lf memory`: default is the

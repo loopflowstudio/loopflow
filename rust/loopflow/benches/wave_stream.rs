@@ -48,7 +48,15 @@ fn main() {
     // One live SSE subscriber, so every delta pays the broadcast serialization
     // the wire pays.
     let mut sub = runtime.subscribe_with_snapshot();
+    // `/events` replays every turn in the thread before the first live frame:
+    // this is what a reader waits through to see its first new token.
+    let replay: usize = sub
+        .turns
+        .iter()
+        .map(|t| serde_json::to_string(t).expect("turn serializes").len())
+        .sum();
     println!("  thread turns     {}", sub.turns.len());
+    println!("  connect replay   {replay} bytes");
 
     runtime.apply_resident_delta(ResidentDelta::TurnOpened {
         answers: Vec::new(),
@@ -63,10 +71,7 @@ fn main() {
             text: DELTA_TEXT.to_string(),
         });
         samples.push(start.elapsed().as_secs_f64() * 1e6);
-        wire_bytes += sub
-            .turn_rx
-            .try_recv()
-            .map_or(0, |frame| frame.json.len());
+        wire_bytes += sub.turn_rx.try_recv().map_or(0, |frame| frame.json.len());
     }
     let turn_elapsed = turn_start.elapsed().as_secs_f64();
     let turn_chars = DELTAS * DELTA_TEXT.len();
@@ -98,7 +103,10 @@ struct Seeded {
 fn seed_journal(dest: &PathBuf) -> Seeded {
     let Some(src) = std::env::var_os("LF_BENCH_JOURNAL").map(PathBuf::from) else {
         fs::write(dest, "").expect("empty journal");
-        return Seeded { events: 0, bytes: 0 };
+        return Seeded {
+            events: 0,
+            bytes: 0,
+        };
     };
     let body = fs::read_to_string(&src).expect("read LF_BENCH_JOURNAL");
     fs::write(dest, &body).expect("seed journal");

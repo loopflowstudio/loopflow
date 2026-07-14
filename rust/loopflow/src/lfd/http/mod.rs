@@ -95,12 +95,7 @@ pub fn router(state: HttpState) -> Router {
             get(attention::get_attention_handler).patch(attention::patch_attention_handler),
         )
         .route("/waves", get(waves::list_waves_handler))
-        .route(
-            "/waves/{wave_id}",
-            get(waves::get_wave_handler)
-                .patch(waves::update_wave_handler)
-                .delete(waves::delete_wave_handler),
-        )
+        .route("/waves/{wave_id}", get(waves::get_wave_handler))
         .route(
             "/waves/{wave_id}/agent-tree",
             get(waves::get_wave_agent_tree_handler),

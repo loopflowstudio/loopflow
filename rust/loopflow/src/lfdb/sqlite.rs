@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, Repo, RepoEdge,
-    RepoId, Session, SessionStatus, SessionUse, Summary, Wave, WaveStatus,
+    RepoId, Session, SessionStatus, SessionUse, Summary, Wave,
 };
 use crate::lfdb::catalog::{list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
@@ -251,9 +251,6 @@ impl SqliteStore {
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let direction_json = serde_json::to_string(wave.direction())?;
-        let area_json = serde_json::to_string(wave.area())?;
-        let metrics_json = serde_json::to_string(wave.metrics())?;
         let created_at = wave
             .created_at()
             .map(|dt| dt.unix_timestamp())
@@ -264,24 +261,20 @@ impl SqliteStore {
             params![
                 wave.id(),
                 wave.name(),
-                direction_json,
-                area_json,
-                if wave.status() == WaveStatus::Paused {
-                    1i64
-                } else {
-                    0i64
-                },
+                "[]",
+                "[]",
+                0i64,
                 created_at,
                 wave.task_capacity as i64,
-                wave.goal(),
-                metrics_json,
+                wave.name(),
+                "[]",
                 wave.parent_wave_id(),
                 wave.repo,
                 "",
                 "",
-                wave.status.as_i32() as i64,
-                wave.iteration as i64,
-                wave.cycle_start_iteration as i64,
+                1i64,
+                0i64,
+                0i64,
             ],
         )?;
         Ok(())

@@ -61,53 +61,64 @@ Source: `rust/loopflow/src/lfd/types/wave.rs`
 pub struct Wave {
     pub id: LfdId,
     pub name: String,
-    pub goal: String,
-    pub metrics: Vec<String>,
     pub repo: String,
-    pub status: WaveStatus,
-    pub iteration: u32,
-    pub cycle_start_iteration: u32,
-    pub direction: Vec<String>,
-    pub area: Vec<String>,
-    pub paused: bool,
     pub created_at: Option<OffsetDateTime>,
     pub task_capacity: u32,
     pub parent_wave_id: Option<LfdId>,
 }
 ```
 
-Status is represented twice:
+The aggregate is durable placement and identity. Authored intent and machine
+policy stay together in `wave/<name>/GOAL.md`:
 
 ```rust
-pub fn status(&self) -> WaveStatus {
-    if self.paused {
-        return WaveStatus::Paused;
-    }
-    self.status
+pub struct WaveConfig {
+    pub crons: Option<Vec<WaveCronDef>>,
+    pub task_capacity: Option<u32>,
+    pub agent: Option<String>,
+    pub skill_agents: Option<HashMap<String, String>>,
+    pub pm: Option<WavePmConfig>,
+    pub paused: Option<bool>,
 }
+```
 
-pub fn set_status(&mut self, status: WaveStatus) {
-    self.paused = status == WaveStatus::Paused;
-    self.status = status;
+Presentation derives rather than persists current state:
+
+```rust
+pub struct WaveSnapshot {
+    pub status: String,       // idle | running | paused
+    pub paused: bool,         // GOAL policy
+    pub goal: String,         // first Objective paragraph
+    pub live: bool,           // listener answered /health
+    pub endpoint: Option<String>,
+    // identity, capacity, child counts, timestamps...
 }
 ```
 
 ### What is clear
 
-- A Wave has one durable id, one human name, and one canonical repository.
+- A Wave registry row has one durable id, one human name, one canonical
+  repository, one Task-process limit, and optional parent identity.
 - Parent Wave identity permits promotion into a durable child Wave without
   inventing recursive Projects.
-- Wave lifecycle status is intentionally nonterminal.
+- `GOAL.md` owns objective, pause, provider policy, PM binding, and cadence.
+- The listener owns runtime state. `lf status` reports its `loop_state`
+  separately from the Wave's idle/running/paused presence.
+- The actual authored domain flow is `wave`; the old `ship-roadmap` default is
+  gone.
 
 ### What is unclear
 
-- `goal`, `metrics`, `direction`, `area`, `iteration`, and
-  `cycle_start_iteration` mix durable product context with execution-engine
-  bookkeeping. Their current invariants are not visible in the type.
-- `paused` and `status` can disagree because both fields are public. The getter
-  masks the disagreement rather than making it unrepresentable.
-- `DEFAULT_WAVE_FLOW = "ship-roadmap"` and `Wave::new(...).goal =
-  "ship-roadmap"` use the same string as both a flow and a goal.
+- `task_capacity` is authored in `GOAL.md` and copied into the registry so
+  reservation can remain a transaction. This is deliberate denormalization;
+  registration is the reconciliation boundary.
+- Existing SQLite columns for the removed generic-run fields remain in the
+  production schema. Persistence writes neutral values and no domain API reads
+  them. A future table rebuild may remove them, but a migration solely for
+  aesthetic purity would add risk without changing ownership.
+- CLI and lfd projection currently each assemble objective, pause, and listener
+  presence. The rule is the same and small; consolidate only if the two
+  contracts start to diverge.
 
 ### Reduced in code
 
@@ -121,7 +132,7 @@ pub fn set_status(&mut self, status: WaveStatus) {
 - Wave `workers` is now `task_capacity`. Provider workers may collaborate
   inside a Task; Wave capacity limits active Task processes. Zero is no longer
   silently coerced to one.
-- Wave registration refreshes authored goal and Task capacity from `GOAL.md`
+- Wave registration refreshes authored Task capacity from `GOAL.md`
   before a child can launch. This repairs existing registry rows as well as new
   ones, so `task_capacity: 0` is an enforced policy rather than documentation.
 - The obsolete `serialized` compatibility input is deleted. Capacity has one
@@ -130,13 +141,21 @@ pub fn set_status(&mut self, status: WaveStatus) {
   deleted. Task Session status, PR identity, webhooks, and merge reconciliation
   now own the live delivery lifecycle. Historical migration tables remain
   readable but have no current domain type.
+- The internal Wave aggregate is reduced from fourteen fields to six. Stale
+  `goal`, `metrics`, `direction`, `area`, iteration, pause, and status copies
+  are gone.
+- The HTTP/CLI contracts derive the displayed objective from `GOAL.md`, pause
+  from authored policy, and presence from listener health. `loop_state` remains
+  the resident's detailed runtime condition.
+- The uncalled HTTP Wave PATCH and DELETE routes are gone. PATCH changed a
+  registry cache that authored config would overwrite; DELETE removed only the
+  cache while leaving the Wave directory and identity intact.
 
-### Review question
+### Verdict
 
-What is the minimum durable Wave aggregate now that generic Runs are gone? The
-likely center is identity, repo, objective, lifecycle/cadence, Task capacity,
-parent, and timestamps; memory/chat/PM bindings remain in their authoritative
-stores rather than being copied into this row.
+The reduced aggregate now matches what SQLite must coordinate atomically.
+Objective, chat, memory, cadence, and runtime health remain durable, but in
+their actual owners rather than as copies on `Wave`.
 
 ## 2. Project Session
 
@@ -636,7 +655,10 @@ pub enum WtCommand {
 
 | State | Owner |
 |---|---|
-| Wave identity, objective, cadence, budget, chat selection | Wave registry / Wave journal |
+| Wave id, name, repo, parent, Task capacity cache | Wave registry |
+| Wave objective, cadence, pause, provider/PM policy | `GOAL.md` |
+| Wave chat and memory observations | Wave journal / `MEMORY.md` |
+| Wave listener and resident condition | live Wave runtime |
 | Project definition, KRs, Task membership | Linear |
 | Local planning reads | atomic Wave PM snapshot |
 | Project pursuit lifecycle | Project Session + Project event ledger |
@@ -697,22 +719,43 @@ The slice deletes 2,497 lines while adding 265. The repository gate passes:
 with 3 intentional skips, 84 Swift tests, Swift multiplatform boundaries,
 clippy, format, and `git diff --check`.
 
+## Third simplification slice — implemented
+
+This slice gives each Wave fact one owner:
+
+1. `Wave` contains only durable registry identity, placement, Task capacity,
+   parent, and creation time.
+2. Objective and policy are read from `GOAL.md`; live status is derived from
+   listener health. The resident's `loop_state` remains a separate fact.
+3. The false `ship-roadmap` default and copied goal/metrics/direction/area,
+   iteration, pause, and status fields are deleted from Rust and wire mirrors.
+4. Wave PATCH/DELETE HTTP routes are deleted because they mutated only part of
+   the Wave's actual identity.
+5. Legacy SQLite columns remain migration-compatible but are no longer exposed
+   as domain state.
+6. The low-level `lf wt create` smoke path is restored. Worktrees remain a
+   supported Git primitive below Task; only domain instructions stop presenting
+   them as the normal roadmap workflow.
+
+The slice deletes 754 lines while adding 299, including this review. The gate
+passes 49 Python tests, 1,283 Rust tests with 3 intentional skips, 59 website
+tests with 3 intentional skips, 84 Swift tests, the CLI smoke test, the signed
+macOS build-for-testing, clippy, format, Swift boundaries, and `git diff --check`.
+
 ## Questions to resolve as we move outward
 
-1. Which `Wave` fields are durable domain state, and which survive only because
-   the old generic `Run` engine once owned the lifecycle?
-2. Are Wave name, repo, Linear context, and snapshot warning intentionally
+1. Are Wave name, repo, Linear context, and snapshot warning intentionally
    frozen launch receipts on child Sessions? If yes, name them that way.
-3. Which descendant Task events should reach the root Wave directly, and which
+2. Which descendant Task events should reach the root Wave directly, and which
    should arrive only through Project interpretation?
-4. Can Project Session no-progress detection be represented as typed input
+3. Can Project Session no-progress detection be represented as typed input
    state rather than an opaque serialized fingerprint?
-5. Is `Resume { message }` one atomic user intent, or two operations joined for
+4. Is `Resume { message }` one atomic user intent, or two operations joined for
    convenience?
-6. How does Wave Chat show transport receipt, directive incorporation, decision
+5. How does Wave Chat show transport receipt, directive incorporation, decision
    lineage, provider transcript, worktree, and PR without becoming three
    separate consoles?
-7. Where should the provider-side exactly-once limitation be visible to an
+6. Where should the provider-side exactly-once limitation be visible to an
    operator retrying a command after a crash?
 
 ## Review ledger
@@ -730,6 +773,8 @@ clippy, format, and `git diff --check`.
   live observability concept. The dead lifecycle is now removed.
 - The protected control plane is the canonical checkout on the default branch,
   not every branch that happens to use the canonical checkout path.
+- The minimal Wave registry aggregate is six fields; authored policy and live
+  runtime state belong elsewhere.
 
 ### Implemented code reductions
 
@@ -743,10 +788,13 @@ clippy, format, and `git diff --check`.
 - Wave `workers` renamed to `task_capacity`; zero capacity is honored.
 - Authored Task capacity is refreshed into the registry at Wave serve time.
 - Stale generic-Run PR cache and `serialized` compatibility input removed.
+- Copied Wave objective/policy/runtime fields and the false default flow removed.
+- Unowned HTTP Wave mutation routes removed.
+- Low-level `lf wt create` smoke coverage restored after the domain-instruction
+  cleanup accidentally changed it to a no-op listing.
 
 ### Held open
 
-- The minimal Wave aggregate after generic Run deletion.
 - Frozen launch receipt versus duplicated source-of-truth fields.
 - Root Wave visibility versus Project-owned interpretation of Task events.
 - Whether status/process invariants warrant a stronger runtime-state type or

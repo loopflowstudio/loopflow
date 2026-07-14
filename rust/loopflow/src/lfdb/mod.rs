@@ -635,7 +635,7 @@ mod tests {
         SessionSupervisor,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{ChatMemoryBlock, Repo, RepoEdge, RepoId, Summary, Wave, WaveStatus};
+    use crate::lfd::types::{ChatMemoryBlock, Repo, RepoEdge, RepoId, Summary, Wave};
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
@@ -649,22 +649,7 @@ mod tests {
 
     fn make_wave(repo: &str) -> Wave {
         let id = LfdId::new();
-        Wave {
-            id: id.clone(),
-            name: format!("wave-{id}"),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: repo.to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: vec!["focus".to_string()],
-            area: vec!["src".to_string()],
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        Wave::new(id.clone(), format!("wave-{id}"), repo.to_string())
     }
 
     fn make_task_session(wave: &Wave) -> TaskSession {
@@ -1462,16 +1447,15 @@ mod tests {
         store.create_wave(&wave).await.expect("create wave");
         assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
 
-        wave.set_status(WaveStatus::Paused);
+        wave.task_capacity = 2;
         store.update_wave(&wave).await.expect("update wave");
         let loaded = store
             .get_wave(wave.id())
             .await
             .expect("get wave")
             .expect("wave exists");
-        assert_eq!(loaded.status(), WaveStatus::Paused);
         assert_eq!(loaded.repo(), "/repo");
-        assert_eq!(loaded.status, WaveStatus::Paused);
+        assert_eq!(loaded.task_capacity, 2);
 
         let repo = Repo {
             path: "/tmp/repo".to_string(),

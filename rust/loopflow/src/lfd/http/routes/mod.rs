@@ -14,7 +14,7 @@ pub(crate) mod test_helpers;
 
 use crate::lfd::http::dto::{format_datetime, ErrorResponse, WaveDto};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Wave, DEFAULT_WAVE_FLOW};
+use crate::lfd::types::Wave;
 use axum::http::StatusCode;
 use axum::Json;
 
@@ -53,7 +53,7 @@ pub async fn build_wave_dtos(waves: Vec<Wave>) -> Vec<WaveDto> {
 }
 
 pub async fn build_wave_dto(wave: Wave) -> WaveDto {
-    let flow_name = DEFAULT_WAVE_FLOW.to_string();
+    let flow_name = "wave".to_string();
     let flow_repo = wave.repo().to_string();
     let flow_steps = tokio::task::spawn_blocking(move || {
         flows::load_flow_steps(&flow_name, std::path::Path::new(&flow_repo)).unwrap_or_default()
@@ -65,23 +65,38 @@ pub async fn build_wave_dto(wave: Wave) -> WaveDto {
         std::path::Path::new(wave.repo()),
         wave.name(),
     );
+    let paused = wave_config
+        .as_ref()
+        .and_then(|config| config.paused)
+        .unwrap_or(false);
+    let live = crate::wave::server::live_endpoint(std::path::Path::new(wave.repo()), wave.name())
+        .await
+        .is_some();
+    let status = if paused {
+        "paused"
+    } else if live {
+        "running"
+    } else {
+        "idle"
+    };
+    let goal = crate::engine::wave_config::read_wave_summary(
+        std::path::Path::new(wave.repo()),
+        wave.name(),
+    )
+    .unwrap_or_else(|_| wave.name().to_string());
 
     WaveDto {
         id: wave.id().to_string(),
         object: "wave".to_string(),
-        name: wave.name().clone(),
-        goal: wave.goal().to_string(),
-        metrics: wave.metrics().clone(),
-        direction: wave.direction().clone(),
-        area: wave.area().clone(),
+        name: wave.name().to_string(),
+        goal,
         agent: wave_config.as_ref().and_then(|config| config.agent.clone()),
         skill_agents: wave_config.and_then(|config| config.skill_agents),
         created_at: format_datetime(wave.created_at()),
-        status: wave.status().as_str().to_string(),
+        status: status.to_string(),
         flow_steps,
         task_capacity: wave.task_capacity(),
         repo: wave.repo.clone(),
-        iteration: wave.iteration(),
         parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
     }
 }

@@ -1,8 +1,6 @@
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    ChatMemoryBlock, ChatMessage, Repo, RepoEdge, RepoId, Summary, Wave, WaveStatus,
-};
-use crate::lfdb::{StoreError, StoreResult};
+use crate::lfd::types::{ChatMemoryBlock, ChatMessage, Repo, RepoEdge, RepoId, Summary, Wave};
+use crate::lfdb::StoreResult;
 
 // -- Row helpers --------------------------------------------------------------
 
@@ -32,10 +30,6 @@ pub fn now_unix() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
-pub fn parse_json_vec(value: &str) -> StoreResult<Vec<String>> {
-    serde_json::from_str::<Vec<String>>(value).map_err(StoreError::Serde)
-}
-
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, direction, area, paused, created_at, workers,
@@ -43,29 +37,14 @@ pub fn parse_json_vec(value: &str) -> StoreResult<Vec<String>> {
 ///        repo, legacy_worktree, legacy_branch, status, iteration,
 ///        cycle_start_iteration
 pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
-    let direction = parse_json_vec(&text(row, 2)?)?;
-    let area = parse_json_vec(&text(row, 3)?)?;
-    let paused = int(row, 4)? != 0;
     let created_at = unix_to_datetime(bigint(row, 5)?);
     let task_capacity = int(row, 6)? as u32;
-    // Legacy rows predating migration 037 (goal NOT NULL DEFAULT) can hold
-    // NULL; fall back to the same default so `lf ls`/reads stay robust.
-    let goal = opt_text(row, 7)?.unwrap_or_else(|| "ship-roadmap".to_string());
-    let metrics = parse_json_vec(&text(row, 8)?)?;
     let parent_wave_id = opt_text(row, 9)?.map(LfdId::from_raw);
 
     Ok(Wave {
         id: LfdId::from_raw(text(row, 0)?),
         name: text(row, 1)?,
-        goal,
-        metrics,
         repo: text(row, 10)?,
-        status: WaveStatus::from_i32(int(row, 13)?),
-        iteration: int(row, 14)? as u32,
-        cycle_start_iteration: int(row, 15)? as u32,
-        direction,
-        area,
-        paused,
         created_at: Some(created_at),
         task_capacity,
         parent_wave_id,

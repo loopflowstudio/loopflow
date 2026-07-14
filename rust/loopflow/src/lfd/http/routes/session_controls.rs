@@ -151,27 +151,12 @@ mod tests {
     use super::*;
     use crate::lfd::http::routes::test_helpers::test_http_state;
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{SessionStatus, SessionUse, Wave, WaveStatus};
+    use crate::lfd::types::{SessionStatus, SessionUse, Wave};
     use axum::extract::{Query, State};
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
-        Wave {
-            id: LfdId::new(),
-            name: "terminal-test".to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: repo.to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        Wave::new(LfdId::new(), "terminal-test".to_string(), repo.to_string())
     }
 
     fn make_session(wave_id: LfdId, source: &str) -> Session {

@@ -476,7 +476,7 @@ mod tests {
         ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcess,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{Wave, WaveStatus};
+    use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, StorageConfig};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::task::{LinearProjectId, LinearProjectRef};
@@ -485,22 +485,7 @@ mod tests {
 
     fn make_wave(repo: &str) -> Wave {
         let id = LfdId::new();
-        Wave {
-            id: id.clone(),
-            name: format!("wave-{id}"),
-            goal: "keep child control coherent".to_string(),
-            metrics: Vec::new(),
-            repo: repo.to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        Wave::new(id.clone(), format!("wave-{id}"), repo.to_string())
     }
 
     fn make_project(wave: &Wave, status: ProjectSessionStatus) -> ProjectSession {

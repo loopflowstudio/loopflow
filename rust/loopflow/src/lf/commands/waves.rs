@@ -1,14 +1,10 @@
 //! `lf ls` and `lf status` — read the wave registry (`lfdb`).
 //!
-//! Discovery and history are QUERIES over the durable store, not a streaming
-//! center (see `scratch/eventing.md`): `lf ls` lists every wave the registry
-//! knows — running and stopped alike (`list_waves(None)`) — and marks which
-//! have a live server answering; `lf status <wave>` reports one wave's native
-//! Project/Task hierarchy, attention, and live loop state.
-//! Both are pure readers over the shared SQLite ledger; `--json` is the
-//! machine-readable snapshot Loopflow's dashboard reads. A live wave has an
-//! endpoint you can subscribe to for motion (`GET /events`); a stopped one is
-//! a row with no endpoint — visible, inert, restartable.
+//! `lf ls` lists every durable Wave registry row and projects authored policy
+//! from `GOAL.md` plus current listener presence. `lf status <wave>` adds the
+//! Wave's Project/Task hierarchy, attention, and live loop state. Both are
+//! read-only; `--json` is the dashboard contract. A stopped Wave remains
+//! visible, inert, and restartable.
 
 use std::path::Path;
 
@@ -31,13 +27,13 @@ use crate::wave::server::live_endpoint;
 pub struct WaveSnapshot {
     pub id: String,
     pub name: String,
-    /// Rolled-up wave status (`idle | running | waiting | paused | failed`).
+    /// Wave presence (`idle | running | paused`). Detailed resident condition
+    /// is reported separately by `WaveDetailSnapshot::loop_state`.
     pub status: String,
     pub paused: bool,
     pub goal: String,
     /// Primary repo path.
     pub repo: String,
-    pub iteration: u32,
     /// Max concurrent Task Sessions this wave allows.
     pub task_capacity: u32,
     /// Non-terminal Task Sessions owned by this Wave.
@@ -287,14 +283,24 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         .into_iter()
         .filter(|session| !session.status.is_terminal())
         .count() as u32;
+    let config = crate::engine::wave_config::read_wave_config(Path::new(&repo), wave.name());
+    let paused = config.and_then(|config| config.paused).unwrap_or(false);
+    let live = endpoint.is_some();
+    let status = if paused {
+        "paused"
+    } else if live {
+        "running"
+    } else {
+        "idle"
+    };
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
-        name: wave.name().clone(),
-        status: wave.status().as_str().to_string(),
-        paused: wave.paused,
-        goal: wave.goal().to_string(),
+        name: wave.name().to_string(),
+        status: status.to_string(),
+        paused,
+        goal: crate::engine::wave_config::read_wave_summary(Path::new(&repo), wave.name())
+            .unwrap_or_else(|_| wave.name().to_string()),
         repo,
-        iteration: wave.iteration(),
         task_capacity: wave.task_capacity(),
         active_tasks,
         active_projects,
@@ -378,7 +384,7 @@ async fn snapshot_projects(
         .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
     let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
     let planning = match store
-        .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().clone())
+        .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().to_string())
         .await
         .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
     {
@@ -852,7 +858,7 @@ mod tests {
         store
             .put_pm_snapshot(PmSnapshotRow {
                 repo: repo.display().to_string(),
-                wave: wave.name().clone(),
+                wave: wave.name().to_string(),
                 provider: "linear".to_string(),
                 initiative: "initiative-1".to_string(),
                 synced_at: 1,
@@ -921,7 +927,6 @@ mod tests {
             paused: false,
             goal: "ship the roadmap".into(),
             repo: "/repo".into(),
-            iteration: 3,
             task_capacity: 2,
             active_tasks: 2,
             active_projects: 1,
@@ -952,7 +957,6 @@ mod tests {
                 paused: false,
                 goal: "g".into(),
                 repo: "/repo".into(),
-                iteration: 0,
                 task_capacity: 1,
                 active_tasks: 0,
                 active_projects: 0,

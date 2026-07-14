@@ -22,15 +22,11 @@ pub struct WavePmConfig {
     pub linear_initiative: Option<String>,
 }
 
-/// Intent read from `wave/<name>/GOAL.md` frontmatter during wave creation.
+/// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
-    pub goal: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub task_capacity: Option<u32>,
-    pub area: Option<Vec<String>>,
-    pub direction: Option<Vec<String>>,
-    pub metrics: Option<Vec<String>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
@@ -53,7 +49,7 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
             return None;
         }
     };
-    let mut config = match split_frontmatter(&content) {
+    Some(match split_frontmatter(&content) {
         Some((frontmatter, _)) => match serde_yaml_ng::from_str::<WaveConfig>(&frontmatter) {
             Ok(config) => config,
             Err(err) => {
@@ -62,11 +58,26 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
             }
         },
         None => WaveConfig::default(),
-    };
-    config.goal = config.goal.or_else(|| Some(name.to_string()));
-    config.area = None;
-    config.direction = None;
-    Some(config)
+    })
+}
+
+/// One-line Wave objective for status, PM, and API projections.
+///
+/// GOAL.md remains the source of truth. The summary is the first paragraph of
+/// `## Objective`, falling back to the first prose paragraph when that section
+/// is absent.
+pub fn read_wave_summary(repo: &Path, name: &str) -> std::io::Result<String> {
+    let content = std::fs::read_to_string(goal_path(repo, name))?;
+    let body = split_frontmatter(&content)
+        .map(|(_, body)| body)
+        .unwrap_or(content);
+    let objective = markdown_section(&body, "Objective");
+    let summary = first_paragraph(&objective);
+    if summary.is_empty() {
+        Ok(first_prose_paragraph(&body))
+    } else {
+        Ok(summary)
+    }
 }
 
 fn split_frontmatter(content: &str) -> Option<(String, String)> {
@@ -83,6 +94,44 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
 
 fn goal_path(repo: &Path, name: &str) -> std::path::PathBuf {
     repo.join("wave").join(name).join("GOAL.md")
+}
+
+fn markdown_section(content: &str, heading: &str) -> String {
+    let marker = format!("## {heading}");
+    let mut in_section = false;
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        if line.trim() == marker {
+            in_section = true;
+            continue;
+        }
+        if in_section && line.trim_start().starts_with("## ") {
+            break;
+        }
+        if in_section {
+            lines.push(line);
+        }
+    }
+    lines.join("\n").trim().to_string()
+}
+
+fn first_paragraph(content: &str) -> String {
+    content
+        .split("\n\n")
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .find(|paragraph| !paragraph.is_empty())
+        .unwrap_or_default()
+}
+
+fn first_prose_paragraph(content: &str) -> String {
+    content
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|paragraph| !paragraph.is_empty())
+        .filter(|paragraph| !paragraph.starts_with('#'))
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .next()
+        .unwrap_or_default()
 }
 
 fn empty_goal_body(name: &str) -> String {
@@ -196,24 +245,35 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn read_wave_config_parses_goal_frontmatter() {
+    fn read_wave_config_parses_machine_frontmatter() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\ntask_capacity: 3\nmetrics:\n  - tests pass\n  - docs updated\narea: ['.']\n---\nDrive the work.\n",
+            "---\ntask_capacity: 3\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.goal.as_deref(), Some("scan"));
         assert_eq!(config.task_capacity, Some(3));
+    }
+
+    #[test]
+    fn read_wave_summary_prefers_the_objective() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\ntask_capacity: 3\n---\n\n## Objective\n\nKeep the system\nboring.\n\n## Process\n\nDo the work.\n",
+        )
+        .expect("write");
+
         assert_eq!(
-            config.metrics,
-            Some(vec!["tests pass".to_string(), "docs updated".to_string()])
+            read_wave_summary(temp.path(), "scan").expect("summary"),
+            "Keep the system boring."
         );
-        assert_eq!(config.area, None);
     }
 
     #[test]
@@ -314,6 +374,5 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(config.agent.is_none());
         assert!(config.skill_agents.is_none());
-        assert_eq!(config.area, None);
     }
 }

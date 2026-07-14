@@ -340,7 +340,7 @@ pub(crate) async fn resolve_target(
             if let (Some(store), Ok(id)) = (store, id.parse()) {
                 own_row = store.get_wave(&id).await?;
             }
-            own_name = own_row.as_ref().map(|row| row.name().clone());
+            own_name = own_row.as_ref().map(|row| row.name().to_string());
         }
         Some(AmbientChannelRef::Channel(name)) => {
             let head = family_head(&name).to_string();
@@ -370,13 +370,13 @@ pub(crate) async fn resolve_target(
             anyhow!("cannot resolve the invoking wave for --parent: no LFD_WAVE_ID in env")
         })?;
         let parent = parent_wave(store, &own).await?;
-        let name = parent.name().clone();
+        let name = parent.name().to_string();
         (Some(parent), name)
     } else {
         // Speak locally: the ambient wave.
         match own_row {
             Some(row) => {
-                let name = row.name().clone();
+                let name = row.name().to_string();
                 (Some(row), name)
             }
             None => {
@@ -515,7 +515,11 @@ mod tests {
             skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
-            argv: vec!["lf".to_string(), "serve".to_string(), wave.name().clone()],
+            argv: vec![
+                "lf".to_string(),
+                "serve".to_string(),
+                wave.name().to_string(),
+            ],
             env: BTreeMap::from([
                 (WAVE_SERVER_ENDPOINT_ENV.to_string(), endpoint.to_string()),
                 (

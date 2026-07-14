@@ -203,7 +203,6 @@ struct WaveSnapshot: Decodable {
     let paused: Bool
     let goal: String
     let repo: String
-    let iteration: Int
     let taskCapacity: Int
     let activeTasks: Int
     let activeProjects: Int
@@ -213,7 +212,7 @@ struct WaveSnapshot: Decodable {
     let parentWaveId: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, paused, goal, repo, iteration, live, endpoint
+        case id, name, status, paused, goal, repo, live, endpoint
         case taskCapacity = "task_capacity"
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"

@@ -407,7 +407,7 @@ mod tests {
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
     use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{RepoId, WaveStatus};
+    use crate::lfd::types::RepoId;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::provider_auth::ProviderAuthService;
     use std::process::Command;
@@ -440,22 +440,7 @@ mod tests {
     }
 
     fn make_wave(name: &str, repo: String) -> Wave {
-        Wave {
-            id: LfdId::new(),
-            name: name.to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo,
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        Wave::new(LfdId::new(), name.to_string(), repo)
     }
 
     fn init_git_repo(path: &Path, remote: &str) {

@@ -6,16 +6,12 @@ WAVE_MINIMAL = {
     "id": "abc-123",
     "object": "wave",
     "name": "reduce",
-    "goal": "ship-roadmap",
-    "metrics": [],
+    "goal": "Keep the codebase small.",
     "task_capacity": 1,
-    "direction": ["infra"],
-    "area": [],
     "status": "running",
     "flow_steps": [],
     "parent_wave_id": None,
     "repo": "/tmp/repo",
-    "iteration": 0,
 }
 
 WAVE_FULL = {

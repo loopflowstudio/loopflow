@@ -48,7 +48,6 @@ fn wave_fixture_carries_single_repo() {
     assert_eq!(wave.parent_wave_id.as_deref(), Some("wave_parent999"));
 
     assert_eq!(wave.repo, "/home/user/project");
-    assert_eq!(wave.iteration, 3);
 }
 
 #[test]

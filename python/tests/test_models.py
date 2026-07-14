@@ -32,7 +32,6 @@ class TestWaveModel:
         assert wave.flow_steps == []
         assert wave.task_capacity == 1
         assert wave.repo == "/tmp/repo"
-        assert wave.iteration == 0
         assert wave.agent is None
         assert wave.skill_agents is None
 

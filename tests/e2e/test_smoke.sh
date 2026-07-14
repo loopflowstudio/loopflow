@@ -38,7 +38,15 @@
     --diff false \
     | grep -q "Test"
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- wt list >/dev/null
+  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- wt create smoke-test >/dev/null
+
+  repo_name=$(basename "$repo_dir")
+  wt_path="$(dirname "$repo_dir")/${repo_name}.smoke-test"
+
+  if [ ! -d "$wt_path" ]; then
+    echo "expected worktree at $wt_path" >&2
+    exit 1
+  fi
 
   cd "$wt_path"
   echo "change" > file.txt

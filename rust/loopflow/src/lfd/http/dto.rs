@@ -64,21 +64,17 @@ pub struct WaveDto {
     pub object: String,
     pub name: String,
     pub goal: String,
-    pub metrics: Vec<String>,
-    pub direction: Vec<String>,
-    pub area: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_agents: Option<HashMap<String, String>>,
     pub created_at: Option<String>,
-    /// Wave-level status rolled up over `repos` (see `Wave::status`).
+    /// Current Wave presence derived from GOAL policy and listener health.
     pub status: String,
     pub flow_steps: Vec<String>,
     pub task_capacity: u32,
     /// The single repository whose main checkout is this Wave's control plane.
     pub repo: String,
-    pub iteration: u32,
     /// Parent wave in the chord tree. `null` for a root wave. Always emitted
     /// (no `skip_serializing_if`) so the Python/Swift mirrors stay in lockstep.
     pub parent_wave_id: Option<String>,
@@ -180,13 +176,6 @@ pub struct WaveAgentTreeDto {
     pub sessions: Vec<WaveAgentTreeSessionDto>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct DeletedResourceResponse {
-    pub id: String,
-    pub object: String,
-    pub deleted: bool,
-}
-
 pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
     datetime?
         .format(&time::format_description::well_known::Rfc3339)
@@ -230,10 +219,7 @@ mod contract_tests {
             id: "wave_abc123".to_string(),
             object: "wave".to_string(),
             name: "engbot".to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            direction: Vec::new(),
-            area: Vec::new(),
+            goal: "Ship the roadmap".to_string(),
             agent: None,
             skill_agents: None,
             status: "idle".to_string(),
@@ -241,13 +227,11 @@ mod contract_tests {
             created_at: None,
             flow_steps: Vec::new(),
             repo: "/home/user/project".to_string(),
-            iteration: 0,
             parent_wave_id: None,
         };
 
         let json = serde_json::to_value(&wave).unwrap();
-        assert_eq!(json["goal"], "ship-roadmap");
-        assert_eq!(json["metrics"], serde_json::json!([]));
+        assert_eq!(json["goal"], "Ship the roadmap");
         assert_eq!(json["repo"], "/home/user/project");
     }
 
@@ -260,17 +244,6 @@ mod contract_tests {
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
         assert!(err.to_string().contains("missing field `goal`"));
-    }
-
-    #[test]
-    fn wave_metrics_is_required() {
-        let mut json = wave_fixture();
-        json.as_object_mut()
-            .expect("wave payload should be an object")
-            .remove("metrics");
-
-        let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
-        assert!(err.to_string().contains("missing field `metrics`"));
     }
 
     #[test]

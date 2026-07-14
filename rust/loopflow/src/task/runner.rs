@@ -977,7 +977,7 @@ mod tests {
             pm_snapshot_warning: None,
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            wave: wave.name().clone(),
+            wave: wave.name().to_string(),
             supervisor: SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },

@@ -1536,23 +1536,11 @@ mod tests {
     }
 
     fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
-        use crate::lfd::types::WaveStatus;
-        crate::lfd::types::Wave {
-            id: crate::lfd::id::LfdId::new(),
-            name: name.to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: "/tmp/repo".to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(time::OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        crate::lfd::types::Wave::new(
+            crate::lfd::id::LfdId::new(),
+            name.to_string(),
+            "/tmp/repo".to_string(),
+        )
     }
 
     /// The registry seat end to end through `serve`: the WaveAgent row is

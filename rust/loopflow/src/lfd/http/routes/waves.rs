@@ -2,22 +2,15 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
-use std::path::Path as FsPath;
-use std::str::FromStr;
 
-use crate::engine::wave_config::update_wave_agent_config;
 use crate::lfd::http::dto::{
-    session_dto, DeletedResourceResponse, ListResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto,
-    WaveDto,
+    session_dto, ListResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
 };
-use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
+use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
-use crate::lfd::types::{WaveStatus, LIVE_SESSION_STATUSES};
+use crate::lfd::http::{api_error, map_store_error, ApiResult};
+use crate::lfd::types::LIVE_SESSION_STATUSES;
 
-// TODO(M1): convert the mutating wave routes in this file to exec lf argv or
-// remove them. lfd is the local face, not a hand: no direct git, worktree, tmux,
-// or ops calls from route handlers.
 #[derive(Debug, Deserialize)]
 pub struct ListWavesQuery {
     repo: Option<String>,
@@ -29,18 +22,6 @@ pub struct ListWavesQuery {
 #[derive(Debug, Deserialize, Default)]
 pub struct GetWaveAgentTreeQuery {
     active_only: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct UpdateWaveRequest {
-    name: Option<String>,
-    goal: Option<String>,
-    direction: Option<Vec<String>>,
-    area: Option<Vec<String>>,
-    task_capacity: Option<u32>,
-    status: Option<String>,
-    agent: Option<String>,
-    skill_agents: Option<std::collections::HashMap<String, String>>,
 }
 
 pub async fn list_waves_handler(
@@ -63,17 +44,6 @@ pub async fn list_waves_handler(
     Ok(Json(ListResponse::new(views, has_more)))
 }
 
-fn trimmed_non_empty(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-}
-
-fn update_task_capacity(current_capacity: u32, requested_capacity: Option<u32>) -> u32 {
-    requested_capacity.unwrap_or(current_capacity)
-}
-
 pub async fn get_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -87,95 +57,6 @@ pub async fn get_wave_handler(
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
     let view = build_wave_dto(wave).await;
     Ok(Json(view))
-}
-
-pub async fn update_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-    Json(payload): Json<UpdateWaveRequest>,
-) -> ApiResult<WaveDto> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let mut wave = state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    // A Wave's authored name is its `wave/<name>/` identity. HTTP cannot move
-    // that directory atomically with its Linear Initiative and durable store.
-    if let Some(ref name) = payload.name {
-        if !name.is_empty() && *name != *wave.name() {
-            return Err(api_error(
-                StatusCode::PRECONDITION_FAILED,
-                "Wave names are authored by the wave/<name>/ directory and cannot be renamed through HTTP",
-            ));
-        }
-    }
-
-    if let Some(goal) = trimmed_non_empty(payload.goal.as_deref()) {
-        wave.goal = goal;
-    }
-    if let Some(direction) = payload.direction {
-        wave.direction = direction;
-    }
-    if let Some(area) = payload.area {
-        wave.area = area;
-    }
-    wave.task_capacity = update_task_capacity(wave.task_capacity, payload.task_capacity);
-    if let Some(status) = payload.status {
-        let parsed = WaveStatus::from_str(&status)
-            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
-        wave.set_status(parsed);
-    }
-
-    if payload.agent.is_some() || payload.skill_agents.is_some() {
-        let repo = wave.repo().to_string();
-        let wave_name = wave.name().clone();
-        let agent = payload.agent.clone();
-        let skill_agents = payload.skill_agents.clone();
-        run_blocking_result(
-            move || update_wave_agent_config(FsPath::new(&repo), &wave_name, agent, skill_agents),
-            StatusCode::BAD_REQUEST,
-        )
-        .await?;
-    }
-
-    state
-        .store
-        .update_wave(&wave)
-        .await
-        .map_err(map_store_error)?;
-
-    let view = build_wave_dto(wave).await;
-    Ok(Json(view))
-}
-
-pub async fn delete_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<DeletedResourceResponse> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    // Delete from the store (cascades to runs, sessions, etc.).
-    state
-        .store
-        .delete_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?;
-
-    Ok(Json(DeletedResourceResponse {
-        id: wave_id.to_string(),
-        object: "wave".to_string(),
-        deleted: true,
-    }))
 }
 
 pub async fn get_wave_agent_tree_handler(
@@ -221,25 +102,6 @@ pub async fn get_wave_agent_tree_handler(
     }))
 }
 
-fn map_join_error(err: tokio::task::JoinError) -> ApiError {
-    api_error(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        ApiMessage::Untrusted(err.to_string()),
-    )
-}
-
-async fn run_blocking_result<T, E, F>(func: F, failure_status: StatusCode) -> Result<T, ApiError>
-where
-    T: Send + 'static,
-    E: std::fmt::Display + Send + 'static,
-    F: FnOnce() -> Result<T, E> + Send + 'static,
-{
-    tokio::task::spawn_blocking(func)
-        .await
-        .map_err(map_join_error)?
-        .map_err(|err| api_error(failure_status, ApiMessage::Untrusted(err.to_string())))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,22 +113,7 @@ mod tests {
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str, name: &str) -> Wave {
-        Wave {
-            id: LfdId::new(),
-            name: name.to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: repo.to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        Wave::new(LfdId::new(), name.to_string(), repo.to_string())
     }
 
     fn make_session(wave: &Wave, session_use: SessionUse, cwd: &Path) -> Session {
@@ -424,91 +271,5 @@ mod tests {
         assert_eq!(listed.data.len(), 1);
         assert_eq!(listed.data[0].repo, repo_a);
         assert_eq!(listed.data[0].name, "wave-a");
-    }
-
-    #[tokio::test]
-    async fn update_fields_handler() {
-        let state = test_http_state().await;
-        let repo_tmp = tempdir().expect("tempdir");
-        init_git_repo(repo_tmp.path());
-        let repo = repo_tmp.path().to_string_lossy().to_string();
-
-        let mut wave = make_wave(&repo, "before");
-        wave.direction = vec!["infra".to_string()];
-        wave.area = vec!["src/".to_string()];
-        state.store.create_wave(&wave).await.expect("create wave");
-        let created_id = wave.id().to_string();
-
-        let Json(updated) = update_wave_handler(
-            State(state.clone()),
-            Path(created_id.clone()),
-            Json(UpdateWaveRequest {
-                direction: Some(vec!["clarity".to_string()]),
-                area: Some(vec!["docs/".to_string()]),
-                ..Default::default()
-            }),
-        )
-        .await
-        .expect("update wave");
-
-        assert_eq!(updated.name, "before");
-        assert_eq!(updated.direction, vec!["clarity".to_string()]);
-        assert_eq!(updated.area, vec!["docs/".to_string()]);
-
-        let Json(found) = get_wave_handler(State(state), Path(created_id))
-            .await
-            .expect("get updated wave");
-        assert_eq!(found.name, "before");
-        assert_eq!(found.direction, vec!["clarity".to_string()]);
-        assert_eq!(found.area, vec!["docs/".to_string()]);
-    }
-
-    #[tokio::test]
-    async fn update_rejects_wave_rename_without_mutating_identity() {
-        let state = test_http_state().await;
-        let repo_tmp = tempdir().expect("tempdir");
-        init_git_repo(repo_tmp.path());
-        let repo = repo_tmp.path().to_string_lossy().to_string();
-        let wave = make_wave(&repo, "before");
-        state.store.create_wave(&wave).await.expect("create wave");
-
-        let result = update_wave_handler(
-            State(state.clone()),
-            Path(wave.id().to_string()),
-            Json(UpdateWaveRequest {
-                name: Some("after".to_string()),
-                ..Default::default()
-            }),
-        )
-        .await;
-
-        assert!(matches!(result, Err((StatusCode::PRECONDITION_FAILED, _))));
-        let stored = state
-            .store
-            .get_wave(wave.id())
-            .await
-            .expect("lookup")
-            .expect("wave");
-        assert_eq!(stored.name(), "before");
-    }
-
-    #[tokio::test]
-    async fn delete_then_get_returns_not_found() {
-        let state = test_http_state().await;
-        let repo_tmp = tempdir().expect("tempdir");
-        init_git_repo(repo_tmp.path());
-        let repo = repo_tmp.path().to_string_lossy().to_string();
-
-        let wave = make_wave(&repo, "delete-me");
-        state.store.create_wave(&wave).await.expect("create wave");
-        let created_id = wave.id().to_string();
-
-        let Json(deleted) = delete_wave_handler(State(state.clone()), Path(created_id.clone()))
-            .await
-            .expect("delete wave");
-        assert!(deleted.deleted);
-
-        let missing = get_wave_handler(State(state), Path(created_id)).await;
-        assert!(matches!(missing, Err((StatusCode::NOT_FOUND, _))));
     }
 }

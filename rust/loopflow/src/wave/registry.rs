@@ -116,7 +116,7 @@ impl Registration {
 /// not degrade to running unregistered (observed live — two brains on one
 /// wave because boot skipped registration entirely). The created row is
 /// minimal and refreshes authored launch configuration from GOAL.md
-/// frontmatter ([`read_wave_config`]): goal and task capacity when present,
+/// frontmatter ([`read_wave_config`]): Task capacity when present,
 /// [`Wave::new`] defaults otherwise. This refresh makes a GOAL.md edit take
 /// effect on the next `lf serve`, including for rows created by older builds.
 ///
@@ -137,13 +137,9 @@ pub async fn ensure_wave_row(
         )
     });
     if let Some(config) = read_wave_config(main_repo, name) {
-        if let Some(goal) = config.goal.filter(|goal| !goal.trim().is_empty()) {
-            wave.goal = goal;
-        }
         if let Some(task_capacity) = config.task_capacity {
             wave.task_capacity = task_capacity;
         }
-        wave.paused = config.paused.unwrap_or(false);
     }
     store.create_wave(&wave).await?;
     if is_new {
@@ -208,7 +204,7 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
         argv: vec![
             "lf".to_string(),
             "serve".to_string(),
-            config.wave.name().clone(),
+            config.wave.name().to_string(),
         ],
         env: std::collections::BTreeMap::from([
             (WAVE_SERVER_ENDPOINT_ENV.to_string(), endpoint.to_string()),
@@ -472,7 +468,6 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    use crate::lfd::types::WaveStatus;
     use crate::lfdb::{open_store, StorageConfig};
 
     async fn temp_store(tmp: &std::path::Path) -> SharedStore {
@@ -484,22 +479,9 @@ mod tests {
     }
 
     fn make_wave(name: &str) -> Wave {
-        Wave {
-            id: LfdId::new(),
-            name: name.to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: "/tmp/repo".to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 2,
-            parent_wave_id: None,
-        }
+        let mut wave = Wave::new(LfdId::new(), name.to_string(), "/tmp/repo".to_string());
+        wave.task_capacity = 2;
+        wave
     }
 
     fn registry_config(store: SharedStore, wave: Wave, force: bool) -> RegistryConfig {
@@ -523,7 +505,11 @@ mod tests {
             skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
-            argv: vec!["lf".to_string(), "serve".to_string(), wave.name().clone()],
+            argv: vec![
+                "lf".to_string(),
+                "serve".to_string(),
+                wave.name().to_string(),
+            ],
             env: BTreeMap::from([
                 (
                     WAVE_SERVER_ENDPOINT_ENV.to_string(),
@@ -567,7 +553,6 @@ mod tests {
             .expect("lookup")
             .expect("row exists");
         assert_eq!(stored.id, wave.id);
-        assert_eq!(stored.goal, "keep shipping", "goal from GOAL.md");
         assert_eq!(stored.task_capacity, 0, "task capacity from GOAL.md");
         assert_eq!(stored.repo(), repo.display().to_string());
 
@@ -597,7 +582,7 @@ mod tests {
         );
     }
 
-    /// No GOAL.md at all: the created row falls back to `Wave::new` defaults.
+    /// No GOAL.md at all: the created row falls back to `Wave::new` policy.
     #[tokio::test]
     async fn ensure_wave_row_without_goal_md_uses_defaults() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -605,7 +590,7 @@ mod tests {
         let wave = ensure_wave_row(&store, tmp.path(), "ship")
             .await
             .expect("row created");
-        assert_eq!(wave.goal, "ship-roadmap");
+        assert_eq!(wave.task_capacity, 1);
     }
 
     #[tokio::test]

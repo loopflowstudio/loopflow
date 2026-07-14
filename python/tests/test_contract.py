@@ -20,12 +20,8 @@ def test_wave_fixture_parses():
 
     assert wave.id == "wave_abc123"
     assert wave.name == "engbot"
-    assert wave.goal == "ship-roadmap"
-    assert wave.metrics == ["all roadmap items shipped", "cargo test green"]
+    assert wave.goal == "Make releases boring."
     assert wave.status == "running"
-    assert wave.direction == ["ux", "clarity"]
-    assert wave.area == ["src/"]
     assert wave.parent_wave_id == "wave_parent999"
 
     assert wave.repo == "/home/user/project"
-    assert wave.iteration == 3

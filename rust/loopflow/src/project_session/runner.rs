@@ -1002,7 +1002,7 @@ mod tests {
                 context: "Provider-neutral control".to_string(),
             },
             wave_id: wave.id().clone(),
-            wave: wave.name().clone(),
+            wave: wave.name().to_string(),
             repo: "/repo".to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
             current_directive_version: 0,

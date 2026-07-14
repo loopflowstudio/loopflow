@@ -652,7 +652,6 @@ fn wave_ci_target(wave_id: &LfdId, task: &TaskSession) -> Option<WaveCiTarget> {
 mod tests {
     use super::*;
     use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
-    use crate::lfd::types::WaveStatus;
     use crate::lfdb::{open_store, StorageConfig};
     use crate::task::{
         LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
@@ -696,22 +695,11 @@ mod tests {
     }
 
     fn make_wave(name: &str, repo: &std::path::Path) -> Wave {
-        Wave {
-            id: LfdId::new(),
-            name: name.to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: repo.to_string_lossy().to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        Wave::new(
+            LfdId::new(),
+            name.to_string(),
+            repo.to_string_lossy().to_string(),
+        )
     }
 
     fn task_with_open_pr(wave: &Wave, pr_number: u32) -> TaskSession {

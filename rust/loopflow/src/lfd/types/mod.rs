@@ -21,4 +21,4 @@ pub use session::{
     WAVE_SERVER_SOURCE,
 };
 pub use summary::Summary;
-pub use wave::{Wave, WaveStatus, DEFAULT_WAVE_FLOW};
+pub use wave::Wave;

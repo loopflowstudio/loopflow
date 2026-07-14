@@ -408,7 +408,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{Session, SessionStatus, Wave, WaveStatus, TMUX_TERMINAL_SOURCE};
+    use crate::lfd::types::{Session, SessionStatus, Wave, TMUX_TERMINAL_SOURCE};
     use crate::lfdb::{open_store, StorageConfig};
 
     use super::{
@@ -481,22 +481,7 @@ mod tests {
     }
 
     fn make_named_wave(repo: &str, name: &str) -> Wave {
-        Wave {
-            id: LfdId::new(),
-            name: name.to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: repo.to_string(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            task_capacity: 1,
-            parent_wave_id: None,
-        }
+        Wave::new(LfdId::new(), name.to_string(), repo.to_string())
     }
 
     /// Create a registry db at `path` with one wave; point `LFD_DB_PATH` at it.

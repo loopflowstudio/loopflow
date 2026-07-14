@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Wave, WaveStatus};
+use crate::lfd::types::Wave;
 use crate::lfdb::{open_store, SharedStore, StorageConfig};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::server;
@@ -21,22 +21,9 @@ pub(crate) async fn temp_store(dir: &Path) -> SharedStore {
 }
 
 pub(crate) fn make_wave(name: &str, repo: &Path, parent: Option<&LfdId>) -> Wave {
-    Wave {
-        id: LfdId::new(),
-        name: name.to_string(),
-        goal: "ship-roadmap".to_string(),
-        metrics: Vec::new(),
-        repo: repo.display().to_string(),
-        status: WaveStatus::Idle,
-        iteration: 0,
-        cycle_start_iteration: 0,
-        direction: Vec::new(),
-        area: Vec::new(),
-        paused: false,
-        created_at: Some(time::OffsetDateTime::now_utc()),
-        task_capacity: 1,
-        parent_wave_id: parent.cloned(),
-    }
+    let mut wave = Wave::new(LfdId::new(), name.to_string(), repo.display().to_string());
+    wave.parent_wave_id = parent.cloned();
+    wave
 }
 
 /// Boot the HTTP surface over a runtime (the wave/mod.rs harness pattern).

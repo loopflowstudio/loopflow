@@ -1638,29 +1638,7 @@ fn write_initiative_to_goal(
 }
 
 fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
-    let path = repo.join("wave").join(wave).join("GOAL.md");
-    let content = std::fs::read_to_string(&path)?;
-    let objective = markdown_section(&content, "Objective");
-    Ok(first_paragraph(&objective))
-}
-
-fn markdown_section(content: &str, heading: &str) -> String {
-    let marker = format!("## {heading}");
-    let mut in_section = false;
-    let mut lines = Vec::new();
-    for line in content.lines() {
-        if line.trim() == marker {
-            in_section = true;
-            continue;
-        }
-        if in_section && line.trim_start().starts_with("## ") {
-            break;
-        }
-        if in_section {
-            lines.push(line);
-        }
-    }
-    lines.join("\n").trim().to_string()
+    Ok(crate::engine::wave_config::read_wave_summary(repo, wave)?)
 }
 
 fn first_paragraph(content: &str) -> String {

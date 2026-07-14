@@ -38,15 +38,11 @@ class Wave(BaseModel):
     object: str
     name: str
     goal: str
-    metrics: list[str]
     task_capacity: int
-    direction: list[str]
-    area: list[str]
     agent: Optional[str] = None
     skill_agents: Optional[dict[str, str]] = None
     status: str
     repo: str
-    iteration: int
     flow_steps: list[FlowStep]
     parent_wave_id: Optional[str]
     created_at: Optional[datetime] = None

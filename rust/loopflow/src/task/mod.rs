@@ -323,9 +323,12 @@ pub struct TaskSession {
     pub status_at: OffsetDateTime,
     pub worktree: PathBuf,
     pub workspace_slug: String,
-    /// Provider/model selection captured when the session is reserved.
+    /// Provider/model selection for the next body generation. This is mutable
+    /// lease state, not Task Session identity.
     pub agent: String,
+    /// Harness family for the next/current body generation.
     pub provider: String,
+    /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
     /// Latest launch generation, retained after that process exits.
     pub latest_process: Option<ChildProcessGeneration>,
@@ -456,6 +459,9 @@ impl TaskSession {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
     Started,
+    BodyHandedOff {
+        handoff: crate::child_session::ChildBodyHandoff,
+    },
     StatusChanged {
         from: TaskSessionStatus,
         to: TaskSessionStatus,

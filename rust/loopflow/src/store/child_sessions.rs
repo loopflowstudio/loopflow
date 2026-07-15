@@ -2,8 +2,8 @@
 //! observation outbox that links each event to its next responsible recipient.
 
 use crate::child_session::{
-    AbandonIntent, BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildDirective, ChildRef, ObservationRecipient,
+    AbandonIntent, BoundaryResult, ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect,
+    ChildCommandId, ChildDirective, ChildRef, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::project_session::{
@@ -70,6 +70,19 @@ impl Store {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_task_process(&session, expected_status)
+        })
+        .await
+    }
+
+    pub async fn handoff_task_body(
+        &self,
+        session_id: &TaskSessionId,
+        request: &ChildBodyHandoffRequest,
+    ) -> StoreResult<TaskSession> {
+        let session_id = session_id.clone();
+        let request = request.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.handoff_task_body(&session_id, &request)
         })
         .await
     }
@@ -410,6 +423,19 @@ impl Store {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_project_process(&session, expected_status)
+        })
+        .await
+    }
+
+    pub async fn handoff_project_body(
+        &self,
+        session_id: &ProjectSessionId,
+        request: &ChildBodyHandoffRequest,
+    ) -> StoreResult<ProjectSession> {
+        let session_id = session_id.clone();
+        let request = request.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.handoff_project_body(&session_id, &request)
         })
         .await
     }

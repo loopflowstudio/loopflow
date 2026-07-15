@@ -955,10 +955,13 @@ mod tests {
     use async_trait::async_trait;
     use time::OffsetDateTime;
 
-    use super::{absorb_commands, apply_input, handle_attachment, progress_summary, CommandStop};
+    use super::{
+        absorb_commands, apply_input, handle_attachment, progress_summary, task_seed, CommandStop,
+    };
     use crate::child_session::{
-        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildProcessGeneration, ChildRef,
+        ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
+        ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective,
+        ChildProcessGeneration, ChildRef,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
@@ -1133,6 +1136,86 @@ mod tests {
         let summary = progress_summary(&"x".repeat(2_500));
         assert_eq!(summary.chars().count(), 2_000);
         assert!(summary.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn failed_claude_task_hands_off_to_codex_with_directive_and_active_pr() {
+        let (store, mut failed) = conformance_session("claude").await;
+        let session_id = failed.id.clone();
+        let worktree = failed.worktree.clone();
+        failed.set_status(
+            TaskSessionStatus::Failed,
+            "Claude quota exhausted after preserving durable state",
+        );
+        store.update_task_session(&failed).await.unwrap();
+
+        let command = ChildCommand::new(
+            ChildRef::Task(session_id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "Keep the existing directive and continue PR2".to_string(),
+            },
+        );
+        let directive = ChildDirective::replacement(
+            ChildRef::Task(session_id.clone()),
+            1,
+            "Keep the existing directive and continue PR2".to_string(),
+            command.source.clone(),
+            command.id.clone(),
+        );
+        store
+            .create_child_command_with_directive(&command, &directive)
+            .await
+            .unwrap();
+        let active_pr_before = store.active_task_pr(&session_id).await.unwrap().unwrap();
+
+        let request = ChildBodyHandoffRequest {
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            reason: "Claude quota exhausted".to_string(),
+        };
+        let mut resumed = store
+            .handoff_task_body(&session_id, &request)
+            .await
+            .unwrap();
+        let active_pr_after = store.active_task_pr(&session_id).await.unwrap().unwrap();
+        let current_directive = store
+            .child_directives(&ChildRef::Task(session_id.clone()))
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.version == resumed.current_directive_version)
+            .expect("current directive survives provider death");
+        let seed = task_seed(
+            &resumed,
+            &active_pr_after,
+            "wave-claude",
+            &current_directive,
+        );
+
+        assert_eq!(resumed.id, session_id);
+        assert_eq!(resumed.worktree, worktree);
+        assert_eq!(resumed.agent, "codex");
+        assert_eq!(resumed.provider, "codex");
+        assert_eq!(resumed.provider_session_id, None);
+        assert_eq!(active_pr_after.id, active_pr_before.id);
+        assert_eq!(active_pr_after.branch, active_pr_before.branch);
+        assert!(seed.contains("Keep the existing directive and continue PR2"));
+        assert!(seed.contains(&active_pr_before.branch));
+        assert!(seed.contains(session_id.as_str()));
+
+        assert_eq!(resumed.begin_generation("lf-task-codex".to_string()), 2);
+        assert_eq!(resumed.latest_process.unwrap().generation, 2);
+        let events = store.task_events_after(&session_id, 0).await.unwrap();
+        assert!(matches!(
+            events.last().map(|event| &event.kind),
+            Some(TaskEventKind::BodyHandedOff { handoff })
+                if handoff.from_agent == "claude"
+                    && handoff.to_agent == "codex"
+                    && handoff.from_provider == "claude"
+                    && handoff.to_provider == "codex"
+                    && handoff.reason == "Claude quota exhausted"
+        ));
     }
 
     #[tokio::test]

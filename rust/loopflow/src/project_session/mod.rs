@@ -121,8 +121,12 @@ pub struct ProjectSession {
     pub iteration: u32,
     pub observation_cursor: i64,
     pub last_state_fingerprint: Option<String>,
+    /// Provider/model selection for the next body generation. This is mutable
+    /// lease state, not Project Session identity.
     pub agent: String,
+    /// Harness family for the next/current body generation.
     pub provider: String,
+    /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
     /// Latest launch generation, retained after that process exits.
     pub latest_process: Option<ChildProcessGeneration>,
@@ -204,6 +208,9 @@ impl ProjectSession {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProjectEventKind {
     Started,
+    BodyHandedOff {
+        handoff: crate::child_session::ChildBodyHandoff,
+    },
     StatusChanged {
         from: ProjectSessionStatus,
         to: ProjectSessionStatus,

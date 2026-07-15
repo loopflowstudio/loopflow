@@ -86,11 +86,15 @@ lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
 lf task acknowledge INF-123 --directive 2 --summary "the shared primitive is first"
 lf task decide INF-123 DECISION_ID revise --message "cover the boundary race"
 lf task wait INF-123
+lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 The Linear task exists before its worktree. One durable Task Session retains
-that stable sibling worktree and provider history through serial PRs, review,
-CI repair, and explicit completion. Every Task PR targets `main`.
+that stable sibling worktree, directive, supervision state, and PR history
+through serial PRs, review, CI repair, provider failure, and explicit
+completion. A provider process and transcript are a replaceable body generation;
+plain `resume` keeps compatible provider history, while `--model` hands the same
+Session to another agent. Every Task PR targets `main`.
 
 Task Sessions inherit the Wave objective, curated memory, Project definition,
 and KRs. Typed, idempotent Task observations keep the Wave informed without

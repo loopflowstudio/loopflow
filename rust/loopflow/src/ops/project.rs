@@ -727,8 +727,33 @@ pub fn project_interrupt(
     queue_project_command(project, ChildCommandKind::Interrupt { replacement })
 }
 
-pub fn project_resume(project: &str, message: Option<String>) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ChildCommandKind::Resume { message })
+pub fn project_resume(
+    project: &str,
+    message: Option<String>,
+    model: Option<String>,
+    reason: Option<String>,
+) -> OpsResult<ProjectControlResult> {
+    block_on_project(async move {
+        let store = project_store().await?;
+        let mut session = store
+            .get_project_session_by_project(project)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
+        reconcile_project_liveness(&store, &mut session).await?;
+        let project_id = session.launch.project.id.as_str().to_string();
+        let source = project_command_source(&session)?;
+        let result = super::child::resume_session(
+            &store,
+            super::child::ChildSession::Project(Box::new(session)),
+            source,
+            message,
+            model,
+            reason,
+        )
+        .await?;
+        Ok(project_control_result(project_id, result))
+    })
 }
 
 pub fn project_decide(

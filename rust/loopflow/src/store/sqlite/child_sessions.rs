@@ -13,9 +13,10 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    AbandonIntent, BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId,
-    ChildExecutionContext, ChildProcessGeneration, ChildRef, DirectiveKind, ObservationRecipient,
+    AbandonIntent, BoundaryResult, ChildBodyHandoff, ChildBodyHandoffRequest, ChildCommand,
+    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildDirective, ChildDirectiveId, ChildExecutionContext, ChildProcessGeneration, ChildRef,
+    DirectiveKind, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::project_session::{
@@ -175,6 +176,52 @@ impl SqliteStore {
         }
         transaction.commit()?;
         Ok(true)
+    }
+
+    pub fn handoff_task_body(
+        &self,
+        session_id: &TaskSessionId,
+        request: &ChildBodyHandoffRequest,
+    ) -> StoreResult<TaskSession> {
+        validate_handoff_request(request)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut session = transaction
+            .query_row(
+                TASK_SESSION_SELECT,
+                params![session_id.as_str()],
+                map_task_session_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        validate_handoff_state(
+            "Task",
+            &session.launch.issue.identifier,
+            session.status.as_str(),
+            session.status.is_process_active(),
+            session.status.is_terminal(),
+            session.abandon_intent.as_ref(),
+        )?;
+        let handoff = apply_handoff(
+            &mut session.agent,
+            &mut session.provider,
+            &mut session.provider_session_id,
+            request,
+        );
+        session.updated_at = OffsetDateTime::now_utc();
+        validate_task_session(&session)?;
+        let parameters = task_session_params(&session);
+        transaction.execute(
+            TASK_SESSION_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        insert_task_event_in(
+            &transaction,
+            &session,
+            &TaskEventKind::BodyHandedOff { handoff },
+        )?;
+        transaction.commit()?;
+        Ok(session)
     }
 
     pub fn task_session(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskSession>> {
@@ -755,56 +802,14 @@ impl SqliteStore {
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let created_at = now_unix();
-        transaction.execute(
-            "INSERT INTO task_events (session_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
-            params![
-                session_id.as_str(),
-                serde_json::to_string(kind)?,
-                created_at
-            ],
+        let session = transaction.query_row(
+            TASK_SESSION_SELECT,
+            params![session_id.as_str()],
+            map_task_session_row,
         )?;
-        let event_id = transaction.last_insert_rowid();
-        if kind.is_project_observable() {
-            let session = transaction.query_row(
-                TASK_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_task_session_row,
-            )?;
-            insert_observation(
-                &transaction,
-                &ObservationRecipient::Project {
-                    session_id: session.project_session_id.clone(),
-                },
-                &ChildRef::Task(session_id.clone()),
-                event_id,
-                &ChildEventPayload::Task {
-                    event: kind.clone(),
-                },
-                created_at,
-            )?;
-            if kind.is_root_wave_observable() {
-                insert_observation(
-                    &transaction,
-                    &ObservationRecipient::Wave {
-                        wave_id: session.wave_id,
-                    },
-                    &ChildRef::Task(session_id.clone()),
-                    event_id,
-                    &ChildEventPayload::Task {
-                        event: kind.clone(),
-                    },
-                    created_at,
-                )?;
-            }
-        }
+        let event = insert_task_event_in(&transaction, &session, kind)?;
         transaction.commit()?;
-        Ok(TaskEvent {
-            id: event_id,
-            session_id: session_id.clone(),
-            kind: kind.clone(),
-            created_at: crate::store::rows::unix_to_datetime(created_at),
-        })
+        Ok(event)
     }
 
     pub fn task_events_after(
@@ -940,6 +945,55 @@ impl SqliteStore {
         Ok(true)
     }
 
+    pub fn handoff_project_body(
+        &self,
+        session_id: &ProjectSessionId,
+        request: &ChildBodyHandoffRequest,
+    ) -> StoreResult<ProjectSession> {
+        validate_handoff_request(request)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut session = transaction
+            .query_row(
+                PROJECT_SESSION_SELECT,
+                params![session_id.as_str()],
+                map_project_session_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        validate_handoff_state(
+            "Project",
+            &session.launch.project.slug,
+            session.status.as_str(),
+            session.status.is_process_active(),
+            session.status.is_terminal(),
+            session.abandon_intent.as_ref(),
+        )?;
+        let handoff = apply_handoff(
+            &mut session.agent,
+            &mut session.provider,
+            &mut session.provider_session_id,
+            request,
+        );
+        session.updated_at = OffsetDateTime::now_utc();
+        validate_project_session(&session)?;
+        transaction.execute(
+            PROJECT_SESSION_UPDATE,
+            rusqlite::params_from_iter(
+                project_session_params(&session)
+                    .iter()
+                    .map(|value| value.as_ref()),
+            ),
+        )?;
+        insert_project_event_in(
+            &transaction,
+            &session,
+            &ProjectEventKind::BodyHandedOff { handoff },
+        )?;
+        transaction.commit()?;
+        Ok(session)
+    }
+
     pub fn project_session(
         &self,
         session_id: &ProjectSessionId,
@@ -1052,43 +1106,14 @@ impl SqliteStore {
     ) -> StoreResult<ProjectEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let created_at = now_unix();
-        transaction.execute(
-            "INSERT INTO project_events (session_id, kind_json, created_at)
-             VALUES (?1, ?2, ?3)",
-            params![
-                session_id.as_str(),
-                serde_json::to_string(kind)?,
-                created_at
-            ],
+        let session = transaction.query_row(
+            PROJECT_SESSION_SELECT,
+            params![session_id.as_str()],
+            map_project_session_row,
         )?;
-        let event_id = transaction.last_insert_rowid();
-        if kind.is_wave_observable() {
-            let session = transaction.query_row(
-                PROJECT_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_project_session_row,
-            )?;
-            insert_observation(
-                &transaction,
-                &ObservationRecipient::Wave {
-                    wave_id: session.wave_id,
-                },
-                &ChildRef::Project(session_id.clone()),
-                event_id,
-                &ChildEventPayload::Project {
-                    event: kind.clone(),
-                },
-                created_at,
-            )?;
-        }
+        let event = insert_project_event_in(&transaction, &session, kind)?;
         transaction.commit()?;
-        Ok(ProjectEvent {
-            id: event_id,
-            session_id: session_id.clone(),
-            kind: kind.clone(),
-            created_at: crate::store::rows::unix_to_datetime(created_at),
-        })
+        Ok(event)
     }
 
     pub fn project_events_after(
@@ -1353,6 +1378,68 @@ fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
     session
         .validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
+fn validate_handoff_request(request: &ChildBodyHandoffRequest) -> StoreResult<()> {
+    if request.agent.trim().is_empty() || request.provider.trim().is_empty() {
+        return Err(StoreError::InvalidData(
+            "body handoff requires an agent and provider".to_string(),
+        ));
+    }
+    if request.reason.trim().is_empty() {
+        return Err(StoreError::InvalidData(
+            "body handoff requires an audit reason".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_handoff_state(
+    kind: &str,
+    label: &str,
+    status: &str,
+    process_active: bool,
+    terminal: bool,
+    abandon_intent: Option<&AbandonIntent>,
+) -> StoreResult<()> {
+    if terminal {
+        return Err(StoreError::InvalidData(format!(
+            "{kind} {label} is {status}; terminal Sessions cannot hand off bodies"
+        )));
+    }
+    if let Some(intent) = abandon_intent {
+        return Err(StoreError::InvalidData(format!(
+            "{kind} {label} is being abandoned: {}",
+            intent.reason
+        )));
+    }
+    if process_active {
+        return Err(StoreError::InvalidData(format!(
+            "{kind} {label} already has an active writer; interrupt it before changing providers"
+        )));
+    }
+    Ok(())
+}
+
+fn apply_handoff(
+    agent: &mut String,
+    provider: &mut String,
+    provider_session_id: &mut Option<String>,
+    request: &ChildBodyHandoffRequest,
+) -> ChildBodyHandoff {
+    let handoff = ChildBodyHandoff {
+        from_agent: agent.clone(),
+        to_agent: request.agent.clone(),
+        from_provider: provider.clone(),
+        to_provider: request.provider.clone(),
+        reason: request.reason.clone(),
+    };
+    if *provider != request.provider {
+        *provider_session_id = None;
+    }
+    *agent = request.agent.clone();
+    *provider = request.provider.clone();
+    handoff
 }
 
 fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
@@ -2322,6 +2409,94 @@ fn child_columns(source: &ChildRef) -> (&'static str, String) {
         ChildRef::Project(session_id) => ("project", session_id.as_str().to_string()),
         ChildRef::Task(session_id) => ("task", session_id.as_str().to_string()),
     }
+}
+
+fn insert_task_event_in(
+    conn: &Connection,
+    session: &TaskSession,
+    kind: &TaskEventKind,
+) -> StoreResult<TaskEvent> {
+    let created_at = now_unix();
+    conn.execute(
+        "INSERT INTO task_events (session_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
+        params![
+            session.id.as_str(),
+            serde_json::to_string(kind)?,
+            created_at
+        ],
+    )?;
+    let event_id = conn.last_insert_rowid();
+    if kind.is_project_observable() {
+        insert_observation(
+            conn,
+            &ObservationRecipient::Project {
+                session_id: session.project_session_id.clone(),
+            },
+            &ChildRef::Task(session.id.clone()),
+            event_id,
+            &ChildEventPayload::Task {
+                event: kind.clone(),
+            },
+            created_at,
+        )?;
+        if kind.is_root_wave_observable() {
+            insert_observation(
+                conn,
+                &ObservationRecipient::Wave {
+                    wave_id: session.wave_id.clone(),
+                },
+                &ChildRef::Task(session.id.clone()),
+                event_id,
+                &ChildEventPayload::Task {
+                    event: kind.clone(),
+                },
+                created_at,
+            )?;
+        }
+    }
+    Ok(TaskEvent {
+        id: event_id,
+        session_id: session.id.clone(),
+        kind: kind.clone(),
+        created_at: crate::store::rows::unix_to_datetime(created_at),
+    })
+}
+
+fn insert_project_event_in(
+    conn: &Connection,
+    session: &ProjectSession,
+    kind: &ProjectEventKind,
+) -> StoreResult<ProjectEvent> {
+    let created_at = now_unix();
+    conn.execute(
+        "INSERT INTO project_events (session_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
+        params![
+            session.id.as_str(),
+            serde_json::to_string(kind)?,
+            created_at
+        ],
+    )?;
+    let event_id = conn.last_insert_rowid();
+    if kind.is_wave_observable() {
+        insert_observation(
+            conn,
+            &ObservationRecipient::Wave {
+                wave_id: session.wave_id.clone(),
+            },
+            &ChildRef::Project(session.id.clone()),
+            event_id,
+            &ChildEventPayload::Project {
+                event: kind.clone(),
+            },
+            created_at,
+        )?;
+    }
+    Ok(ProjectEvent {
+        id: event_id,
+        session_id: session.id.clone(),
+        kind: kind.clone(),
+        created_at: crate::store::rows::unix_to_datetime(created_at),
+    })
 }
 
 fn insert_observation(

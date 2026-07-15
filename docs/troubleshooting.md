@@ -37,7 +37,13 @@ stopped process through the same Task Session:
 lf task decide INF-123 cd_123 approve
 lf task follow-up INF-123 "address the latest review"
 lf task resume INF-123 "continue from the failure"
+lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
+
+Plain `resume` continues the same provider transcript. `--model` keeps the Task
+Session, directive, worktree, and active PR, but gives the next body generation
+to the selected agent. It refuses while another body is still writing; interrupt
+that body first.
 
 If a control returned a command id, inspect or wait for its durable receipt:
 
@@ -49,11 +55,19 @@ lf task receipt cc_123 --wait --timeout 30s --json
 
 **Symptom:** Tasks fail with rate limit errors.
 
-Claude, Codex, Gemini, and OpenCode have usage limits. Options:
+Claude, Codex, Gemini, and OpenCode have usage limits. Resume the same Session
+on another supported Session provider:
+
+```bash
+lf task resume INF-123 --model codex --reason "Claude quota exhausted"
+lf project resume project-slug --model codex --reason "Claude quota exhausted"
+```
+
+Other options:
 
 - Wait and retry
 - Reduce parallel waves
-- Switch to a different model: `lf gate -m codex`
+- Switch a one-shot flow to a different model: `lf gate -m codex`
 
 ## Worktree issues
 

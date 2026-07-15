@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use crate::child_session::{
-    AbandonIntent, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDirective, ChildRef,
+    AbandonIntent, ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandId,
+    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildRef,
 };
 use crate::project_session::{ProjectEventKind, ProjectSession, ProjectSessionStatus};
 use crate::store::SharedStore;
@@ -62,6 +62,35 @@ impl ChildSession {
             Self::Project(session) => session.status.is_process_active(),
             Self::Task(session) => session.status.is_process_active(),
         }
+    }
+
+    fn agent(&self) -> &str {
+        match self {
+            Self::Project(session) => &session.agent,
+            Self::Task(session) => &session.agent,
+        }
+    }
+
+    async fn handoff(
+        &mut self,
+        store: &SharedStore,
+        request: &ChildBodyHandoffRequest,
+    ) -> OpsResult<()> {
+        *self = match self {
+            Self::Project(session) => Self::Project(Box::new(
+                store
+                    .handoff_project_body(&session.id, request)
+                    .await
+                    .map_err(child_error)?,
+            )),
+            Self::Task(session) => Self::Task(Box::new(
+                store
+                    .handoff_task_body(&session.id, request)
+                    .await
+                    .map_err(child_error)?,
+            )),
+        };
+        Ok(())
     }
 
     async fn supervisor_restart_bar(&self, store: &SharedStore) -> OpsResult<Option<String>> {
@@ -357,6 +386,60 @@ enum LaunchIntent {
     ExplicitResume,
 }
 
+pub(crate) async fn resume_session(
+    store: &SharedStore,
+    mut session: ChildSession,
+    source: ChildCommandSource,
+    message: Option<String>,
+    model: Option<String>,
+    reason: Option<String>,
+) -> OpsResult<ChildControlResult> {
+    if let Some(model) = model {
+        let request = handoff_request(&model, reason.as_deref())?;
+        if session.agent() != request.agent {
+            if !matches!(&source, ChildCommandSource::Human) {
+                if let Some(bar) = session.supervisor_restart_bar(store).await? {
+                    return Err(child_error(bar));
+                }
+            }
+            session.handoff(store, &request).await?;
+        }
+    }
+    queue_command(store, session, source, ChildCommandKind::Resume { message }).await
+}
+
+fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHandoffRequest> {
+    let agent = model.trim();
+    if agent.is_empty() {
+        return Err(child_error("handoff model cannot be empty"));
+    }
+    let (provider, model_name) = agent
+        .split_once(':')
+        .map_or((agent, None), |(provider, model_name)| {
+            (provider, Some(model_name))
+        });
+    let provider = crate::harness::canonical_harness(provider)
+        .ok_or_else(|| child_error(format!("unsupported session harness: {provider}")))?;
+    let agent = match model_name {
+        Some(model_name) if model_name.trim().is_empty() => {
+            return Err(child_error("handoff model name cannot be empty"));
+        }
+        Some(model_name) => format!("{provider}:{}", model_name.trim()),
+        None => provider.to_string(),
+    };
+    let reason = reason
+        .unwrap_or("operator requested provider handoff")
+        .trim();
+    if reason.is_empty() {
+        return Err(child_error("handoff reason cannot be empty"));
+    }
+    Ok(ChildBodyHandoffRequest {
+        agent,
+        provider: provider.to_string(),
+        reason: reason.to_string(),
+    })
+}
+
 pub(crate) async fn queue_command(
     store: &SharedStore,
     mut session: ChildSession,
@@ -643,7 +726,9 @@ mod tests {
         ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcessGeneration,
     };
     use crate::id::WaveId;
-    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::project_session::{
+        ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
+    };
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         ProjectLaunchReceipt, TaskLaunchReceipt,
@@ -652,7 +737,7 @@ mod tests {
     use crate::task::{GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
     use crate::wave::Wave;
 
-    use super::{queue_command, ChildSession};
+    use super::{handoff_request, queue_command, resume_session, ChildSession};
 
     fn make_wave(repo: &str) -> Wave {
         let id = WaveId::new();
@@ -980,6 +1065,181 @@ mod tests {
         // `lf task resume` still has a Session to resume.
         assert!(!task.status.is_terminal());
         assert!(task.abandon_intent.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_handoff_reuses_compatible_history_and_records_the_transition() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project(&wave, ProjectSessionStatus::Waiting);
+        project.provider_session_id = Some("claude-thread".to_string());
+        project.latest_process = Some(ChildProcessGeneration {
+            generation: 4,
+            pid: None,
+            tmux_name: "lf-project-old".to_string(),
+            started_at: project.updated_at,
+        });
+        project.agent = "claude:sonnet".to_string();
+        project.provider = "claude".to_string();
+        let project_id = project.id.clone();
+        store.create_project_session(&project).await.unwrap();
+
+        let request = handoff_request("claude:opus", Some("use the larger context window"))
+            .expect("valid same-provider handoff");
+        let mut child = ChildSession::Project(Box::new(project));
+        child.handoff(&store, &request).await.unwrap();
+
+        let persisted = store
+            .get_project_session(&project_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.agent, "claude:opus");
+        assert_eq!(persisted.provider, "claude");
+        assert_eq!(
+            persisted.provider_session_id.as_deref(),
+            Some("claude-thread")
+        );
+        let events = store.project_events_after(&project_id, 0).await.unwrap();
+        assert!(matches!(
+            events.last().map(|event| &event.kind),
+            Some(ProjectEventKind::BodyHandedOff { handoff })
+                if handoff.from_agent == "claude:sonnet"
+                    && handoff.to_agent == "claude:opus"
+                    && handoff.reason == "use the larger context window"
+        ));
+    }
+
+    #[tokio::test]
+    async fn live_task_writer_rejects_provider_handoff_without_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+        let task = make_task(&wave, &project, TaskSessionStatus::Running);
+        let task_id = task.id.clone();
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        let request = handoff_request("codex", Some("Claude quota exhausted")).unwrap();
+        let error = store
+            .handoff_task_body(&task_id, &request)
+            .await
+            .expect_err("a live writer must be interrupted before handoff");
+        assert!(error.to_string().contains("active writer"));
+
+        let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
+        assert_eq!(persisted.agent, "claude");
+        assert_eq!(
+            persisted.provider_session_id.as_deref(),
+            Some("thread-task")
+        );
+        assert!(store
+            .task_events_after(&task_id, 0)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn task_handoff_preserves_an_open_pr_and_its_supervisor_bar() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        task.provider_session_id = Some("claude-review-thread".to_string());
+        let mut pr = make_task_pr(&task);
+        let task_id = task.id.clone();
+        let pr_id = pr.id.clone();
+        store.create_task_session(&task, &pr).await.unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: crate::task::AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 898,
+                url: "https://github.com/loopflow/loopflow/pull/898".to_string(),
+            }),
+        });
+        store.update_task_pr(&pr).await.unwrap();
+
+        let error = resume_session(
+            &store,
+            ChildSession::Task(Box::new(task)),
+            ChildCommandSource::Project(project.id.clone()),
+            None,
+            Some("codex".to_string()),
+            Some("supervisor tried to answer review".to_string()),
+        )
+        .await
+        .expect_err("supervision must not hand off an open PR");
+        assert!(error.to_string().contains("#898"));
+        assert_eq!(
+            store
+                .get_task_session(&task_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .agent,
+            "claude"
+        );
+
+        let request = handoff_request("codex", Some("answer review on Codex")).unwrap();
+        let persisted = store.handoff_task_body(&task_id, &request).await.unwrap();
+        let active_pr = store.active_task_pr(&task_id).await.unwrap().unwrap();
+
+        assert_eq!(active_pr.id, pr_id);
+        assert!(persisted.supervisor_restart_bar(Some(&active_pr)).is_some());
+        assert_eq!(persisted.agent, "codex");
+        assert_eq!(persisted.provider_session_id, None);
+    }
+
+    #[tokio::test]
+    async fn terminal_task_rejects_handoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+        let task = make_task(&wave, &project, TaskSessionStatus::Completed);
+        let task_id = task.id.clone();
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        let request = handoff_request("codex", Some("should not restart")).unwrap();
+        let error = store
+            .handoff_task_body(&task_id, &request)
+            .await
+            .expect_err("terminal Sessions never hand off");
+        assert!(error.to_string().contains("terminal Sessions"));
     }
 
     /// Abandonment is decided when it is *queued*, not when a runner consumes it.

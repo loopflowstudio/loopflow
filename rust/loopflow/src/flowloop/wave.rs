@@ -285,7 +285,7 @@ enum InboxAction {
     /// Tear the body down; `skip` advances the playhead anyway.
     Interrupt { skip: bool },
     /// Not interrupt-shaped: deliver to the live body or queue for the next.
-    Deliver(InboxItem),
+    Deliver(Box<InboxItem>),
     /// The listener hung up: tear down and end the loop.
     ListenerGone,
 }
@@ -604,7 +604,7 @@ impl WaveLoop {
                             self.interrupt_child(&body_id, &mut wait_task, skip).await;
                             return;
                         }
-                        InboxAction::Deliver(item) => self.on_inbox(item).await,
+                        InboxAction::Deliver(item) => self.on_inbox(*item).await,
                         InboxAction::ListenerGone => {
                             wait_task.abort();
                             return;
@@ -802,26 +802,26 @@ impl WaveLoop {
                             finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
-                        InboxAction::Deliver(InboxItem::Message(message))
-                            if message.op == MessageOp::Steer && supports_steer =>
-                        {
-                            if self
-                                .steer_harness(message, harness.as_mut(), capture.as_ref())
-                                .await
+                        InboxAction::Deliver(item) => match *item {
+                            InboxItem::Message(message)
+                                if message.op == MessageOp::Steer && supports_steer =>
                             {
-                                timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                                if self
+                                    .steer_harness(message, harness.as_mut(), capture.as_ref())
+                                    .await
+                                {
+                                    timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                                }
                             }
-                        }
-                        InboxAction::Deliver(InboxItem::Message(message))
-                            if message.op == MessageOp::Steer =>
-                        {
-                            if self.seen.insert(message.id.clone()) {
-                                self.queue.push(message);
+                            InboxItem::Message(message) if message.op == MessageOp::Steer => {
+                                if self.seen.insert(message.id.clone()) {
+                                    self.queue.push(message);
+                                }
+                                self.interrupt_harness(&body_id, harness.as_mut(), false).await;
+                                return;
                             }
-                            self.interrupt_harness(&body_id, harness.as_mut(), false).await;
-                            return;
-                        }
-                        InboxAction::Deliver(item) => self.on_inbox(item).await,
+                            item => self.on_inbox(item).await,
+                        },
                         InboxAction::ListenerGone => {
                             let _ = harness.stop().await;
                             finish_capture(capture.as_ref(), "interrupted");
@@ -1044,10 +1044,10 @@ impl WaveLoop {
                 }
                 InboxAction::Interrupt { skip: false }
             }
-            Some(InboxItem::Task(observation)) => InboxAction::Deliver(InboxItem::Message(
-                crate::wave::journal::task_observation_message(&observation),
+            Some(InboxItem::Task(observation)) => InboxAction::Deliver(Box::new(
+                InboxItem::Message(crate::wave::journal::task_observation_message(&observation)),
             )),
-            Some(item) => InboxAction::Deliver(item),
+            Some(item) => InboxAction::Deliver(Box::new(item)),
             None => {
                 self.end = Some(LoopEnd::ListenerGone);
                 InboxAction::ListenerGone

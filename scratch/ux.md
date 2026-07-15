@@ -603,7 +603,7 @@ Proof:
 The first four slices can run concurrently because they have separate product
 owners and mostly separate code surfaces:
 
-1. **Stable Wave surface (W2-173)** — repo dropdown, stable Wave rows, restrained lens,
+1. **Stable Wave surface (W2-178)** — repo dropdown, stable Wave rows, restrained lens,
    persistent Objective/Projects pane, and Chat as the default third pane.
 2. **Durable Wave Chat (W2-174)** — bounded/cached load, quick send path, body-independent
    history, failure rollups, and inline linked references with popovers.
@@ -624,6 +624,10 @@ Two integration slices follow those roots:
    fallback. Depends on the shared attach descriptor.
 
 Run History remains intentionally deferred.
+
+W2-173 was superseded before implementation because its initial Task Session
+pinned a development-provenance `lf` that could not open the production store.
+W2-178 carries the unchanged work with the corrected execution context.
 
 ## Size check
 

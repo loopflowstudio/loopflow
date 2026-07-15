@@ -90,7 +90,7 @@
 //!   have it.
 //! - `GET /memory/log` → `{facts}` — add-stream facts since the last
 //!   curation, oldest first. Wave-level only.
-//! - `POST /memory {op, content, summary}` → `{summary}`. `op` is `"update"`
+//! - `POST /memory {op, content, summary, receipts}` → `{summary}`. `op` is `"update"`
 //!   (full replacement) or `"add"` (publish one fact; `content` must be
 //!   non-empty). `summary` is explicitly Optional — null falls back to the
 //!   content's first non-empty line. The server is the sole writer of the
@@ -118,6 +118,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
+use crate::receipt::Receipt;
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
@@ -309,12 +310,15 @@ enum MemoryOp {
 }
 
 /// `POST /memory` request body. `summary` is explicitly Optional — null falls
-/// back to the content's first non-empty line.
+/// back to the content's first non-empty line. `receipts` are the parsed
+/// evidence bindings for an `add`; the client stamps each with its wave and
+/// always sends the list (empty for `update`), so no serde default is needed.
 #[derive(Debug, Deserialize)]
 struct PostMemory {
     op: MemoryOp,
     content: String,
     summary: Option<String>,
+    receipts: Vec<Receipt>,
 }
 
 /// `POST /memory` response: the summary that was journaled.
@@ -594,7 +598,7 @@ async fn memory_write_handler(
                     "content is required for the add op".to_string(),
                 ));
             }
-            state.runtime.append_memory(fact)
+            state.runtime.append_memory(fact, body.receipts.clone())
         }
     };
     match result {

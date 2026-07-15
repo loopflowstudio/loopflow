@@ -33,6 +33,7 @@ use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::project_session::ProjectObservation;
+use crate::receipt::Receipt;
 use crate::security::sanitize_fs_component;
 use crate::task::TaskObservation;
 use crate::wave::channel::matches_prefix;
@@ -724,14 +725,17 @@ impl WaveRuntime {
         Ok(())
     }
 
-    /// Publish one fact to the replayable memory stream and journal `MemoryAdded`.
+    /// Publish one fact and its evidence receipts to the replayable memory
+    /// stream and journal `MemoryAdded`. The live string stream carries only the
+    /// prose (receipts ride the journal for the `--json` view).
     ///
     /// # Errors
     /// Journal I/O only.
-    pub fn append_memory(&self, fact: &str) -> std::io::Result<()> {
+    pub fn append_memory(&self, fact: &str, receipts: Vec<Receipt>) -> std::io::Result<()> {
         let mut inner = self.inner();
         inner.journal.append(|_| EventKind::MemoryAdded {
             fact: fact.to_string(),
+            receipts,
         });
         inner.memory_adds.push(fact.to_string());
         let _ = self.memory_add_tx.send(fact.to_string());
@@ -1725,8 +1729,8 @@ mod tests {
 
         rt.update_memory("# Ship\n\n- fold is truth\n", "fold is truth")
             .expect("update");
-        rt.append_memory("fold is truth").expect("append");
-        rt.append_memory("bullets append").expect("append");
+        rt.append_memory("fold is truth", vec![]).expect("append");
+        rt.append_memory("bullets append", vec![]).expect("append");
         assert_eq!(
             rt.memory().read(),
             "# Ship\n\n- fold is truth\n",
@@ -1744,7 +1748,7 @@ mod tests {
         let facts: Vec<&str> = events
             .iter()
             .filter_map(|e| match &e.kind {
-                EventKind::MemoryAdded { fact } => Some(fact.as_str()),
+                EventKind::MemoryAdded { fact, .. } => Some(fact.as_str()),
                 _ => None,
             })
             .collect();
@@ -1758,8 +1762,8 @@ mod tests {
         let rt = open_runtime(tmp.path());
         let long_fact = "workers report via lf radio pub with the full useful detail";
 
-        rt.append_memory(long_fact).expect("append");
-        rt.append_memory("second fact").expect("append");
+        rt.append_memory(long_fact, vec![]).expect("append");
+        rt.append_memory("second fact", vec![]).expect("append");
 
         let sub = rt.subscribe_with_snapshot(None);
         assert_eq!(
@@ -1777,11 +1781,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         {
             let rt = open_runtime(tmp.path());
-            rt.append_memory("first").expect("append");
-            rt.append_memory("second").expect("append");
+            rt.append_memory("first", vec![]).expect("append");
+            rt.append_memory("second", vec![]).expect("append");
             rt.update_memory("# Ship\n\ncompiled\n", "compiled")
                 .expect("update");
-            rt.append_memory("third").expect("append");
+            rt.append_memory("third", vec![]).expect("append");
         }
 
         let rt = open_runtime(tmp.path());

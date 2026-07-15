@@ -270,6 +270,7 @@ struct RoadmapView: View {
                         roadmap: roadmap,
                         activeControlId: activeControlId,
                         onOpen: { openWave(roadmap.wave) },
+                        onError: { controlError = $0 },
                         onTaskAction: { task, action in
                             perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
                         },
@@ -320,26 +321,11 @@ struct RoadmapView: View {
         }
     }
 
+    /// Navigate to the Wave. Starting a stopped Wave is the Home control's job
+    /// now — it runs `lf home start` on the *configured Home*, not this machine,
+    /// then this fires to open the detail.
     private func openWave(_ wave: WaveSnapshot) {
-        guard !wave.live else {
-            onOpenWave(wave)
-            return
-        }
-        activeControlId = "wave:\(wave.id)"
-        controlError = nil
-        Task {
-            do {
-                let repo = wave.repo
-                let name = wave.name
-                try await Task.detached(priority: .userInitiated) {
-                    try LocalWaveAgentLauncher.launchWave(repoPath: repo, waveName: name)
-                }.value
-                onOpenWave(wave)
-            } catch {
-                controlError = error.localizedDescription
-            }
-            activeControlId = nil
-        }
+        onOpenWave(wave)
     }
 
     private enum TaskControl {
@@ -401,10 +387,121 @@ struct RoadmapView: View {
     }
 }
 
+/// A Wave's inherited Home on its row: the address always visible, plus the
+/// probed liveness and the *one* contextual action the shared `HomeRuntimeDto`
+/// dictates. The app never does SSH — `lf home probe|start` classifies the Home
+/// and Start runs on the configured Home, not this machine. Probed once per
+/// Wave card on appear (local reads are instant; a remote Home costs one routed
+/// probe), never once per row and never on the 15s roadmap poll.
+private struct WaveHomeControl: View {
+    let wave: WaveSnapshot
+    let onOpen: () -> Void
+    let onError: (String) -> Void
+
+    @Environment(\.palette) private var palette
+    @State private var runtime: HomeRuntime?
+    @State private var probeError: String?
+    @State private var isProbing = false
+    @State private var isActing = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: Spacing.xxs) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "house")
+                    .font(Typography.caption(9))
+                    .foregroundStyle(palette.textSecondary)
+                Text(wave.home.address)
+                    .font(Typography.caption(10).weight(.medium))
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                if isProbing {
+                    ProgressView().controlSize(.small)
+                } else if let runtime {
+                    stateChip(runtime.state)
+                }
+            }
+            action
+        }
+        .task(id: wave.id) { await probe() }
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        if isActing {
+            ProgressView().controlSize(.small)
+        } else if let runtime {
+            switch runtime.action {
+            case .attach:
+                Button("Open") { onOpen() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help(runtime.endpoint.map { "Attach to \($0)" } ?? "Open the Wave")
+            case .start(let home):
+                Button("Start on \(home)") { Task { await start() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            case .reason(let message):
+                Text(message)
+                    .font(Typography.caption(9))
+                    .foregroundStyle(Color.statusWarning)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+        } else if let probeError {
+            Text(probeError)
+                .font(Typography.caption(9))
+                .foregroundStyle(Color.statusError)
+                .lineLimit(2)
+        }
+    }
+
+    private func stateChip(_ state: HomeState) -> some View {
+        let (label, color): (String, Color) = switch state {
+        case .running: ("running", .statusSuccess)
+        case .stopped: ("stopped", .statusNeutral)
+        case .unreachable: ("unreachable", .statusError)
+        case .unknown: ("unknown", .statusWarning)
+        }
+        return Text(label)
+            .font(Typography.caption(9).weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    @MainActor
+    private func probe() async {
+        isProbing = true
+        defer { isProbing = false }
+        do {
+            runtime = try await RegistryQueryLocal.shared.homeProbe(wave: wave.name, cwd: wave.repo)
+            probeError = nil
+        } catch {
+            probeError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func start() async {
+        isActing = true
+        defer { isActing = false }
+        do {
+            let result = try await RegistryQueryLocal.shared.homeStart(wave: wave.name, cwd: wave.repo)
+            runtime = result.runtime
+            onOpen()
+        } catch {
+            onError(error.localizedDescription)
+        }
+    }
+}
+
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
     let activeControlId: String?
     let onOpen: () -> Void
+    let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onInterrupt: (RoadmapTask) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
@@ -434,18 +531,7 @@ private struct RoadmapWaveCard: View {
                     }
                 }
                 Spacer()
-                Button {
-                    onOpen()
-                } label: {
-                    if activeControlId == "wave:\(roadmap.wave.id)" {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text(roadmap.wave.live ? "Open chat" : "Start & open")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(activeControlId != nil)
+                WaveHomeControl(wave: roadmap.wave, onOpen: onOpen, onError: onError)
             }
 
             switch roadmap.projects {

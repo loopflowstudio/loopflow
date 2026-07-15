@@ -65,6 +65,24 @@ public struct RegistryQuery: Sendable {
         )
     }
 
+    /// Probe one Wave's Home for liveness and the single contextual action.
+    /// The app never does SSH — `lf home probe` classifies the Home (local reads
+    /// are instant, remote routes one `lf status` over the credential-forwarding
+    /// transport) and returns the shared `HomeRuntimeDto`. Probe on demand per
+    /// focused Wave, never once per row.
+    public func homeProbe(wave: String, cwd: String?) async throws -> HomeRuntime {
+        let stdout = try await run(["home", "probe", wave, "--json"], cwd)
+        return try Self.decode(HomeRuntime.self, from: stdout)
+    }
+
+    /// Idempotently start a Wave on its *configured Home* (not this machine) and
+    /// return the attach identity. Safe to repeat: an already-running Home comes
+    /// back with `started == false` rather than launched twice.
+    public func homeStart(wave: String, cwd: String?) async throws -> HomeStartResult {
+        let stdout = try await run(["home", "start", wave, "--json"], cwd)
+        return try Self.decode(HomeStartResult.self, from: stdout)
+    }
+
     /// Every durable plan row across the machine, joined to the same Task
     /// references and live evidence as `lf status`. One subprocess reads every
     /// Wave; an optional scope filters that shared snapshot at the source.
@@ -261,14 +279,14 @@ public enum HomeLocation: Decodable, Sendable, Hashable {
 }
 
 /// `HomeState` (`engine/wave_home.rs`) — a Home's observed liveness.
-enum HomeState: String, Decodable, Equatable {
+public enum HomeState: String, Decodable, Sendable, Equatable {
     case unreachable, stopped, running, unknown
 }
 
 /// `HomeActionDto` — the single contextual action a surface should offer, so the
 /// UI never branches on `HomeState` itself: Attach when running, Start when
 /// reachable-but-stopped, or the actionable reason otherwise.
-enum HomeAction: Decodable, Equatable {
+public enum HomeAction: Decodable, Sendable, Equatable {
     case attach(endpoint: String)
     case start(home: String)
     case reason(message: String)
@@ -277,7 +295,7 @@ enum HomeAction: Decodable, Equatable {
         case kind, endpoint, home, message
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "attach":
@@ -300,12 +318,22 @@ enum HomeAction: Decodable, Equatable {
 /// with its evidence, the attach endpoint when running, and the one action.
 /// This is the shared contract the conductor renders; the app never probes SSH
 /// itself — it calls `lf home probe|start --json`.
-struct HomeRuntime: Decodable, Equatable {
-    let home: WaveHome
-    let state: HomeState
-    let reason: String
-    let endpoint: String?
-    let action: HomeAction
+public struct HomeRuntime: Decodable, Sendable, Equatable {
+    public let home: WaveHome
+    public let state: HomeState
+    public let reason: String
+    public let endpoint: String?
+    public let action: HomeAction
+}
+
+/// `HomeStartResult` (`ops/home.rs`) — the receipt from an idempotent
+/// `lf home start`: whether this call launched the resident (`false` = it was
+/// already running) plus the same runtime evidence a probe returns. The
+/// `runtime.endpoint` is the attach identity to open.
+public struct HomeStartResult: Decodable, Sendable, Equatable {
+    public let wave: String
+    public let started: Bool
+    public let runtime: HomeRuntime
 }
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals

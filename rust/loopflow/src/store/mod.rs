@@ -498,14 +498,13 @@ pub async fn open_existing_store() -> Option<Store> {
     if !path.exists() {
         return None;
     }
-    // Opening validates the one live schema. An incompatible store is never
-    // repaired in place.
-    let conn = rusqlite::Connection::open(path).ok()?;
-    if let Err(err) = migrations::apply_sqlite(&conn) {
-        tracing::warn!(?path, %err, "local store is incompatible; delete it and rerun the command");
-        return None;
+    match open_store(&cfg).await {
+        Ok(store) => Some(store),
+        Err(err) => {
+            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
+            None
+        }
     }
-    open_store(&cfg).await.ok()
 }
 
 pub type SharedStore = Arc<Store>;

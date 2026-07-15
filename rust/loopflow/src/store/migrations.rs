@@ -345,17 +345,59 @@ pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String>
     applied.last().cloned().ok_or_else(incompatible)
 }
 
+pub fn latest_known_version() -> String {
+    MIGRATIONS
+        .last()
+        .map(Migration::version)
+        .unwrap_or_else(|| "none".to_string())
+}
+
+pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
+    if !user_tables(conn)?
+        .iter()
+        .any(|table| table == "schema_migrations")
+    {
+        return Ok(None);
+    }
+    Ok(applied_versions(conn)?.last().cloned())
+}
+
+pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    let tables = user_tables(conn)?;
+    if !tables.iter().any(|table| table == "schema_migrations") {
+        return if tables.is_empty() {
+            Ok(false)
+        } else {
+            Err(incompatible())
+        };
+    }
+    let applied = applied_versions(conn)?;
+    if applied.is_empty() && tables.len() == 1 {
+        return Ok(false);
+    }
+    if applied.as_slice() == [LEGACY_BASELINE_VERSION] {
+        return Ok(true);
+    }
+    Ok(!pending_migrations(&applied, MIGRATIONS)?.is_empty())
+}
+
 fn incompatible() -> StoreError {
     StoreError::InvalidData(RECREATE_MESSAGE.to_string())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{sync_channel, TryRecvError};
+    use std::time::{Duration, Instant};
+
     use rusqlite::OptionalExtension;
 
     use super::{
-        active_namespace, applied_versions, apply_set, apply_sqlite, latest_version_sqlite,
-        product_schema, validate_set, Migration, MigrationId, MIGRATIONS,
+        active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
+        apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
+        latest_known_version, latest_version_sqlite, product_schema, validate_set, Migration,
+        MigrationId, MIGRATIONS,
     };
     use crate::task::TaskEventKind;
 
@@ -851,6 +893,99 @@ mod tests {
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
             "0.11.003_child_body_lease"
+        );
+    }
+
+    #[test]
+    fn release_migration_publishes_a_complete_previous_generation_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        apply_set(&conn, &MIGRATIONS[..1]).unwrap();
+
+        apply_sqlite_with_backup(&conn, &path).unwrap();
+
+        let backup_path = directory.path().join("loopflow.db.backup-0.10.001_initial");
+        let backup = rusqlite::Connection::open(backup_path).unwrap();
+        assert_eq!(
+            latest_applied_version_sqlite(&backup).unwrap().as_deref(),
+            Some("0.10.001_initial")
+        );
+        assert!(backup.prepare("SELECT * FROM child_body_leases").is_err());
+    }
+
+    static WRITER_SAW_BUSY: AtomicBool = AtomicBool::new(false);
+
+    fn observe_writer_busy(_: i32) -> bool {
+        WRITER_SAW_BUSY.store(true, Ordering::SeqCst);
+        std::thread::yield_now();
+        true
+    }
+
+    #[test]
+    fn backup_snapshot_and_migration_share_one_exclusive_transaction() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        apply_set(&conn, &MIGRATIONS[..1]).unwrap();
+        WRITER_SAW_BUSY.store(false, Ordering::SeqCst);
+
+        let writer_path = path.clone();
+        let (start_writer, writer_start) = sync_channel(0);
+        let (writer_done, observe_writer) = sync_channel(1);
+        let writer = std::thread::spawn(move || {
+            let writer = rusqlite::Connection::open(writer_path).unwrap();
+            writer.busy_handler(Some(observe_writer_busy)).unwrap();
+            writer_start.recv().unwrap();
+            writer
+                .execute(
+                    "INSERT INTO bus_messages (channel, byline, text, at)
+                     VALUES ('test', 'writer', 'after migration', 1)",
+                    [],
+                )
+                .unwrap();
+            writer_done
+                .send(latest_version_sqlite(&writer).unwrap())
+                .unwrap();
+        });
+
+        apply_sqlite_transaction(&conn, |conn| {
+            backup_before_migration(conn, &path)?;
+            start_writer.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !WRITER_SAW_BUSY.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            assert!(
+                WRITER_SAW_BUSY.load(Ordering::SeqCst),
+                "competing writer should encounter the migration transaction"
+            );
+            assert_eq!(observe_writer.try_recv(), Err(TryRecvError::Empty));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(observe_writer.recv().unwrap(), latest_known_version());
+        writer.join().unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT text FROM bus_messages WHERE byline = 'writer'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "after migration"
+        );
+        let backup = rusqlite::Connection::open(
+            directory.path().join("loopflow.db.backup-0.10.001_initial"),
+        )
+        .unwrap();
+        assert_eq!(
+            backup
+                .query_row("SELECT count(*) FROM bus_messages", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 

@@ -138,7 +138,7 @@ pub fn list_execs(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `lf trace <exec-id>`: reconstruct the process tree containing one exec.
+/// `lf trace <exec-or-trace-id>`: reconstruct one process tree.
 pub fn trace(
     exec_id: &str,
     json: bool,
@@ -155,29 +155,17 @@ pub fn trace(
     let matches = store
         .run_events_matching_exec(exec_id)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
-
-    let exec_ids: BTreeSet<&str> = matches
-        .iter()
-        .map(|event| event.process_id.as_str())
-        .collect();
-    match exec_ids.len() {
-        0 => return Err(anyhow!("no exec matching '{exec_id}' in the ledger")),
-        1 => {}
-        _ => {
-            return Err(anyhow!(
-                "exec '{exec_id}' is ambiguous — matches: {}",
-                exec_ids
-                    .into_iter()
-                    .map(short_id)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-        }
-    }
-    let trace_id = matches[0].run_id.clone();
-    let events = store
-        .run_events_matching(&trace_id)
+    let trace_matches = store
+        .run_events_matching(exec_id)
         .map_err(|err| anyhow!("failed to read trace: {err}"))?;
+    let trace_id = trace_id_for_address(exec_id, &matches, &trace_matches)?;
+    let events = if matches.is_empty() {
+        trace_matches
+    } else {
+        store
+            .run_events_matching(&trace_id)
+            .map_err(|err| anyhow!("failed to read trace: {err}"))?
+    };
 
     let spans = trace_spans(&events);
     let launches = store.agent_launches_matching(&trace_id)?;
@@ -305,6 +293,50 @@ pub fn trace(
     }
 
     Ok(())
+}
+
+fn trace_id_for_address(
+    address: &str,
+    exec_matches: &[crate::store::RunEventRow],
+    trace_matches: &[crate::store::RunEventRow],
+) -> Result<String> {
+    let exec_ids = exec_matches
+        .iter()
+        .map(|event| event.process_id.as_str())
+        .collect::<BTreeSet<_>>();
+    match exec_ids.len() {
+        1 => return Ok(exec_matches[0].run_id.clone()),
+        2.. => {
+            return Err(anyhow!(
+                "exec '{address}' is ambiguous — matches: {}",
+                exec_ids
+                    .into_iter()
+                    .map(short_id)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        }
+        _ => {}
+    }
+
+    let trace_ids = trace_matches
+        .iter()
+        .map(|event| event.run_id.as_str())
+        .collect::<BTreeSet<_>>();
+    match trace_ids.len() {
+        0 => Err(anyhow!(
+            "no exec or trace matching '{address}' in the ledger"
+        )),
+        1 => Ok(trace_matches[0].run_id.clone()),
+        _ => Err(anyhow!(
+            "trace '{address}' is ambiguous — matches: {}",
+            trace_ids
+                .into_iter()
+                .map(short_id)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1069,8 +1101,8 @@ pub(crate) fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        boundary_spans, format_duration, format_tokens, own_spend, summarize_execs, trace_spans,
-        SpanDto,
+        boundary_spans, format_duration, format_tokens, own_spend, summarize_execs,
+        trace_id_for_address, trace_spans, SpanDto,
     };
     use crate::store::RunEventRow;
 
@@ -1156,6 +1188,15 @@ mod tests {
         assert_eq!(parent.label, "wave intel");
         assert_eq!(child.label, "pm show");
         assert_eq!(child.status, "error");
+    }
+
+    #[test]
+    fn trace_addresses_accept_the_run_id_carried_by_context_evidence() {
+        let events = vec![row("trace-address", 0, 100, "run", "started")];
+
+        let trace_id = trace_id_for_address("trace-add", &[], &events).unwrap();
+
+        assert_eq!(trace_id, "trace-address");
     }
 
     #[test]

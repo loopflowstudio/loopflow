@@ -379,9 +379,9 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Reconstruct the process tree containing one exec, with its skill launches
+    /// Reconstruct one process tree from an exec or trace address
     Trace {
-        /// Exec id from `lf execs` (a unique prefix is enough)
+        /// Exec id from `lf execs` or trace id from Context Lab
         exec_id: String,
         /// Emit the process tree as JSON
         #[arg(long)]

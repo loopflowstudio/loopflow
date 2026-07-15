@@ -188,14 +188,15 @@ Inspect exactly what an agent received and what Loopflow observed:
 lf runs                         # skill calls with context, tokens, and cost
 lf top                          # last-hour throughput and live lf processes
 lf execs                        # every lf process, including lookups
-lf trace <exec-id>
-lf trace <exec-id> --events
-lf trace <exec-id> --events --jsonl --launch <launch-id-prefix>
-lf trace <exec-id> --json --content --launch <launch-id> --turn <turn-id>
+lf trace <exec-or-trace-id>
+lf trace <exec-or-trace-id> --events
+lf trace <exec-or-trace-id> --events --jsonl --launch <launch-id-prefix>
+lf trace <exec-or-trace-id> --json --content --launch <launch-id> --turn <turn-id>
 lf context --days 14 --repo "$PWD" --wave intelligence --json
 ```
 
-`lf trace` keeps prompt and normalized conversation artifacts below
+`lf trace` accepts the exec ids shown by `lf execs` and the trace ids carried by
+Context Lab evidence. It keeps prompt and normalized conversation artifacts below
 `~/.lf/traces`; it prints paths and metadata by default, never prompt or event
 bodies. `--events` explicitly reads the recorded exchange; `--content` opens
 the exact prompt and normalized conversation for one trace address.

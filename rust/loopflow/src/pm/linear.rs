@@ -6,8 +6,9 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::pm::{
-    parse_project_content, project_slug, render_project_content, PmError, PmItem, PmItemCreate,
-    PmItemUpdate, PmKr, PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
+    parse_project_content, project_slug, render_project_content, IssueComment, IssueObservation,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmResult, PmWave, TeamBinding,
+    RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -225,6 +226,42 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
     }
   }
 }"#;
+
+// Loopflow's own OAuth user. Its id lets the observer tell a human's edit or
+// comment from Loopflow's own writeback, so ingestion never feeds itself.
+const VIEWER_QUERY: &str = r#"query Viewer {
+  viewer {
+    id
+  }
+}"#;
+
+// One issue's human-editable content plus a `createdAt`-ordered page of its
+// comments. Each comment carries `user { id }` (the human author) but not
+// `botActor`, so an integration-authored comment decodes to a null author and is
+// never treated as human direction. `updatedAt` is the revision marker. The
+// reconciler orders delivery itself and dedupes against the cursor, so page
+// order only bounds how many comments one read can surface (OBSERVATION_COMMENT_PAGE).
+const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $comments: Int!) {
+  issue(id: $id) {
+    updatedAt
+    title
+    description
+    comments(first: $comments, orderBy: createdAt) {
+      nodes {
+        id
+        body
+        user {
+          id
+        }
+      }
+    }
+  }
+}"#;
+
+/// How many recent comments one observation reads. A Task accumulating more than
+/// this many unseen human comments between polls is not a real case; the cursor
+/// still refuses to double-deliver any it does see.
+const OBSERVATION_COMMENT_PAGE: u32 = 50;
 
 #[derive(Debug, Clone)]
 pub struct LinearClient {
@@ -733,6 +770,40 @@ impl LinearClient {
             .await?;
         Ok(())
     }
+
+    /// Loopflow's own Linear user id, used to skip its own comments and edits.
+    pub async fn viewer_id(&self) -> PmResult<String> {
+        let response: ViewerData = self.graphql(VIEWER_QUERY, json!({})).await?;
+        Ok(response.viewer.id)
+    }
+
+    /// Read one issue's title, description, comments, and revision marker.
+    pub async fn observe_issue(&self, issue_id: &str) -> PmResult<IssueObservation> {
+        let response: IssueObservationData = self
+            .graphql(
+                ISSUE_OBSERVATION_QUERY,
+                json!({ "id": issue_id, "comments": OBSERVATION_COMMENT_PAGE }),
+            )
+            .await?;
+        let issue = response
+            .issue
+            .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?;
+        Ok(IssueObservation {
+            revision: issue.updated_at,
+            title: issue.title,
+            description: issue.description.unwrap_or_default(),
+            comments: issue
+                .comments
+                .nodes
+                .into_iter()
+                .map(|node| IssueComment {
+                    id: node.id,
+                    body: node.body,
+                    author_id: node.user.map(|user| user.id),
+                })
+                .collect(),
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -836,6 +907,41 @@ struct IssuePayload {
 #[derive(Deserialize)]
 struct IdNode {
     id: String,
+}
+
+#[derive(Deserialize)]
+struct ViewerData {
+    viewer: IdNode,
+}
+
+#[derive(Deserialize)]
+struct IssueObservationData {
+    issue: Option<IssueObservationNode>,
+}
+
+#[derive(Deserialize)]
+struct IssueObservationNode {
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    comments: CommentConnection,
+}
+
+#[derive(Deserialize)]
+struct CommentConnection {
+    nodes: Vec<CommentNode>,
+}
+
+#[derive(Deserialize)]
+struct CommentNode {
+    id: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    user: Option<IdNode>,
 }
 
 #[derive(Deserialize)]
@@ -1155,6 +1261,95 @@ mod tests {
         assert!(CREATE_ITEM_MUTATION.contains("$teamId: String!"));
         assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
         assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
+    }
+
+    #[tokio::test]
+    async fn viewer_id_reads_loopflows_own_user() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "viewer": { "id": "user-loopflow" } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        assert_eq!(
+            client.viewer_id().await.expect("viewer id"),
+            "user-loopflow"
+        );
+    }
+
+    #[tokio::test]
+    async fn observe_issue_reads_revision_content_and_comment_authors() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({
+                "data": {
+                    "issue": {
+                        "updatedAt": "2026-07-15T18:00:00.000Z",
+                        "title": "Stream Linear edits",
+                        "description": "New body",
+                        "comments": {
+                            "nodes": [
+                                { "id": "c-1", "body": "please prioritize", "user": { "id": "user-human" } },
+                                { "id": "c-2", "body": "PR: https://x", "user": { "id": "user-loopflow" } },
+                                { "id": "c-3", "body": "integration note", "user": null }
+                            ]
+                        }
+                    }
+                }
+            }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let observation = client
+            .observe_issue("issue-1")
+            .await
+            .expect("observe issue");
+        assert_eq!(observation.revision, "2026-07-15T18:00:00.000Z");
+        assert_eq!(observation.title, "Stream Linear edits");
+        assert_eq!(observation.description, "New body");
+        assert_eq!(
+            observation.comments,
+            vec![
+                IssueComment {
+                    id: "c-1".to_string(),
+                    body: "please prioritize".to_string(),
+                    author_id: Some("user-human".to_string()),
+                },
+                IssueComment {
+                    id: "c-2".to_string(),
+                    body: "PR: https://x".to_string(),
+                    author_id: Some("user-loopflow".to_string()),
+                },
+                IssueComment {
+                    id: "c-3".to_string(),
+                    body: "integration note".to_string(),
+                    author_id: None,
+                },
+            ]
+        );
+
+        let requests = requests.lock().await;
+        let body: Value = serde_json::from_str(&requests[0].body).expect("body is json");
+        assert_eq!(body["variables"]["id"], "issue-1");
+        assert_eq!(body["variables"]["comments"], OBSERVATION_COMMENT_PAGE);
+    }
+
+    #[tokio::test]
+    async fn observe_issue_reports_a_missing_issue() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "issue": null } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let error = client
+            .observe_issue("issue-missing")
+            .await
+            .expect_err("missing issue errors");
+        assert!(error.to_string().contains("issue-missing"));
     }
 
     #[tokio::test]

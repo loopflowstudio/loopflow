@@ -98,10 +98,10 @@ direction.
 `ChildCommandSource::Linear` (child_session.rs) — provenance so receipts,
 `lf task status`, and Mac Active Sessions can show "direction from a Linear
 edit," and so PM-writeback logic never mistakes it for something needing
-writeback. Wire DTO change ⇒ add a `linear` case to the
-`tests/fixtures/dto/child_control_activity.json` round-trip fixture. (No Swift
-file mirrors `ChildCommandSource` directly; Active Sessions consume task status,
-not the raw source enum — so no Swift change for the variant itself.)
+writeback. Wire DTO change ⇒ the `ChildControlSource` enum is mirrored in Swift
+(`swift/Loopflow/Models/ChatTurn.swift`) and exercised by the
+`child_control_activity.json` round-trip fixture (Rust + `DTOFixtureTests.swift`);
+add the `linear` case to both mirrors.
 
 ## Linear read capability (net-new)
 
@@ -190,8 +190,8 @@ Against a mock Linear client (the `graphql()` funnel is already mocked in
 - `store/child_sessions.rs` / `store/mod.rs` — cursor verbs; a persist-only
   directive/command insert reusing `create_child_command_with_directive` /
   `create_child_command` without launch.
-- `child_session.rs` — `ChildCommandSource::Linear` (+ DTO fixture case; no Swift
-  mirror).
+- `child_session.rs` + `swift/Loopflow/Models/ChatTurn.swift` —
+  `ChildCommandSource::Linear` / `ChildControlSource.linear` (+ DTO fixture case).
 - `ops/child.rs` / `ops/task.rs` — `reconcile_linear_observation` + persist-only
   ingest wrappers.
 - `task/runner.rs` — live-observer interval; startup catch-up.
@@ -207,14 +207,20 @@ local reconciliation loop meets the 5s budget).
 
 ## PR sequence (serial, one Task)
 
-1. **`linear-observe-core`** — Linear reads (viewer + issue observation), the two
-   cursor tables + verbs, `ChildCommandSource::Linear` (+ mirror/fixture), the
-   persist-only ingest path, `reconcile_linear_observation` with exactly-once +
-   feedback-loop skip + baseline, unit tests. (Persisted rows already drained by
-   the existing runner startup path.)
-2. **`linear-observe-live`** — live-runner observer interval (≤5s) + backoff;
+1. **`linear-read`** *(this PR)* — Linear read capability (`viewer_id`,
+   `observe_issue` → `IssueObservation`/`IssueComment`) and the
+   `ChildCommandSource::Linear` provenance variant across both wire mirrors
+   (Rust + Swift). Unit-tested against the mock GraphQL server; the variant's
+   wire shape is pinned. Pure capability + foundation — no wiring yet, nothing
+   observes.
+2. **`linear-observe-store`** — the two cursor tables + store verbs, the
+   persist-only ingest path (reuses `create_child_command_with_directive` /
+   `create_child_command`, never launches), `reconcile_linear_observation` with
+   exactly-once + feedback-loop skip + baseline, unit tests. The writer half;
+   persisted rows are already drained by the existing runner startup path.
+3. **`linear-observe-live`** — live-runner observer interval (≤5s) + backoff;
    `lf task status` degraded/last-observation fields. Integration test: live
    steer < 5s, FIFO follow-ups, degraded + recovery.
-3. **`linear-observe-resident`** — wave-resident sweep over resumable sessions,
+4. **`linear-observe-resident`** — wave-resident sweep over resumable sessions,
    resume catch-up backstop, Mac Active Sessions surfacing the durable state.
    Restart-exactly-once test.

@@ -212,10 +212,15 @@ private struct PmProjectSnapshot: Decodable {
     let definition: String
     let krs: [PmKrSnapshot]
     let initiativeIds: [String]
+    // Stable ids of the Linear teams the Project belongs to. Optional: a snapshot
+    // written before the field existed decodes to nil. Mirrors Rust
+    // `PmProject.team_ids`.
+    let teamIds: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, summary, definition, krs
         case initiativeIds = "initiative_ids"
+        case teamIds = "team_ids"
     }
 }
 

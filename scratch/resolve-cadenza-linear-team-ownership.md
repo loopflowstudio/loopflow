@@ -172,19 +172,28 @@ shipped issue path). Every planned mutation prints before the first Linear write
 
 ## PR sequence (serial, one branch each)
 
-1. **Product-team move primitive + fail-closed creation.** Add
-   `projectUpdate(teamIds:)`/`move_project_to_team`, select Project `teams` in the
-   read, add the `PmProject` team field + fixtures (Rust/Swift/Python), and remove
-   the shared-team creation fallback (bind the product wave to the shared team
-   explicitly first). Unit-tested against the mock Linear server; DTO round-trips.
-2. **`reteam` repairs Projects; `doctor` detects foreign-team Projects + relaxes
-   same-repo sharing.** Extend `pm_reteam` and `pm_sync`, CLI output, doctor
-   diagnostics. Classification stays pure/unit-tested.
-3. **Live Cadenza inventory + dry-run + apply (executed from Cadenza checkout).**
+1. **Detection — DONE (this PR).** `PmProject` carries `team_ids:
+   Option<Vec<String>>` resolved from the existing initiative-projects query
+   (`teams { nodes { id } }`, no extra round trip; `Option` so older cached
+   snapshots still decode, matching `PmItem.url`). `lf pm doctor` flags a Project
+   whose resolved teams exclude the wave's bound team and names `lf pm reteam` as
+   the repair (`project_off_team`, pure + unit-tested). Dropped the false-positive
+   "waves share a team" diagnostic — a product may share one team across waves.
+   Swift `PmProjectSnapshot` mirrors `team_ids` (optional). Mock-server + pure
+   unit tests; no live Linear.
+2. **Repair — `reteam` moves the Project ahead of its issues.** Add
+   `projectUpdate(teamIds:)` / `move_project_to_team`, extend `pm_reteam` to plan
+   and apply the Project-team move (set, not add) before the issue moves, extend
+   `PmReteamResult` + CLI output. Idempotent (Project already on team → skip).
+3. **Fail-closed creation + bind product.** Remove the
+   `config.linear.team`/default-`"Loopflow"` fallback from the *creation* path so
+   an unbound wave errors with the `lf pm init` recovery instead of attaching to
+   the shared team; keep reads team-agnostic. Requires binding the product wave to
+   the shared team explicitly first (one live team lookup).
+4. **Live Cadenza inventory + dry-run + apply (executed from Cadenza checkout).**
    Read-only inventory of every Cadenza Initiative/Project/open Task/completed
-   Task/active Session; dry-run; apply; prove second apply is a no-op. This is
-   operational, not a code PR — its receipt is the migration record, run from the
-   Cadenza repo where the waves live, not from this worktree.
+   Task/active Session; dry-run; apply; prove second apply is a no-op. Operational,
+   not a code PR — run from the Cadenza repo where the waves live.
 
 ## Build/verify target for pursue
 

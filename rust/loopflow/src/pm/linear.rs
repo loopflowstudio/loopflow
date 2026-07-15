@@ -77,6 +77,11 @@ const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($in
             id
           }
         }
+        teams(first: 50) {
+          nodes {
+            id
+          }
+        }
       }
       pageInfo {
         hasNextPage
@@ -937,6 +942,8 @@ struct ProjectNode {
     content: Option<String>,
     #[serde(default)]
     initiatives: IdConnection,
+    #[serde(default)]
+    teams: IdConnection,
 }
 
 impl ProjectNode {
@@ -955,6 +962,7 @@ impl ProjectNode {
                 .into_iter()
                 .map(|initiative| initiative.id)
                 .collect(),
+            team_ids: Some(self.teams.nodes.into_iter().map(|team| team.id).collect()),
         }
     }
 }
@@ -1193,6 +1201,43 @@ mod tests {
             .as_str()
             .expect("query string")
             .contains("\n        url\n"));
+    }
+
+    #[tokio::test]
+    async fn list_projects_resolves_owning_teams() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "initiative": { "projects": {
+                "nodes": [{
+                    "id": "project-1",
+                    "name": "Unified Practice Targets",
+                    "description": "",
+                    "content": "## Definition\n\nA bet.\n\n## KRs\n",
+                    "initiatives": { "nodes": [{ "id": "initiative-1" }] },
+                    "teams": { "nodes": [{ "id": "team-cadenza" }] }
+                }],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
+            } } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let projects = client
+            .list_projects("initiative-1")
+            .await
+            .expect("list projects");
+
+        assert_eq!(projects.len(), 1);
+        assert_eq!(
+            projects[0].team_ids.as_deref(),
+            Some(["team-cadenza".to_string()].as_slice())
+        );
+        let request: Value =
+            serde_json::from_str(&requests.lock().await[0].body).expect("query json");
+        assert!(request["query"]
+            .as_str()
+            .expect("query string")
+            .contains("teams(first: 50)"));
     }
 
     #[tokio::test]

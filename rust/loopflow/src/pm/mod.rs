@@ -78,6 +78,12 @@ pub struct PmProject {
     pub definition: String,
     pub krs: Vec<PmKr>,
     pub initiative_ids: Vec<String>,
+    /// Stable ids of the Linear teams this Project belongs to. `None` when the
+    /// read did not resolve teams (a snapshot written before the field existed);
+    /// `Some(vec)` is authoritative. Team ownership drives `doctor`/`reteam`
+    /// repair; a Project's team is otherwise invisible to the team-agnostic read
+    /// path. Optional so an older cached snapshot still decodes.
+    pub team_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

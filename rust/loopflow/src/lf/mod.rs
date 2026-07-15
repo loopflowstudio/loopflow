@@ -1520,11 +1520,11 @@ mod tests {
             "route",
             "set",
             "--default",
-            "jack",
+            "jack@loopflow.studio",
             "--backup",
-            "loopflow-eng",
+            "loopflow-eng@loopflow.studio",
             "--backup",
-            "cadenza-eng",
+            "jackstah@gmail.com",
         ])
         .expect("parse profile route");
 
@@ -1538,8 +1538,8 @@ mod tests {
                         repo: None,
                     }
                 }
-            }) if default == "jack"
-                && backups == vec!["loopflow-eng", "cadenza-eng"]
+            }) if default == "jack@loopflow.studio"
+                && backups == vec!["loopflow-eng@loopflow.studio", "jackstah@gmail.com"]
         ));
     }
 
@@ -1549,7 +1549,7 @@ mod tests {
             "lf",
             "profile",
             "create",
-            "loopflow-eng",
+            "loopflow-eng@loopflow.studio",
             "--chrome-profile",
             "loopflow-eng@loopflow.studio",
         ])
@@ -1562,7 +1562,7 @@ mod tests {
                     profile,
                     chrome_profile: Some(chrome_profile),
                 }
-            }) if profile == "loopflow-eng"
+            }) if profile == "loopflow-eng@loopflow.studio"
                 && chrome_profile == "loopflow-eng@loopflow.studio"
         ));
     }
@@ -1574,7 +1574,7 @@ mod tests {
             "profile",
             "account",
             "set",
-            "jack",
+            "jack@loopflow.studio",
             "claude",
             "jack@loopflow.studio",
         ])
@@ -1590,7 +1590,7 @@ mod tests {
                         account,
                     }
                 }
-            }) if profile == "jack"
+            }) if profile == "jack@loopflow.studio"
                 && provider == "claude"
                 && account == "jack@loopflow.studio"
         ));
@@ -1653,7 +1653,7 @@ mod tests {
             "--account",
             "primary",
             "--profile",
-            "jackstah",
+            "jackstah@gmail.com",
         ])
         .expect("parse Loopflow profile binding");
 
@@ -1668,7 +1668,7 @@ mod tests {
                 }
             }) if provider == "claude"
                 && account.as_deref() == Some("primary")
-                && profile == "jackstah"
+                && profile == "jackstah@gmail.com"
         ));
     }
 

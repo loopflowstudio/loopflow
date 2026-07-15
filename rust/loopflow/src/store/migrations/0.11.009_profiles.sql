@@ -8,7 +8,6 @@ CREATE TABLE chrome_profile_bindings (
     profile_id TEXT NOT NULL,
     host_id TEXT NOT NULL,
     chrome_directory TEXT NOT NULL,
-    google_email TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (profile_id, host_id),
@@ -50,22 +49,46 @@ CREATE TABLE repo_backup_profiles (
 ALTER TABLE provider_session_accounts ADD COLUMN profile_id TEXT
     REFERENCES profiles(profile_id) ON DELETE CASCADE;
 
--- Preserve the account-first router as one profile per account id. These
--- records are intentionally editable: the user can later map several profiles
--- to one reusable provider account without moving its credential home.
+-- Preserve verified provider logins as email-identified profiles. Account ids
+-- remain opaque credential-home keys and never become profile identity.
 INSERT INTO profiles (profile_id, created_at, updated_at)
-SELECT account_id, MIN(created_at), MAX(updated_at)
+SELECT lower(login), MIN(created_at), MAX(updated_at)
 FROM provider_accounts
-GROUP BY account_id;
+WHERE login IS NOT NULL AND instr(login, '@') > 1
+GROUP BY lower(login);
 
 INSERT INTO profile_provider_accounts (
     profile_id, provider, account_id, created_at, updated_at
 )
-SELECT account_id, provider, account_id, created_at, updated_at
-FROM provider_accounts;
+SELECT profile_id, provider, account_id, created_at, updated_at
+FROM (
+    SELECT
+        lower(login) AS profile_id,
+        provider,
+        account_id,
+        created_at,
+        updated_at,
+        row_number() OVER (
+            PARTITION BY provider, lower(login)
+            ORDER BY preferred DESC, updated_at DESC, account_id
+        ) AS preference_rank
+    FROM provider_accounts
+    WHERE login IS NOT NULL AND instr(login, '@') > 1
+)
+WHERE preference_rank = 1;
 
 UPDATE provider_session_accounts
-SET profile_id = account_id
+SET profile_id = (
+    SELECT lower(provider_accounts.login)
+    FROM provider_accounts
+    WHERE provider_accounts.provider = provider_session_accounts.provider
+      AND provider_accounts.account_id = provider_session_accounts.account_id
+)
 WHERE EXISTS (
-    SELECT 1 FROM profiles WHERE profiles.profile_id = provider_session_accounts.account_id
+    SELECT 1
+    FROM provider_accounts
+    WHERE provider_accounts.provider = provider_session_accounts.provider
+      AND provider_accounts.account_id = provider_session_accounts.account_id
+      AND provider_accounts.login IS NOT NULL
+      AND instr(provider_accounts.login, '@') > 1
 );

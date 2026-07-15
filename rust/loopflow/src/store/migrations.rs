@@ -727,7 +727,7 @@ mod tests {
 
         assert_eq!(
             conn.query_row(
-                "SELECT COUNT(*) FROM profiles WHERE profile_id = 'primary'",
+                "SELECT COUNT(*) FROM profiles WHERE profile_id = 'jack@example.com'",
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -737,7 +737,7 @@ mod tests {
         assert_eq!(
             conn.query_row(
                 "SELECT COUNT(*) FROM profile_provider_accounts
-                 WHERE profile_id = 'primary'",
+                 WHERE profile_id = 'jack@example.com'",
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -752,7 +752,7 @@ mod tests {
                 |row| row.get::<_, String>(0),
             )
             .unwrap(),
-            "primary"
+            "jack@example.com"
         );
         assert_eq!(
             conn.query_row(

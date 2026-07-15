@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 
 use crate::lf::{ProfileAccountCommand, ProfileCommand, ProfileRouteCommand};
 use crate::profile::{
-    resolve_local_chrome_profile, ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId,
+    resolve_local_chrome_profile, ChromeProfileBinding, HostId, Profile, ProfileId,
     ProfileProviderAccount, RepoProfileRoute,
 };
 use crate::provider_account::open_account_store;
@@ -65,18 +65,22 @@ async fn create_profile(
     if let Some(raw_chrome_profile) = raw_chrome_profile {
         let chrome_profile =
             resolve_local_chrome_profile(raw_chrome_profile).map_err(|error| anyhow!(error))?;
-        let google_email = EmailAddress::parse(&chrome_profile.label).map_err(|_| {
-            anyhow!(
-                "Chrome profile '{}' is not signed into a Google email identity",
-                chrome_profile.label
-            )
-        })?;
+        if !chrome_profile
+            .label
+            .eq_ignore_ascii_case(profile_id.as_str())
+        {
+            return Err(anyhow!(
+                "Chrome profile '{}' is signed in as '{}', not '{}'",
+                raw_chrome_profile,
+                chrome_profile.label,
+                profile_id
+            ));
+        }
         store
             .upsert_chrome_profile_binding(&ChromeProfileBinding {
                 profile_id: profile_id.clone(),
                 host_id: HostId::local().map_err(|error| anyhow!(error))?,
                 chrome_directory: chrome_profile.directory,
-                google_email,
                 created_at: now,
                 updated_at: now,
             })
@@ -107,10 +111,7 @@ async fn list_profiles(store: &SharedStore) -> Result<()> {
     for profile in profiles {
         println!("{}", profile.id);
         if let Some(binding) = store.chrome_profile_binding(&profile.id, &host_id).await? {
-            println!(
-                "  chrome  {} ({})",
-                binding.google_email, binding.chrome_directory
-            );
+            println!("  chrome  {}", binding.chrome_directory);
         }
         for mapping in mappings
             .iter()
@@ -347,13 +348,13 @@ mod tests {
     fn route_format_preserves_declared_order() {
         assert_eq!(
             format_route(
-                &ProfileId::parse("jack").unwrap(),
+                &ProfileId::parse("jack@loopflow.studio").unwrap(),
                 &[
-                    ProfileId::parse("loopflow-eng").unwrap(),
-                    ProfileId::parse("cadenza-eng").unwrap(),
+                    ProfileId::parse("loopflow-eng@loopflow.studio").unwrap(),
+                    ProfileId::parse("jackstah@gmail.com").unwrap(),
                 ],
             ),
-            "jack -> loopflow-eng -> cadenza-eng"
+            "jack@loopflow.studio -> loopflow-eng@loopflow.studio -> jackstah@gmail.com"
         );
     }
 }

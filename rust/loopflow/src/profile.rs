@@ -14,32 +14,15 @@ use crate::store::ProviderAccountId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ProfileId(String);
+pub struct ProfileId(EmailAddress);
 
 impl ProfileId {
     pub fn parse(value: &str) -> Result<Self, String> {
-        let value = value.trim();
-        if value.is_empty() || value.len() > 63 {
-            return Err("profile id must be 1-63 characters".to_string());
-        }
-        let mut chars = value.chars();
-        let first = chars
-            .next()
-            .expect("non-empty profile id has a first character");
-        if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-            return Err("profile id must start with a lowercase letter or number".to_string());
-        }
-        if !chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
-        {
-            return Err(
-                "profile id may contain lowercase letters, numbers, '-' and '_'".to_string(),
-            );
-        }
-        Ok(Self(value.to_string()))
+        EmailAddress::parse(value).map(Self)
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
@@ -212,7 +195,6 @@ pub struct ChromeProfileBinding {
     pub profile_id: ProfileId,
     pub host_id: HostId,
     pub chrome_directory: String,
-    pub google_email: EmailAddress,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -250,10 +232,12 @@ mod tests {
     };
 
     #[test]
-    fn profile_ids_are_path_safe() {
+    fn profile_ids_are_normalized_emails() {
         assert_eq!(
-            ProfileId::parse("loopflow-eng").unwrap().as_str(),
-            "loopflow-eng"
+            ProfileId::parse(" Loopflow-Eng@Loopflow.Studio ")
+                .unwrap()
+                .as_str(),
+            "loopflow-eng@loopflow.studio"
         );
         assert!(ProfileId::parse("Loopflow").is_err());
         assert!(ProfileId::parse("../loopflow").is_err());

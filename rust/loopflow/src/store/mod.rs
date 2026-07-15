@@ -861,7 +861,7 @@ mod tests {
     };
     use crate::id::WaveId;
     use crate::profile::{
-        ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
+        ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount,
         ProviderProfileCandidate, RepoProfileRoute,
     };
     use crate::project_session::{
@@ -3010,7 +3010,11 @@ mod tests {
         let shared = provider_account("claude", "shared", 0);
         store.upsert_provider_account(&shared).await.unwrap();
 
-        for id in ["jack", "loopflow-eng", "cadenza-eng"] {
+        for id in [
+            "jack@loopflow.studio",
+            "loopflow-eng@loopflow.studio",
+            "jackstah@gmail.com",
+        ] {
             let profile = Profile {
                 id: ProfileId::parse(id).unwrap(),
                 created_at: 1,
@@ -3018,7 +3022,7 @@ mod tests {
             };
             store.upsert_profile(&profile).await.unwrap();
         }
-        for id in ["jack", "cadenza-eng"] {
+        for id in ["loopflow-eng@loopflow.studio", "jackstah@gmail.com"] {
             store
                 .set_profile_provider_account(&ProfileProviderAccount {
                     profile_id: ProfileId::parse(id).unwrap(),
@@ -3032,10 +3036,9 @@ mod tests {
         }
         store
             .upsert_chrome_profile_binding(&ChromeProfileBinding {
-                profile_id: ProfileId::parse("jack").unwrap(),
+                profile_id: ProfileId::parse("jack@loopflow.studio").unwrap(),
                 host_id: HostId::parse("studio-mac").unwrap(),
                 chrome_directory: "Profile 7".to_string(),
-                google_email: EmailAddress::parse("jack@loopflow.studio").unwrap(),
                 created_at: 1,
                 updated_at: 1,
             })
@@ -3043,10 +3046,10 @@ mod tests {
             .unwrap();
         let route = RepoProfileRoute {
             repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            default_profile: ProfileId::parse("jack").unwrap(),
+            default_profile: ProfileId::parse("jack@loopflow.studio").unwrap(),
             backup_profiles: vec![
-                ProfileId::parse("loopflow-eng").unwrap(),
-                ProfileId::parse("cadenza-eng").unwrap(),
+                ProfileId::parse("loopflow-eng@loopflow.studio").unwrap(),
+                ProfileId::parse("jackstah@gmail.com").unwrap(),
             ],
             created_at: 1,
             updated_at: 1,
@@ -3064,7 +3067,7 @@ mod tests {
         assert_eq!(
             store
                 .profile_provider_account(
-                    &ProfileId::parse("cadenza-eng").unwrap(),
+                    &ProfileId::parse("loopflow-eng@loopflow.studio").unwrap(),
                     Provider::Claude,
                 )
                 .await
@@ -3076,7 +3079,7 @@ mod tests {
         assert_eq!(
             store
                 .chrome_profile_binding(
-                    &ProfileId::parse("jack").unwrap(),
+                    &ProfileId::parse("jack@loopflow.studio").unwrap(),
                     &HostId::parse("studio-mac").unwrap(),
                 )
                 .await
@@ -3097,7 +3100,11 @@ mod tests {
         let reserve = provider_account("claude", "reserve", 0);
         store.upsert_provider_account(&shared).await.unwrap();
         store.upsert_provider_account(&reserve).await.unwrap();
-        for id in ["default", "alias", "backup"] {
+        for id in [
+            "default@example.com",
+            "alias@example.com",
+            "backup@example.com",
+        ] {
             store
                 .upsert_profile(&Profile {
                     id: ProfileId::parse(id).unwrap(),
@@ -3109,15 +3116,15 @@ mod tests {
         }
         let candidates = vec![
             ProviderProfileCandidate {
-                profile_id: ProfileId::parse("default").unwrap(),
+                profile_id: ProfileId::parse("default@example.com").unwrap(),
                 account_id: shared.account_id.clone(),
             },
             ProviderProfileCandidate {
-                profile_id: ProfileId::parse("alias").unwrap(),
+                profile_id: ProfileId::parse("alias@example.com").unwrap(),
                 account_id: shared.account_id.clone(),
             },
             ProviderProfileCandidate {
-                profile_id: ProfileId::parse("backup").unwrap(),
+                profile_id: ProfileId::parse("backup@example.com").unwrap(),
                 account_id: reserve.account_id.clone(),
             },
         ];
@@ -3127,14 +3134,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(selected.profile_id.as_str(), "default");
+        assert_eq!(selected.profile_id.as_str(), "default@example.com");
         assert_eq!(selected.account.account_id, shared.account_id);
 
         store
             .pin_provider_session_route(
                 Provider::Claude,
                 "session-alias",
-                &ProfileId::parse("alias").unwrap(),
+                &ProfileId::parse("alias@example.com").unwrap(),
                 &shared.account_id,
             )
             .await
@@ -3144,7 +3151,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(resumed.profile_id.as_str(), "alias");
+        assert_eq!(resumed.profile_id.as_str(), "alias@example.com");
         assert!(resumed.resume_requested_session);
 
         store
@@ -3162,7 +3169,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(failed_over.profile_id.as_str(), "backup");
+        assert_eq!(failed_over.profile_id.as_str(), "backup@example.com");
         assert_eq!(failed_over.account.account_id, reserve.account_id);
         assert!(!failed_over.resume_requested_session);
     }

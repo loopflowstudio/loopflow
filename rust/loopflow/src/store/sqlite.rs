@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 
 use crate::id::WaveId;
 use crate::profile::{
-    ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
+    ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount,
     ProviderProfileCandidate, RepoProfileRoute,
 };
 use crate::provider_auth::Provider;
@@ -243,9 +243,8 @@ fn read_chrome_profile_binding(
     let profile_id = row.get::<_, String>(0)?;
     let host_id = row.get::<_, String>(1)?;
     let chrome_directory = row.get(2)?;
-    let google_email = row.get::<_, String>(3)?;
-    let created_at = row.get(4)?;
-    let updated_at = row.get(5)?;
+    let created_at = row.get(3)?;
+    let updated_at = row.get(4)?;
     Ok(ProfileId::parse(&profile_id)
         .map_err(StoreError::InvalidData)
         .and_then(|profile_id| {
@@ -253,17 +252,12 @@ fn read_chrome_profile_binding(
                 .map_err(StoreError::InvalidData)
                 .map(|host_id| (profile_id, host_id))
         })
-        .and_then(|(profile_id, host_id)| {
-            EmailAddress::parse(&google_email)
-                .map_err(StoreError::InvalidData)
-                .map(|google_email| ChromeProfileBinding {
-                    profile_id,
-                    host_id,
-                    chrome_directory,
-                    google_email,
-                    created_at,
-                    updated_at,
-                })
+        .map(|(profile_id, host_id)| ChromeProfileBinding {
+            profile_id,
+            host_id,
+            chrome_directory,
+            created_at,
+            updated_at,
         }))
 }
 
@@ -935,17 +929,15 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO chrome_profile_bindings (
-                profile_id, host_id, chrome_directory, google_email, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                profile_id, host_id, chrome_directory, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(profile_id, host_id) DO UPDATE SET
                 chrome_directory = excluded.chrome_directory,
-                google_email = excluded.google_email,
                 updated_at = excluded.updated_at",
             params![
                 binding.profile_id.as_str(),
                 binding.host_id.as_str(),
                 binding.chrome_directory,
-                binding.google_email.as_str(),
                 binding.created_at,
                 binding.updated_at,
             ],
@@ -960,7 +952,7 @@ impl SqliteStore {
     ) -> StoreResult<Option<ChromeProfileBinding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT profile_id, host_id, chrome_directory, google_email, created_at, updated_at
+            "SELECT profile_id, host_id, chrome_directory, created_at, updated_at
              FROM chrome_profile_bindings
              WHERE profile_id = ?1 AND host_id = ?2",
             params![profile_id.as_str(), host_id.as_str()],

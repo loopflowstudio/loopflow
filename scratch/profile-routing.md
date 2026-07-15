@@ -1,6 +1,6 @@
 # Profile routing and account lifecycle
 
-## End state
+## Current profile set
 
 A Loopflow profile is the unit a repository routes through. Each profile binds
 one host-local Chrome profile and one account per provider. Provider accounts
@@ -9,8 +9,8 @@ Claude or Codex account.
 
 ```text
 repository
-  default_profile: jackstah
-  backup_profiles: [loopflow-eng, cadenza-eng]
+  default_profile: jack@loopflow.studio
+  backup_profiles: [loopflow-eng@loopflow.studio, jackstah@gmail.com]
                          |
                          v
 profile -------------------------------+
@@ -19,22 +19,25 @@ profile -------------------------------+
   codex account  -> provider account <--+
 ```
 
-The intended mappings are:
+The current-phase mappings are:
 
 | Loopflow profile | Claude account | Codex account |
 |---|---|---|
-| `jackstah` | `jack@loopflow.studio` | `jack@loopflow.studio` |
-| `jack` | `jack@loopflow.studio` | `jack@loopflow.studio` |
-| `loopflow-eng` | `loopflow-eng@loopflow.studio` | `loopflow-eng@loopflow.studio` |
-| `cadenza-eng` | `loopflow-eng@loopflow.studio` | `cadenza-eng@loopflow.studio` |
+| `jack@loopflow.studio` | `jack@loopflow.studio` | `jack@loopflow.studio` |
+| `loopflow-eng@loopflow.studio` | `jackstah@gmail.com` | `loopflow-eng@loopflow.studio` |
+| `jackstah@gmail.com` | `jackstah@gmail.com` | `jackstah@gmail.com` |
 
-The existing `jackstah@gmail.com` Claude and Codex accounts remain registered
-after they downgrade, but no automatic route uses them unless a profile maps to
-them explicitly.
+There is no `cadenza-eng`/`cadenza-dev` profile in this phase. The existing
+`jackstah@gmail.com` profile stays available while its already-paid provider
+plans are used and can later remain as a low-tier fallback after downgrade.
+`loopflow-eng@loopflow.studio` is created and currently paid on Codex/OpenAI;
+its Claude mapping intentionally reuses the personal account.
 
 ## Ownership
 
 ```rust
+struct ProfileId(EmailAddress);
+
 struct Profile {
     id: ProfileId,
 }
@@ -43,7 +46,6 @@ struct ChromeProfileBinding {
     profile_id: ProfileId,
     host_id: HostId,
     chrome_directory: String,
-    google_email: EmailAddress,
 }
 
 struct ProfileProviderAccount {
@@ -59,11 +61,11 @@ struct RepoProfileRoute {
 }
 ```
 
-Profile names are user-chosen routing identities. A Chrome binding is
-host-local because `Profile 7` on one Mac means nothing on another host.
-Provider accounts are keyed by provider plus normalized login email in the
-user-facing model; credential-home paths use an opaque stable id rather than
-putting email addresses in paths.
+The normalized Google/Chrome email is the profile identity exposed by the CLI.
+A Chrome binding is host-local because `Profile 7` on one Mac means nothing on
+another host. Provider accounts are keyed by provider plus normalized login
+email in the user-facing model; credential-home paths use an opaque stable id
+rather than putting email addresses in paths.
 
 Repository routes are personal local state keyed by `RepoId`, not committed
 `.lf/config.yaml`. Checked-in config is a team convention, while OAuth profile
@@ -84,14 +86,14 @@ the first remaining candidate. Pin both the profile and resolved provider
 account to the provider child for its lifetime.
 
 A rate-limit response updates the provider account's global health, not the
-profile. If `jackstah` and `jack` both resolve Claude to
-`jack@loopflow.studio`, exhausting it removes both candidates for Claude. The
-router cannot mistake two names for two pools.
+profile. If `loopflow-eng@loopflow.studio` and `jackstah@gmail.com` both resolve
+Claude to `jackstah@gmail.com`, exhausting it removes both candidates for
+Claude. The router cannot mistake two profiles for two pools.
 
-This also means `jack` is not useful as a backup for `jackstah` while both map
-to the same accounts. Likewise, `cadenza-eng` contributes a distinct Codex
-fallback but no distinct Claude fallback. `lf profile route show` should render
-these aliases as shared rather than presenting them as additional capacity.
+This also means `jackstah@gmail.com` is not additional Claude capacity behind
+`loopflow-eng@loopflow.studio` while both map to the same personal Claude
+account. It is distinct Codex capacity. `lf profile route show` should render
+shared provider mappings rather than presenting them as additional capacity.
 
 Failover starts a new provider child with the next profile. Credentials never
 change underneath a live Claude or Codex process.
@@ -99,14 +101,14 @@ change underneath a live Claude or Codex process.
 The basic CLI should read as the real model:
 
 ```sh
-lf profile create jack --chrome-profile jack@loopflow.studio
-lf profile account set jack claude jack@loopflow.studio
-lf profile account set jack codex jack@loopflow.studio
+lf profile create jack@loopflow.studio --chrome-profile jack@loopflow.studio
+lf profile account set jack@loopflow.studio claude jack@loopflow.studio
+lf profile account set jack@loopflow.studio codex jack@loopflow.studio
 
 lf profile route set \
-  --default jackstah \
-  --backup loopflow-eng \
-  --backup cadenza-eng
+  --default jack@loopflow.studio \
+  --backup loopflow-eng@loopflow.studio \
+  --backup jackstah@gmail.com
 
 lf profile route show
 ```
@@ -148,11 +150,11 @@ renewal date from token behavior. A canceled-but-still-paid account remains
 Do not wait until the old subscription expires to create the new identity.
 Prepare everything except the purchase:
 
-1. Create real managed Google identities for `loopflow-eng@loopflow.studio`
-   and `cadenza-eng@loopflow.studio`.
-2. Route their verification and recovery mail to `jack@loopflow.studio` and
-   verify delivery.
-3. Create matching Chrome profiles, authenticate the free provider accounts,
+1. Maintain the three real Google identities `jack@loopflow.studio`,
+   `loopflow-eng@loopflow.studio`, and `jackstah@gmail.com`.
+2. Route `loopflow-eng@loopflow.studio` verification and recovery mail to
+   `jack@loopflow.studio` and verify delivery.
+3. Create matching Chrome profiles, authenticate the provider accounts,
    install/connect the provider extensions, and import their credentials into
    Loopflow.
 4. Record each existing account's provider-specific billing date, cancel its
@@ -164,8 +166,7 @@ Prepare everything except the purchase:
    can cut over on different days without changing the repository's profile
    route.
 7. Leave `jackstah@gmail.com` registered as `ExplicitOnly` after downgrade, or
-   map it to a deliberately named low-tier profile if it should remain a
-   fallback.
+   keep that profile eligible if the low-tier account should remain a fallback.
 
 Canceling early is safe for this schedule: both providers document continued
 access through the paid billing period, and OpenAI documents that consumer
@@ -174,19 +175,18 @@ a separate purchase, not a transfer.
 
 ## Google account management
 
-An email alias is insufficient for `loopflow-eng` or `cadenza-eng`: Google says
-aliases are not Google Accounts and cannot sign in. They must be real managed
-users if they are the Google OAuth identities.
+An email alias is insufficient for `loopflow-eng@loopflow.studio`: Google says
+aliases are not Google Accounts and cannot sign in. It must be a real managed
+user because it is a Google OAuth and Chrome profile identity.
 
 The lowest-overhead setup to test is:
 
 - enable Cloud Identity Free;
 - turn off automatic paid Workspace license assignment for the engineering
   account organizational unit;
-- create the two users as Cloud Identity identities;
+- create `loopflow-eng@loopflow.studio` as a Cloud Identity identity;
 - add recipient-address routing to `jack@loopflow.studio` for provider mail;
-- confirm sign-in and mail delivery with `loopflow-eng` before repeating it for
-  `cadenza-eng`.
+- confirm sign-in and mail delivery before connecting provider OAuth.
 
 Cloud Identity does not supply a Gmail mailbox. If Workspace routing cannot
 deliver mail for those exact unlicensed identities in the current domain
@@ -215,8 +215,8 @@ browser control remains on the host that owns the Chrome profile.
 ## Migration from the current account-first router
 
 1. Preserve existing provider credential homes and health rows.
-2. Re-key `primary` and `loopflow` as provider accounts identified by their
-   verified provider email.
+2. Preserve opaque account ids such as `primary` and `loopflow`; record their
+   verified provider login emails separately.
 3. Create Loopflow profiles separately and move Chrome-pairing metadata from
    provider-account homes to host-local profile bindings.
 4. Create profile-provider mapping rows and one local repository route.

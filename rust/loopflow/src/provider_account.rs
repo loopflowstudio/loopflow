@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::profile::{
-    ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
+    ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount,
     ProviderProfileCandidate,
 };
 use crate::provider_auth::Provider;
@@ -651,16 +651,18 @@ async fn migrate_legacy_chrome_bindings(store: &SharedStore) -> Result<(), Provi
                     legacy_path.display()
                 ))
             })?;
-        let Ok(google_email) = EmailAddress::parse(&legacy.label) else {
+        if !legacy
+            .label
+            .eq_ignore_ascii_case(mapping.profile_id.as_str())
+        {
             continue;
-        };
+        }
         let now = now_unix();
         store
             .upsert_chrome_profile_binding(&ChromeProfileBinding {
                 profile_id: mapping.profile_id,
                 host_id: host_id.clone(),
                 chrome_directory: legacy.directory,
-                google_email,
                 created_at: now,
                 updated_at: now,
             })
@@ -835,7 +837,7 @@ mod tests {
         );
         let route = ProviderAccountRoute {
             provider: Provider::Codex,
-            profile_id: ProfileId::parse("reserve").unwrap(),
+            profile_id: ProfileId::parse("reserve@example.com").unwrap(),
             account_id: parse_account_id("reserve").unwrap(),
             credential: AccountCredential::AccessToken("codex-secret".to_string()),
             resume_requested_session: false,
@@ -880,7 +882,7 @@ mod tests {
             (
                 ProviderAccountRoute {
                     provider: Provider::Claude,
-                    profile_id: ProfileId::parse("primary").unwrap(),
+                    profile_id: ProfileId::parse("primary@example.com").unwrap(),
                     account_id: parse_account_id("primary").unwrap(),
                     credential: AccountCredential::NativeHome(claude_home.clone()),
                     resume_requested_session: false,
@@ -892,7 +894,7 @@ mod tests {
             (
                 ProviderAccountRoute {
                     provider: Provider::Codex,
-                    profile_id: ProfileId::parse("reserve").unwrap(),
+                    profile_id: ProfileId::parse("reserve@example.com").unwrap(),
                     account_id: parse_account_id("reserve").unwrap(),
                     credential: AccountCredential::NativeHome(codex_home.clone()),
                     resume_requested_session: false,
@@ -935,7 +937,7 @@ mod tests {
         store.upsert_provider_account(&account).await.unwrap();
         let route = ProviderAccountRoute {
             provider: Provider::Claude,
-            profile_id: ProfileId::parse("primary").unwrap(),
+            profile_id: ProfileId::parse("primary@example.com").unwrap(),
             account_id: account_id.clone(),
             credential: AccountCredential::AccessToken("claude-secret".to_string()),
             resume_requested_session: false,
@@ -992,7 +994,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        let profile_id = ProfileId::parse("primary").unwrap();
+        let profile_id = ProfileId::parse("jack@example.com").unwrap();
         store
             .upsert_profile(&Profile {
                 id: profile_id.clone(),
@@ -1020,7 +1022,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(binding.chrome_directory, "Profile 3");
-        assert_eq!(binding.google_email.as_str(), "jack@example.com");
         assert!(!legacy_path.exists());
     }
 

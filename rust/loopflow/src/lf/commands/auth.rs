@@ -390,7 +390,7 @@ async fn resolve_auth_chrome_profile(
             })?;
         return Ok(Some(LocalChromeProfile {
             directory: binding.chrome_directory,
-            label: binding.google_email.to_string(),
+            label: binding.profile_id.to_string(),
         }));
     }
     raw_chrome_profile

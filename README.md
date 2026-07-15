@@ -471,21 +471,29 @@ Register provider accounts, then route each repository through personal
 profiles:
 
 ```bash
-lf profile create jack --chrome-profile jackstah@example.com
-lf auth import claude --account primary --profile jack
-lf profile create reserve --chrome-profile reserve@example.com
-lf auth connect claude --account reserve --profile reserve
+lf profile create jack@loopflow.studio --chrome-profile jack@loopflow.studio
+lf profile create loopflow-eng@loopflow.studio --chrome-profile loopflow-eng@loopflow.studio
+lf profile create jackstah@gmail.com --chrome-profile jackstah@gmail.com
+
+lf auth import claude --account primary --profile jackstah@gmail.com
+lf auth connect claude --account loopflow --profile jack@loopflow.studio
 lf auth accounts claude
 
-lf profile account set jack claude jackstah@example.com
-lf profile account set jack codex jackstah@example.com
-lf profile account set reserve claude reserve@example.com
+lf profile account set jack@loopflow.studio claude jack@loopflow.studio
+lf profile account set jack@loopflow.studio codex jack@loopflow.studio
+lf profile account set loopflow-eng@loopflow.studio claude jackstah@gmail.com
+lf profile account set loopflow-eng@loopflow.studio codex loopflow-eng@loopflow.studio
+lf profile account set jackstah@gmail.com claude jackstah@gmail.com
+lf profile account set jackstah@gmail.com codex jackstah@gmail.com
 
-lf profile route set --default jack --backup reserve
+lf profile route set \
+  --default jack@loopflow.studio \
+  --backup loopflow-eng@loopflow.studio \
+  --backup jackstah@gmail.com
 lf profile route show
 
-lf auth disable claude reserve
-lf auth enable claude reserve
+lf auth disable claude primary
+lf auth enable claude primary
 lf auth reset claude primary
 lf auth disconnect claude --account reserve
 ```

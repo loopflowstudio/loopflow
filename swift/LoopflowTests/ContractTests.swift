@@ -182,6 +182,20 @@ struct ContractTests {
         #expect(bareInterrupt.turn == nil)
     }
 
+    @Test("chat_history.json decodes through the durable history models")
+    func chatHistoryFixtureParses() throws {
+        let data = try fixtureData("dto/chat_history.json")
+        let snapshot = try JSONDecoder().decode(ChatHistorySnapshot.self, from: data)
+
+        #expect(snapshot.state == .partial)
+        #expect(snapshot.detail?.contains("line 8") == true)
+        #expect(snapshot.turns.map(\.id) == ["turn-7"])
+        #expect(snapshot.truncated)
+
+        let reencoded = try JSONEncoder().encode(snapshot)
+        #expect(try JSONDecoder().decode(ChatHistorySnapshot.self, from: reencoded) == snapshot)
+    }
+
     @Test("wave_loop_states.json pins the shared SSE state vocabulary")
     func loopStateVocabularyPinned() throws {
         // Swift deliberately drops unknown names off the stream (see

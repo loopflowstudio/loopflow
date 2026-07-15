@@ -52,6 +52,10 @@ active provider turn and otherwise queues the message for the next pass.
 `lf chat --follow` replays the latest 12 turns and follows new turns. The
 conversation shows human and Wave prose plus human-level failures; commands and
 tools stay in the journal, which retains the complete thread.
+`lf chat --history --json -w <wave>` folds the latest saved turns directly from
+that journal, so a stopped listener does not make the conversation disappear.
+The response distinguishes missing, partial, and unavailable evidence from a
+valid empty thread.
 
 `lf radio pub` and `lf radio sub` use the SQLite bus. The bus is a short-lived,
 prefix-addressed transport between Wave, Project, and Task work; it is not a

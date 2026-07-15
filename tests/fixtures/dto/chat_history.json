@@ -1,0 +1,18 @@
+{
+  "state": "partial",
+  "detail": "Durable Wave Chat history stops at unreadable line 8.",
+  "turns": [
+    {
+      "id": "turn-7",
+      "role": "user",
+      "text": "Keep the saved thread visible while reconnecting.",
+      "status": "completed",
+      "items": [],
+      "created_at": "2026-07-15T04:00:00Z",
+      "from": null,
+      "body": null,
+      "activity": null
+    }
+  ],
+  "truncated": true
+}

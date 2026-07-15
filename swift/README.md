@@ -15,7 +15,9 @@ the whole machine or a repository to filter that same snapshot locally.
 Create a Wave with the `+` button. The app writes `GOAL.md` and `MEMORY.md`
 in the repository's main checkout. **Open chat** attaches to a live Wave;
 **Start & open** launches a stopped Wave through `lf wave` and opens its
-conversation while it connects. Wave Chat opens on the recent conversation.
+conversation while it connects. Wave Chat paints the bounded local journal
+tail before SSE, keeps it visible through reconnects, and rolls equivalent
+operational failures into one disclosed notice.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and human-level failures remain visible. The detail pane
 reads Projects, Tasks, decisions, PR delivery, and attention from
@@ -45,9 +47,9 @@ codebase tree, and registry health.
   maintain a second roadmap or lifecycle database. Unavailable per-Wave
   evidence renders its reason, and refresh failures leave the last successful
   roadmap or selected Wave detail visible.
-- **Per-Wave SSE** owns live motion. `WaveChatConnection` connects only to the
-  selected Wave's `/events` stream; human subscriptions replay the latest 12
-  turns before continuing live.
+- **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
+  `lf chat --history --json`, then connects only to the selected Wave's
+  `/events` stream and upserts its replay before continuing live.
 
 ## Code map
 

@@ -112,6 +112,26 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
+    @Test("Wave Chat history is a bounded local query")
+    func chatHistoryUsesLocalJournalQuery() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(args == [
+                "chat", "--history", "--json", "--limit", "12", "--wave", "product",
+            ])
+            #expect(cwd == "/tmp/repo")
+            return #"{"state":"missing","detail":"No durable Wave Chat history exists yet.","turns":[],"truncated":false}"#
+        }
+
+        let snapshot = try await query.chatHistory(
+            wave: "product",
+            limit: 12,
+            cwd: "/tmp/repo"
+        )
+        #expect(snapshot.state == .missing)
+        #expect(snapshot.turns.isEmpty)
+        #expect(!snapshot.truncated)
+    }
+
     @Test("lf home probe decodes the state and the one contextual action")
     func homeProbeDecodesStateAndAction() async throws {
         let json = #"""

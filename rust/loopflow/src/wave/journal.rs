@@ -283,19 +283,50 @@ pub fn journal_path(repo_root: &Path, wave: &str) -> PathBuf {
         .join("journal.jsonl")
 }
 
-/// Read a journal's events without becoming a writer.
+/// What a read-only journal consumer can honestly say about its evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadOnlyJournalState {
+    Available,
+    Missing,
+    Partial,
+    Unavailable,
+}
+
+/// Events recovered without taking ownership of the Wave journal.
+#[derive(Debug)]
+pub struct ReadOnlyJournal {
+    pub events: Vec<Event>,
+    pub state: ReadOnlyJournalState,
+    pub detail: Option<String>,
+}
+
+/// Read a journal's events without becoming a writer, retaining evidence state.
 ///
 /// The ambient-context read path (every `lf` run inside a wave) folds over
 /// this from arbitrary processes, so it must never create the file or
-/// truncate a torn tail — the running wave server owns the pen. Missing or
-/// unreadable file, a torn tail, or a line from another format version all
-/// yield whatever parsed cleanly before the fault (possibly nothing).
-pub fn read_events(path: &Path) -> Vec<Event> {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return Vec::new();
+/// truncate a torn tail — the running wave server owns the pen. A torn or
+/// future-version tail returns the valid prefix as `Partial`; missing and
+/// unreadable files stay distinct from a valid empty journal.
+pub fn read_events_with_state(path: &Path) -> ReadOnlyJournal {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return ReadOnlyJournal {
+                events: Vec::new(),
+                state: ReadOnlyJournalState::Missing,
+                detail: Some("No durable Wave Chat history exists yet.".to_string()),
+            };
+        }
+        Err(err) => {
+            return ReadOnlyJournal {
+                events: Vec::new(),
+                state: ReadOnlyJournalState::Unavailable,
+                detail: Some(format!("Could not read durable Wave Chat history: {err}")),
+            };
+        }
     };
     let mut events = Vec::new();
-    for line in raw.lines() {
+    for (index, line) in raw.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -308,12 +339,38 @@ pub fn read_events(path: &Path) -> Vec<Event> {
                     version = event.v,
                     "journal line from another format version; stopping read-only fold"
                 );
-                break;
+                return ReadOnlyJournal {
+                    events,
+                    state: ReadOnlyJournalState::Partial,
+                    detail: Some(format!(
+                        "Durable Wave Chat history stops at line {}: format v{} is incompatible with v{FORMAT_VERSION}.",
+                        index + 1,
+                        event.v
+                    )),
+                };
             }
-            Err(_) => break,
+            Err(_) => {
+                return ReadOnlyJournal {
+                    events,
+                    state: ReadOnlyJournalState::Partial,
+                    detail: Some(format!(
+                        "Durable Wave Chat history stops at unreadable line {}.",
+                        index + 1
+                    )),
+                };
+            }
         }
     }
-    events
+    ReadOnlyJournal {
+        events,
+        state: ReadOnlyJournalState::Available,
+        detail: None,
+    }
+}
+
+/// Read the valid event prefix for callers that do not present evidence state.
+pub fn read_events(path: &Path) -> Vec<Event> {
+    read_events_with_state(path).events
 }
 
 // -- Console narration --------------------------------------------------
@@ -1255,13 +1312,17 @@ mod tests {
         raw.push_str(r#"{"v":1,"seq":2,"at":"2026-"#);
         std::fs::write(&path, &raw).expect("corrupt");
 
-        let events = read_events(&path);
-        assert_eq!(events.len(), 1);
+        let read = read_events_with_state(&path);
+        assert_eq!(read.events.len(), 1);
+        assert_eq!(read.state, ReadOnlyJournalState::Partial);
+        assert!(read.detail.as_deref().unwrap().contains("line 2"));
         assert_eq!(std::fs::read_to_string(&path).expect("reread"), raw);
 
-        // Missing file: empty, and still not created.
+        // Missing file: explicitly missing, and still not created.
         let ghost = path.parent().unwrap().join("ghost.jsonl");
-        assert!(read_events(&ghost).is_empty());
+        let missing = read_events_with_state(&ghost);
+        assert!(missing.events.is_empty());
+        assert_eq!(missing.state, ReadOnlyJournalState::Missing);
         assert!(!ghost.exists());
     }
 

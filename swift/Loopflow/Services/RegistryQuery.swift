@@ -90,6 +90,19 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
+    /// Latest durable Wave turns from the local journal. This read does not
+    /// require or start a Wave listener; Wave Chat installs it before SSE.
+    public func chatHistory(
+        wave: String,
+        limit: Int = 12,
+        cwd: String?
+    ) async throws -> ChatHistorySnapshot {
+        let stdout = try await run([
+            "chat", "--history", "--json", "--limit", String(limit), "--wave", wave,
+        ], cwd)
+        return try Self.decode(ChatHistorySnapshot.self, from: stdout)
+    }
+
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task Session's recorded base.
     public func taskChanges(issue: String, cwd: String?) async throws -> TaskChangesSnapshot {

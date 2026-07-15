@@ -63,7 +63,14 @@ struct WaveChatView: View {
             confirmStop = false
             isFollowingLatest = true
             isNearTranscriptBottom = true
-            let conn = WaveChatConnection(repoPath: repoPath, waveName: waveName)
+            let query = RegistryQueryLocal.shared
+            let conn = WaveChatConnection(
+                repoPath: repoPath,
+                waveName: waveName,
+                loadHistory: { repoPath, waveName, limit in
+                    try await query.chatHistory(wave: waveName, limit: limit, cwd: repoPath)
+                }
+            )
             connection = conn
             conn.start()
         }
@@ -98,10 +105,13 @@ struct WaveChatView: View {
             playhead: connection?.playhead,
             loopState: connection?.loopState ?? .idle
         )
-        let visible = turns.filter(isVisibleTurn)
+        let visible = visibleConversationTurns(turns, failures: failures)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                    if let notice = historyNotice, !visible.isEmpty {
+                        WaveChatHistoryNotice(notice: notice)
+                    }
                     ForEach(visible) { turn in
                         if let activity = turn.activity {
                             ChildControlActivityCard(
@@ -229,24 +239,76 @@ struct WaveChatView: View {
 
     @ViewBuilder
     private var statusOverlay: some View {
-        switch connection?.phase ?? .idle {
-        case .notRunning, .idle:
-            notRunningState
-        case .connecting:
+        if connection?.historyState == nil {
             VStack(spacing: Spacing.md) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Connecting to \(waveName)…")
+                Text("Loading saved conversation…")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .live:
+        } else if connection?.phase == .notRunning || connection?.phase == .idle {
+            notRunningState
+        } else if let notice = historyNotice,
+                  connection?.historyState != .available {
             emptyState(
-                icon: "bubble.left.and.bubble.right",
-                title: "No turns yet",
-                message: "Send a message to start the conversation."
+                icon: notice.icon,
+                title: notice.title,
+                message: notice.message
             )
+        } else {
+            switch connection?.phase ?? .idle {
+            case .notRunning, .idle:
+                EmptyView()
+            case .connecting:
+                VStack(spacing: Spacing.md) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Connecting to \(waveName)…")
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .live:
+                emptyState(
+                    icon: "bubble.left.and.bubble.right",
+                    title: "No turns yet",
+                    message: "Send a message to start the conversation."
+                )
+            }
+        }
+    }
+
+    private var historyNotice: WaveChatHistoryNotice.Content? {
+        guard let connection else { return nil }
+        switch connection.historyState {
+        case .missing:
+            return .init(
+                icon: "clock.arrow.circlepath",
+                title: "No saved conversation",
+                message: connection.historyDetail ?? "This Wave has no durable Chat history yet."
+            )
+        case .partial:
+            return .init(
+                icon: "exclamationmark.triangle",
+                title: "Showing partial conversation",
+                message: connection.historyDetail ?? "Later saved turns could not be read."
+            )
+        case .unavailable:
+            return .init(
+                icon: "exclamationmark.triangle",
+                title: "Saved conversation unavailable",
+                message: connection.historyDetail ?? "The durable Wave Chat record could not be read."
+            )
+        case .available where connection.historyTruncated:
+            return .init(
+                icon: "clock",
+                title: "Recent conversation",
+                message: "Showing the latest \(connection.turns.count) saved turns."
+            )
+        case .available, nil:
+            return nil
         }
     }
 
@@ -288,6 +350,11 @@ struct WaveChatView: View {
                 .foregroundStyle(palette.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 340)
+            if let notice = historyNotice,
+               connection?.historyState != .available {
+                WaveChatHistoryNotice(notice: notice)
+                    .frame(maxWidth: 340)
+            }
             Button {
                 startWave()
             } label: {
@@ -459,6 +526,38 @@ struct WaveChatView: View {
     private func timestampLabel(for turn: ChatTurn) -> String? {
         guard let date = turn.createdAtDate else { return nil }
         return Self.timestampFormatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct WaveChatHistoryNotice: View {
+    struct Content {
+        let icon: String
+        let title: String
+        let message: String
+    }
+
+    let notice: Content
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: notice.icon)
+                .foregroundStyle(palette.textSecondary)
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(notice.title)
+                    .font(Typography.caption(11).weight(.semibold))
+                    .foregroundStyle(palette.text)
+                Text(notice.message)
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
+        }
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surfaceMuted.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .accessibilityIdentifier("wave-chat-history-notice")
     }
 }
 

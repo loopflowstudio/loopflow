@@ -287,7 +287,7 @@ struct EventsQuery {
     limit: Option<usize>,
 }
 
-const HUMAN_THREAD_REPLAY_LIMIT: usize = 12;
+pub(crate) const HUMAN_THREAD_REPLAY_LIMIT: usize = 12;
 
 /// `GET /memory` response.
 #[derive(Debug, Serialize)]

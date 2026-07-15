@@ -13,6 +13,40 @@ public enum WaveChatError: Error, Sendable {
     case badEndpoint(String)
 }
 
+/// Evidence state of a read-only fold over the durable Wave journal.
+public enum ChatHistoryState: String, Codable, Sendable, Equatable {
+    case available
+    case missing
+    case partial
+    case unavailable
+}
+
+/// Bounded `lf chat --history --json` response. Every field mirrors Rust.
+public struct ChatHistorySnapshot: Codable, Sendable, Equatable {
+    public let state: ChatHistoryState
+    public let detail: String?
+    public let turns: [ChatTurn]
+    public let truncated: Bool
+
+    public init(
+        state: ChatHistoryState,
+        detail: String?,
+        turns: [ChatTurn],
+        truncated: Bool
+    ) {
+        self.state = state
+        self.detail = detail
+        self.turns = turns
+        self.truncated = truncated
+    }
+}
+
+public typealias ChatHistoryLoader = @Sendable (
+    _ repoPath: String,
+    _ waveName: String,
+    _ limit: Int
+) async throws -> ChatHistorySnapshot
+
 /// Reads the discovery pointer a running wave writes under its `wave/<name>/` dir.
 ///
 /// Wave state lives at the wave's ORIGIN repo: a running wave publishes its
@@ -272,6 +306,10 @@ public final class WaveChatConnection {
 
     public private(set) var turns: [ChatTurn] = []
     public private(set) var phase: Phase = .idle
+    /// Nil while the bounded local read has not completed.
+    public private(set) var historyState: ChatHistoryState?
+    public private(set) var historyDetail: String?
+    public private(set) var historyTruncated = false
     /// Last loop state seen — sent once on subscribe, again on every
     /// transition, and echoed by `POST /messages` responses.
     public private(set) var loopState: WaveLoopState = .idle
@@ -283,13 +321,23 @@ public final class WaveChatConnection {
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
     private let session: URLSession
+    private let loadHistory: ChatHistoryLoader?
+    private let historyLimit: Int
     private let decoder = JSONDecoder()
 
     /// Poll interval while the wave isn't running yet, in nanoseconds.
     private let pollInterval: UInt64 = 1_000_000_000
-    public init(repoPath: String, waveName: String, session: URLSession? = nil) {
+    public init(
+        repoPath: String,
+        waveName: String,
+        session: URLSession? = nil,
+        historyLimit: Int = 12,
+        loadHistory: ChatHistoryLoader? = nil
+    ) {
         self.repoPath = repoPath
         self.waveName = waveName
+        self.historyLimit = historyLimit
+        self.loadHistory = loadHistory
         if let session {
             self.session = session
         } else {
@@ -341,6 +389,7 @@ public final class WaveChatConnection {
     // MARK: - Discovery + streaming loop
 
     private func run() async {
+        await loadDurableHistory()
         while !Task.isCancelled {
             guard let endpoint = WaveEndpoint.read(repoPath: repoPath, waveName: waveName) else {
                 currentEndpoint = nil
@@ -364,6 +413,26 @@ public final class WaveChatConnection {
         }
     }
 
+    private func loadDurableHistory() async {
+        guard let loadHistory else { return }
+        do {
+            let snapshot = try await loadHistory(repoPath, waveName, historyLimit)
+            turns = snapshot.turns.sorted { a, b in
+                if a.sequence != b.sequence { return a.sequence < b.sequence }
+                return a.id < b.id
+            }
+            historyState = snapshot.state
+            historyDetail = snapshot.detail
+            historyTruncated = snapshot.truncated
+        } catch is CancellationError {
+            return
+        } catch {
+            historyState = .unavailable
+            historyDetail = "Saved conversation could not be read: \(error.localizedDescription)"
+            historyTruncated = false
+        }
+    }
+
     private func stream(endpoint: String) async throws {
         guard let url = URL(string: "http://\(endpoint)/events") else {
             throw WaveChatError.badEndpoint(endpoint)
@@ -378,13 +447,14 @@ public final class WaveChatConnection {
         guard http.statusCode == 200 else {
             throw WaveChatError.badStatus(http.statusCode)
         }
-        // A fresh stream replays the server's authoritative recent tail. Drop
-        // the previous snapshot first so recovery changes cannot leave a stale
-        // turn beside the replay. The loop state resets too; the server's first
-        // frame is a `state` event.
-        turns = []
+        // A fresh stream replays the same journal tail as the bounded local
+        // read. Keep the saved snapshot painted and upsert replay frames by id;
+        // connecting cannot repair a partial or unavailable durable read.
         loopState = .idle
         playhead = nil
+        if historyState == nil {
+            historyState = .available
+        }
         phase = .live
 
         var parser = SSEFrameParser()
@@ -393,8 +463,8 @@ public final class WaveChatConnection {
                 if Task.isCancelled { return }
                 // `resync`: the live turn stream lagged, so a `turn-delta` may
                 // have been dropped and the open-turn reconstruction could be
-                // short a fragment. End this connection; `run()` reconnects for a
-                // fresh atomic snapshot (which resets `turns` and replays whole).
+                // short a fragment. End this connection; `run()` reconnects for
+                // a fresh whole-turn replay into the stable turn ids.
                 if frame.event == "resync" { return }
                 handle(event: frame.event, data: frame.data)
             }
@@ -440,6 +510,10 @@ public final class WaveChatConnection {
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
         do {
             upsert(try decoder.decode(ChatTurn.self, from: json))
+            if historyState == .missing {
+                historyState = .available
+                historyDetail = nil
+            }
         } catch {
             LoggingService.wave("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
             assertionFailure("wave chat turn frame failed to decode: \(error)")

@@ -130,7 +130,7 @@ impl ContextCoverage {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ContextAssetKind {

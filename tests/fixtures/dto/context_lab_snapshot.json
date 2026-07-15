@@ -29,27 +29,21 @@
     ]
   },
   "coverage": {
-    "launches": 1,
     "complete_launches": 1,
     "partial_launches": 0,
     "prompt_only_launches": 0,
     "capturing_launches": 0,
-    "turns": 2,
     "assembled_turns": 1,
     "provider_total_only_turns": 0,
     "unknown_turns": 1,
     "prompt_artifacts_available": 1,
-    "conversations_available": 1,
-    "supplied_tokens": 1000,
-    "attributed_tokens": 800
+    "conversations_available": 1
   },
   "totals": {
     "sessions": 1,
     "launches": 1,
     "turns": 2,
-    "assembled_turns": 1,
     "context_tokens": 1000,
-    "context_token_turns": 1,
     "median_context_tokens": 1000,
     "p95_context_tokens": 1000,
     "instruction_tokens": 800,
@@ -65,16 +59,13 @@
   "aggregate_root": {
     "id": "session-set",
     "level": "session_set",
-    "kind": "session_set",
+    "kind": null,
     "label": "Session set",
     "source_path": null,
     "content_sha256": null,
     "attributed_tokens": 800,
-    "isolated_tokens": 805,
     "session_count": 1,
     "turn_count": 2,
-    "first_seen": 110,
-    "last_seen": 130,
     "children": [
       {
         "id": "context-kind",
@@ -84,11 +75,8 @@
         "source_path": null,
         "content_sha256": null,
         "attributed_tokens": 800,
-        "isolated_tokens": 805,
         "session_count": 1,
         "turn_count": 1,
-        "first_seen": 120,
-        "last_seen": 120,
         "children": [
           {
             "id": "context-source",
@@ -98,11 +86,8 @@
             "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
             "content_sha256": null,
             "attributed_tokens": 800,
-            "isolated_tokens": 805,
             "session_count": 1,
             "turn_count": 1,
-            "first_seen": 120,
-            "last_seen": 120,
             "children": [
               {
                 "id": "context-revision",
@@ -112,11 +97,8 @@
                 "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
                 "content_sha256": "0123456789abcdef",
                 "attributed_tokens": 800,
-                "isolated_tokens": 805,
                 "session_count": 1,
                 "turn_count": 1,
-                "first_seen": 120,
-                "last_seen": 120,
                 "children": []
               }
             ]
@@ -132,52 +114,30 @@
       "started_at": 110,
       "outcome": "completed",
       "steering_turns": 0,
-      "capture": "complete",
       "provider": "codex",
       "model": "gpt-5",
       "surface": "headless",
       "wave": "intelligence",
       "flow": null,
       "skill": "implement",
-      "conversation_available": true,
       "turns": [
         {
           "id": "turn-1",
           "ordinal": 1,
-          "started_at": 120,
-          "status": "completed",
-          "input_op": "initial",
-          "coverage": "assembled",
           "supplied_context_tokens": 1000,
-          "provider_input_tokens": 1100,
-          "cost_usd": 0.42,
-          "prompt_artifact_available": true,
           "assets": [
             {
               "node_id": "context-revision",
-              "position": 0,
-              "channel": "system",
               "kind": "operating_instructions",
               "label": "LOOPFLOW.md",
-              "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
-              "content_sha256": "0123456789abcdef",
-              "included_by": "operate",
-              "attributed_tokens": 800,
-              "isolated_tokens": 805
+              "attributed_tokens": 800
             }
           ]
         },
         {
           "id": "turn-2",
           "ordinal": 2,
-          "started_at": 130,
-          "status": "partial",
-          "input_op": "message",
-          "coverage": "unknown",
           "supplied_context_tokens": null,
-          "provider_input_tokens": null,
-          "cost_usd": null,
-          "prompt_artifact_available": false,
           "assets": []
         }
       ]
@@ -190,7 +150,6 @@
       "kind": "operating_instructions",
       "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
       "content_sha256": "0123456789abcdef",
-      "editable": true,
       "current_content_sha256": "0123456789abcdef",
       "precedence_layers": [
         "operate"
@@ -200,14 +159,11 @@
         "exposed_launches": 1,
         "exposed_turns": 1,
         "attributed_tokens": 800,
-        "isolated_tokens": 805,
         "median_tokens_per_exposed_turn": 800,
         "p95_tokens_per_exposed_turn": 800,
         "first_seen": 120,
-        "last_seen": 120,
         "completed_launches": 1,
         "failed_launches": 0,
-        "interrupted_launches": 0,
         "steering_turns": 0,
         "complete_capture_launches": 1
       },
@@ -219,12 +175,9 @@
             "launch_id": "launch-1",
             "turn_id": "turn-1"
           },
-          "started_at": 120,
           "outcome": "completed",
-          "capture": "complete",
           "supplied_context_tokens": 1000,
           "selected_source_tokens": 800,
-          "steering_turns": 0,
           "prompt_artifact_available": true,
           "conversation_available": true
         }

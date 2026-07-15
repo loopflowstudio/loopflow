@@ -65,7 +65,7 @@ struct TraceEvidenceView: View {
 
     @ViewBuilder
     private func artifactView(_ artifact: TraceArtifactSnapshot) -> some View {
-        if artifact.available, let body = artifact.content {
+        if let body = artifact.content {
             VStack(alignment: .leading, spacing: 0) {
                 if let path = artifact.path {
                     Text(path)
@@ -113,7 +113,7 @@ private struct RefinementTaskChoice: Identifiable, Hashable {
 }
 
 struct RefinementTaskSheet: View {
-    let query: SessionSetQuery?
+    let query: SessionSetQuery
     let evidence: SourceEvidence
     let backlink: ContextLabRoute
     let onLaunch: (TaskWorkspaceRoute) -> Void
@@ -199,10 +199,6 @@ struct RefinementTaskSheet: View {
 
     private func loadTasks() async {
         defer { isLoading = false }
-        guard let query else {
-            errorMessage = "The Context Lab query is no longer available."
-            return
-        }
         do {
             let roadmap = try await RegistryQueryLocal.shared.roadmap(wave: "intelligence")
             let selectedRepos = Set(query.repoPaths.map(\.normalizedFilePath))
@@ -232,8 +228,7 @@ struct RefinementTaskSheet: View {
 
     @MainActor
     private func launch() async {
-        guard let query,
-              let selectedTaskId,
+        guard let selectedTaskId,
               let choice = tasks.first(where: { $0.id == selectedTaskId }),
               let runtime = choice.task.runtime,
               let workspace = choice.task.reference.workspace,
@@ -244,10 +239,10 @@ struct RefinementTaskSheet: View {
         do {
             let refreshed = try await RegistryQueryLocal.shared.contextLab(query)
             guard let currentEvidence = refreshed.evidence.first(where: { $0.nodeId == evidence.nodeId }),
-                  currentEvidence.editable,
+                  currentEvidence.isEditable,
                   currentEvidence.contentSha256 == evidence.contentSha256
             else {
-                throw ContextRefinementError.staleSource(
+                throw ContextRefinementError(
                     "The selected source revision changed. Refresh Context Lab and select the current revision."
                 )
             }
@@ -257,12 +252,12 @@ struct RefinementTaskSheet: View {
                 worktree: workspace.worktree
             )
             guard FileManager.default.fileExists(atPath: workspace.worktree) else {
-                throw ContextRefinementError.staleWorktree(
+                throw ContextRefinementError(
                     "The Task worktree is missing. Resume or recreate \(choice.task.task.identifier) first."
                 )
             }
             guard effectiveSourceHash(kind: evidence.kind.rawValue, path: taskSource) == evidence.contentSha256 else {
-                throw ContextRefinementError.staleWorktree(
+                throw ContextRefinementError(
                     "The Task worktree does not contain the selected source revision. Rebase it, then retry."
                 )
             }
@@ -369,16 +364,15 @@ struct TaskWorkspaceWindow: View {
     }
 }
 
-enum ContextRefinementError: LocalizedError {
-    case staleSource(String)
-    case staleWorktree(String)
-    case sourceOutsideRepo(String)
+struct ContextRefinementError: LocalizedError {
+    let message: String
+
+    init(_ message: String) {
+        self.message = message
+    }
 
     var errorDescription: String? {
-        switch self {
-        case let .staleSource(message), let .staleWorktree(message), let .sourceOutsideRepo(message):
-            message
-        }
+        message
     }
 }
 
@@ -386,7 +380,7 @@ func taskSourcePath(sourcePath: String, repoPath: String, worktree: String) thro
     let source = URL(fileURLWithPath: sourcePath).standardizedFileURL.path
     let repo = URL(fileURLWithPath: repoPath).standardizedFileURL.path
     guard source == repo || source.hasPrefix(repo + "/") else {
-        throw ContextRefinementError.sourceOutsideRepo(
+        throw ContextRefinementError(
             "The selected source is outside this Task's repo and cannot be refined from its worktree."
         )
     }

@@ -317,7 +317,6 @@ pub struct TraceContentDto {
 
 #[derive(Debug, serde::Serialize)]
 pub struct TraceArtifactDto {
-    pub available: bool,
     pub path: Option<String>,
     pub content: Option<String>,
     pub unavailable_reason: Option<String>,
@@ -377,7 +376,6 @@ fn trace_content(
 impl TraceArtifactDto {
     fn unavailable(reason: &str) -> Self {
         Self {
-            available: false,
             path: None,
             content: None,
             unavailable_reason: Some(reason.to_string()),
@@ -392,13 +390,11 @@ fn read_trace_artifact(relative: &str) -> TraceArtifactDto {
     };
     match std::fs::read_to_string(&path) {
         Ok(content) => TraceArtifactDto {
-            available: true,
             path: Some(path.to_string_lossy().to_string()),
             content: Some(content),
             unavailable_reason: None,
         },
         Err(error) => TraceArtifactDto {
-            available: false,
             path: Some(path.to_string_lossy().to_string()),
             content: None,
             unavailable_reason: Some(error.to_string()),

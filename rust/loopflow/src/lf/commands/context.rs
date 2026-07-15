@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::journal::open_ledger;
-use crate::trace::{AgentLaunchRow, AgentTurnRow, ContextAssetRow};
+use crate::trace::{AgentLaunchRow, AgentTurnRow, ContextAssetKind, ContextAssetRow};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionSetQuery {
@@ -38,19 +38,15 @@ pub struct ContextLabSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextCoverageDto {
-    pub launches: u64,
     pub complete_launches: u64,
     pub partial_launches: u64,
     pub prompt_only_launches: u64,
     pub capturing_launches: u64,
-    pub turns: u64,
     pub assembled_turns: u64,
     pub provider_total_only_turns: u64,
     pub unknown_turns: u64,
     pub prompt_artifacts_available: u64,
     pub conversations_available: u64,
-    pub supplied_tokens: u64,
-    pub attributed_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -58,9 +54,7 @@ pub struct SessionSetTotals {
     pub sessions: u64,
     pub launches: u64,
     pub turns: u64,
-    pub assembled_turns: u64,
     pub context_tokens: Option<u64>,
-    pub context_token_turns: u64,
     pub median_context_tokens: Option<u64>,
     pub p95_context_tokens: Option<u64>,
     pub instruction_tokens: Option<u64>,
@@ -88,16 +82,13 @@ pub enum ContextFlameLevel {
 pub struct ContextFlameNode {
     pub id: String,
     pub level: ContextFlameLevel,
-    pub kind: String,
+    pub kind: Option<ContextAssetKind>,
     pub label: String,
     pub source_path: Option<String>,
     pub content_sha256: Option<String>,
     pub attributed_tokens: u64,
-    pub isolated_tokens: u64,
     pub session_count: u64,
     pub turn_count: u64,
-    pub first_seen: Option<i64>,
-    pub last_seen: Option<i64>,
     pub children: Vec<ContextFlameNode>,
 }
 
@@ -108,14 +99,12 @@ pub struct SessionLane {
     pub started_at: i64,
     pub outcome: String,
     pub steering_turns: Option<u64>,
-    pub capture: String,
     pub provider: String,
     pub model: Option<String>,
     pub surface: String,
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
-    pub conversation_available: bool,
     pub turns: Vec<TurnLane>,
 }
 
@@ -123,29 +112,16 @@ pub struct SessionLane {
 pub struct TurnLane {
     pub id: String,
     pub ordinal: u64,
-    pub started_at: i64,
-    pub status: String,
-    pub input_op: String,
-    pub coverage: String,
     pub supplied_context_tokens: Option<u64>,
-    pub provider_input_tokens: Option<u64>,
-    pub cost_usd: Option<f64>,
-    pub prompt_artifact_available: bool,
     pub assets: Vec<ContextLaneAsset>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextLaneAsset {
     pub node_id: String,
-    pub position: u64,
-    pub channel: String,
-    pub kind: String,
+    pub kind: ContextAssetKind,
     pub label: String,
-    pub source_path: Option<String>,
-    pub content_sha256: String,
-    pub included_by: String,
     pub attributed_tokens: u64,
-    pub isolated_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -169,12 +145,9 @@ pub enum EvidenceRole {
 pub struct RepresentativeTrace {
     pub role: EvidenceRole,
     pub address: TraceAddress,
-    pub started_at: i64,
     pub outcome: String,
-    pub capture: String,
     pub supplied_context_tokens: Option<u64>,
     pub selected_source_tokens: u64,
-    pub steering_turns: Option<u64>,
     pub prompt_artifact_available: bool,
     pub conversation_available: bool,
 }
@@ -185,14 +158,11 @@ pub struct SourceMeasurements {
     pub exposed_launches: u64,
     pub exposed_turns: u64,
     pub attributed_tokens: u64,
-    pub isolated_tokens: u64,
     pub median_tokens_per_exposed_turn: Option<u64>,
     pub p95_tokens_per_exposed_turn: Option<u64>,
     pub first_seen: Option<i64>,
-    pub last_seen: Option<i64>,
     pub completed_launches: u64,
     pub failed_launches: u64,
-    pub interrupted_launches: u64,
     pub steering_turns: Option<u64>,
     pub complete_capture_launches: u64,
 }
@@ -201,10 +171,9 @@ pub struct SourceMeasurements {
 pub struct SourceEvidence {
     pub node_id: String,
     pub label: String,
-    pub kind: String,
+    pub kind: ContextAssetKind,
     pub source_path: Option<String>,
     pub content_sha256: String,
-    pub editable: bool,
     pub current_content_sha256: Option<String>,
     pub precedence_layers: Vec<String>,
     pub measurements: SourceMeasurements,
@@ -332,18 +301,13 @@ pub fn aggregate(
         .map(|turn| (turn.id.as_str(), turn))
         .collect::<HashMap<_, _>>();
     let assets_by_turn = group_assets(&assets);
+    let revisions = build_revisions(&assets, &launch_by_id, &turn_by_id, &turns);
 
     let sessions = build_session_lanes(&launches, &turns, &assets_by_turn);
-    let coverage = build_coverage(&launches, &turns, &assets);
+    let coverage = build_coverage(&launches, &turns);
     let totals = build_totals(&launches, &turns, &assets);
-    let aggregate_root = build_flame(&launches, &turns, &assets);
-    let evidence = build_evidence(
-        &assets,
-        &launch_by_id,
-        &turn_by_id,
-        &assets_by_turn,
-        &sessions,
-    );
+    let aggregate_root = build_flame(&launches, &turns, &revisions);
+    let evidence = build_evidence(revisions);
     ContextLabSnapshot {
         query,
         coverage,
@@ -368,18 +332,12 @@ fn group_assets(assets: &[ContextAssetRow]) -> HashMap<&str, Vec<&ContextAssetRo
     grouped
 }
 
-fn build_coverage(
-    launches: &[AgentLaunchRow],
-    turns: &[AgentTurnRow],
-    assets: &[ContextAssetRow],
-) -> ContextCoverageDto {
+fn build_coverage(launches: &[AgentLaunchRow], turns: &[AgentTurnRow]) -> ContextCoverageDto {
     ContextCoverageDto {
-        launches: launches.len() as u64,
         complete_launches: count_launches(launches, "complete"),
         partial_launches: count_launches(launches, "partial"),
         prompt_only_launches: count_launches(launches, "prompt_only"),
         capturing_launches: count_launches(launches, "capturing"),
-        turns: turns.len() as u64,
         assembled_turns: count_turn_coverage(turns, "assembled"),
         provider_total_only_turns: count_turn_coverage(turns, "provider_total_only"),
         unknown_turns: count_turn_coverage(turns, "unknown"),
@@ -391,12 +349,6 @@ fn build_coverage(
             .iter()
             .filter(|launch| artifact_available(&launch.conversation_path))
             .count() as u64,
-        supplied_tokens: turns
-            .iter()
-            .filter(|turn| turn.context_coverage == "assembled")
-            .map(|turn| nonnegative(turn.supplied_context_tokens))
-            .sum(),
-        attributed_tokens: assets.iter().map(|row| row.asset.attributed_tokens).sum(),
     }
 }
 
@@ -423,7 +375,7 @@ fn build_totals(
         .len() as u64;
     let instruction_tokens = assets
         .iter()
-        .filter(|row| is_instruction_kind(row.asset.kind.as_str()))
+        .filter(|row| is_instruction_kind(row.asset.kind))
         .map(|row| row.asset.attributed_tokens)
         .sum::<u64>();
     let attributed_tokens = assets
@@ -442,9 +394,7 @@ fn build_totals(
             .len() as u64,
         launches: launches.len() as u64,
         turns: turns.len() as u64,
-        assembled_turns: context_values.len() as u64,
         context_tokens,
-        context_token_turns: context_values.len() as u64,
         median_context_tokens: percentile(&context_values, 50),
         p95_context_tokens: percentile(&context_values, 95),
         instruction_tokens,
@@ -488,28 +438,19 @@ fn build_session_lanes(
                 started_at: launch.started_at,
                 outcome: launch.outcome.clone(),
                 steering_turns: Some(steering_turns),
-                capture: launch.capture_status.clone(),
                 provider: launch.provider.clone(),
                 model: launch.model.clone(),
                 surface: launch.surface.clone(),
                 wave: launch.wave.clone(),
                 flow: launch.flow.clone(),
                 skill: launch.skill.clone(),
-                conversation_available: artifact_available(&launch.conversation_path),
                 turns: launch_turns
                     .into_iter()
                     .map(|turn| TurnLane {
                         id: turn.id.clone(),
                         ordinal: nonnegative(turn.ordinal),
-                        started_at: turn.started_at,
-                        status: turn.status.clone(),
-                        input_op: turn.input_op.clone(),
-                        coverage: turn.context_coverage.clone(),
                         supplied_context_tokens: (turn.context_coverage == "assembled")
                             .then(|| nonnegative(turn.supplied_context_tokens)),
-                        provider_input_tokens: turn.provider_input_tokens.map(nonnegative),
-                        cost_usd: turn.cost_usd,
-                        prompt_artifact_available: artifact_available(&turn.task_prompt_path),
                         assets: assets_by_turn
                             .get(turn.id.as_str())
                             .into_iter()
@@ -524,281 +465,56 @@ fn build_session_lanes(
 }
 
 fn lane_asset(launch: &AgentLaunchRow, row: &ContextAssetRow) -> ContextLaneAsset {
-    let kind = row.asset.kind.as_str();
     let canonical = canonical_identity(launch, row);
     ContextLaneAsset {
-        node_id: revision_node_id(kind, &canonical, &row.asset.content_sha256),
-        position: u64::from(row.asset.position),
-        channel: row.asset.channel.as_str().to_string(),
-        kind: kind.to_string(),
+        node_id: revision_node_id(row.asset.kind, &canonical.key, &row.asset.content_sha256),
+        kind: row.asset.kind,
         label: row.asset.label.clone(),
-        source_path: canonical.path,
-        content_sha256: row.asset.content_sha256.clone(),
-        included_by: row.asset.included_by.clone(),
         attributed_tokens: row.asset.attributed_tokens,
-        isolated_tokens: row.asset.isolated_tokens,
     }
 }
 
 #[derive(Debug, Clone, Default)]
-struct NodeAccumulator {
+struct FlameAccumulator {
     attributed_tokens: u64,
-    isolated_tokens: u64,
     sessions: BTreeSet<String>,
     turns: BTreeSet<String>,
-    first_seen: Option<i64>,
-    last_seen: Option<i64>,
 }
 
-impl NodeAccumulator {
-    fn add(
-        &mut self,
-        run_id: &str,
-        turn_id: &str,
-        timestamp: i64,
-        attributed_tokens: u64,
-        isolated_tokens: u64,
-    ) {
+impl FlameAccumulator {
+    fn add(&mut self, run_id: &str, turn_id: &str, attributed_tokens: u64) {
         self.attributed_tokens += attributed_tokens;
-        self.isolated_tokens += isolated_tokens;
         self.sessions.insert(run_id.to_string());
         self.turns.insert(turn_id.to_string());
-        self.first_seen = Some(
-            self.first_seen
-                .map_or(timestamp, |value| value.min(timestamp)),
-        );
-        self.last_seen = Some(
-            self.last_seen
-                .map_or(timestamp, |value| value.max(timestamp)),
-        );
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RevisionKey {
-    kind: String,
+    kind: ContextAssetKind,
     canonical_key: String,
     label: String,
     source_path: Option<String>,
     content_sha256: String,
 }
 
-type SourceGroupKey = (String, String, String, Option<String>);
+type SourceGroupKey = (ContextAssetKind, String, String, Option<String>);
+
+#[derive(Debug, Clone, Default)]
+struct RevisionAccumulator {
+    flame: FlameAccumulator,
+    precedence_layers: BTreeSet<String>,
+    candidates: BTreeMap<String, EvidenceCandidate>,
+}
 
 #[derive(Debug, Clone)]
 struct FlameNodeDescriptor {
     id: String,
     level: ContextFlameLevel,
-    kind: String,
+    kind: Option<ContextAssetKind>,
     label: String,
     source_path: Option<String>,
     content_sha256: Option<String>,
-}
-
-fn build_flame(
-    launches: &[AgentLaunchRow],
-    turns: &[AgentTurnRow],
-    assets: &[ContextAssetRow],
-) -> ContextFlameNode {
-    let launch_by_id = launches
-        .iter()
-        .map(|launch| (launch.id.as_str(), launch))
-        .collect::<HashMap<_, _>>();
-    let turn_by_id = turns
-        .iter()
-        .map(|turn| (turn.id.as_str(), turn))
-        .collect::<HashMap<_, _>>();
-    let mut revisions: BTreeMap<RevisionKey, NodeAccumulator> = BTreeMap::new();
-    for row in assets {
-        let Some(turn) = turn_by_id.get(row.turn_id.as_str()) else {
-            continue;
-        };
-        let Some(launch) = launch_by_id.get(turn.launch_id.as_str()) else {
-            continue;
-        };
-        let canonical = canonical_identity(launch, row);
-        revisions
-            .entry(RevisionKey {
-                kind: row.asset.kind.as_str().to_string(),
-                canonical_key: canonical.key,
-                label: canonical.label,
-                source_path: canonical.path,
-                content_sha256: row.asset.content_sha256.clone(),
-            })
-            .or_default()
-            .add(
-                &launch.run_id,
-                &turn.id,
-                turn.started_at,
-                row.asset.attributed_tokens,
-                row.asset.isolated_tokens,
-            );
-    }
-
-    let mut by_source: BTreeMap<SourceGroupKey, Vec<(ContextFlameNode, NodeAccumulator)>> =
-        BTreeMap::new();
-    for (key, accumulator) in revisions {
-        let node = node_from_accumulator(
-            FlameNodeDescriptor {
-                id: revision_node_id(&key.kind, &canonical_from_key(&key), &key.content_sha256),
-                level: ContextFlameLevel::Revision,
-                kind: key.kind.clone(),
-                label: short_hash(&key.content_sha256),
-                source_path: key.source_path.clone(),
-                content_sha256: Some(key.content_sha256.clone()),
-            },
-            accumulator.clone(),
-            Vec::new(),
-        );
-        by_source
-            .entry((
-                key.kind.clone(),
-                key.canonical_key.clone(),
-                key.label.clone(),
-                key.source_path.clone(),
-            ))
-            .or_default()
-            .push((node, accumulator));
-    }
-
-    let mut by_kind: BTreeMap<String, Vec<(ContextFlameNode, NodeAccumulator)>> = BTreeMap::new();
-    for ((kind, canonical_key, label, source_path), mut built_children) in by_source {
-        built_children.sort_by(|left, right| node_order(&left.0, &right.0));
-        let accumulator =
-            merge_accumulators(built_children.iter().map(|(_, accumulator)| accumulator));
-        let children = built_children.into_iter().map(|(node, _)| node).collect();
-        let node = node_from_accumulator(
-            FlameNodeDescriptor {
-                id: stable_id(&format!("source\0{kind}\0{canonical_key}")),
-                level: ContextFlameLevel::Source,
-                kind: kind.clone(),
-                label,
-                source_path,
-                content_sha256: None,
-            },
-            accumulator.clone(),
-            children,
-        );
-        by_kind
-            .entry(kind.clone())
-            .or_default()
-            .push((node, accumulator));
-    }
-
-    let mut kind_nodes = Vec::new();
-    for (kind, mut built_children) in by_kind {
-        built_children.sort_by(|left, right| node_order(&left.0, &right.0));
-        let accumulator =
-            merge_accumulators(built_children.iter().map(|(_, accumulator)| accumulator));
-        let children = built_children.into_iter().map(|(node, _)| node).collect();
-        kind_nodes.push(node_from_accumulator(
-            FlameNodeDescriptor {
-                id: stable_id(&format!("kind\0{kind}")),
-                level: ContextFlameLevel::Kind,
-                kind: kind.clone(),
-                label: kind_label(&kind),
-                source_path: None,
-                content_sha256: None,
-            },
-            accumulator,
-            children,
-        ));
-    }
-    sort_nodes(&mut kind_nodes);
-    let mut root_accumulator = NodeAccumulator {
-        attributed_tokens: kind_nodes.iter().map(|node| node.attributed_tokens).sum(),
-        isolated_tokens: kind_nodes.iter().map(|node| node.isolated_tokens).sum(),
-        first_seen: launches.iter().map(|launch| launch.started_at).min(),
-        last_seen: turns.iter().map(|turn| turn.started_at).max(),
-        ..NodeAccumulator::default()
-    };
-    root_accumulator.sessions = launches
-        .iter()
-        .map(|launch| launch.run_id.clone())
-        .collect();
-    root_accumulator.turns = turns.iter().map(|turn| turn.id.clone()).collect();
-    node_from_accumulator(
-        FlameNodeDescriptor {
-            id: "session-set".to_string(),
-            level: ContextFlameLevel::SessionSet,
-            kind: "session_set".to_string(),
-            label: "Session set".to_string(),
-            source_path: None,
-            content_sha256: None,
-        },
-        root_accumulator,
-        kind_nodes,
-    )
-}
-
-fn canonical_from_key(key: &RevisionKey) -> CanonicalIdentity {
-    CanonicalIdentity {
-        key: key.canonical_key.clone(),
-        label: key.label.clone(),
-        path: key.source_path.clone(),
-    }
-}
-
-fn node_from_accumulator(
-    descriptor: FlameNodeDescriptor,
-    accumulator: NodeAccumulator,
-    children: Vec<ContextFlameNode>,
-) -> ContextFlameNode {
-    ContextFlameNode {
-        id: descriptor.id,
-        level: descriptor.level,
-        kind: descriptor.kind,
-        label: descriptor.label,
-        source_path: descriptor.source_path,
-        content_sha256: descriptor.content_sha256,
-        attributed_tokens: accumulator.attributed_tokens,
-        isolated_tokens: accumulator.isolated_tokens,
-        session_count: accumulator.sessions.len() as u64,
-        turn_count: accumulator.turns.len() as u64,
-        first_seen: accumulator.first_seen,
-        last_seen: accumulator.last_seen,
-        children,
-    }
-}
-
-fn merge_accumulators<'a>(
-    accumulators: impl IntoIterator<Item = &'a NodeAccumulator>,
-) -> NodeAccumulator {
-    let mut accumulator = NodeAccumulator::default();
-    for child in accumulators {
-        accumulator.attributed_tokens += child.attributed_tokens;
-        accumulator.isolated_tokens += child.isolated_tokens;
-        accumulator.first_seen = merge_min(accumulator.first_seen, child.first_seen);
-        accumulator.last_seen = merge_max(accumulator.last_seen, child.last_seen);
-        accumulator.sessions.extend(child.sessions.iter().cloned());
-        accumulator.turns.extend(child.turns.iter().cloned());
-    }
-    accumulator
-}
-
-fn merge_min(left: Option<i64>, right: Option<i64>) -> Option<i64> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (left, right) => left.or(right),
-    }
-}
-
-fn merge_max(left: Option<i64>, right: Option<i64>) -> Option<i64> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.max(right)),
-        (left, right) => left.or(right),
-    }
-}
-
-fn sort_nodes(nodes: &mut [ContextFlameNode]) {
-    nodes.sort_by(node_order);
-}
-
-fn node_order(left: &ContextFlameNode, right: &ContextFlameNode) -> std::cmp::Ordering {
-    right
-        .attributed_tokens
-        .cmp(&left.attributed_tokens)
-        .then_with(|| left.label.cmp(&right.label))
 }
 
 #[derive(Debug, Clone)]
@@ -814,32 +530,20 @@ struct EvidenceCandidate {
     conversation_available: bool,
 }
 
-#[derive(Debug, Clone, Default)]
-struct EvidenceAccumulator {
-    label: String,
-    kind: String,
-    source_path: Option<String>,
-    content_sha256: String,
-    sessions: BTreeSet<String>,
-    launches: BTreeSet<String>,
-    turns: BTreeMap<String, u64>,
-    isolated_tokens: u64,
-    precedence_layers: BTreeSet<String>,
-    candidates: Vec<EvidenceCandidate>,
-}
-
-fn build_evidence(
+fn build_revisions(
     assets: &[ContextAssetRow],
     launch_by_id: &HashMap<&str, &AgentLaunchRow>,
     turn_by_id: &HashMap<&str, &AgentTurnRow>,
-    assets_by_turn: &HashMap<&str, Vec<&ContextAssetRow>>,
-    sessions: &[SessionLane],
-) -> Vec<SourceEvidence> {
-    let session_by_id = sessions
-        .iter()
-        .map(|session| (session.id.as_str(), session))
-        .collect::<HashMap<_, _>>();
-    let mut groups: BTreeMap<String, EvidenceAccumulator> = BTreeMap::new();
+    turns: &[AgentTurnRow],
+) -> BTreeMap<RevisionKey, RevisionAccumulator> {
+    let mut steering_by_launch: HashMap<&str, u64> = HashMap::new();
+    for turn in turns.iter().filter(|turn| turn.input_op == "steer") {
+        *steering_by_launch
+            .entry(turn.launch_id.as_str())
+            .or_default() += 1;
+    }
+
+    let mut revisions = BTreeMap::new();
     for row in assets {
         let Some(turn) = turn_by_id.get(row.turn_id.as_str()) else {
             continue;
@@ -848,46 +552,25 @@ fn build_evidence(
             continue;
         };
         let canonical = canonical_identity(launch, row);
-        let kind = row.asset.kind.as_str();
-        let node_id = revision_node_id(kind, &canonical, &row.asset.content_sha256);
-        let group = groups
-            .entry(node_id)
-            .or_insert_with(|| EvidenceAccumulator {
-                label: canonical.label.clone(),
-                kind: kind.to_string(),
-                source_path: canonical.path.clone(),
+        let revision = revisions
+            .entry(RevisionKey {
+                kind: row.asset.kind,
+                canonical_key: canonical.key,
+                label: canonical.label,
+                source_path: canonical.path,
                 content_sha256: row.asset.content_sha256.clone(),
-                ..EvidenceAccumulator::default()
-            });
-        group.sessions.insert(launch.run_id.clone());
-        group.launches.insert(launch.id.clone());
-        *group.turns.entry(turn.id.clone()).or_default() += row.asset.attributed_tokens;
-        group.isolated_tokens += row.asset.isolated_tokens;
-        group
+            })
+            .or_insert_with(RevisionAccumulator::default);
+        revision
+            .flame
+            .add(&launch.run_id, &turn.id, row.asset.attributed_tokens);
+        revision
             .precedence_layers
             .insert(row.asset.included_by.clone());
-
-        if group
+        let candidate = revision
             .candidates
-            .iter()
-            .all(|candidate| candidate.address.turn_id != turn.id)
-        {
-            let session = session_by_id.get(launch.id.as_str());
-            let source_tokens = assets_by_turn
-                .get(turn.id.as_str())
-                .into_iter()
-                .flatten()
-                .filter(|candidate| {
-                    let identity = canonical_identity(launch, candidate);
-                    revision_node_id(
-                        candidate.asset.kind.as_str(),
-                        &identity,
-                        &candidate.asset.content_sha256,
-                    ) == group_node_id(kind, &canonical, &row.asset.content_sha256)
-                })
-                .map(|candidate| candidate.asset.attributed_tokens)
-                .sum();
-            group.candidates.push(EvidenceCandidate {
+            .entry(turn.id.clone())
+            .or_insert_with(|| EvidenceCandidate {
                 address: TraceAddress {
                     run_id: launch.run_id.clone(),
                     launch_id: launch.id.clone(),
@@ -898,22 +581,170 @@ fn build_evidence(
                 capture: launch.capture_status.clone(),
                 supplied_context_tokens: (turn.context_coverage == "assembled")
                     .then(|| nonnegative(turn.supplied_context_tokens)),
-                selected_source_tokens: source_tokens,
-                steering_turns: session.and_then(|session| session.steering_turns),
+                selected_source_tokens: 0,
+                steering_turns: Some(
+                    steering_by_launch
+                        .get(launch.id.as_str())
+                        .copied()
+                        .unwrap_or(0),
+                ),
                 prompt_artifact_available: artifact_available(&turn.task_prompt_path),
-                conversation_available: session
-                    .is_some_and(|session| session.conversation_available),
+                conversation_available: artifact_available(&launch.conversation_path),
             });
-        }
+        candidate.selected_source_tokens += row.asset.attributed_tokens;
+    }
+    revisions
+}
+
+fn build_flame(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+    revisions: &BTreeMap<RevisionKey, RevisionAccumulator>,
+) -> ContextFlameNode {
+    let mut by_source: BTreeMap<SourceGroupKey, Vec<(ContextFlameNode, FlameAccumulator)>> =
+        BTreeMap::new();
+    for (key, revision) in revisions {
+        let node = node_from_accumulator(
+            FlameNodeDescriptor {
+                id: revision_node_id(key.kind, &key.canonical_key, &key.content_sha256),
+                level: ContextFlameLevel::Revision,
+                kind: Some(key.kind),
+                label: short_hash(&key.content_sha256),
+                source_path: key.source_path.clone(),
+                content_sha256: Some(key.content_sha256.clone()),
+            },
+            revision.flame.clone(),
+            Vec::new(),
+        );
+        by_source
+            .entry((
+                key.kind,
+                key.canonical_key.clone(),
+                key.label.clone(),
+                key.source_path.clone(),
+            ))
+            .or_default()
+            .push((node, revision.flame.clone()));
     }
 
-    let mut evidence = groups
+    let mut by_kind: BTreeMap<ContextAssetKind, Vec<(ContextFlameNode, FlameAccumulator)>> =
+        BTreeMap::new();
+    for ((kind, canonical_key, label, source_path), mut built_children) in by_source {
+        built_children.sort_by(|left, right| node_order(&left.0, &right.0));
+        let accumulator =
+            merge_accumulators(built_children.iter().map(|(_, accumulator)| accumulator));
+        let children = built_children.into_iter().map(|(node, _)| node).collect();
+        let node = node_from_accumulator(
+            FlameNodeDescriptor {
+                id: stable_id(&format!("source\0{}\0{canonical_key}", kind.as_str())),
+                level: ContextFlameLevel::Source,
+                kind: Some(kind),
+                label,
+                source_path,
+                content_sha256: None,
+            },
+            accumulator.clone(),
+            children,
+        );
+        by_kind.entry(kind).or_default().push((node, accumulator));
+    }
+
+    let mut kind_nodes = Vec::new();
+    for (kind, mut built_children) in by_kind {
+        built_children.sort_by(|left, right| node_order(&left.0, &right.0));
+        let accumulator =
+            merge_accumulators(built_children.iter().map(|(_, accumulator)| accumulator));
+        let children = built_children.into_iter().map(|(node, _)| node).collect();
+        kind_nodes.push(node_from_accumulator(
+            FlameNodeDescriptor {
+                id: stable_id(&format!("kind\0{}", kind.as_str())),
+                level: ContextFlameLevel::Kind,
+                kind: Some(kind),
+                label: kind_label(kind.as_str()),
+                source_path: None,
+                content_sha256: None,
+            },
+            accumulator,
+            children,
+        ));
+    }
+    sort_nodes(&mut kind_nodes);
+    let mut root_accumulator = FlameAccumulator {
+        attributed_tokens: kind_nodes.iter().map(|node| node.attributed_tokens).sum(),
+        ..FlameAccumulator::default()
+    };
+    root_accumulator.sessions = launches
+        .iter()
+        .map(|launch| launch.run_id.clone())
+        .collect();
+    root_accumulator.turns = turns.iter().map(|turn| turn.id.clone()).collect();
+    node_from_accumulator(
+        FlameNodeDescriptor {
+            id: "session-set".to_string(),
+            level: ContextFlameLevel::SessionSet,
+            kind: None,
+            label: "Session set".to_string(),
+            source_path: None,
+            content_sha256: None,
+        },
+        root_accumulator,
+        kind_nodes,
+    )
+}
+
+fn node_from_accumulator(
+    descriptor: FlameNodeDescriptor,
+    accumulator: FlameAccumulator,
+    children: Vec<ContextFlameNode>,
+) -> ContextFlameNode {
+    ContextFlameNode {
+        id: descriptor.id,
+        level: descriptor.level,
+        kind: descriptor.kind,
+        label: descriptor.label,
+        source_path: descriptor.source_path,
+        content_sha256: descriptor.content_sha256,
+        attributed_tokens: accumulator.attributed_tokens,
+        session_count: accumulator.sessions.len() as u64,
+        turn_count: accumulator.turns.len() as u64,
+        children,
+    }
+}
+
+fn merge_accumulators<'a>(
+    accumulators: impl IntoIterator<Item = &'a FlameAccumulator>,
+) -> FlameAccumulator {
+    let mut accumulator = FlameAccumulator::default();
+    for child in accumulators {
+        accumulator.attributed_tokens += child.attributed_tokens;
+        accumulator.sessions.extend(child.sessions.iter().cloned());
+        accumulator.turns.extend(child.turns.iter().cloned());
+    }
+    accumulator
+}
+
+fn sort_nodes(nodes: &mut [ContextFlameNode]) {
+    nodes.sort_by(node_order);
+}
+
+fn node_order(left: &ContextFlameNode, right: &ContextFlameNode) -> std::cmp::Ordering {
+    right
+        .attributed_tokens
+        .cmp(&left.attributed_tokens)
+        .then_with(|| left.label.cmp(&right.label))
+}
+
+fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<SourceEvidence> {
+    let mut evidence = revisions
         .into_iter()
-        .map(|(node_id, group)| {
-            let mut per_turn = group.turns.values().copied().collect::<Vec<_>>();
+        .map(|(key, revision)| {
+            let candidates = revision.candidates.into_values().collect::<Vec<_>>();
+            let mut per_turn = candidates
+                .iter()
+                .map(|candidate| candidate.selected_source_tokens)
+                .collect::<Vec<_>>();
             per_turn.sort_unstable();
-            let launch_candidates = group
-                .candidates
+            let launch_candidates = candidates
                 .iter()
                 .map(|candidate| (candidate.address.launch_id.as_str(), candidate))
                 .collect::<BTreeMap<_, _>>();
@@ -922,41 +753,29 @@ fn build_evidence(
                 .map(|candidate| candidate.steering_turns)
                 .collect::<Option<Vec<_>>>()
                 .map(|values| values.into_iter().sum());
-            let current_content_sha256 = group
+            let current_content_sha256 = key
                 .source_path
                 .as_deref()
-                .and_then(|path| hash_effective_source(&group.kind, path));
-            let editable = group.source_path.as_deref().is_some_and(|path| {
-                Path::new(path).is_file()
-                    && current_content_sha256.as_deref() == Some(group.content_sha256.as_str())
-            });
+                .and_then(|path| hash_effective_source(key.kind, path));
             SourceEvidence {
-                node_id,
-                label: group.label,
-                kind: group.kind,
-                source_path: group.source_path,
-                content_sha256: group.content_sha256,
-                editable,
+                node_id: revision_node_id(key.kind, &key.canonical_key, &key.content_sha256),
+                label: key.label,
+                kind: key.kind,
+                source_path: key.source_path,
+                content_sha256: key.content_sha256,
                 current_content_sha256,
-                precedence_layers: group.precedence_layers.into_iter().collect(),
+                precedence_layers: revision.precedence_layers.into_iter().collect(),
                 measurements: SourceMeasurements {
-                    exposed_sessions: group.sessions.len() as u64,
-                    exposed_launches: group.launches.len() as u64,
-                    exposed_turns: group.turns.len() as u64,
-                    attributed_tokens: per_turn.iter().sum(),
-                    isolated_tokens: group.isolated_tokens,
+                    exposed_sessions: revision.flame.sessions.len() as u64,
+                    exposed_launches: launch_candidates.len() as u64,
+                    exposed_turns: candidates.len() as u64,
+                    attributed_tokens: revision.flame.attributed_tokens,
                     median_tokens_per_exposed_turn: percentile(&per_turn, 50),
                     p95_tokens_per_exposed_turn: percentile(&per_turn, 95),
-                    first_seen: group
-                        .candidates
+                    first_seen: candidates
                         .iter()
                         .map(|candidate| candidate.started_at)
                         .min(),
-                    last_seen: group
-                        .candidates
-                        .iter()
-                        .map(|candidate| candidate.started_at)
-                        .max(),
                     completed_launches: launch_candidates
                         .values()
                         .filter(|candidate| candidate.outcome == "completed")
@@ -965,17 +784,13 @@ fn build_evidence(
                         .values()
                         .filter(|candidate| candidate.outcome == "failed")
                         .count() as u64,
-                    interrupted_launches: launch_candidates
-                        .values()
-                        .filter(|candidate| candidate.outcome == "interrupted")
-                        .count() as u64,
                     steering_turns,
                     complete_capture_launches: launch_candidates
                         .values()
                         .filter(|candidate| candidate.capture == "complete")
                         .count() as u64,
                 },
-                representatives: select_representatives(&group.candidates),
+                representatives: select_representatives(&candidates),
             }
         })
         .collect::<Vec<_>>();
@@ -987,10 +802,6 @@ fn build_evidence(
             .then_with(|| left.label.cmp(&right.label))
     });
     evidence
-}
-
-fn group_node_id(kind: &str, canonical: &CanonicalIdentity, content_sha256: &str) -> String {
-    revision_node_id(kind, canonical, content_sha256)
 }
 
 fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<RepresentativeTrace> {
@@ -1033,12 +844,9 @@ fn representative(role: EvidenceRole, candidate: &EvidenceCandidate) -> Represen
     RepresentativeTrace {
         role,
         address: candidate.address.clone(),
-        started_at: candidate.started_at,
         outcome: candidate.outcome.clone(),
-        capture: candidate.capture.clone(),
         supplied_context_tokens: candidate.supplied_context_tokens,
         selected_source_tokens: candidate.selected_source_tokens,
-        steering_turns: candidate.steering_turns,
         prompt_artifact_available: candidate.prompt_artifact_available,
         conversation_available: candidate.conversation_available,
     }
@@ -1102,10 +910,11 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-fn revision_node_id(kind: &str, canonical: &CanonicalIdentity, content_sha256: &str) -> String {
+fn revision_node_id(kind: ContextAssetKind, canonical_key: &str, content_sha256: &str) -> String {
     stable_id(&format!(
         "revision\0{kind}\0{}\0{content_sha256}",
-        canonical.key
+        canonical_key,
+        kind = kind.as_str(),
     ))
 }
 
@@ -1117,16 +926,18 @@ fn short_hash(value: &str) -> String {
     value.chars().take(10).collect()
 }
 
-fn hash_effective_source(kind: &str, path: &str) -> Option<String> {
+fn hash_effective_source(kind: ContextAssetKind, path: &str) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
     let effective = match kind {
-        "operating_instructions" => format!("<lf:loopflow>\n{content}\n</lf:loopflow>"),
-        "skill_instructions" => {
+        ContextAssetKind::OperatingInstructions => {
+            format!("<lf:loopflow>\n{content}\n</lf:loopflow>")
+        }
+        ContextAssetKind::SkillInstructions => {
             crate::engine::flow::split_frontmatter(&content).map_or(content, |(_, body)| body)
         }
         // These assets combine the file with generated or journal-backed state;
         // one file hash cannot prove that the effective slice is still current.
-        "goal" | "memory" => return None,
+        ContextAssetKind::Goal | ContextAssetKind::Memory => return None,
         _ => content,
     };
     Some(hex::encode(Sha256::digest(effective.as_bytes())))
@@ -1161,17 +972,17 @@ fn count_turn_coverage(turns: &[AgentTurnRow], coverage: &str) -> u64 {
         .count() as u64
 }
 
-fn is_instruction_kind(kind: &str) -> bool {
+fn is_instruction_kind(kind: ContextAssetKind) -> bool {
     matches!(
         kind,
-        "operating_instructions"
-            | "surface_instructions"
-            | "provider_instructions"
-            | "repo_instructions"
-            | "skill_instructions"
-            | "direction"
-            | "goal"
-            | "memory"
+        ContextAssetKind::OperatingInstructions
+            | ContextAssetKind::SurfaceInstructions
+            | ContextAssetKind::ProviderInstructions
+            | ContextAssetKind::RepoInstructions
+            | ContextAssetKind::SkillInstructions
+            | ContextAssetKind::Direction
+            | ContextAssetKind::Goal
+            | ContextAssetKind::Memory
     )
 }
 
@@ -1209,7 +1020,7 @@ fn print_human(snapshot: &ContextLabSnapshot) {
     println!(
         "CONTEXT      {} tokens / {} assembled turns  median {}  p95 {}",
         display_optional(totals.context_tokens),
-        totals.context_token_turns,
+        snapshot.coverage.assembled_turns,
         display_optional(totals.median_context_tokens),
         display_optional(totals.p95_context_tokens),
     );
@@ -1219,9 +1030,9 @@ fn print_human(snapshot: &ContextLabSnapshot) {
         snapshot.coverage.partial_launches,
         snapshot.coverage.prompt_only_launches,
         snapshot.coverage.prompt_artifacts_available,
-        snapshot.coverage.turns,
+        totals.turns,
         snapshot.coverage.conversations_available,
-        snapshot.coverage.launches,
+        totals.launches,
     );
     println!("\nCONTEXT FLAME");
     for node in &snapshot.aggregate_root.children {
@@ -1273,7 +1084,7 @@ mod tests {
         let snapshot = aggregate(query, launches, turns, assets);
 
         assert_eq!(snapshot.totals.context_tokens, Some(100));
-        assert_eq!(snapshot.totals.context_token_turns, 1);
+        assert_eq!(snapshot.coverage.assembled_turns, 1);
         assert_eq!(snapshot.totals.cost_usd, Some(0.25));
         assert_eq!(snapshot.totals.cost_turns, 1);
         assert_eq!(snapshot.coverage.unknown_turns, 1);
@@ -1286,6 +1097,14 @@ mod tests {
                 .map(|node| node.attributed_tokens)
                 .sum::<u64>(),
             snapshot.aggregate_root.attributed_tokens
+        );
+        assert_eq!(
+            snapshot.sessions[0].turns[0]
+                .assets
+                .iter()
+                .map(|asset| asset.label.as_str())
+                .collect::<Vec<_>>(),
+            ["AGENTS.md", "implement"]
         );
         assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
     }

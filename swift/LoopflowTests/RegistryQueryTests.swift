@@ -334,7 +334,7 @@ struct RegistryQueryTests {
                 "--launch", "launch-1", "--turn", "turn-1",
             ])
             return """
-            {"address":{"run_id":"run-1","launch_id":"launch-1","turn_id":"turn-1"},"system_prompt":{"available":false,"path":null,"content":null,"unavailable_reason":"turn has no system prompt"},"task_prompt":{"available":true,"path":"/trace/task.txt","content":"exact task","unavailable_reason":null},"conversation":{"available":false,"path":"/trace/events.jsonl","content":null,"unavailable_reason":"missing"}}
+            {"address":{"run_id":"run-1","launch_id":"launch-1","turn_id":"turn-1"},"system_prompt":{"path":null,"content":null,"unavailable_reason":"turn has no system prompt"},"task_prompt":{"path":"/trace/task.txt","content":"exact task","unavailable_reason":null},"conversation":{"path":"/trace/events.jsonl","content":null,"unavailable_reason":"missing"}}
             """
         }
 
@@ -343,7 +343,7 @@ struct RegistryQueryTests {
         #expect(trace.address == address)
         #expect(trace.taskPrompt.content == "exact task")
         #expect(trace.systemPrompt.unavailableReason == "turn has no system prompt")
-        #expect(!trace.conversation.available)
+        #expect(trace.conversation.content == nil)
     }
 
     @Test("PM snapshot exposes only filed open backlog")

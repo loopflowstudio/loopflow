@@ -3,7 +3,7 @@ import CryptoKit
 import Loopflow
 import SwiftUI
 
-private enum ContextLabMode: String, CaseIterable, Identifiable {
+enum ContextLabMode: String, Codable, CaseIterable, Identifiable, Hashable {
     case aggregate = "Aggregate flame"
     case lanes = "Session lanes"
     case table = "Table"
@@ -34,7 +34,7 @@ private struct ContextLabSavedView: Codable, Identifiable {
     let id: UUID
     let name: String
     let query: SessionSetQuery
-    let mode: String
+    let mode: ContextLabMode
 }
 
 struct TaskWorkspaceRoute: Codable, Hashable {
@@ -48,7 +48,7 @@ struct ContextLabRoute: Codable, Hashable {
     let query: SessionSetQuery
     let selectedNodeId: String
     let focusNodeId: String
-    let mode: String
+    let mode: ContextLabMode
 }
 
 struct ContextLabView: View {
@@ -77,7 +77,6 @@ struct ContextLabView: View {
     @State private var captureStates: Set<CaptureState> = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var requestId = UUID()
     @State private var traceRequest: TraceAddress?
     @State private var refinementEvidence: SourceEvidence?
     @State private var savedViews: [ContextLabSavedView]
@@ -104,7 +103,7 @@ struct ContextLabView: View {
             _captureStates = State(initialValue: Set(query.captureStates))
             _selectedNodeId = State(initialValue: route.selectedNodeId)
             _focusNodeId = State(initialValue: route.focusNodeId)
-            _mode = State(initialValue: ContextLabMode(rawValue: route.mode) ?? .aggregate)
+            _mode = State(initialValue: route.mode)
         }
         _savedViews = State(initialValue: Self.loadSavedViews())
     }
@@ -125,23 +124,6 @@ struct ContextLabView: View {
         )
     }
 
-    private var queryIdentity: String {
-        let q = query
-        var parts: [String] = []
-        parts.append(q.repoPaths.joined(separator: ","))
-        parts.append(String(q.startedAfter))
-        parts.append(String(q.startedBefore))
-        parts.append(q.waves.joined(separator: ","))
-        parts.append(q.flows.joined(separator: ","))
-        parts.append(q.skills.joined(separator: ","))
-        parts.append(q.providers.joined(separator: ","))
-        parts.append(q.models.joined(separator: ","))
-        parts.append(q.surfaces.joined(separator: ","))
-        parts.append(q.outcomes.map(\.rawValue).joined(separator: ","))
-        parts.append(q.captureStates.map(\.rawValue).joined(separator: ","))
-        return parts.joined(separator: "|")
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -156,20 +138,20 @@ struct ContextLabView: View {
             }
         }
         .background(palette.background)
-        .task(id: queryIdentity) { await refresh() }
+        .task(id: query) { await refresh() }
         .sheet(item: $traceRequest) { address in
             TraceEvidenceView(address: address)
                 .frame(minWidth: 760, minHeight: 620)
         }
         .sheet(item: $refinementEvidence) { evidence in
             RefinementTaskSheet(
-                query: snapshot?.query,
+                query: snapshot?.query ?? query,
                 evidence: evidence,
                 backlink: ContextLabRoute(
                     query: snapshot?.query ?? query,
                     selectedNodeId: evidence.nodeId,
                     focusNodeId: focusNodeId,
-                    mode: mode.rawValue
+                    mode: mode
                 ),
                 onLaunch: { route in
                     refinementEvidence = nil
@@ -223,12 +205,12 @@ struct ContextLabView: View {
                 ContextStat(label: "Launches", value: totals.launches.formatted())
                 ContextStat(
                     label: "Assembled turns",
-                    value: "\(totals.assembledTurns.formatted()) / \(totals.turns.formatted())"
+                    value: "\(snapshot.coverage.assembledTurns.formatted()) / \(totals.turns.formatted())"
                 )
                 ContextStat(
                     label: "Context tokens",
                     value: optionalTokens(totals.contextTokens),
-                    denominator: "\(totals.contextTokenTurns) measured turns"
+                    denominator: "\(snapshot.coverage.assembledTurns) measured turns"
                 )
                 ContextStat(label: "Median / p95", value: "\(optionalTokens(totals.medianContextTokens)) / \(optionalTokens(totals.p95ContextTokens))")
                 ContextStat(
@@ -253,8 +235,8 @@ struct ContextLabView: View {
                 )
                 ContextStat(
                     label: "Capture",
-                    value: "\(snapshot.coverage.completeLaunches) / \(snapshot.coverage.launches) complete",
-                    denominator: "prompts \(snapshot.coverage.promptArtifactsAvailable) / \(snapshot.coverage.turns)"
+                    value: "\(snapshot.coverage.completeLaunches) / \(totals.launches) complete",
+                    denominator: "prompts \(snapshot.coverage.promptArtifactsAvailable) / \(totals.turns)"
                 )
             }
         }
@@ -335,7 +317,7 @@ struct ContextLabView: View {
 
                 if let snapshot {
                     Divider()
-                    coverageSummary(snapshot.coverage)
+                    coverageSummary(snapshot)
                 }
             }
             .padding(Spacing.lg)
@@ -400,9 +382,9 @@ struct ContextLabView: View {
 
     private func aggregate(_ snapshot: ContextLabSnapshot) -> some View {
         let focus = findNode(focusNodeId, in: snapshot.aggregateRoot) ?? snapshot.aggregateRoot
-        let coverage = snapshot.coverage.turns == 0
+        let coverage = snapshot.totals.turns == 0
             ? 0.25
-            : 0.35 + 0.65 * Double(snapshot.coverage.assembledTurns) / Double(snapshot.coverage.turns)
+            : 0.35 + 0.65 * Double(snapshot.coverage.assembledTurns) / Double(snapshot.totals.turns)
         return ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 HStack {
@@ -580,7 +562,7 @@ struct ContextLabView: View {
                 evidenceMetric("Precedence", evidence.precedenceLayers.joined(separator: " · "))
             }
 
-            if !evidence.editable {
+            if !evidence.isEditable {
                 Label(editabilityReason(evidence), systemImage: "lock.trianglebadge.exclamationmark")
                     .font(Typography.caption(10))
                     .foregroundStyle(Color.statusWarning)
@@ -734,14 +716,18 @@ struct ContextLabView: View {
         }
     }
 
-    private func coverageSummary(_ coverage: ContextCoverageSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+    private func coverageSummary(_ snapshot: ContextLabSnapshot) -> some View {
+        let coverage = snapshot.coverage
+        return VStack(alignment: .leading, spacing: Spacing.sm) {
             railTitle("Coverage")
-            evidenceMetric("Assembled", "\(coverage.assembledTurns) / \(coverage.turns) turns")
+            evidenceMetric("Assembled", "\(coverage.assembledTurns) / \(snapshot.totals.turns) turns")
             evidenceMetric("Provider total", coverage.providerTotalOnlyTurns.formatted())
             evidenceMetric("Unknown", coverage.unknownTurns.formatted())
-            evidenceMetric("Attribution", "\(coverage.attributedTokens) / \(coverage.suppliedTokens) tokens")
-            evidenceMetric("Conversations", "\(coverage.conversationsAvailable) / \(coverage.launches)")
+            evidenceMetric(
+                "Attribution",
+                "\(snapshot.aggregateRoot.attributedTokens) / \(optionalTokens(snapshot.totals.contextTokens)) tokens"
+            )
+            evidenceMetric("Conversations", "\(coverage.conversationsAvailable) / \(snapshot.totals.launches)")
         }
     }
 
@@ -820,7 +806,7 @@ struct ContextLabView: View {
     }
 
     private func canRefine(_ evidence: SourceEvidence, in query: SessionSetQuery) -> Bool {
-        guard evidence.editable,
+        guard evidence.isEditable,
               let sourcePath = evidence.sourcePath?.normalizedFilePath,
               query.repoPaths.count == 1,
               let repoPath = query.repoPaths.first?.normalizedFilePath
@@ -829,7 +815,7 @@ struct ContextLabView: View {
     }
 
     private func refinementHelp(_ evidence: SourceEvidence, in query: SessionSetQuery) -> String {
-        guard evidence.editable, let sourcePath = evidence.sourcePath else {
+        guard evidence.isEditable, let sourcePath = evidence.sourcePath else {
             return editabilityReason(evidence)
         }
         guard query.repoPaths.count == 1, let repoPath = query.repoPaths.first else {
@@ -880,12 +866,13 @@ struct ContextLabView: View {
     }
 
     private func refresh() async {
-        let nextRequest = UUID()
-        requestId = nextRequest
         isLoading = true
+        defer {
+            if !Task.isCancelled { isLoading = false }
+        }
         do {
             let next = try await RegistryQueryLocal.shared.contextLab(query)
-            guard requestId == nextRequest, !Task.isCancelled else { return }
+            try Task.checkCancellation()
             snapshot = next
             errorMessage = nil
             if findNode(selectedNodeId, in: next.aggregateRoot) == nil {
@@ -897,10 +884,9 @@ struct ContextLabView: View {
         } catch is CancellationError {
             return
         } catch {
-            guard requestId == nextRequest, !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
         }
-        if requestId == nextRequest { isLoading = false }
     }
 
     private func clearFilters() {
@@ -927,7 +913,7 @@ struct ContextLabView: View {
             id: UUID(),
             name: name,
             query: query,
-            mode: mode.rawValue
+            mode: mode
         ))
         persistSavedViews()
     }
@@ -945,7 +931,7 @@ struct ContextLabView: View {
         surface = saved.query.surfaces.first ?? ""
         outcomes = Set(saved.query.outcomes)
         captureStates = Set(saved.query.captureStates)
-        mode = ContextLabMode(rawValue: saved.mode) ?? .aggregate
+        mode = saved.mode
     }
 
     private func delete(_ saved: ContextLabSavedView) {
@@ -1204,8 +1190,9 @@ private func outcomeColor(_ outcome: SessionOutcome) -> Color {
     }
 }
 
-private func contextColor(_ kind: ContextAssetKind) -> Color {
-    switch kind {
+private func contextColor(_ kind: ContextAssetKind?) -> Color {
+    guard let kind else { return Color(hex: 0x62666B) }
+    return switch kind {
     case .operatingInstructions: Color(hex: 0x7D2948)
     case .surfaceInstructions: Color(hex: 0xA83F5B)
     case .providerInstructions: Color(hex: 0x6C4AA3)
@@ -1221,7 +1208,7 @@ private func contextColor(_ kind: ContextAssetKind) -> Color {
     case .diff: Color(hex: 0xA34A3E)
     case .clipboard: Color(hex: 0x5E5A9C)
     case .userMessage: Color(hex: 0x3E7C8C)
-    case .assembly, .sessionSet: Color(hex: 0x62666B)
+    case .assembly: Color(hex: 0x62666B)
     }
 }
 
@@ -1256,8 +1243,8 @@ func contextRevisionComparisonBlocker(
     return nil
 }
 
-private func displayKind(_ kind: ContextAssetKind) -> String {
-    kind.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+private func displayKind(_ kind: ContextAssetKind?) -> String {
+    kind?.rawValue.replacingOccurrences(of: "_", with: " ").capitalized ?? "Session set"
 }
 
 private func displayCapture(_ capture: CaptureState) -> String {

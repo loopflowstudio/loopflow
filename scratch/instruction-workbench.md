@@ -69,9 +69,10 @@ session set → context kind → canonical source → content revision
 
 Width is attributed supplied tokens. Color identifies context kind. Opacity
 encodes capture coverage, not quality. Each node also carries session count,
-turn count, isolated tokens, first/last observation, and its share of the
-selected population. Within a kind, nodes sort by supplied-token load so the
-largest research targets stay stable.
+turn count, and its share of the selected population. Revision evidence owns
+observation dates and distribution metrics; the flame does not duplicate them.
+Within a kind, nodes sort by supplied-token load so the largest research targets
+stay stable.
 
 **Session lanes** render one horizontal prompt flame per launch or turn. Lanes
 share a token scale; prompt assets retain assembled order. Sorting by total
@@ -175,20 +176,19 @@ struct ContextLabSnapshot: Decodable, Sendable {
     let totals: SessionSetTotals
     let aggregateRoot: ContextFlameNode
     let sessions: [SessionLane]
+    let evidence: [SourceEvidence]
 }
 
 struct ContextFlameNode: Decodable, Identifiable, Sendable {
     let id: String
-    let kind: ContextAssetKind
+    let level: ContextFlameLevel
+    let kind: ContextAssetKind?    // nil only for the session-set root
     let label: String
     let sourcePath: String?
     let contentSha256: String?
     let attributedTokens: UInt64
-    let isolatedTokens: UInt64
     let sessionCount: UInt64
     let turnCount: UInt64
-    let firstSeen: Int64?
-    let lastSeen: Int64?
     let children: [ContextFlameNode]
 }
 
@@ -198,7 +198,6 @@ struct SessionLane: Decodable, Identifiable, Sendable {
     let startedAt: Int64
     let outcome: SessionOutcome
     let steeringTurns: UInt64?
-    let capture: CaptureState
     let turns: [TurnLane]
 }
 
@@ -339,4 +338,3 @@ checkpoint.
 - A maintainer who did not implement the feature completes the installed-app
   demo. Their friction, any manual terminal escape, and the exact live trace and
   Task addresses are recorded before the Intelligence project closes.
-

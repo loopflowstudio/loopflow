@@ -51,7 +51,7 @@ struct ContextLabTests {
                 query: query,
                 selectedNodeId: "revision-1",
                 focusNodeId: "source-1",
-                mode: "Session lanes"
+                mode: .lanes
             )
         )
 

@@ -17,7 +17,7 @@ struct DTOFixtureTests {
         #expect(snapshot.coverage.unknownTurns == 1)
         #expect(snapshot.aggregateRoot.children[0].children[0].children.count == 1)
         #expect(snapshot.sessions[0].turns[1].suppliedContextTokens == nil)
-        #expect(snapshot.evidence[0].editable)
+        #expect(snapshot.evidence[0].isEditable)
         #expect(snapshot.evidence[0].representatives[0].address.turnId == "turn-1")
     }
 

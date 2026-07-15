@@ -627,10 +627,7 @@ mod tests {
 
     #[test]
     fn capture_check_rejects_post_epoch_provider_spend_without_a_launch() {
-        let _guard = crate::journal::test_env_lock();
-        let previous = std::env::var_os("LF_HOME");
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("LF_HOME", home.path());
+        let _guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::open_ledger().unwrap();
         let mut event = row(
             "missing-capture",
@@ -651,18 +648,11 @@ mod tests {
             check.detail
         );
 
-        match previous {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
-        }
     }
 
     #[test]
     fn capture_check_ignores_ungated_orchestrators_and_external_hosts() {
-        let _guard = crate::journal::test_env_lock();
-        let previous = std::env::var_os("LF_HOME");
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("LF_HOME", home.path());
+        let _guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::open_ledger().unwrap();
         let required_after = store.trace_capture_required_after().unwrap();
         let orchestrator = row("orchestrator", required_after, "skill", "completed");
@@ -672,18 +662,11 @@ mod tests {
         let check = check_capture(&store, &[orchestrator, external_host]).unwrap();
         assert_eq!(check.status, Status::Ok, "{}", check.detail);
 
-        match previous {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
-        }
     }
 
     #[test]
     fn capture_check_ignores_a_pre_epoch_process_that_finishes_after_activation() {
-        let _guard = crate::journal::test_env_lock();
-        let previous = std::env::var_os("LF_HOME");
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("LF_HOME", home.path());
+        let _guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::open_ledger().unwrap();
         let required_after = store.trace_capture_required_after().unwrap();
         let started = row("old-process", required_after - 1, "run", "started");
@@ -693,10 +676,6 @@ mod tests {
         let check = check_capture(&store, &[started, completed]).unwrap();
         assert_eq!(check.status, Status::Ok, "{}", check.detail);
 
-        match previous {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
-        }
     }
 
     fn named(mut row: RunEventRow, command: &str) -> RunEventRow {

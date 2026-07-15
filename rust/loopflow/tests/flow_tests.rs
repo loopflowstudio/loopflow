@@ -65,6 +65,7 @@ fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::p
         .current_dir(repo)
         .env("HOME", home)
         .env("LF_HOME", home)
+        .env_remove("LF_DB_PATH")
         .env("NO_COLOR", "1")
         .env_remove("LF_RUN_ID")
         .env_remove("LF_PROCESS_ID");

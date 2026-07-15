@@ -1629,16 +1629,13 @@ mod tests {
 
     #[test]
     fn capture_persists_private_artifacts_and_queryable_rows() {
-        let _guard = crate::journal::test_env_lock();
-        let previous = std::env::var_os("LF_HOME");
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("LF_HOME", home.path());
+        let guard = crate::journal::TestLedgerGuard::new();
         let run_id = RunId::new();
         let context = TraceCaptureContext {
             run_id: run_id.clone(),
             process_id: ProcessId::new(),
-            repo: home.path().to_path_buf(),
-            worktree: home.path().to_path_buf(),
+            repo: guard.home().to_path_buf(),
+            worktree: guard.home().to_path_buf(),
             wave: Some("intelligence".to_string()),
             flow: None,
             skill: Some("implement".to_string()),
@@ -1685,10 +1682,6 @@ mod tests {
             assert_eq!(mode, 0o600);
         }
 
-        match previous {
-            Some(value) => std::env::set_var("LF_HOME", value),
-            None => std::env::remove_var("LF_HOME"),
-        }
     }
 
     #[test]

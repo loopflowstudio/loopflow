@@ -24,27 +24,36 @@ fn env_lock() -> &'static Mutex<()> {
 }
 
 struct HomeOverride {
-    original: Option<OsString>,
-    _temp: Option<TempDir>,
+    previous_lf_home: Option<OsString>,
+    previous_db_path: Option<OsString>,
+    _temp: TempDir,
 }
 
 impl HomeOverride {
     fn new_temp() -> Self {
         let temp = TempDir::new().expect("temp home dir");
-        let original = env::var_os("LF_HOME");
+        let previous_lf_home = env::var_os("LF_HOME");
+        let previous_db_path = env::var_os("LF_DB_PATH");
+        env::remove_var("LF_HOME");
+        env::remove_var("LF_DB_PATH");
         env::set_var("LF_HOME", temp.path());
         Self {
-            original,
-            _temp: Some(temp),
+            previous_lf_home,
+            previous_db_path,
+            _temp: temp,
         }
     }
 }
 
 impl Drop for HomeOverride {
     fn drop(&mut self) {
-        match &self.original {
+        match &self.previous_lf_home {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
+        }
+        match &self.previous_db_path {
+            Some(prev) => env::set_var("LF_DB_PATH", prev),
+            None => env::remove_var("LF_DB_PATH"),
         }
     }
 }
@@ -61,9 +70,9 @@ pub struct EnvGuard {
     previous_path: Option<String>,
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
-    restore_lf_home: bool,
-    _temp: TempDir,
-    _home: Option<HomeOverride>,
+    previous_db_path: Option<OsString>,
+    _bin: TempDir,
+    _lf_home: TempDir,
 }
 
 impl EnvGuard {
@@ -75,36 +84,40 @@ impl EnvGuard {
     #[allow(dead_code)] // Shared helper used only by tests that need HOME isolation.
     pub fn with_home(entries: &[(&str, &str)], home: Option<&Path>) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
-        let temp = TempDir::new().expect("temp bin dir");
+        let bin = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
-            write_executable(temp.path(), name, content);
+            write_executable(bin.path(), name, content);
         }
         let previous_path = env::var("PATH").ok();
         let new_path = match &previous_path {
-            Some(prev) => format!("{}:{}", temp.path().display(), prev),
-            None => temp.path().display().to_string(),
+            Some(prev) => format!("{}:{}", bin.path().display(), prev),
+            None => bin.path().display().to_string(),
         };
         env::set_var("PATH", new_path);
         let previous_home = env::var("HOME").ok();
         if let Some(home) = home {
             env::set_var("HOME", home);
         }
+        let previous_lf_home = env::var_os("LF_HOME");
+        let previous_db_path = env::var_os("LF_DB_PATH");
+        let lf_home = TempDir::new().expect("temp lf home dir");
+        env::remove_var("LF_HOME");
+        env::remove_var("LF_DB_PATH");
+        env::set_var("LF_HOME", lf_home.path());
         Self {
             _lock: lock,
             previous_path,
             previous_home,
-            previous_lf_home: None,
-            restore_lf_home: false,
-            _temp: temp,
-            _home: None,
+            previous_lf_home,
+            previous_db_path,
+            _bin: bin,
+            _lf_home: lf_home,
         }
     }
 
     #[allow(dead_code)] // Shared helper used by tests that exercise the local registry.
     pub fn with_lf_home(entries: &[(&str, &str)], home: &Path) -> Self {
-        let mut guard = Self::with_home(entries, None);
-        guard.previous_lf_home = env::var_os("LF_HOME");
-        guard.restore_lf_home = true;
+        let guard = Self::with_home(entries, None);
         env::set_var("LF_HOME", home);
         guard
     }
@@ -122,11 +135,13 @@ impl Drop for EnvGuard {
         } else {
             env::remove_var("HOME");
         }
-        if self.restore_lf_home {
-            match &self.previous_lf_home {
-                Some(prev) => env::set_var("LF_HOME", prev),
-                None => env::remove_var("LF_HOME"),
-            }
+        match &self.previous_lf_home {
+            Some(prev) => env::set_var("LF_HOME", prev),
+            None => env::remove_var("LF_HOME"),
+        }
+        match &self.previous_db_path {
+            Some(prev) => env::set_var("LF_DB_PATH", prev),
+            None => env::remove_var("LF_DB_PATH"),
         }
     }
 }

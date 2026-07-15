@@ -21,15 +21,74 @@ const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
-/// Serializes tests that mutate process-global env (LF_HOME and run identity).
-/// Every test in the crate that touches these vars must hold this lock —
-/// the ledger path is resolved from env at write time.
+/// Serializes tests that mutate process-global store or run identity variables.
+/// Every test in the crate that touches these variables must hold this lock.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_LEDGER_DB_PATH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct TestLedgerGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    previous_lf_home: Option<std::ffi::OsString>,
+    previous_db_path: Option<std::ffi::OsString>,
+    previous_test_path: Option<PathBuf>,
+    home: tempfile::TempDir,
+}
+
+#[cfg(test)]
+impl TestLedgerGuard {
+    pub(crate) fn new() -> Self {
+        let lock = test_env_lock();
+        let home = tempfile::TempDir::new().expect("test ledger home");
+        let previous_lf_home = std::env::var_os("LF_HOME");
+        let previous_db_path = std::env::var_os("LF_DB_PATH");
+        std::env::remove_var("LF_HOME");
+        std::env::remove_var("LF_DB_PATH");
+        std::env::set_var("LF_HOME", home.path());
+        let previous_test_path =
+            TEST_LEDGER_DB_PATH.with(|path| path.replace(Some(home.path().join("loopflow.db"))));
+        Self {
+            _lock: lock,
+            previous_lf_home,
+            previous_db_path,
+            previous_test_path,
+            home,
+        }
+    }
+
+    pub(crate) fn home(&self) -> &Path {
+        self.home.path()
+    }
+
+    pub(crate) fn set_db_path(&self, path: PathBuf) {
+        TEST_LEDGER_DB_PATH.with(|current| *current.borrow_mut() = Some(path));
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestLedgerGuard {
+    fn drop(&mut self) {
+        TEST_LEDGER_DB_PATH.with(|path| *path.borrow_mut() = self.previous_test_path.take());
+        match &self.previous_lf_home {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+        match &self.previous_db_path {
+            Some(value) => std::env::set_var("LF_DB_PATH", value),
+            None => std::env::remove_var("LF_DB_PATH"),
+        }
+    }
 }
 
 thread_local! {
@@ -406,16 +465,13 @@ fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
         .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
 }
 
-/// In lib tests, never touch the real ~/.lf ledger: honor an explicit database,
-/// then a test's LF_HOME, else fall back to one process-wide temp store.
+/// Unit tests never resolve the ledger from process-global storage variables.
+/// A test can opt into its own path through `TestLedgerGuard`; unguarded tests
+/// share a process-local temporary ledger rather than touching a machine store.
 #[cfg(test)]
 fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
-    if std::env::var_os("LF_DB_PATH").is_some() {
-        return crate::store::database_path_from_env()
-            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()));
-    }
-    if let Ok(home) = std::env::var("LF_HOME") {
-        return Ok(PathBuf::from(home).join("loopflow.db"));
+    if let Some(path) = TEST_LEDGER_DB_PATH.with(|path| path.borrow().clone()) {
+        return Ok(path);
     }
     static TEST_HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     Ok(TEST_HOME
@@ -719,8 +775,8 @@ mod tests {
     }
 
     use super::{
-        emit, events_path, read_events, runs_root, test_env_lock, LfEvent, LfEventFields,
-        LfEventType, LfNode,
+        emit, events_path, read_events, runs_root, LfEvent, LfEventFields, LfEventType, LfNode,
+        TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
     use crate::id::{ProcessId, RunId, WaveId};
@@ -734,12 +790,44 @@ mod tests {
     const CHILD_RUN_DIR_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_RUN_DIR";
     const CHILD_WRITER_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_WRITER";
 
+    struct AmbientStorage {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous_lf_home: Option<std::ffi::OsString>,
+        previous_db_path: Option<std::ffi::OsString>,
+    }
+
+    impl AmbientStorage {
+        fn seed(home: &std::path::Path, db_path: &std::path::Path) -> Self {
+            let lock = super::test_env_lock();
+            let previous_lf_home = std::env::var_os("LF_HOME");
+            let previous_db_path = std::env::var_os("LF_DB_PATH");
+            std::env::set_var("LF_HOME", home);
+            std::env::set_var("LF_DB_PATH", db_path);
+            Self {
+                _lock: lock,
+                previous_lf_home,
+                previous_db_path,
+            }
+        }
+    }
+
+    impl Drop for AmbientStorage {
+        fn drop(&mut self) {
+            match &self.previous_lf_home {
+                Some(value) => std::env::set_var("LF_HOME", value),
+                None => std::env::remove_var("LF_HOME"),
+            }
+            match &self.previous_db_path {
+                Some(value) => std::env::set_var("LF_DB_PATH", value),
+                None => std::env::remove_var("LF_DB_PATH"),
+            }
+        }
+    }
+
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
-        let _guard = test_env_lock();
+        let _guard = journal_test_guard();
         super::clear_context();
         super::clear_usage();
-        let home = tempfile::TempDir::new().expect("ledger home");
-        std::env::set_var("LF_HOME", home.path());
         let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
         let previous_process = std::env::var(super::LF_PROCESS_ID_ENV).ok();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
@@ -760,34 +848,41 @@ mod tests {
         result
     }
 
-    /// Holds the env lock and points the ledger (LF_HOME) at a tempdir so
-    /// tests never touch the real ~/.lf store.
-    fn journal_test_guard() -> (std::sync::MutexGuard<'static, ()>, tempfile::TempDir) {
-        let guard = test_env_lock();
+    fn journal_test_guard() -> TestLedgerGuard {
+        let guard = TestLedgerGuard::new();
         super::clear_context();
         super::clear_usage();
         std::env::remove_var(super::LF_RUN_ID_ENV);
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        let home = tempfile::TempDir::new().expect("ledger home");
-        std::env::set_var("LF_HOME", home.path());
-        (guard, home)
+        guard
     }
 
     #[test]
-    fn explicit_database_path_controls_the_ledger() {
-        let (_guard, home) = journal_test_guard();
-        let path = home.path().join("explicit.db");
-        let previous = std::env::var_os("LF_DB_PATH");
-        std::env::set_var("LF_DB_PATH", &path);
+    fn explicit_test_database_path_controls_the_ledger() {
+        let guard = journal_test_guard();
+        let path = guard.home().join("explicit.db");
+        guard.set_db_path(path.clone());
 
         let opened = super::open_ledger();
 
-        match previous {
-            Some(value) => std::env::set_var("LF_DB_PATH", value),
-            None => std::env::remove_var("LF_DB_PATH"),
-        }
         opened.expect("open explicit ledger");
         assert!(path.exists());
+    }
+
+    #[test]
+    fn unit_test_ledger_ignores_ambient_storage_paths() {
+        let ambient_home = tempfile::tempdir().expect("ambient home");
+        let ambient_db_dir = tempfile::tempdir().expect("ambient db dir");
+        let ambient_db = ambient_db_dir.path().join("production.db");
+        let _ambient = AmbientStorage::seed(ambient_home.path(), &ambient_db);
+
+        let resolved = super::ledger_db_path().expect("test ledger path");
+        super::open_ledger().expect("open test ledger");
+
+        assert_ne!(resolved, ambient_db);
+        assert_ne!(resolved, ambient_home.path().join("loopflow.db"));
+        assert!(!ambient_db.exists());
+        assert!(!ambient_home.path().join("loopflow.db").exists());
     }
 
     fn started_fields(

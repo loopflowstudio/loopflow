@@ -1458,15 +1458,9 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn resolve_registry_without_a_store_runs_unregistered() {
-        let _env = crate::journal::test_env_lock();
+        let _env = crate::journal::TestLedgerGuard::new();
         let tmp = tempfile::tempdir().expect("tempdir");
-        let previous = std::env::var_os("LF_DB_PATH");
-        std::env::set_var("LF_DB_PATH", tmp.path().join("absent.db"));
         let config = resolve_registry(tmp.path(), "ship").await;
-        match previous {
-            Some(value) => std::env::set_var("LF_DB_PATH", value),
-            None => std::env::remove_var("LF_DB_PATH"),
-        }
         assert!(config.is_none(), "missing store boots unregistered");
     }
 

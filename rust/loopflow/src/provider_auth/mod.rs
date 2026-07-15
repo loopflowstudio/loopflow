@@ -63,6 +63,7 @@ const LINEAR_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
 const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
 const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
 const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
+#[cfg(target_os = "macos")]
 const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 #[cfg(target_os = "macos")]
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
@@ -408,7 +409,9 @@ pub struct ClaudeKeychainGuard {
 }
 
 struct ClaudeKeychainCredential {
+    #[cfg(target_os = "macos")]
     account: String,
+    #[cfg(target_os = "macos")]
     blob: SecretString,
 }
 
@@ -1610,9 +1613,6 @@ pub(crate) async fn prepare_provider_account_access_token(
     let token = match provider {
         Provider::Claude => {
             let broker = ClaudeAuthBroker::for_profile(provider_home.to_path_buf());
-            if !matches!(broker.check_status().await?, AuthStatus::Active { .. }) {
-                return Ok(None);
-            }
             broker.extract_token().await
         }
         Provider::Codex => {
@@ -2452,6 +2452,7 @@ pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthE
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn write_claude_profile_credentials(
     config_dir: &Path,
     credential: &SecretString,
@@ -3910,6 +3911,21 @@ mod tests {
             fs::read_to_string(&path).expect("replacement credential file"),
             replacement
         );
+    }
+
+    #[tokio::test]
+    async fn managed_claude_access_token_does_not_depend_on_cli_status() {
+        let temp = tempdir().expect("tempdir");
+        let payload =
+            r#"{"claudeAiOauth":{"accessToken":"test-access-token","expiresAt":4102444800000}}"#;
+        write_claude_profile_credentials(temp.path(), &SecretString::new(payload.to_string()))
+            .expect("write profile credentials");
+
+        let token = prepare_provider_account_access_token(Provider::Claude, temp.path())
+            .await
+            .expect("read managed access token");
+
+        assert_eq!(token.as_deref(), Some("test-access-token"));
     }
 
     #[test]

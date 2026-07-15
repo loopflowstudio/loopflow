@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,9 +19,9 @@ use crate::provider_account::{
 };
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
-    drive_claude_browser_authorization, no_event_sink, provider_account_auth_status,
-    start_provider_account_auth, AuthStatus, ClaudeKeychainGuard, Provider, ProviderAuthService,
-    ProviderAuthSnapshot,
+    drive_claude_browser_authorization, no_event_sink, prepare_provider_account_access_token,
+    provider_account_auth_status, start_provider_account_auth, AuthStatus, ClaudeKeychainGuard,
+    Provider, ProviderAuthService, ProviderAuthSnapshot,
 };
 use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
@@ -256,15 +258,9 @@ async fn connect_account(
         capture_claude_profile_credentials(&profile)?;
         let login = match provider_account_auth_status(provider, profile.clone()).await? {
             AuthStatus::Active { login } => login,
-            other => {
-                return Err(anyhow!(
-                    "{} account '{}' finished login with status {}",
-                    provider.display_name(),
-                    account_id,
-                    other.as_str()
-                ));
-            }
+            _ => None,
         };
+        require_managed_access_token(provider, &account_id, &profile).await?;
         if let Some(guard) = keychain_guard {
             guard.restore()?;
         }
@@ -273,16 +269,19 @@ async fn connect_account(
         None
     };
 
-    let status = provider_account_auth_status(provider, profile.clone()).await?;
-    let login = match status {
-        AuthStatus::Active { login } => observed_claude_login.or(login),
-        other => {
-            return Err(anyhow!(
-                "{} account '{}' finished login with status {}",
-                provider.display_name(),
-                account_id,
-                other.as_str()
-            ))
+    let login = if provider == Provider::Claude {
+        observed_claude_login
+    } else {
+        match provider_account_auth_status(provider, profile.clone()).await? {
+            AuthStatus::Active { login } => login,
+            other => {
+                return Err(anyhow!(
+                    "{} account '{}' finished login with status {}",
+                    provider.display_name(),
+                    account_id,
+                    other.as_str()
+                ))
+            }
         }
     };
     let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login)?;
@@ -372,19 +371,8 @@ async fn import_account(
         ambient.email.or(paired_login)
     };
 
-    let status_login =
-        match provider_account_auth_status(provider, provider_profile.clone()).await? {
-            AuthStatus::Active { login } => login,
-            other => {
-                return Err(anyhow!(
-                    "{} account '{}' has status {} after import",
-                    provider.display_name(),
-                    account_id,
-                    other.as_str()
-                ))
-            }
-        };
-    let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login.or(status_login))?;
+    require_managed_access_token(provider, &account_id, &provider_profile).await?;
+    let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login)?;
     register_managed_account(provider, &account_id, provider_profile, login).await?;
     println!(
         "Imported {} account '{}'",
@@ -392,6 +380,24 @@ async fn import_account(
         account_id
     );
     Ok(())
+}
+
+async fn require_managed_access_token(
+    provider: Provider,
+    account_id: &ProviderAccountId,
+    profile: &std::path::Path,
+) -> Result<()> {
+    if prepare_provider_account_access_token(provider, profile)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "{} account '{}' did not produce a usable access token",
+        provider.display_name(),
+        account_id
+    ))
 }
 
 fn read_ambient_claude_status() -> Result<ClaudeAuthStatusOutput> {

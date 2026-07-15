@@ -471,34 +471,34 @@ Register provider accounts, then route each repository through personal
 profiles:
 
 ```bash
-lf profile create jack@loopflow.studio --chrome-profile jack@loopflow.studio
-lf profile create loopflow-eng@loopflow.studio --chrome-profile loopflow-eng@loopflow.studio
-lf profile create jackstah@gmail.com --chrome-profile jackstah@gmail.com
+lf profile create primary@example.com --chrome-profile primary@example.com
+lf profile create engineering@example.com --chrome-profile engineering@example.com
+lf profile create personal@example.com --chrome-profile personal@example.com
 
-lf auth import claude --account personal --profile jackstah@gmail.com
-lf auth set claude personal --login-email jackstah@gmail.com
-lf auth connect claude --account jack --profile jack@loopflow.studio
-lf auth set claude jack --login-email jack@loopflow.studio --plan max
+lf auth import claude --account personal --profile personal@example.com
+lf auth set claude personal --login-email personal@example.com
+lf auth connect claude --account primary --profile primary@example.com
+lf auth set claude primary --login-email primary@example.com --plan max
 
-lf auth connect codex --account jack
-lf auth set codex jack --login-email jack@loopflow.studio --plan max
+lf auth connect codex --account primary
+lf auth set codex primary --login-email primary@example.com --plan max
 lf auth connect codex --account engineering
-lf auth set codex engineering --login-email loopflow-eng@loopflow.studio --plan max
+lf auth set codex engineering --login-email engineering@example.com --plan max
 lf auth connect codex --account personal
-lf auth set codex personal --login-email jackstah@gmail.com
+lf auth set codex personal --login-email personal@example.com
 lf auth accounts claude
 
-lf profile account set jack@loopflow.studio claude jack@loopflow.studio
-lf profile account set jack@loopflow.studio codex jack@loopflow.studio
-lf profile account set loopflow-eng@loopflow.studio claude jackstah@gmail.com
-lf profile account set loopflow-eng@loopflow.studio codex loopflow-eng@loopflow.studio
-lf profile account set jackstah@gmail.com claude jackstah@gmail.com
-lf profile account set jackstah@gmail.com codex jackstah@gmail.com
+lf profile account set primary@example.com claude primary@example.com
+lf profile account set primary@example.com codex primary@example.com
+lf profile account set engineering@example.com claude personal@example.com
+lf profile account set engineering@example.com codex engineering@example.com
+lf profile account set personal@example.com claude personal@example.com
+lf profile account set personal@example.com codex personal@example.com
 
 lf profile route set \
-  --default jack@loopflow.studio \
-  --backup loopflow-eng@loopflow.studio \
-  --backup jackstah@gmail.com
+  --default primary@example.com \
+  --backup engineering@example.com \
+  --backup personal@example.com
 lf profile route show
 
 lf auth set claude personal --paid-through 2026-08-14
@@ -506,6 +506,9 @@ lf auth set claude personal --routing explicit-only
 lf auth reset claude personal
 lf auth disconnect claude --account personal
 ```
+
+These addresses are placeholders. Profiles, account bindings, and repository
+routes live in the local Loopflow database; Loopflow ships no account topology.
 
 Claude authorization runs through Claude in Chrome when its browser extension
 is connected. If the controller is unavailable, Loopflow falls back to a hidden

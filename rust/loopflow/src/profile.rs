@@ -236,10 +236,10 @@ mod tests {
     #[test]
     fn profile_ids_are_normalized_emails() {
         assert_eq!(
-            ProfileId::parse(" Loopflow-Eng@Loopflow.Studio ")
+            ProfileId::parse(" Engineering@Example.com ")
                 .unwrap()
                 .as_str(),
-            "loopflow-eng@loopflow.studio"
+            "engineering@example.com"
         );
         assert!(ProfileId::parse("Loopflow").is_err());
         assert!(ProfileId::parse("../loopflow").is_err());
@@ -248,10 +248,10 @@ mod tests {
     #[test]
     fn email_addresses_are_normalized() {
         assert_eq!(
-            EmailAddress::parse(" Jack@Loopflow.Studio ")
+            EmailAddress::parse(" Primary@Example.com ")
                 .unwrap()
                 .as_str(),
-            "jack@loopflow.studio"
+            "primary@example.com"
         );
         assert!(EmailAddress::parse("not-an-email").is_err());
     }

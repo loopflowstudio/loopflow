@@ -153,6 +153,35 @@ public struct RegistryQuery: Sendable {
         )
     }
 
+    /// A wave's curated trajectory: its memory facts with the evidence receipts
+    /// that justify each, oldest to newest. Daemon-less — `lf memory log --json`
+    /// folds the wave journal, so the trajectory renders whether or not the Home
+    /// is live. `cwd` must be the wave's origin repo (receipts are journaled
+    /// there); the Mac passes `wave.repo`.
+    public func memoryLog(wave: String, cwd: String?) async throws -> [MemoryFact] {
+        let stdout = try await run(["memory", "log", "--json", "--wave", wave], cwd)
+        return try Self.decode([MemoryFact].self, from: stdout)
+    }
+
+    /// Record one trajectory note, optionally bound to evidence receipts written
+    /// as `kind:reference` tokens. The write goes through the wave's live Home —
+    /// the sole holder of MEMORY.md's pen — so a wave with no live Home throws
+    /// (there is no offline write path). The caller surfaces that as the
+    /// Start-on-Home hint rather than a raw failure.
+    public func memoryAdd(
+        wave: String,
+        fact: String,
+        receipts: [String],
+        cwd: String?
+    ) async throws {
+        var args = ["memory", "add", fact]
+        for token in receipts {
+            args.append(contentsOf: ["--receipt", token])
+        }
+        args.append(contentsOf: ["--wave", wave])
+        _ = try await run(args, cwd)
+    }
+
     /// Per-boundary spend over a window: what each skill, and each terminal run,
     /// actually spent. `lf usage --json` applies the cumulative-diff rule, so
     /// these rows are additive and sum to the totals `lf usage` prints.

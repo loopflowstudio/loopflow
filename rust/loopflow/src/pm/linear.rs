@@ -107,6 +107,17 @@ const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: String!, $n
   }
 }"#;
 
+// Sets the Project's teams to exactly `[$teamId]` — a replacement, not an add —
+// so a Project stranded on the shared team lands on the wave's team. Projects
+// keep their id/slug across a team move (only issues renumber).
+const MOVE_PROJECT_TO_TEAM_MUTATION: &str = r#"mutation MoveProjectToTeam($id: String!, $teamId: String!) {
+  projectUpdate(id: $id, input: { teamIds: [$teamId] }) {
+    project {
+      id
+    }
+  }
+}"#;
+
 const ARCHIVE_PROJECT_MUTATION: &str = r#"mutation ArchiveProject($id: String!) {
   projectArchive(id: $id) {
     success
@@ -664,6 +675,23 @@ impl LinearClient {
             )
             .await?;
         Ok(response.issue_update.issue.identifier)
+    }
+
+    /// Reassign a Project to exactly one team. `teamIds` is a set replacement, so
+    /// this pulls the Project off whatever team(s) it was on (e.g. the shared
+    /// team) and onto the wave's team. Unlike issues, a Project keeps its id and
+    /// slug across the move.
+    pub async fn move_project_to_team(&self, project_id: &str, team_id: &str) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                MOVE_PROJECT_TO_TEAM_MUTATION,
+                json!({
+                    "id": project_id,
+                    "teamId": team_id,
+                }),
+            )
+            .await?;
+        Ok(())
     }
 
     /// The key (Task prefix) of a team by its id, e.g. `PRD` for the product
@@ -1376,6 +1404,35 @@ mod tests {
             .contains("issueUpdate"));
         assert_eq!(body["variables"]["id"], "issue-9");
         assert_eq!(body["variables"]["teamId"], "team-prd");
+    }
+
+    #[tokio::test]
+    async fn move_project_to_team_sets_the_team_ids() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "projectUpdate": { "project": { "id": "project-1" } } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-old".to_string()),
+            base_url,
+        );
+
+        client
+            .move_project_to_team("project-1", "team-cadenza")
+            .await
+            .expect("move project succeeds");
+
+        let requests = requests.lock().await;
+        let body: Value = serde_json::from_str(&requests[0].body).expect("move json");
+        let query = body["query"].as_str().expect("query");
+        assert!(query.contains("projectUpdate"));
+        // teamIds is a set replacement: exactly the wave's team, pulling the
+        // Project off the shared team.
+        assert!(query.contains("teamIds: [$teamId]"));
+        assert_eq!(body["variables"]["id"], "project-1");
+        assert_eq!(body["variables"]["teamId"], "team-cadenza");
     }
 
     #[tokio::test]

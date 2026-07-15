@@ -2,8 +2,12 @@
 //! the convention; the one rule is that a shipped migration is never edited.
 
 use std::fmt;
+use std::fs::OpenOptions;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::store::{StoreError, StoreResult};
+use fs2::FileExt;
 
 // -- Identity -----------------------------------------------------------------
 
@@ -120,8 +124,6 @@ const LEGACY_BASELINE_VERSION: &str = "001_initial";
 
 const RECREATE_MESSAGE: &str =
     "incompatible Loopflow database; delete loopflow.db and rerun the command";
-const NEWER_MESSAGE: &str =
-    "loopflow.db was written by a newer Loopflow; upgrade lf to open this database";
 
 /// The major.minor a migration authored today belongs to, from the single version
 /// source of truth (the workspace `Cargo.toml`, via Cargo).
@@ -144,12 +146,21 @@ pub fn active_namespace() -> (u32, u32) {
 // -- Applying -----------------------------------------------------------------
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
+    apply_sqlite_transaction(conn, |_| Ok(()))
+}
+
+fn apply_sqlite_transaction(
+    conn: &rusqlite::Connection,
+    before_migration: impl FnOnce(&rusqlite::Connection) -> StoreResult<()>,
+) -> StoreResult<()> {
     let foreign_keys_enabled: bool =
         conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     let migration_result = match conn.execute_batch("BEGIN EXCLUSIVE") {
         Ok(()) => {
-            let result = apply_set(conn, MIGRATIONS).and_then(|()| validate_foreign_keys(conn));
+            let result = before_migration(conn)
+                .and_then(|()| apply_set(conn, MIGRATIONS))
+                .and_then(|()| validate_foreign_keys(conn));
             match result {
                 Ok(()) => conn.execute_batch("COMMIT").map_err(StoreError::from),
                 Err(error) => {
@@ -170,6 +181,126 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
         Err(error) => Err(error),
         Ok(()) => restore_result,
     }
+}
+
+pub(crate) fn apply_sqlite_with_backup(
+    conn: &rusqlite::Connection,
+    path: &Path,
+) -> StoreResult<()> {
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")?;
+    let lock_path = path.with_file_name(format!(
+        "{}.migration.lock",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("loopflow.db")
+    ));
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .map_err(|error| StoreError::InvalidData(format!("open migration lock: {error}")))?;
+    lock.lock_exclusive()
+        .map_err(|error| StoreError::InvalidData(format!("acquire migration lock: {error}")))?;
+    let result =
+        apply_sqlite_transaction(conn, |conn| backup_before_migration(conn, path).map(|_| ()));
+    let unlock = lock
+        .unlock()
+        .map_err(|error| StoreError::InvalidData(format!("release migration lock: {error}")));
+    match result {
+        Err(error) => Err(error),
+        Ok(()) => unlock,
+    }
+}
+
+fn backup_before_migration(
+    conn: &rusqlite::Connection,
+    path: &Path,
+) -> StoreResult<Option<PathBuf>> {
+    if !requires_migration_sqlite(conn)? {
+        return Ok(None);
+    }
+    let previous =
+        latest_applied_version_sqlite(conn)?.unwrap_or_else(|| "uninitialized".to_string());
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("loopflow.db");
+    let safe_version = previous
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let backup_path = path.with_file_name(format!("{file_name}.backup-{safe_version}"));
+    if valid_backup(&backup_path, &previous) {
+        return Ok(Some(backup_path));
+    }
+
+    let unique = format!(
+        "{file_name}.backup-{safe_version}.tmp-{}-{}",
+        std::process::id(),
+        time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+    );
+    let temporary_path = path.with_file_name(unique);
+    let source = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let mut destination = rusqlite::Connection::open(&temporary_path)?;
+    let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
+    if let Err(error) = backup.run_to_completion(64, Duration::from_millis(10), None) {
+        drop(backup);
+        drop(destination);
+        drop(source);
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(error.into());
+    }
+    drop(backup);
+    drop(destination);
+    drop(source);
+    if let Err(error) = std::fs::File::open(&temporary_path).and_then(|file| file.sync_all()) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(StoreError::InvalidData(format!(
+            "failed to sync migration backup: {error}"
+        )));
+    }
+    if let Err(error) = std::fs::rename(&temporary_path, &backup_path) {
+        return Err(StoreError::InvalidData(format!(
+            "failed to atomically publish migration backup (existing backup and {} were preserved): {error}",
+            temporary_path.display()
+        )));
+    }
+    #[cfg(unix)]
+    if let Some(parent) = backup_path.parent() {
+        std::fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to sync migration backup directory: {error}"
+                ))
+            })?;
+    }
+    Ok(Some(backup_path))
+}
+
+fn valid_backup(path: &Path, expected_version: &str) -> bool {
+    let Ok(connection) = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return false;
+    };
+    let integrity: rusqlite::Result<String> =
+        connection.pragma_query_value(None, "integrity_check", |row| row.get(0));
+    integrity.as_deref() == Ok("ok")
+        && latest_applied_version_sqlite(&connection)
+            .is_ok_and(|version| version.as_deref() == Some(expected_version))
 }
 
 fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
@@ -251,7 +382,13 @@ fn pending_migrations<'a>(
             continue;
         }
         return match MigrationId::parse_version(version) {
-            Some(_) => Err(StoreError::InvalidData(NEWER_MESSAGE.to_string())),
+            Some(_) => Err(StoreError::InvalidData(format!(
+                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf doctor with that binary",
+                env!("CARGO_PKG_VERSION"),
+                set.last()
+                    .map(Migration::version)
+                    .unwrap_or_else(|| "none".to_string())
+            ))),
             None => Err(incompatible()),
         };
     }
@@ -387,9 +524,8 @@ fn incompatible() -> StoreError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc::{sync_channel, TryRecvError};
-    use std::time::{Duration, Instant};
+    use std::sync::mpsc::sync_channel;
+    use std::time::Duration;
 
     use rusqlite::OptionalExtension;
 
@@ -819,12 +955,18 @@ mod tests {
 
     /// Downgrade: the database ran a migration this binary has never heard of.
     #[test]
-    fn a_database_from_a_newer_loopflow_asks_for_an_upgrade() {
+    fn an_unknown_migration_reports_both_database_and_binary_evidence() {
         let conn = open();
         apply_set(&conn, &[baseline(), FIRST_IN_NEXT_MINOR]).unwrap();
 
         let error = apply_set(&conn, &[baseline()]).unwrap_err();
-        assert!(error.to_string().contains("upgrade lf"));
+        let message = error.to_string();
+        assert!(message.contains("0.11.001_add_colour"), "{message}");
+        assert!(
+            message.contains("latest known 0.10.001_initial"),
+            "{message}"
+        );
+        assert!(message.contains("run lf doctor"), "{message}");
     }
 
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned
@@ -911,15 +1053,7 @@ mod tests {
             latest_applied_version_sqlite(&backup).unwrap().as_deref(),
             Some("0.10.001_initial")
         );
-        assert!(backup.prepare("SELECT * FROM child_body_leases").is_err());
-    }
-
-    static WRITER_SAW_BUSY: AtomicBool = AtomicBool::new(false);
-
-    fn observe_writer_busy(_: i32) -> bool {
-        WRITER_SAW_BUSY.store(true, Ordering::SeqCst);
-        std::thread::yield_now();
-        true
+        assert!(!columns(&backup, "task_sessions").contains(&"lf_bin".to_string()));
     }
 
     #[test]
@@ -928,15 +1062,33 @@ mod tests {
         let path = directory.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_set(&conn, &MIGRATIONS[..1]).unwrap();
-        WRITER_SAW_BUSY.store(false, Ordering::SeqCst);
-
+        conn.execute_batch("PRAGMA journal_mode = WAL").unwrap();
         let writer_path = path.clone();
         let (start_writer, writer_start) = sync_channel(0);
+        let (first_attempt, observe_first_attempt) = sync_channel(1);
+        let (retry_writer, writer_retry) = sync_channel(0);
         let (writer_done, observe_writer) = sync_channel(1);
         let writer = std::thread::spawn(move || {
-            let writer = rusqlite::Connection::open(writer_path).unwrap();
-            writer.busy_handler(Some(observe_writer_busy)).unwrap();
             writer_start.recv().unwrap();
+            let writer = rusqlite::Connection::open(writer_path).unwrap();
+            writer.busy_timeout(Duration::ZERO).unwrap();
+            let blocked = writer
+                .execute(
+                    "INSERT INTO bus_messages (channel, byline, text, at)
+                     VALUES ('test', 'writer', 'after migration', 1)",
+                    [],
+                )
+                .is_err_and(|error| {
+                    matches!(
+                        error.sqlite_error_code(),
+                        Some(
+                            rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                        )
+                    )
+                });
+            first_attempt.send(blocked).unwrap();
+            writer_retry.recv().unwrap();
+            writer.busy_timeout(Duration::from_secs(5)).unwrap();
             writer
                 .execute(
                     "INSERT INTO bus_messages (channel, byline, text, at)
@@ -952,19 +1104,17 @@ mod tests {
         apply_sqlite_transaction(&conn, |conn| {
             backup_before_migration(conn, &path)?;
             start_writer.send(()).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while !WRITER_SAW_BUSY.load(Ordering::SeqCst) && Instant::now() < deadline {
-                std::thread::yield_now();
-            }
             assert!(
-                WRITER_SAW_BUSY.load(Ordering::SeqCst),
-                "competing writer should encounter the migration transaction"
+                observe_first_attempt
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap(),
+                "competing writer committed between backup and migration"
             );
-            assert_eq!(observe_writer.try_recv(), Err(TryRecvError::Empty));
             Ok(())
         })
         .unwrap();
 
+        retry_writer.send(()).unwrap();
         assert_eq!(observe_writer.recv().unwrap(), latest_known_version());
         writer.join().unwrap();
         assert_eq!(

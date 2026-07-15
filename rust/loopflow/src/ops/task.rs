@@ -1132,6 +1132,7 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         generation.to_string(),
     ];
     let generation_text = generation.to_string();
+    let control_bin = execution.lf_bin.to_string_lossy().to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
     let lf_home = execution.lf_home.to_string_lossy().to_string();
     // Inherit the Wave's execution home so this Task's routed shipping commands
@@ -1152,6 +1153,7 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
             crate::child_session::TASK_LEASE_TOKEN_ENV,
             lease.token.as_str(),
         ),
+        (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
         (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
         (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
         (crate::engine::wave_home::WAVE_HOME_ENV, wave_home.as_str()),

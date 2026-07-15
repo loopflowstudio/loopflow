@@ -99,15 +99,18 @@ fn emit_build_provenance(manifest_dir: &Path) {
     if !matches!(provenance.as_str(), "development" | "release") {
         panic!("LOOPFLOW_BUILD_PROVENANCE must be `development` or `release`, got `{provenance}`");
     }
-    let source_root = git_root
-        .unwrap_or(manifest_dir)
-        .canonicalize()
-        .unwrap_or_else(|error| panic!("canonicalize Loopflow source root: {error}"));
+    let source_root = if provenance == "release" {
+        "release".to_string()
+    } else {
+        git_root
+            .unwrap_or(manifest_dir)
+            .canonicalize()
+            .unwrap_or_else(|error| panic!("canonicalize Loopflow source root: {error}"))
+            .display()
+            .to_string()
+    };
     println!("cargo:rustc-env=LOOPFLOW_BUILD_PROVENANCE={provenance}");
-    println!(
-        "cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}",
-        source_root.display()
-    );
+    println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
 }
 

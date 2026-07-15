@@ -38,18 +38,8 @@ pub(crate) fn configure_vendor_tokio_env(command: &mut tokio::process::Command) 
 
 fn vendor_control_context() -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)>
 {
-    let control_bin = std::env::var_os(crate::store::CONTROL_BIN_ENV)
-        .map(std::path::PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(crate::engine::process::resolve_pinned_lf_binary)?;
-    let control_home = std::env::var_os(crate::store::CONTROL_HOME_ENV)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::store::lf_home_dir);
-    let control_db = std::env::var_os(crate::store::CONTROL_DB_PATH_ENV)
-        .map(std::path::PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(|| crate::store::database_path_from_env().map_err(anyhow::Error::from))?;
-    Ok((control_bin, control_home, control_db))
+    let context = crate::engine::process::pinned_execution_context()?;
+    Ok((context.lf_bin, context.lf_home, context.db_path))
 }
 
 fn set_vendor_std_env(

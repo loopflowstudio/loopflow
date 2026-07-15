@@ -33,12 +33,15 @@ pub fn provenance() -> BuildProvenance {
         .expect("build script embeds a validated Loopflow provenance")
 }
 
-pub fn source_root() -> &'static Path {
-    Path::new(env!("LOOPFLOW_BUILD_SOURCE_ROOT"))
+pub fn source_root() -> Option<&'static Path> {
+    let root = env!("LOOPFLOW_BUILD_SOURCE_ROOT");
+    (root != "release").then(|| Path::new(root))
 }
 
 pub fn source_identity() -> String {
-    source_identity_for(source_root())
+    source_root()
+        .map(source_identity_for)
+        .unwrap_or_else(|| "release".to_string())
 }
 
 fn parse_provenance(value: &str) -> Option<BuildProvenance> {
@@ -91,7 +94,15 @@ mod tests {
             provenance(),
             BuildProvenance::Development | BuildProvenance::Release
         ));
-        assert!(source_root().is_absolute());
+        match provenance() {
+            BuildProvenance::Development => {
+                assert!(source_root().is_some_and(Path::is_absolute));
+            }
+            BuildProvenance::Release => {
+                assert_eq!(source_root(), None);
+                assert_eq!(super::source_identity(), "release");
+            }
+        }
         assert_eq!(
             parse_provenance("development"),
             Some(BuildProvenance::Development)

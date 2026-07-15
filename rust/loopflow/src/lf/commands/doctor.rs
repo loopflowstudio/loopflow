@@ -16,7 +16,6 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use time::{Duration, OffsetDateTime};
 
-use crate::journal::open_ledger;
 use crate::lf::output::Colors;
 use crate::store::RunEventRow;
 
@@ -68,31 +67,87 @@ impl Check {
 /// Exits non-zero when any check fails, so a cron can gate on it.
 #[derive(Debug, serde::Serialize)]
 struct DoctorReport<'a> {
+    store: StoreReport,
     rows: usize,
     checks: &'a [Check],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct StoreReport {
+    build_provenance: crate::build_info::BuildProvenance,
+    build_source_identity: String,
+    build_source_root: Option<String>,
+    database_path: String,
+    latest_known_migration: String,
+    latest_applied_migration: Option<String>,
+    migration_error: Option<String>,
+}
+
 pub fn run(json: bool) -> Result<()> {
-    let store = open_ledger()?;
-    let events = store.list_run_events_since(0)?;
-    let mut checks = audit(&events);
-    checks.push(check_capture(&store, &events)?);
+    let database_path = crate::store::database_path_from_env()?;
+    let opened = crate::store::sqlite::SqliteStore::new(&database_path);
+    let mut store_report = inspect_store(&database_path);
+    let (events, checks) = match opened {
+        Ok(store) => {
+            let events = store.list_run_events_since(0)?;
+            let mut checks = audit(&events);
+            checks.push(check_capture(&store, &events)?);
+            (events, checks)
+        }
+        Err(error) => {
+            let detail = error.to_string();
+            store_report.migration_error = Some(detail.clone());
+            (Vec::new(), vec![Check::fail("store", detail)])
+        }
+    };
     if json {
         println!(
             "{}",
             serde_json::to_string(&DoctorReport {
+                store: store_report,
                 rows: events.len(),
                 checks: &checks,
             })?
         );
     } else {
-        print_checks(&checks, events.len());
+        print_checks(&store_report, &checks, events.len());
     }
 
     if checks.iter().any(|check| check.status == Status::Fail) {
         return Err(anyhow!("run ledger audit failed"));
     }
     Ok(())
+}
+
+fn inspect_store(path: &Path) -> StoreReport {
+    let mut latest_applied_migration = None;
+    let mut migration_error = None;
+    if path.exists() {
+        match rusqlite::Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            Ok(connection) => {
+                match crate::store::migrations::latest_applied_version_sqlite(&connection) {
+                    Ok(version) => latest_applied_migration = version,
+                    Err(error) => migration_error = Some(error.to_string()),
+                }
+                if let Err(error) = crate::store::migrations::latest_version_sqlite(&connection) {
+                    migration_error.get_or_insert_with(|| error.to_string());
+                }
+            }
+            Err(error) => migration_error = Some(error.to_string()),
+        }
+    }
+    StoreReport {
+        build_provenance: crate::build_info::provenance(),
+        build_source_identity: crate::build_info::source_identity(),
+        build_source_root: crate::build_info::source_root().map(|root| root.display().to_string()),
+        database_path: path.display().to_string(),
+        latest_known_migration: crate::store::migrations::latest_known_version(),
+        latest_applied_migration,
+        migration_error,
+    }
 }
 
 fn check_capture(
@@ -570,8 +625,24 @@ fn day_of(ts: i64) -> Option<time::Date> {
         .map(|dt| dt.date())
 }
 
-fn print_checks(checks: &[Check], rows: usize) {
+fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     let colors = Colors::default();
+    println!(
+        "build: {} ({})",
+        store.build_provenance, store.build_source_identity
+    );
+    if let Some(root) = &store.build_source_root {
+        println!("source: {root}");
+    }
+    println!("database: {}", store.database_path);
+    println!(
+        "migrations: applied {} / known {}",
+        store.latest_applied_migration.as_deref().unwrap_or("none"),
+        store.latest_known_migration
+    );
+    if let Some(error) = &store.migration_error {
+        println!("migration error: {error}");
+    }
     println!("ledger: {rows} run events\n");
     for check in checks {
         let (mark, color) = match check.status {
@@ -593,10 +664,36 @@ fn print_checks(checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, check_capture, check_continuity, Status};
+    use super::{audit, check_capture, check_continuity, inspect_store, Status};
     use crate::store::RunEventRow;
 
     const DAY: i64 = 86_400;
+
+    #[test]
+    fn store_report_exposes_unknown_applied_migration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at)
+                 VALUES ('9.0.001_divergent', unixepoch() + 1)",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let report = inspect_store(&path);
+
+        assert_eq!(
+            report.latest_applied_migration.as_deref(),
+            Some("9.0.001_divergent")
+        );
+        let error = report.migration_error.unwrap();
+        assert!(error.contains("9.0.001_divergent"), "{error}");
+        assert!(error.contains("latest known"), "{error}");
+    }
 
     fn row(run_id: &str, ts: i64, node: &str, event: &str) -> RunEventRow {
         RunEventRow {
@@ -647,7 +744,6 @@ mod tests {
             "{}",
             check.detail
         );
-
     }
 
     #[test]
@@ -661,7 +757,6 @@ mod tests {
 
         let check = check_capture(&store, &[orchestrator, external_host]).unwrap();
         assert_eq!(check.status, Status::Ok, "{}", check.detail);
-
     }
 
     #[test]
@@ -675,7 +770,6 @@ mod tests {
 
         let check = check_capture(&store, &[started, completed]).unwrap();
         assert_eq!(check.status, Status::Ok, "{}", check.detail);
-
     }
 
     fn named(mut row: RunEventRow, command: &str) -> RunEventRow {

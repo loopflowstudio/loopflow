@@ -1681,7 +1681,6 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
-
     }
 
     #[test]

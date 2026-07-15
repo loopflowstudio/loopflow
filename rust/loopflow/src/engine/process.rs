@@ -9,19 +9,12 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
 }
 
 pub(crate) fn resolve_lf_binary() -> PathBuf {
-    if crate::build_info::provenance().is_release() {
-        if let Ok(path) = std::env::var(crate::store::CONTROL_BIN_ENV) {
-            let trimmed = path.trim();
-            if !trimmed.is_empty() {
-                return PathBuf::from(trimmed);
-            }
-        }
-    }
-    if let Ok(path) = std::env::var("LF_BIN") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
+    if let Some(path) = select_binary_override(
+        crate::build_info::provenance(),
+        std::env::var_os(crate::store::CONTROL_BIN_ENV),
+        std::env::var_os("LF_BIN"),
+    ) {
+        return path;
     }
 
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
@@ -48,6 +41,23 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     }
 
     PathBuf::from("lf")
+}
+
+fn select_binary_override(
+    provenance: crate::build_info::BuildProvenance,
+    control: Option<std::ffi::OsString>,
+    ordinary: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let selected = if provenance.is_release() {
+        control.or(ordinary)
+    } else {
+        ordinary
+    }?;
+    if selected.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(selected))
+    }
 }
 
 /// Resolve the `lf` a Session will be pinned to: an absolute path that exists.
@@ -309,6 +319,20 @@ pub(crate) async fn start_lf_session_with_env(
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone())),
     );
+    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
+    let environment = child_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let shell_command = lf_session_shell_command(argv, &environment);
+    start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
+}
+
+fn extend_session_control_context(
+    child_env: &mut Vec<(String, String)>,
+    context: &crate::child_session::ChildExecutionContext,
+    provenance: crate::build_info::BuildProvenance,
+) {
     let pinned = [
         (
             crate::store::CONTROL_BIN_ENV,
@@ -328,7 +352,7 @@ pub(crate) async fn start_lf_session_with_env(
             child_env.push((key.to_string(), value));
         }
     }
-    if !crate::build_info::provenance().is_release() {
+    if !provenance.is_release() {
         for (ordinary, control) in [
             ("LF_HOME", crate::store::CONTROL_HOME_ENV),
             ("LF_DB_PATH", crate::store::CONTROL_DB_PATH_ENV),
@@ -345,12 +369,6 @@ pub(crate) async fn start_lf_session_with_env(
             }
         }
     }
-    let environment = child_env
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    let shell_command = lf_session_shell_command(argv, &environment);
-    start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
 pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) -> String {
@@ -419,8 +437,56 @@ pub(crate) fn tmux_session_slug(value: &str) -> String {
 mod tests {
     use std::io::{BufRead, BufReader};
     use std::os::unix::process::CommandExt;
+    use std::path::PathBuf;
 
-    use super::{lf_session_shell_command, reap_child_process, tmux_installed};
+    use super::{
+        extend_session_control_context, lf_session_shell_command, reap_child_process,
+        select_binary_override, tmux_installed,
+    };
+    use crate::build_info::BuildProvenance;
+    use crate::child_session::ChildExecutionContext;
+
+    #[test]
+    fn development_ignores_stale_control_binary_override() {
+        assert_eq!(
+            select_binary_override(
+                BuildProvenance::Development,
+                Some("/production/lf".into()),
+                Some("/development/lf".into()),
+            ),
+            Some(PathBuf::from("/development/lf"))
+        );
+        assert_eq!(
+            select_binary_override(
+                BuildProvenance::Release,
+                Some("/production/lf".into()),
+                Some("/ambient/lf".into()),
+            ),
+            Some(PathBuf::from("/production/lf"))
+        );
+    }
+
+    #[test]
+    fn persisted_control_binary_wins_over_relaunching_callers_binary() {
+        let mut environment = vec![(
+            crate::store::CONTROL_BIN_ENV.to_string(),
+            "/persisted/lf".to_string(),
+        )];
+        let caller = ChildExecutionContext {
+            lf_bin: PathBuf::from("/caller/lf"),
+            lf_home: PathBuf::from("/caller/home"),
+            db_path: PathBuf::from("/caller/loopflow.db"),
+        };
+
+        extend_session_control_context(&mut environment, &caller, BuildProvenance::Release);
+
+        assert!(environment.iter().any(|(key, value)| {
+            key == crate::store::CONTROL_BIN_ENV && value == "/persisted/lf"
+        }));
+        assert!(!environment
+            .iter()
+            .any(|(key, value)| { key == crate::store::CONTROL_BIN_ENV && value == "/caller/lf" }));
+    }
 
     /// The probe must agree with whether tmux can actually be run. The previous
     /// `--version` probe disagreed on every machine that has tmux, which pinned

@@ -166,7 +166,7 @@ impl SqliteStore {
             "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
         )?;
 
-        if existing_database && crate::build_info::provenance().is_release() {
+        if existing_database {
             super::migrations::apply_sqlite_with_backup(&conn, path)?;
         } else {
             super::migrations::apply_sqlite(&conn)?;

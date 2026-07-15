@@ -10,9 +10,7 @@ use loopflow::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
     ProjectLaunchReceipt, TaskLaunchReceipt,
 };
-use loopflow::store::{
-    open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
-};
+use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
 use loopflow::task::{
     PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
 };

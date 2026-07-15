@@ -119,4 +119,3 @@ lease before adopting, replacing, or waking a process.
   remote SSH presentation.
 - Ten real handoffs and host-restart evidence; those require the launch and
   presentation slices above.
-

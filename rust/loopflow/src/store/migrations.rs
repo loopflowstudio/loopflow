@@ -166,8 +166,8 @@ const MIGRATIONS: &[Migration] = &[
             minor: 11,
             ordinal: 9,
         },
-        name: "profiles",
-        sql: include_str!("migrations/0.11.009_profiles.sql"),
+        name: "context_pressure",
+        sql: include_str!("migrations/0.11.009_context_pressure.sql"),
     },
     Migration {
         id: MigrationId {
@@ -175,9 +175,78 @@ const MIGRATIONS: &[Migration] = &[
             minor: 11,
             ordinal: 10,
         },
-        name: "provider_account_lifecycle",
-        sql: include_str!("migrations/0.11.010_provider_account_lifecycle.sql"),
+        name: "context_input_normalization",
+        sql: include_str!("migrations/0.11.010_context_input_normalization.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 11,
+        },
+        name: "profiles",
+        sql: include_str!("migrations/0.11.011_profiles.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 12,
+        },
+        name: "provider_account_lifecycle",
+        sql: include_str!("migrations/0.11.012_provider_account_lifecycle.sql"),
+    },
+];
+
+/// The exact branch-local history that reached one production ledger before
+/// main established `0.11.008_interactive_handoffs`. These ids were never
+/// released. They remain here only long enough to recognize and converge that
+/// known history without treating arbitrary unknown migrations as ours.
+const DIVERGENT_MIGRATIONS: &[Migration] = &[
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 8,
+        },
+        name: "context_pressure",
+        sql: include_str!("migrations/0.11.009_context_pressure.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 9,
+        },
+        name: "context_input_normalization",
+        sql: include_str!("migrations/0.11.010_context_input_normalization.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 10,
+        },
+        name: "profiles",
+        sql: include_str!("migrations/0.11.011_profiles.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 11,
+        },
+        name: "provider_account_lifecycle",
+        sql: include_str!("migrations/0.11.012_provider_account_lifecycle.sql"),
+    },
+];
+
+const CONVERGED_VERSIONS: &[&str] = &[
+    "0.11.008_interactive_handoffs",
+    "0.11.009_context_pressure",
+    "0.11.010_context_input_normalization",
+    "0.11.011_profiles",
+    "0.11.012_provider_account_lifecycle",
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -397,6 +466,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
     }
 
     adopt_legacy_baseline(conn, set)?;
+    adopt_divergent_history(conn, set)?;
 
     let applied = applied_versions(conn)?;
     for migration in pending_migrations(&applied, set)? {
@@ -423,6 +493,99 @@ fn adopt_legacy_baseline(conn: &rusqlite::Connection, set: &[Migration]) -> Stor
         "UPDATE schema_migrations SET version = ?1 WHERE version = ?2",
         [baseline.version(), LEGACY_BASELINE_VERSION.to_string()],
     )?;
+    Ok(())
+}
+
+/// Converge the one known branch-local history that reached production before
+/// `0.11.008_interactive_handoffs` shipped. Product schema must exactly match
+/// the claimed divergent prefix before any ledger identity is rewritten.
+fn adopt_divergent_history(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
+    let applied = applied_versions(conn)?;
+    let Some((canonical_start, divergent_len)) = divergent_history(&applied, set) else {
+        return Ok(());
+    };
+
+    validate_divergent_schema(conn, set, canonical_start, divergent_len)?;
+
+    let divergent_versions = DIVERGENT_MIGRATIONS[..divergent_len]
+        .iter()
+        .map(Migration::version)
+        .collect::<Vec<_>>();
+    let applied_at = divergent_versions
+        .iter()
+        .map(|version| {
+            conn.query_row(
+                "SELECT applied_at FROM schema_migrations WHERE version = ?1",
+                [version],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for version in &divergent_versions {
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version = ?1",
+            [version],
+        )?;
+    }
+
+    let interactive = &set[canonical_start];
+    conn.execute_batch(interactive.sql)?;
+    conn.execute(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+        (interactive.version(), applied_at[0]),
+    )?;
+
+    for (offset, applied_at) in applied_at.into_iter().enumerate() {
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+            (set[canonical_start + offset + 1].version(), applied_at),
+        )?;
+    }
+    Ok(())
+}
+
+fn divergent_history(applied: &[String], set: &[Migration]) -> Option<(usize, usize)> {
+    let canonical = set.iter().map(Migration::version).collect::<Vec<_>>();
+    let canonical_start = canonical
+        .iter()
+        .position(|version| version == CONVERGED_VERSIONS[0])?;
+    if canonical.len() < canonical_start + CONVERGED_VERSIONS.len()
+        || !canonical[canonical_start..canonical_start + CONVERGED_VERSIONS.len()]
+            .iter()
+            .map(String::as_str)
+            .eq(CONVERGED_VERSIONS.iter().copied())
+        || applied.len() <= canonical_start
+        || applied.len() > canonical_start + DIVERGENT_MIGRATIONS.len()
+        || applied[..canonical_start] != canonical[..canonical_start]
+    {
+        return None;
+    }
+
+    let divergent_len = applied.len() - canonical_start;
+    let divergent = DIVERGENT_MIGRATIONS[..divergent_len]
+        .iter()
+        .map(Migration::version)
+        .collect::<Vec<_>>();
+    (applied[canonical_start..] == divergent).then_some((canonical_start, divergent_len))
+}
+
+fn validate_divergent_schema(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    canonical_start: usize,
+    divergent_len: usize,
+) -> StoreResult<()> {
+    let expected = rusqlite::Connection::open_in_memory()?;
+    for migration in &set[..canonical_start] {
+        expected.execute_batch(migration.sql)?;
+    }
+    for migration in &DIVERGENT_MIGRATIONS[..divergent_len] {
+        expected.execute_batch(migration.sql)?;
+    }
+    if product_schema(conn)? != product_schema(&expected)? {
+        return Err(incompatible());
+    }
     Ok(())
 }
 
@@ -578,6 +741,9 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
     if applied.as_slice() == [LEGACY_BASELINE_VERSION] {
         return Ok(true);
     }
+    if divergent_history(&applied, MIGRATIONS).is_some() {
+        return Ok(true);
+    }
     Ok(!pending_migrations(&applied, MIGRATIONS)?.is_empty())
 }
 
@@ -596,7 +762,7 @@ mod tests {
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
         latest_known_version, latest_version_sqlite, product_schema, validate_set, Migration,
-        MigrationId, MIGRATIONS,
+        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
     use crate::task::TaskEventKind;
 
@@ -627,6 +793,22 @@ mod tests {
 
     fn baseline() -> Migration {
         MIGRATIONS[0]
+    }
+
+    fn apply_divergent_history(conn: &rusqlite::Connection, count: usize) {
+        let canonical_start = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "interactive_handoffs")
+            .unwrap();
+        apply_set(conn, &MIGRATIONS[..canonical_start]).unwrap();
+        for migration in &DIVERGENT_MIGRATIONS[..count] {
+            conn.execute_batch(migration.sql).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, unixepoch())",
+                [migration.version()],
+            )
+            .unwrap();
+        }
     }
 
     fn columns(conn: &rusqlite::Connection, table: &str) -> Vec<String> {
@@ -688,7 +870,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.010_provider_account_lifecycle"
+            "0.11.012_provider_account_lifecycle"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -709,10 +891,46 @@ mod tests {
                 "0.11.006_context_launch_work".to_string(),
                 "0.11.007_task_pr_parent".to_string(),
                 "0.11.008_interactive_handoffs".to_string(),
-                "0.11.009_profiles".to_string(),
-                "0.11.010_provider_account_lifecycle".to_string()
+                "0.11.009_context_pressure".to_string(),
+                "0.11.010_context_input_normalization".to_string(),
+                "0.11.011_profiles".to_string(),
+                "0.11.012_provider_account_lifecycle".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn every_known_divergent_prefix_converges_without_losing_rows() {
+        for count in 1..=DIVERGENT_MIGRATIONS.len() {
+            let conn = open();
+            conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+            apply_divergent_history(&conn, count);
+            conn.execute(
+                "INSERT INTO waves (id, name, repo, created_at) VALUES (?1, ?2, '/repo', 1)",
+                (format!("wave-{count}"), format!("Wave {count}")),
+            )
+            .unwrap();
+
+            apply_sqlite(&conn).unwrap();
+
+            assert_eq!(
+                latest_version_sqlite(&conn)
+                    .unwrap_or_else(|error| panic!("divergent prefix {count}: {error}")),
+                "0.11.012_provider_account_lifecycle"
+            );
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                applied_versions(&conn).unwrap(),
+                MIGRATIONS
+                    .iter()
+                    .map(Migration::version)
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
@@ -1201,7 +1419,30 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.010_provider_account_lifecycle"
+            "0.11.012_provider_account_lifecycle"
+        );
+    }
+
+    #[test]
+    fn divergent_repair_publishes_the_unmodified_previous_generation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        apply_divergent_history(&conn, DIVERGENT_MIGRATIONS.len());
+
+        apply_sqlite_with_backup(&conn, &path).unwrap();
+
+        let backup_path = directory
+            .path()
+            .join("loopflow.db.backup-0.11.011_provider_account_lifecycle");
+        let backup = rusqlite::Connection::open(backup_path).unwrap();
+        assert_eq!(
+            latest_applied_version_sqlite(&backup).unwrap().as_deref(),
+            Some("0.11.011_provider_account_lifecycle")
+        );
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.11.012_provider_account_lifecycle"
         );
     }
 

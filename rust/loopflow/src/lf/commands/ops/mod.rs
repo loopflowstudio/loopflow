@@ -781,7 +781,7 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
 
     if !result.deferrals.is_empty() {
         println!(
-            "  deferred — protected active/in-review Session ({}):",
+            "  deferred — protected writing Task body ({}):",
             result.deferrals.len()
         );
         for deferral in &result.deferrals {
@@ -790,6 +790,12 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
                 deferral.identifier, deferral.title, deferral.reason
             );
         }
+    }
+    if result.session_updates > 0 {
+        println!(
+            "  reconciled Task Session identifiers: {}",
+            result.session_updates
+        );
     }
     if result.already > 0 {
         println!("  already in team: {} (skipped)", result.already);

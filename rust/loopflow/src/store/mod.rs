@@ -1544,6 +1544,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_issue_identifier_rebinds_only_without_a_writing_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        let mut waiting = make_task_session(&wave, &project);
+        waiting.set_status(TaskSessionStatus::Waiting, "PR is open");
+        store
+            .create_task_session(&waiting, &make_task_pr(&waiting))
+            .await
+            .unwrap();
+        assert!(store
+            .rebind_task_issue_identifier("issue-uuid", "INF-123", "PRD-8")
+            .await
+            .unwrap());
+        assert!(store
+            .get_task_session_by_issue("INF-123")
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .get_task_session_by_issue("PRD-8")
+                .await
+                .unwrap()
+                .unwrap()
+                .launch
+                .issue
+                .identifier,
+            "PRD-8"
+        );
+        assert!(!store
+            .rebind_task_issue_identifier("issue-uuid", "INF-123", "PRD-8")
+            .await
+            .unwrap());
+
+        let mut running = make_task_session(&wave, &project);
+        running.launch.issue.id = LinearIssueId::new("issue-running").unwrap();
+        running.launch.issue.identifier = "W2-9".to_string();
+        running.worktree = PathBuf::from("/repo.running");
+        running.begin_generation("task-body".to_string());
+        store
+            .create_task_session(&running, &make_task_pr(&running))
+            .await
+            .unwrap();
+        assert!(store
+            .rebind_task_issue_identifier("issue-running", "W2-9", "PRD-9")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("active body"));
+    }
+
+    #[tokio::test]
     async fn task_pr_persists_head_sha_and_ci_observation() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))

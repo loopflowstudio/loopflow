@@ -157,14 +157,15 @@ Initiative, each project maps to a Linear Project, and each task maps to an
 Issue. `lf pm sync` refreshes a machine-local SQLite snapshot; no Project files
 are generated in the repository.
 
-Connect a wave to Linear once. `lf pm init` links or creates the Initiative,
-then writes its id into `GOAL.md` frontmatter:
+Connect a wave to Linear once. `lf pm init` links or creates the Initiative and
+Wave-owned team, then writes both ids into `GOAL.md` frontmatter:
 
 ```yaml
 # wave/infra/GOAL.md frontmatter
 pm:
   provider: linear
   linear_initiative: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
+  linear_team: 2d1f0a77-8b3e-4c9a-9f21-6e5d4c3b2a10
 ```
 
 Do not look up or paste this id by hand. With no pinned id, `lf pm init` links
@@ -174,7 +175,8 @@ id. Duplicate titles fail loudly.
 Then read and edit tasks:
 
 ```bash
-lf pm init --wave infra                                             # connect the Linear Initiative
+lf pm init --wave infra --team-key INF                              # connect or rebind Initiative + team
+lf pm reteam --wave infra --apply                                   # move Projects, then Issues without a writing body
 lf pm sync --wave infra                                             # refresh SQLite
 lf pm status                                                        # show linked waves and task counts
 lf pm show --wave infra                                             # read; refresh when stale
@@ -195,6 +197,7 @@ separate Tasks and name the Project each advances.
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident loop |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
+| `pm.linear_team` | Linear team id owning the Wave's Project and Task prefixes |
 | `home` | The Wave's execution Home — a user-owned address (default: the current user's local machine) |
 
 The resident loop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).

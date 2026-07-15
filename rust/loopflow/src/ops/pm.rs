@@ -11,6 +11,7 @@ use std::path::Path;
 
 use futures_util::future::try_join_all;
 
+use crate::child_session::ChildLeaseState;
 use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::ops::error::{OpsError, OpsResult};
@@ -25,7 +26,7 @@ use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
 use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
-use crate::task::TaskSessionStatus;
+use crate::task::{TaskSession, TaskSessionStatus};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -151,7 +152,7 @@ pub struct PmReteamMove {
     pub new_identifier: Option<String>,
 }
 
-/// One open issue left in place to protect a live/in-review Task.
+/// One open issue left in place while a Task body can still write its old id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamDeferral {
     pub identifier: String,
@@ -182,6 +183,8 @@ pub struct PmReteamResult {
     pub deferrals: Vec<PmReteamDeferral>,
     /// Issues already carrying the target team key (skipped — idempotency).
     pub already: usize,
+    /// Durable Task Sessions whose cached display identifier was reconciled.
+    pub session_updates: usize,
     /// Completed issues left in the shared team as historical.
     pub historical: usize,
 }
@@ -291,9 +294,10 @@ async fn pm_create_project_async(
         definition: title.to_string(),
         krs: Vec::new(),
     };
+    let linear_name = linear_project_name(&wave, &seed.name);
     let id = match ctx
         .client
-        .create_project(&ctx.initiative, &seed.name, &seed.definition, &seed.krs)
+        .create_project(&ctx.initiative, &linear_name, &seed.definition, &seed.krs)
         .await
     {
         Ok(id) => id,
@@ -930,21 +934,26 @@ async fn pm_init_async(
     let existing_initiative = read_initiative(repo, &wave, provider);
     let existing_team = read_team(repo, &wave, provider);
 
-    // Full no-op fast path: both bindings present, no network touch.
+    let explicit_team = options.team_key.is_some() || options.team_name.is_some();
+
+    // Full no-op fast path: both bindings present and the caller did not ask
+    // to adopt a different team. An explicit team selection is a rebind.
     if let (Some(initiative_id), Some(team_id)) =
         (existing_initiative.as_ref(), existing_team.as_ref())
     {
-        progress.status(&format!(
-            "wave/{wave} already linked to {provider} Initiative {initiative_id} and team {team_id}"
-        ));
-        return Ok(PmInitResult {
-            wave,
-            initiative_id: initiative_id.clone(),
-            created: false,
-            team_id: team_id.clone(),
-            team_key: None,
-            team_created: false,
-        });
+        if !explicit_team {
+            progress.status(&format!(
+                "wave/{wave} already linked to {provider} Initiative {initiative_id} and team {team_id}"
+            ));
+            return Ok(PmInitResult {
+                wave,
+                initiative_id: initiative_id.clone(),
+                created: false,
+                team_id: team_id.clone(),
+                team_key: None,
+                team_created: false,
+            });
+        }
     }
 
     let summary = wave_summary(repo, &wave)?;
@@ -983,34 +992,41 @@ async fn pm_init_async(
         write_initiative_to_goal(repo, &wave, provider, &initiative_id)?;
     }
 
-    // Team: keep an existing binding, else adopt or create the requested one.
-    let team_missing = existing_team.is_none();
-    let (team_id, team_key, team_created) = match existing_team {
-        Some(id) => (id, None, false),
-        None => {
-            let name = options.team_name.clone().unwrap_or_else(|| title.clone());
-            let key = options
-                .team_key
+    // Team: an explicit key/name rebinds an existing Wave; otherwise keep its
+    // binding or create the default one when missing.
+    let resolve_requested_team = explicit_team || existing_team.is_none();
+    let (team_id, team_key, team_created) = if resolve_requested_team {
+        let name = options.team_name.clone().unwrap_or_else(|| title.clone());
+        let key = options
+            .team_key
+            .clone()
+            .unwrap_or_else(|| default_team_key(&wave));
+        progress.status(&format!(
+            "resolving {provider} team `{name}` (key {key}) for wave/{wave}"
+        ));
+        let team = client.ensure_team(&name, &key).await.map_err(pm_to_ops)?;
+        progress.status(&format!(
+            "{} {provider} team {} (key {})",
+            if team.created { "created" } else { "adopted" },
+            team.id,
+            team.key
+        ));
+        (team.id, Some(team.key), team.created)
+    } else {
+        (
+            existing_team
                 .clone()
-                .unwrap_or_else(|| default_team_key(&wave));
-            progress.status(&format!(
-                "resolving {provider} team `{name}` (key {key}) for wave/{wave}"
-            ));
-            let team = client.ensure_team(&name, &key).await.map_err(pm_to_ops)?;
-            progress.status(&format!(
-                "{} {provider} team {} (key {})",
-                if team.created { "created" } else { "adopted" },
-                team.id,
-                team.key
-            ));
-            (team.id, Some(team.key), team.created)
-        }
+                .expect("an unrequested existing team was checked above"),
+            None,
+            false,
+        )
     };
-    if team_missing {
+    let team_changed = existing_team.as_deref() != Some(team_id.as_str());
+    if team_changed {
         write_team_to_goal(repo, &wave, provider, &team_id)?;
     }
 
-    if initiative_missing || team_missing {
+    if initiative_missing || team_changed {
         let _ = crate::ops::commit_workflow(
             repo,
             &crate::ops::CommitOptions {
@@ -1439,31 +1455,68 @@ enum ReteamClass {
     Historical,
     /// Already carries the target team key → skip (idempotency key).
     Already,
-    /// A non-terminal Task Session owns it → defer to protect live/in-review work.
+    /// A writing Task body owns it → defer until that process generation exits.
     Defer(String),
-    /// Open, settled, not yet in the team → move.
+    /// Open, not yet in the team, and not being written → move.
     Move,
 }
 
-/// An issue moves only if it is open, not already in the target team, and has no
-/// non-terminal Session. `is_terminal()` is `Completed | Abandoned`, so every
-/// other Session state (running, waiting, blocked, failed, …) defers — the
-/// conservative "protect anything active or in-review" rule.
+#[derive(Debug, Clone, Copy)]
+struct ReteamSessionState<'a> {
+    identifier: &'a str,
+    status: TaskSessionStatus,
+    lease_state: Option<ChildLeaseState>,
+}
+
+impl<'a> From<&'a TaskSession> for ReteamSessionState<'a> {
+    fn from(session: &'a TaskSession) -> Self {
+        Self {
+            identifier: &session.launch.issue.identifier,
+            status: session.status,
+            lease_state: session.latest_process.as_ref().map(|process| process.state),
+        }
+    }
+}
+
+impl ReteamSessionState<'_> {
+    fn protection_reason(self) -> Option<String> {
+        if self.status.is_process_active()
+            || matches!(
+                self.lease_state,
+                Some(ChildLeaseState::Reserved | ChildLeaseState::Active)
+            )
+        {
+            Some(format!("{} body", self.status.as_str()))
+        } else {
+            None
+        }
+    }
+}
+
+/// Open issues move unless a Task body can still write the old identifier back.
+/// Waiting-for-review, blocked, and failed Sessions are durable intent without a
+/// process lease, so renumbering them is safe once their cached identifier is
+/// updated atomically.
 fn classify_reteam_item(
     item: &PmItem,
     team_key: &str,
-    session_status: Option<TaskSessionStatus>,
+    session: Option<ReteamSessionState<'_>>,
 ) -> ReteamClass {
     if item.completed {
         return ReteamClass::Historical;
     }
-    if identifier_has_team_prefix(&item.identifier, team_key) {
+    let already = identifier_has_team_prefix(&item.identifier, team_key);
+    let session_needs_update = session.is_some_and(|session| session.identifier != item.identifier);
+    if let Some(reason) = session
+        .filter(|_| !already || session_needs_update)
+        .and_then(ReteamSessionState::protection_reason)
+    {
+        return ReteamClass::Defer(reason);
+    }
+    if already {
         return ReteamClass::Already;
     }
-    match session_status {
-        Some(status) if !status.is_terminal() => ReteamClass::Defer(status.as_str().to_string()),
-        _ => ReteamClass::Move,
-    }
+    ReteamClass::Move
 }
 
 /// Whether an identifier already belongs to the team keyed by `team_key`. The
@@ -1531,6 +1584,7 @@ async fn pm_reteam_async(
     let mut moves = Vec::new();
     let mut deferrals = Vec::new();
     let mut already = 0usize;
+    let mut session_updates = 0usize;
     let mut historical = 0usize;
 
     for project in &projects {
@@ -1547,14 +1601,38 @@ async fn pm_reteam_async(
         let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
         for item in items {
             // Look up the protecting Session by the issue's stable UUID.
-            let session_status = store
+            let session = store
                 .get_task_session_by_issue(&item.id)
                 .await
-                .map_err(|err| OpsError::Message(format!("failed to read task registry: {err}")))?
-                .map(|session| session.status);
-            match classify_reteam_item(&item, &team_key, session_status) {
+                .map_err(|err| OpsError::Message(format!("failed to read task registry: {err}")))?;
+            match classify_reteam_item(
+                &item,
+                &team_key,
+                session.as_ref().map(ReteamSessionState::from),
+            ) {
                 ReteamClass::Historical => historical += 1,
-                ReteamClass::Already => already += 1,
+                ReteamClass::Already => {
+                    already += 1;
+                    if options.apply {
+                        if let Some(session) = session {
+                            session_updates += usize::from(
+                                store
+                                    .rebind_task_issue_identifier(
+                                        &item.id,
+                                        &session.launch.issue.identifier,
+                                        &item.identifier,
+                                    )
+                                    .await
+                                    .map_err(|err| {
+                                        OpsError::Message(format!(
+                                            "failed to reconcile Task Session for {}: {err}",
+                                            item.identifier
+                                        ))
+                                    })?,
+                            );
+                        }
+                    }
+                }
                 ReteamClass::Defer(reason) => deferrals.push(PmReteamDeferral {
                     identifier: item.identifier,
                     title: item.name,
@@ -1605,6 +1683,21 @@ async fn pm_reteam_async(
                 )
                 .await
                 .map_err(pm_to_ops)?;
+            session_updates += usize::from(
+                store
+                    .rebind_task_issue_identifier(
+                        &mv.id,
+                        &mv.old_identifier,
+                        &new_identifier,
+                    )
+                    .await
+                    .map_err(|err| {
+                        OpsError::Message(format!(
+                            "moved {} to {new_identifier}, but failed to reconcile its Task Session: {err}",
+                            mv.old_identifier
+                        ))
+                    })?,
+            );
             mv.new_identifier = Some(new_identifier);
         }
         if !project_moves.is_empty() || !moves.is_empty() {
@@ -1628,6 +1721,7 @@ async fn pm_reteam_async(
         moves,
         deferrals,
         already,
+        session_updates,
         historical,
     })
 }
@@ -1749,8 +1843,7 @@ async fn pm_sync_async(
             }
             // A Project stranded on a foreign team (e.g. the shared team it was
             // created against before the wave was bound) is invisible to the
-            // team-agnostic read path — flag it and name the repair. `reteam`
-            // never touched Projects, so this is the only surface that catches it.
+            // team-agnostic read path — flag it and name the `reteam` repair.
             if let Some(team_id) = &bound_team {
                 if project_off_team(team_id, project.team_ids.as_deref()) {
                     let teams = project.team_ids.as_deref().unwrap_or_default().join(", ");
@@ -1787,7 +1880,7 @@ async fn pm_sync_async(
             if stranded > 0 {
                 diagnostics.push(format!(
                     "wave/{wave} has {stranded} open issue(s) not in team {team_key}; \
-                     run `lf pm reteam --wave {wave}` to move the settled ones"
+                     run `lf pm reteam --wave {wave}` to plan their migration"
                 ));
             }
         }
@@ -1894,8 +1987,9 @@ async fn pm_project_write_async(
             )));
         }
         progress.status(&format!("updating Linear Project `{}`", project.name));
+        let linear_name = linear_project_name(&wave, &name);
         ctx.client
-            .update_project(&project.id, &name, &options.definition, &krs)
+            .update_project(&project.id, &linear_name, &options.definition, &krs)
             .await
             .map_err(pm_to_ops)?;
         (project.id.clone(), new_slug, false)
@@ -1910,9 +2004,10 @@ async fn pm_project_write_async(
             )));
         }
         progress.status(&format!("creating Linear Project `{name}`"));
+        let linear_name = linear_project_name(&wave, &name);
         let id = ctx
             .client
-            .create_project(&ctx.initiative, &name, &options.definition, &krs)
+            .create_project(&ctx.initiative, &linear_name, &options.definition, &krs)
             .await
             .map_err(pm_to_ops)?;
         (id, slug, true)
@@ -2136,7 +2231,11 @@ async fn checked_projects(
     initiative: &str,
     wave: &str,
 ) -> OpsResult<Vec<PmProject>> {
-    let projects = client.list_projects(initiative).await.map_err(pm_to_ops)?;
+    let mut projects = client.list_projects(initiative).await.map_err(pm_to_ops)?;
+    for project in &mut projects {
+        project.name = canonical_project_name(wave, &project.name).to_string();
+        project.slug = crate::pm::project_slug(&project.name);
+    }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
 }
@@ -2167,6 +2266,18 @@ fn title_case(slug: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn linear_project_name(wave: &str, canonical_name: &str) -> String {
+    format!("{} — {}", title_case(wave), canonical_name.trim())
+}
+
+fn canonical_project_name<'a>(wave: &str, linear_name: &'a str) -> &'a str {
+    let prefix = format!("{} — ", title_case(wave));
+    linear_name
+        .strip_prefix(&prefix)
+        .unwrap_or(linear_name)
+        .trim()
 }
 
 fn block_on_pm<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
@@ -2337,6 +2448,23 @@ mod tests {
     }
 
     #[test]
+    fn team_write_rebinds_without_disturbing_the_initiative() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "product",
+            "pm:\n  provider: linear\n  linear_initiative: \"initiative-1\"\n  linear_team: \"team-shared\"\n",
+        );
+
+        write_team_to_goal(repo.path(), "product", PmProviderKind::Linear, "team-prd")
+            .expect("replace team");
+
+        let pm = read_wave_pm_config(repo.path(), "product").expect("pm config");
+        assert_eq!(pm.linear_initiative.as_deref(), Some("initiative-1"));
+        assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
+    }
+
+    #[test]
     fn resolve_team_prefers_wave_binding_over_config() {
         let repo = tempfile::tempdir().expect("temp dir");
         write_goal(
@@ -2366,6 +2494,26 @@ mod tests {
         assert_eq!(default_team_key("x"), "LF");
     }
 
+    #[test]
+    fn linear_project_prefix_is_presentation_only() {
+        assert_eq!(
+            linear_project_name("product", "Loopflow API"),
+            "Product — Loopflow API"
+        );
+        assert_eq!(
+            canonical_project_name("product", "Product — Loopflow API"),
+            "Loopflow API"
+        );
+        assert_eq!(
+            crate::pm::project_slug(canonical_project_name("product", "Product — Loopflow API")),
+            "loopflow-api"
+        );
+        assert_eq!(
+            canonical_project_name("product", "Unprefixed migration input"),
+            "Unprefixed migration input"
+        );
+    }
+
     fn reteam_item(identifier: &str, completed: bool) -> PmItem {
         PmItem {
             id: format!("uuid-of-{identifier}"),
@@ -2377,6 +2525,18 @@ mod tests {
             completed,
             project: None,
             assignee: None,
+        }
+    }
+
+    fn reteam_session(
+        identifier: &str,
+        status: TaskSessionStatus,
+        lease_state: Option<ChildLeaseState>,
+    ) -> ReteamSessionState<'_> {
+        ReteamSessionState {
+            identifier,
+            status,
+            lease_state,
         }
     }
 
@@ -2424,16 +2584,24 @@ mod tests {
             classify_reteam_item(
                 &reteam_item("W2-2", false),
                 "PRD",
-                Some(TaskSessionStatus::Running)
+                Some(reteam_session(
+                    "W2-2",
+                    TaskSessionStatus::Running,
+                    Some(ChildLeaseState::Active)
+                ))
             ),
-            ReteamClass::Defer("running".to_string())
+            ReteamClass::Defer("running body".to_string())
         );
-        // Open with a terminal Session → move (work is over).
+        // Open with a review-waiting Session → move and reconcile its display id.
         assert_eq!(
             classify_reteam_item(
                 &reteam_item("W2-3", false),
                 "PRD",
-                Some(TaskSessionStatus::Completed)
+                Some(reteam_session(
+                    "W2-3",
+                    TaskSessionStatus::Waiting,
+                    Some(ChildLeaseState::Finished)
+                ))
             ),
             ReteamClass::Move
         );
@@ -2445,23 +2613,77 @@ mod tests {
     }
 
     #[test]
-    fn reteam_defers_every_non_terminal_session_state() {
+    fn reteam_protects_only_sessions_with_a_writing_body() {
         for status in [
             TaskSessionStatus::Created,
-            TaskSessionStatus::Starting,
-            TaskSessionStatus::Running,
             TaskSessionStatus::Waiting,
             TaskSessionStatus::Blocked,
             TaskSessionStatus::Failed,
         ] {
-            assert!(
-                matches!(
-                    classify_reteam_item(&reteam_item("W2-9", false), "PRD", Some(status)),
-                    ReteamClass::Defer(_)
+            assert_eq!(
+                classify_reteam_item(
+                    &reteam_item("W2-9", false),
+                    "PRD",
+                    Some(reteam_session("W2-9", status, None))
                 ),
-                "{status:?} must defer"
+                ReteamClass::Move,
+                "{status:?} has no writing body"
             );
         }
+        for status in [TaskSessionStatus::Starting, TaskSessionStatus::Running] {
+            assert!(matches!(
+                classify_reteam_item(
+                    &reteam_item("W2-9", false),
+                    "PRD",
+                    Some(reteam_session(
+                        "W2-9",
+                        status,
+                        Some(ChildLeaseState::Active)
+                    ))
+                ),
+                ReteamClass::Defer(_)
+            ));
+        }
+        assert!(matches!(
+            classify_reteam_item(
+                &reteam_item("W2-9", false),
+                "PRD",
+                Some(reteam_session(
+                    "W2-9",
+                    TaskSessionStatus::Waiting,
+                    Some(ChildLeaseState::Reserved)
+                ))
+            ),
+            ReteamClass::Defer(_)
+        ));
+    }
+
+    #[test]
+    fn reteam_reconciles_only_when_an_already_moved_session_is_idle() {
+        assert_eq!(
+            classify_reteam_item(
+                &reteam_item("PRD-8", false),
+                "PRD",
+                Some(reteam_session(
+                    "W2-9",
+                    TaskSessionStatus::Waiting,
+                    Some(ChildLeaseState::Finished)
+                ))
+            ),
+            ReteamClass::Already
+        );
+        assert!(matches!(
+            classify_reteam_item(
+                &reteam_item("PRD-8", false),
+                "PRD",
+                Some(reteam_session(
+                    "W2-9",
+                    TaskSessionStatus::Running,
+                    Some(ChildLeaseState::Active)
+                ))
+            ),
+            ReteamClass::Defer(_)
+        ));
     }
 
     #[test]

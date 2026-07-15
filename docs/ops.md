@@ -121,14 +121,15 @@ lf pm task update --id 1207... --title "Refine dark mode"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 lf pm task move --id 1207... --wave designer --project api
 lf pm rename --wave designer --title "Designer"                  # rename the backing Linear Initiative
-lf pm init --wave designer                                       # connect the Initiative
+lf pm init --wave designer --team-key DSG                        # connect or rebind Initiative + team
+lf pm reteam --wave designer --apply                             # move Projects, then open Issues without a writing body
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `status` | Show linked waves, backing Linear Initiative names, and task counts by Project |
 | `show` | Export the SQLite Project/task snapshot; refresh stale data when possible |
-| `project create/update/archive` | Write or retire Linear Projects, then refresh SQLite |
+| `project create/update/archive` | Write or retire Wave-prefixed Linear Projects, then refresh SQLite |
 | `task create` | Create a Linear task attached to a Project |
 | `task update` | Edit an existing Linear task |
 | `task done` | Close a Linear task and optionally comment with a PR link |
@@ -136,12 +137,12 @@ lf pm init --wave designer                                       # connect the I
 | `sync` | Fetch Linear Initiatives, Projects, KRs, and Issues into SQLite |
 | `sync --plan` | Report Initiative/Project drift without writing SQLite |
 | `rename` | Rename the Linear Initiative backing a wave |
-| `init` | Create or connect the wave's Linear Initiative and write its stable id into `GOAL.md` |
+| `init` | Create or connect the Wave's Linear Initiative and team; an explicit team key rebinds an existing Wave |
 
 | Flag | Description |
 |------|-------------|
 | `--wave NAME` | Target wave (defaults to the current branch's wave) |
-| `--project SLUG` | Linear Project slug from the synced snapshot |
+| `--project SLUG` | Canonical Loopflow Project slug; the Wave prefix shown in Linear is excluded |
 | `--sync` | Refresh from Linear before reading |
 | `--no-sync` | Read SQLite only; never contact Linear |
 | `--id TASK-ID` | Existing Linear issue to update or close |
@@ -160,7 +161,16 @@ pm:
 
 When the id is absent, init derives the Initiative title from the wave name.
 It links one exact match, creates one when none exists, and fails when the title
-is ambiguous. Later commands use the persisted id, never the mutable title.
+is ambiguous. It also binds a Wave-owned team whose key prefixes new Issues.
+Passing an explicit `--team-key` replaces an existing team binding after
+adopting or creating that exact team. Later commands use persisted ids, never
+mutable titles.
+
+Linear's Projects view is flat, so provider titles use `<Wave> — <Project>`.
+Loopflow removes that display prefix while reading and keeps the canonical name
+and slug. Creating `Loopflow API` in `product` therefore shows `Product —
+Loopflow API` in Linear and remains `project:loopflow-api` everywhere in
+Loopflow.
 
 By default, `show` serves snapshots younger than one hour without a network
 request. Older snapshots get one five-second refresh attempt; failures fall

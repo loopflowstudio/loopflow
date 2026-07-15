@@ -48,6 +48,27 @@ struct WorkAttentionTests {
         #expect(working.rows.map { $0.task.task.identifier } == ["W2-1", "W2-2"])
     }
 
+    @Test("Shared fixture preserves all attention states and the spoken reason")
+    func sharedAttentionFixturePreservesProjection() throws {
+        let tasks = try loadAttentionFixture()
+
+        #expect(tasks.count == 8)
+        #expect(tasks["live_advancing"]?.attention.level == .green)
+        #expect(nowGroup(for: try #require(tasks["live_advancing"])) == .working)
+        #expect(nowGroup(for: try #require(tasks["live_human_wait"])) == .needsInput)
+        #expect(tasks["dead_dirty"]?.attention.localProgress.dirty == true)
+        #expect(tasks["dead_authored_commits"]?.attention.localProgress.authoredCommits == true)
+        #expect(nowGroup(for: try #require(tasks["clean_backlog"])) == nil)
+        #expect(nowGroup(for: try #require(tasks["completed"])) == nil)
+        #expect(tasks["stale"]?.attention.localProgress.recoveryRequired == true)
+        #expect(nowGroup(for: try #require(tasks["unavailable"])) == .unknown)
+
+        let dirty = try #require(tasks["dead_dirty"])
+        let spoken = taskAttentionAccessibilityLabel(dirty)
+        #expect(spoken.contains(dirty.attention.reason))
+        #expect(spoken.contains("Next owner: task"))
+    }
+
     // MARK: - Fixtures
 
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {
@@ -59,6 +80,20 @@ struct WorkAttentionTests {
         return try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
     }
 
+    private func loadAttentionFixture(
+        sourceFile: String = #filePath
+    ) throws -> [String: RoadmapTask] {
+        let fixture = URL(fileURLWithPath: sourceFile)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_attention_states.json")
+        return try JSONDecoder().decode(
+            [String: RoadmapTask].self,
+            from: Data(contentsOf: fixture)
+        )
+    }
+
     private func decodeWave(workingTasks: [(String, String)]) throws -> WaveRoadmap {
         let tasks = workingTasks.map { identifier, statusAt in
             """
@@ -67,6 +102,7 @@ struct WorkAttentionTests {
               "reference": {"issue_url":null,"workspace":null},
               "runtime": {"session_id":"ts_\(identifier)","project_session_id":"ps_1","status":"running","reason":"working","status_at":"\(statusAt)","provider":"claude","process_alive":true},
               "next_move": {"owner":"task","reason":"working"},
+              "attention": {"level":"green","reason":"working","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":60,"next_owner":"task","controls":["attach","interrupt"],"pm_completed":false,"session_status":"running","process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
               "active_pr": null,
               "section": "now"
             }

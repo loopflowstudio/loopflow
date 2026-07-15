@@ -64,6 +64,7 @@ struct RegistryQueryTests {
               "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
+              "attention":{"level":"green","reason":"provider turn is active","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"next_owner":"task","controls":["attach","interrupt"],"pm_completed":false,"session_status":"running","process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
               "prs":[],
               "active_pr":null
             }]

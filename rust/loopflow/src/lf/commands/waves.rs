@@ -243,6 +243,86 @@ pub struct TaskRuntimeSnapshot {
     pub process_alive: bool,
 }
 
+/// The compact Task attention signal shared by terminal and app surfaces. The
+/// names are deliberately the product's visual vocabulary: consumers do not
+/// reinterpret Session/process combinations into their own colors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskAttentionLevel {
+    Green,
+    Red,
+    Black,
+    Unknown,
+}
+
+/// Lifecycle controls the current evidence makes safe. Navigation affordances
+/// such as opening the worktree or PR are references, not lifecycle controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskAttentionControl {
+    Start,
+    Attach,
+    Resume,
+    Interrupt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskProcessEvidenceState {
+    Observed,
+    NotExpected,
+    NotApplicable,
+    Unavailable,
+}
+
+/// Raw process constituent behind the attention fold. `alive` is present only
+/// when this machine could look; absence never means dead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskProcessEvidence {
+    pub state: TaskProcessEvidenceState,
+    pub alive: Option<bool>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalProgressEvidenceState {
+    Observed,
+    Missing,
+    NotApplicable,
+    Unavailable,
+}
+
+/// The one definition of unsettled local Task progress. Every constituent is
+/// explicit so a popover can explain the fold without running Git again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalProgressEvidence {
+    pub state: LocalProgressEvidenceState,
+    pub unsettled: Option<bool>,
+    pub dirty: Option<bool>,
+    pub authored_commits: Option<bool>,
+    pub recovery_required: Option<bool>,
+    pub reason: Option<String>,
+}
+
+/// A Task's shared attention projection and the evidence that proves it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAttentionSnapshot {
+    pub level: TaskAttentionLevel,
+    pub reason: String,
+    /// RFC3339 time process/workspace evidence was sampled.
+    pub observed_at: String,
+    /// Age of the durable Session state at that sample, if a Session exists.
+    pub evidence_age_secs: Option<i64>,
+    pub next_owner: NextMoveOwner,
+    pub controls: Vec<TaskAttentionControl>,
+    pub pm_completed: bool,
+    pub session_status: Option<TaskSessionStatus>,
+    pub process: TaskProcessEvidence,
+    pub local_progress: LocalProgressEvidence,
+    pub active_pr_phase: Option<PrPhase>,
+}
+
 /// Stable references for one Task, shared verbatim by `lf status` and
 /// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
 /// from the durable Task Session and outlives its process and final PR.
@@ -268,6 +348,7 @@ pub struct TaskDetailSnapshot {
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub directive: Option<DirectiveSnapshot>,
     pub next_move: NextMove,
+    pub attention: TaskAttentionSnapshot,
     pub prs: Vec<PrSnapshot>,
     pub active_pr: Option<String>,
 }
@@ -398,6 +479,7 @@ pub struct RoadmapTask {
     pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub next_move: NextMove,
+    pub attention: TaskAttentionSnapshot,
     pub active_pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -486,8 +568,9 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one `tmux list-sessions` for the whole
-/// read, no git probes, no network. `lf status` answers "is it healthy"; this
-/// answers "what is being worked on and what could be".
+/// read, bounded Git probes for Tasks with Sessions, and no network. `lf status`
+/// answers "is it healthy"; this answers "what is being worked on and what
+/// could be".
 pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -579,8 +662,8 @@ async fn wave_roadmap_projects(
             }
         }
     };
-    // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail
-    // and costs a git probe per PR; the roadmap stays subprocess-free past tmux.
+    // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail.
+    // Roadmap's bounded Git reads belong only to the shared attention evidence.
     match snapshot_projects(
         store,
         wave,
@@ -633,6 +716,7 @@ fn roadmap_task(detail: TaskDetailSnapshot, liveness: Liveness) -> RoadmapTask {
         reference: detail.reference,
         runtime: detail.runtime,
         next_move: detail.next_move,
+        attention: detail.attention,
         active_pr,
         section,
     }
@@ -1124,6 +1208,18 @@ async fn snapshot_task_detail(
             reason: "Task is ready to start".to_string(),
         },
     };
+    let observed_at = now();
+    let process = task_process_evidence(session, runtime.as_ref(), liveness);
+    let local_progress = task_local_progress(session, active, &process);
+    let attention = derive_task_attention(
+        item.completed,
+        runtime.as_ref(),
+        &next_move,
+        active.map(TaskPr::phase),
+        process,
+        local_progress,
+        observed_at,
+    );
     let directive = match session {
         Some(session) => {
             current_directive(
@@ -1141,12 +1237,13 @@ async fn snapshot_task_detail(
         runtime,
         directive,
         next_move,
+        attention,
         prs: prs
             .iter()
             .map(|pr| {
-                // PR emptiness is an execution-plane fact (`lf status`); it costs a
-                // git probe per active PR, so `lf roadmap` opts out (`probe_pr_empty`
-                // false) to keep its machine-wide read subprocess-free.
+                // PR emptiness is an execution-plane fact (`lf status`); it costs
+                // an additional Git comparison, so `lf roadmap` opts out. The
+                // attention fold already carries the progress evidence it needs.
                 let empty = match (session, active) {
                     (Some(session), Some(active)) if probe_pr_empty && active.id == pr.id => {
                         task_pr_empty(session, pr)
@@ -1158,6 +1255,225 @@ async fn snapshot_task_detail(
             .collect(),
         active_pr: active.map(|pr| pr.id.to_string()),
     })
+}
+
+fn task_process_evidence(
+    session: Option<&TaskSession>,
+    runtime: Option<&TaskRuntimeSnapshot>,
+    liveness: &TmuxLiveness,
+) -> TaskProcessEvidence {
+    let Some(session) = session else {
+        return TaskProcessEvidence {
+            state: TaskProcessEvidenceState::NotApplicable,
+            alive: None,
+            reason: None,
+        };
+    };
+    if !session.status.is_process_active() {
+        return TaskProcessEvidence {
+            state: TaskProcessEvidenceState::NotExpected,
+            alive: None,
+            reason: None,
+        };
+    }
+    if !liveness.installed {
+        return TaskProcessEvidence {
+            state: TaskProcessEvidenceState::Unavailable,
+            alive: None,
+            reason: Some("tmux is unavailable; this machine cannot observe the Task body".into()),
+        };
+    }
+    TaskProcessEvidence {
+        state: TaskProcessEvidenceState::Observed,
+        alive: Some(runtime.is_some_and(|runtime| runtime.process_alive)),
+        reason: None,
+    }
+}
+
+fn task_local_progress(
+    session: Option<&TaskSession>,
+    active_pr: Option<&TaskPr>,
+    process: &TaskProcessEvidence,
+) -> LocalProgressEvidence {
+    let Some(session) = session else {
+        return LocalProgressEvidence {
+            state: LocalProgressEvidenceState::NotApplicable,
+            unsettled: Some(false),
+            dirty: None,
+            authored_commits: None,
+            recovery_required: None,
+            reason: None,
+        };
+    };
+    inspect_task_local_progress(
+        session.status,
+        &session.worktree,
+        active_pr.map(|pr| pr.base_commit.as_str()),
+        process,
+    )
+}
+
+fn inspect_task_local_progress(
+    status: TaskSessionStatus,
+    worktree: &Path,
+    active_pr_base: Option<&str>,
+    process: &TaskProcessEvidence,
+) -> LocalProgressEvidence {
+    let recovery_required = if status.is_process_active() {
+        process.alive.map(|alive| !alive)
+    } else {
+        Some(false)
+    };
+    if !worktree.exists() {
+        if status.is_terminal() && active_pr_base.is_none() {
+            return LocalProgressEvidence {
+                state: LocalProgressEvidenceState::NotApplicable,
+                unsettled: Some(false),
+                dirty: None,
+                authored_commits: None,
+                recovery_required: Some(false),
+                reason: Some("terminal Task delivery is settled; no worktree remains".into()),
+            };
+        }
+        return LocalProgressEvidence {
+            state: LocalProgressEvidenceState::Missing,
+            unsettled: Some(true),
+            dirty: None,
+            authored_commits: None,
+            recovery_required: Some(true),
+            reason: Some(format!("Task worktree is missing: {}", worktree.display())),
+        };
+    }
+    let dirty = match crate::engine::git::is_clean(worktree) {
+        Ok(clean) => !clean,
+        Err(error) => {
+            return LocalProgressEvidence {
+                state: LocalProgressEvidenceState::Unavailable,
+                unsettled: None,
+                dirty: None,
+                authored_commits: None,
+                recovery_required,
+                reason: Some(format!("failed to inspect Task worktree: {error}")),
+            }
+        }
+    };
+    let authored_commits = match active_pr_base {
+        Some(base) => match crate::engine::git::rev_parse(worktree, "HEAD") {
+            Ok(head) => Some(head != base),
+            Err(error) => {
+                return LocalProgressEvidence {
+                    state: LocalProgressEvidenceState::Unavailable,
+                    unsettled: dirty.then_some(true),
+                    dirty: Some(dirty),
+                    authored_commits: None,
+                    recovery_required,
+                    reason: Some(format!("failed to inspect Task HEAD: {error}")),
+                }
+            }
+        },
+        // Merged or abandoned PR history is settled delivery. With no active
+        // PR only new dirty changes can still require local recovery.
+        None => Some(false),
+    };
+    let unsettled = match recovery_required {
+        Some(recovery) => Some(dirty || authored_commits == Some(true) || recovery),
+        None if dirty || authored_commits == Some(true) => Some(true),
+        None => None,
+    };
+    LocalProgressEvidence {
+        state: LocalProgressEvidenceState::Observed,
+        unsettled,
+        dirty: Some(dirty),
+        authored_commits,
+        recovery_required,
+        reason: None,
+    }
+}
+
+fn derive_task_attention(
+    pm_completed: bool,
+    runtime: Option<&TaskRuntimeSnapshot>,
+    next_move: &NextMove,
+    active_pr_phase: Option<PrPhase>,
+    process: TaskProcessEvidence,
+    local_progress: LocalProgressEvidence,
+    observed_at: time::OffsetDateTime,
+) -> TaskAttentionSnapshot {
+    let live = process.alive == Some(true);
+    let human_handoff = matches!(
+        next_move.owner,
+        NextMoveOwner::Human | NextMoveOwner::Review
+    );
+    let failed = runtime.is_some_and(|runtime| runtime.status == TaskSessionStatus::Failed);
+    let (level, reason) = if live && human_handoff {
+        (TaskAttentionLevel::Red, next_move.reason.clone())
+    } else if live {
+        (TaskAttentionLevel::Green, next_move.reason.clone())
+    } else if human_handoff || failed {
+        (TaskAttentionLevel::Red, next_move.reason.clone())
+    } else if process.state == TaskProcessEvidenceState::Unavailable
+        && runtime.is_some_and(|runtime| runtime.status.is_process_active())
+    {
+        (
+            TaskAttentionLevel::Unknown,
+            process
+                .reason
+                .clone()
+                .unwrap_or_else(|| "Task body evidence is unavailable".into()),
+        )
+    } else if local_progress.unsettled == Some(true) {
+        let reason = if local_progress.dirty == Some(true) {
+            "Task body stopped with uncommitted work".to_string()
+        } else if local_progress.authored_commits == Some(true) {
+            match active_pr_phase {
+                Some(PrPhase::Open) | Some(PrPhase::Publishing) => next_move.reason.clone(),
+                _ => "Task body stopped with unsettled commits".to_string(),
+            }
+        } else if let Some(reason) = &local_progress.reason {
+            reason.clone()
+        } else {
+            "no live Task body; local progress requires recovery".to_string()
+        };
+        (TaskAttentionLevel::Red, reason)
+    } else if local_progress.unsettled.is_none() {
+        (
+            TaskAttentionLevel::Unknown,
+            local_progress
+                .reason
+                .clone()
+                .unwrap_or_else(|| "local Task progress is unavailable".into()),
+        )
+    } else {
+        (TaskAttentionLevel::Black, next_move.reason.clone())
+    };
+    let controls = match runtime {
+        None if !pm_completed => vec![TaskAttentionControl::Start],
+        None => Vec::new(),
+        Some(runtime) if runtime.status.is_terminal() => Vec::new(),
+        Some(runtime) if runtime.status.is_process_active() => match process.alive {
+            Some(true) => vec![
+                TaskAttentionControl::Attach,
+                TaskAttentionControl::Interrupt,
+            ],
+            Some(false) => vec![TaskAttentionControl::Resume],
+            None => Vec::new(),
+        },
+        Some(_) => vec![TaskAttentionControl::Resume],
+    };
+    TaskAttentionSnapshot {
+        level,
+        reason,
+        observed_at: format_time(observed_at)
+            .expect("Task attention observation time formats as RFC 3339"),
+        evidence_age_secs: runtime.and_then(|runtime| age_secs(&runtime.status_at, observed_at)),
+        next_owner: next_move.owner,
+        controls,
+        pm_completed,
+        session_status: runtime.map(|runtime| runtime.status),
+        process,
+        local_progress,
+        active_pr_phase,
+    }
 }
 
 fn task_reference(
@@ -1578,7 +1894,40 @@ struct RoadmapRow {
     owner: NextMoveOwner,
     pr: Option<String>,
     workspace: Option<String>,
+    attention: Option<TaskAttentionLevel>,
     reason: String,
+}
+
+fn task_attention_label(level: TaskAttentionLevel) -> &'static str {
+    match level {
+        TaskAttentionLevel::Green => "green",
+        TaskAttentionLevel::Red => "red",
+        TaskAttentionLevel::Black => "black",
+        TaskAttentionLevel::Unknown => "unknown",
+    }
+}
+
+fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow {
+    RoadmapRow {
+        section: task.section,
+        id: task.task.identifier.clone(),
+        issue_url: task.reference.issue_url.clone(),
+        title: task.task.name.clone(),
+        rank: (task.task.rank != u32::MAX).then_some(task.task.rank),
+        age_secs: task
+            .runtime
+            .as_ref()
+            .and_then(|runtime| age_secs(&runtime.status_at, now)),
+        owner: task.next_move.owner,
+        pr: task.active_pr.as_ref().map(pr_label),
+        workspace: task
+            .reference
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.slug.clone()),
+        attention: Some(task.attention.level),
+        reason: task.attention.reason.clone(),
+    }
 }
 
 fn pr_label(pr: &PrSnapshot) -> String {
@@ -1668,29 +2017,12 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                     owner: project.next_move.owner,
                     pr: None,
                     workspace: None,
+                    attention: None,
                     reason: project.next_move.reason.clone(),
                 });
             }
             for task in &project.tasks {
-                rows.push(RoadmapRow {
-                    section: task.section,
-                    id: task.task.identifier.clone(),
-                    issue_url: task.reference.issue_url.clone(),
-                    title: task.task.name.clone(),
-                    rank: (task.task.rank != u32::MAX).then_some(task.task.rank),
-                    age_secs: task
-                        .runtime
-                        .as_ref()
-                        .and_then(|runtime| age_secs(&runtime.status_at, now)),
-                    owner: task.next_move.owner,
-                    pr: task.active_pr.as_ref().map(pr_label),
-                    workspace: task
-                        .reference
-                        .workspace
-                        .as_ref()
-                        .map(|workspace| workspace.slug.clone()),
-                    reason: task.next_move.reason.clone(),
-                });
+                rows.push(task_roadmap_row(task, now));
             }
         }
         if rows.is_empty() {
@@ -1711,7 +2043,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             println!("  {}", section_label(section));
             for row in in_section {
                 println!(
-                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {signal:<7}  {workspace:<20}  {pr:<24}  {title}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -1727,6 +2059,10 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                         .age_secs
                         .map(format_age)
                         .unwrap_or_else(|| "-".to_string()),
+                    signal = row
+                        .attention
+                        .map(task_attention_label)
+                        .unwrap_or("-"),
                     workspace = truncate(row.workspace.as_deref().unwrap_or("-"), 20),
                     pr = truncate(row.pr.as_deref().unwrap_or("-"), 24),
                     title = truncate(&row.title, 36),
@@ -1772,7 +2108,7 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{process::Command, sync::Arc};
 
     use super::*;
     use crate::id::WaveId;
@@ -2069,6 +2405,14 @@ mod tests {
                         owner: NextMoveOwner::Project,
                         reason: "Task is ready to start".into(),
                     },
+                    attention: test_task_attention(
+                        false,
+                        None,
+                        &NextMove {
+                            owner: NextMoveOwner::Project,
+                            reason: "Task is ready to start".into(),
+                        },
+                    ),
                     prs: Vec::new(),
                     active_pr: None,
                 }],
@@ -2137,6 +2481,7 @@ mod tests {
         runtime: Option<TaskRuntimeSnapshot>,
         next_move: NextMove,
     ) -> TaskDetailSnapshot {
+        let attention = test_task_attention(false, runtime.as_ref(), &next_move);
         TaskDetailSnapshot {
             task: PmTaskSummary {
                 id: format!("{identifier}-id"),
@@ -2158,9 +2503,356 @@ mod tests {
             runtime,
             directive: None,
             next_move,
+            attention,
             prs: Vec::new(),
             active_pr: None,
         }
+    }
+
+    fn test_task_attention(
+        pm_completed: bool,
+        runtime: Option<&TaskRuntimeSnapshot>,
+        next_move: &NextMove,
+    ) -> TaskAttentionSnapshot {
+        let process = match runtime {
+            Some(runtime) if runtime.status.is_process_active() => TaskProcessEvidence {
+                state: TaskProcessEvidenceState::Observed,
+                alive: Some(runtime.process_alive),
+                reason: None,
+            },
+            Some(_) => TaskProcessEvidence {
+                state: TaskProcessEvidenceState::NotExpected,
+                alive: None,
+                reason: None,
+            },
+            None => TaskProcessEvidence {
+                state: TaskProcessEvidenceState::NotApplicable,
+                alive: None,
+                reason: None,
+            },
+        };
+        let recovery_required = runtime
+            .filter(|runtime| runtime.status.is_process_active())
+            .and_then(|runtime| Some(!runtime.process_alive));
+        let local_progress = LocalProgressEvidence {
+            state: if runtime.is_some() {
+                LocalProgressEvidenceState::Observed
+            } else {
+                LocalProgressEvidenceState::NotApplicable
+            },
+            unsettled: Some(recovery_required == Some(true)),
+            dirty: runtime.map(|_| false),
+            authored_commits: runtime.map(|_| false),
+            recovery_required,
+            reason: None,
+        };
+        derive_task_attention(
+            pm_completed,
+            runtime,
+            next_move,
+            None,
+            process,
+            local_progress,
+            now(),
+        )
+    }
+
+    fn local_progress(
+        unsettled: Option<bool>,
+        dirty: Option<bool>,
+        authored_commits: Option<bool>,
+        recovery_required: Option<bool>,
+    ) -> LocalProgressEvidence {
+        LocalProgressEvidence {
+            state: if unsettled.is_some() {
+                LocalProgressEvidenceState::Observed
+            } else {
+                LocalProgressEvidenceState::Unavailable
+            },
+            unsettled,
+            dirty,
+            authored_commits,
+            recovery_required,
+            reason: unsettled
+                .is_none()
+                .then(|| "failed to inspect Task worktree".to_string()),
+        }
+    }
+
+    fn process(state: TaskProcessEvidenceState, alive: Option<bool>) -> TaskProcessEvidence {
+        TaskProcessEvidence {
+            state,
+            alive,
+            reason: (state == TaskProcessEvidenceState::Unavailable)
+                .then(|| "tmux is unavailable; this machine cannot observe the Task body".into()),
+        }
+    }
+
+    fn projected_attention(
+        completed: bool,
+        runtime: Option<&TaskRuntimeSnapshot>,
+        owner: NextMoveOwner,
+        reason: &str,
+        phase: Option<PrPhase>,
+        process: TaskProcessEvidence,
+        local_progress: LocalProgressEvidence,
+    ) -> TaskAttentionSnapshot {
+        derive_task_attention(
+            completed,
+            runtime,
+            &NextMove {
+                owner,
+                reason: reason.into(),
+            },
+            phase,
+            process,
+            local_progress,
+            now(),
+        )
+    }
+
+    #[test]
+    fn shared_attention_projection_covers_the_desktop_decision_table() {
+        let running = task_runtime(TaskSessionStatus::Running, "implementing", at(30), true);
+        let green = projected_attention(
+            false,
+            Some(&running),
+            NextMoveOwner::Task,
+            "implementing",
+            Some(PrPhase::Working),
+            process(TaskProcessEvidenceState::Observed, Some(true)),
+            local_progress(Some(false), Some(false), Some(false), Some(false)),
+        );
+        assert_eq!(green.level, TaskAttentionLevel::Green);
+        assert_eq!(
+            green.controls,
+            vec![
+                TaskAttentionControl::Attach,
+                TaskAttentionControl::Interrupt
+            ]
+        );
+
+        let human = projected_attention(
+            false,
+            Some(&running),
+            NextMoveOwner::Human,
+            "choose the recovery boundary",
+            Some(PrPhase::Working),
+            process(TaskProcessEvidenceState::Observed, Some(true)),
+            local_progress(Some(false), Some(false), Some(false), Some(false)),
+        );
+        assert_eq!(human.level, TaskAttentionLevel::Red);
+        assert_eq!(human.reason, "choose the recovery boundary");
+
+        let dead = task_runtime(TaskSessionStatus::Running, "implementing", at(300), false);
+        let dirty = projected_attention(
+            false,
+            Some(&dead),
+            NextMoveOwner::Task,
+            "implementing",
+            Some(PrPhase::Working),
+            process(TaskProcessEvidenceState::Observed, Some(false)),
+            local_progress(Some(true), Some(true), Some(false), Some(true)),
+        );
+        assert_eq!(dirty.level, TaskAttentionLevel::Red);
+        assert_eq!(dirty.reason, "Task body stopped with uncommitted work");
+
+        let commits = projected_attention(
+            false,
+            Some(&dead),
+            NextMoveOwner::Review,
+            "checks passed; awaiting review",
+            Some(PrPhase::Open),
+            process(TaskProcessEvidenceState::NotExpected, None),
+            local_progress(Some(true), Some(false), Some(true), Some(false)),
+        );
+        assert_eq!(commits.level, TaskAttentionLevel::Red);
+        assert_eq!(commits.reason, "checks passed; awaiting review");
+
+        let backlog = projected_attention(
+            false,
+            None,
+            NextMoveOwner::Project,
+            "Task is ready to start",
+            None,
+            process(TaskProcessEvidenceState::NotApplicable, None),
+            local_progress(Some(false), None, None, None),
+        );
+        assert_eq!(backlog.level, TaskAttentionLevel::Black);
+        assert_eq!(backlog.controls, vec![TaskAttentionControl::Start]);
+
+        let completed_runtime =
+            task_runtime(TaskSessionStatus::Completed, "merged", at(600), false);
+        let completed = projected_attention(
+            true,
+            Some(&completed_runtime),
+            NextMoveOwner::Project,
+            "Linear Task is complete",
+            None,
+            process(TaskProcessEvidenceState::NotExpected, None),
+            local_progress(Some(false), Some(false), Some(false), Some(false)),
+        );
+        assert_eq!(completed.level, TaskAttentionLevel::Black);
+        assert!(completed.controls.is_empty());
+
+        let stale = projected_attention(
+            false,
+            Some(&dead),
+            NextMoveOwner::Task,
+            "implementing",
+            Some(PrPhase::Working),
+            process(TaskProcessEvidenceState::Observed, Some(false)),
+            local_progress(Some(true), Some(false), Some(false), Some(true)),
+        );
+        assert_eq!(stale.level, TaskAttentionLevel::Red);
+        assert_eq!(
+            stale.reason,
+            "no live Task body; local progress requires recovery"
+        );
+
+        let unavailable = projected_attention(
+            false,
+            Some(&dead),
+            NextMoveOwner::Task,
+            "implementing",
+            Some(PrPhase::Working),
+            process(TaskProcessEvidenceState::Observed, Some(false)),
+            local_progress(None, None, None, Some(true)),
+        );
+        assert_eq!(unavailable.level, TaskAttentionLevel::Unknown);
+        assert_eq!(unavailable.reason, "failed to inspect Task worktree");
+
+        let unobservable = projected_attention(
+            false,
+            Some(&running),
+            NextMoveOwner::Task,
+            "implementing",
+            Some(PrPhase::Working),
+            process(TaskProcessEvidenceState::Unavailable, None),
+            local_progress(None, Some(false), Some(false), None),
+        );
+        assert_eq!(unobservable.level, TaskAttentionLevel::Unknown);
+        assert!(unobservable.controls.is_empty());
+    }
+
+    fn git(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git stdout is UTF-8")
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn local_progress_reads_dirty_and_authored_commits_from_git() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        git(repo.path(), &["init"]);
+        git(repo.path(), &["config", "user.name", "Loopflow Test"]);
+        git(
+            repo.path(),
+            &["config", "user.email", "loopflow@example.com"],
+        );
+        std::fs::write(repo.path().join("state.txt"), "base\n").expect("write base");
+        git(repo.path(), &["add", "state.txt"]);
+        git(repo.path(), &["commit", "-m", "base"]);
+        let base = git(repo.path(), &["rev-parse", "HEAD"]);
+        let live = process(TaskProcessEvidenceState::Observed, Some(true));
+
+        let clean = inspect_task_local_progress(
+            TaskSessionStatus::Running,
+            repo.path(),
+            Some(&base),
+            &live,
+        );
+        assert_eq!(clean.unsettled, Some(false));
+        assert_eq!(clean.dirty, Some(false));
+        assert_eq!(clean.authored_commits, Some(false));
+
+        std::fs::write(repo.path().join("state.txt"), "dirty\n").expect("write change");
+        let dirty = inspect_task_local_progress(
+            TaskSessionStatus::Running,
+            repo.path(),
+            Some(&base),
+            &live,
+        );
+        assert_eq!(dirty.unsettled, Some(true));
+        assert_eq!(dirty.dirty, Some(true));
+
+        git(repo.path(), &["add", "state.txt"]);
+        git(repo.path(), &["commit", "-m", "authored"]);
+        let committed = inspect_task_local_progress(
+            TaskSessionStatus::Waiting,
+            repo.path(),
+            Some(&base),
+            &process(TaskProcessEvidenceState::NotExpected, None),
+        );
+        assert_eq!(committed.unsettled, Some(true));
+        assert_eq!(committed.dirty, Some(false));
+        assert_eq!(committed.authored_commits, Some(true));
+    }
+
+    #[test]
+    fn shared_attention_fixture_pins_every_desktop_state() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/task_attention_states.json"
+        ));
+        let tasks: std::collections::BTreeMap<String, RoadmapTask> =
+            serde_json::from_str(fixture).expect("decode shared attention fixture");
+
+        assert_eq!(tasks.len(), 8);
+        assert_eq!(
+            tasks["live_advancing"].attention.level,
+            TaskAttentionLevel::Green
+        );
+        assert_eq!(
+            tasks["live_human_wait"].attention.level,
+            TaskAttentionLevel::Red
+        );
+        assert_eq!(
+            tasks["dead_dirty"].attention.local_progress.dirty,
+            Some(true)
+        );
+        assert_eq!(
+            tasks["dead_authored_commits"]
+                .attention
+                .local_progress
+                .authored_commits,
+            Some(true)
+        );
+        assert_eq!(
+            tasks["clean_backlog"].attention.level,
+            TaskAttentionLevel::Black
+        );
+        assert_eq!(
+            tasks["completed"].attention.level,
+            TaskAttentionLevel::Black
+        );
+        assert_eq!(
+            tasks["stale"].attention.local_progress.recovery_required,
+            Some(true)
+        );
+        assert_eq!(
+            tasks["unavailable"].attention.level,
+            TaskAttentionLevel::Unknown
+        );
+
+        let dirty_row = task_roadmap_row(&tasks["dead_dirty"], now());
+        assert_eq!(dirty_row.attention, Some(TaskAttentionLevel::Red));
+        assert_eq!(
+            dirty_row.reason, tasks["dead_dirty"].attention.reason,
+            "CLI rows must print the shared attention reason verbatim"
+        );
     }
 
     fn task_runtime(

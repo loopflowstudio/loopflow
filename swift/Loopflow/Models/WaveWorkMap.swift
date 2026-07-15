@@ -33,11 +33,12 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let runtime: TaskRuntimeSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
+    public let attention: TaskAttentionSnapshot
     public let prs: [PrSnapshot]
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, prs
+        case task, reference, runtime, directive, attention, prs
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -154,11 +155,12 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
+    public let attention: TaskAttentionSnapshot
     public let activePr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, section
+        case task, reference, runtime, attention, section
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -207,6 +209,73 @@ public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
 public struct WorkNextMove: Decodable, Sendable, Hashable {
     public let owner: WorkNextMoveOwner
     public let reason: String
+}
+
+public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
+    case green, red, black, unknown
+}
+
+public enum TaskAttentionControl: String, Decodable, Sendable, Hashable {
+    case start, attach, resume, interrupt
+}
+
+public enum TaskProcessEvidenceState: String, Decodable, Sendable, Hashable {
+    case observed
+    case notExpected = "not_expected"
+    case notApplicable = "not_applicable"
+    case unavailable
+}
+
+public struct TaskProcessEvidence: Decodable, Sendable, Hashable {
+    public let state: TaskProcessEvidenceState
+    public let alive: Bool?
+    public let reason: String?
+}
+
+public enum LocalProgressEvidenceState: String, Decodable, Sendable, Hashable {
+    case observed, missing
+    case notApplicable = "not_applicable"
+    case unavailable
+}
+
+public struct LocalProgressEvidence: Decodable, Sendable, Hashable {
+    public let state: LocalProgressEvidenceState
+    public let unsettled: Bool?
+    public let dirty: Bool?
+    public let authoredCommits: Bool?
+    public let recoveryRequired: Bool?
+    public let reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case state, unsettled, dirty, reason
+        case authoredCommits = "authored_commits"
+        case recoveryRequired = "recovery_required"
+    }
+}
+
+public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
+    public let level: TaskAttentionLevel
+    public let reason: String
+    public let observedAt: String
+    public let evidenceAgeSeconds: Int?
+    public let nextOwner: WorkNextMoveOwner
+    public let controls: [TaskAttentionControl]
+    public let pmCompleted: Bool
+    public let sessionStatus: TaskSessionStatus?
+    public let process: TaskProcessEvidence
+    public let localProgress: LocalProgressEvidence
+    public let activePrPhase: PrPhase?
+
+    enum CodingKeys: String, CodingKey {
+        case level, reason, controls, process
+        case observedAt = "observed_at"
+        case evidenceAgeSeconds = "evidence_age_secs"
+        case nextOwner = "next_owner"
+        case pmCompleted = "pm_completed"
+        case sessionStatus = "session_status"
+        case localProgress = "local_progress"
+        case activePrPhase = "active_pr_phase"
+    }
 }
 
 public enum PrPhase: String, Decodable, Sendable, Hashable {

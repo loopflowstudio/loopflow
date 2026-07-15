@@ -77,6 +77,19 @@
                   "process_alive": true
                 },
                 "next_move": {"owner": "task", "reason": "Task flow iteration 1, step 2/3: task_pursue"},
+                "attention": {
+                  "level": "green",
+                  "reason": "Task flow iteration 1, step 2/3: task_pursue",
+                  "observed_at": "2026-07-15T00:00:00Z",
+                  "evidence_age_secs": 960,
+                  "next_owner": "task",
+                  "controls": ["attach", "interrupt"],
+                  "pm_completed": false,
+                  "session_status": "running",
+                  "process": {"state": "observed", "alive": true, "reason": null},
+                  "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null},
+                  "active_pr_phase": null
+                },
                 "active_pr": null,
                 "section": "now"
               },
@@ -108,6 +121,19 @@
                   "process_alive": false
                 },
                 "next_move": {"owner": "review", "reason": "PR open for review"},
+                "attention": {
+                  "level": "red",
+                  "reason": "PR open for review",
+                  "observed_at": "2026-07-15T00:00:00Z",
+                  "evidence_age_secs": 7200,
+                  "next_owner": "review",
+                  "controls": ["resume"],
+                  "pm_completed": false,
+                  "session_status": "waiting",
+                  "process": {"state": "not_expected", "alive": null, "reason": null},
+                  "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null},
+                  "active_pr_phase": "open"
+                },
                 "active_pr": {
                   "id": "pr-review",
                   "sequence": 1,
@@ -143,6 +169,19 @@
                 },
                 "runtime": null,
                 "next_move": {"owner": "project", "reason": "Task is ready to start"},
+                "attention": {
+                  "level": "black",
+                  "reason": "Task is ready to start",
+                  "observed_at": "2026-07-15T00:00:00Z",
+                  "evidence_age_secs": null,
+                  "next_owner": "project",
+                  "controls": ["start"],
+                  "pm_completed": false,
+                  "session_status": null,
+                  "process": {"state": "not_applicable", "alive": null, "reason": null},
+                  "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null},
+                  "active_pr_phase": null
+                },
                 "active_pr": null,
                 "section": "available"
               },
@@ -174,6 +213,19 @@
                   "process_alive": false
                 },
                 "next_move": {"owner": "project", "reason": "Linear Task is complete"},
+                "attention": {
+                  "level": "black",
+                  "reason": "Linear Task is complete",
+                  "observed_at": "2026-07-15T00:00:00Z",
+                  "evidence_age_secs": 10800,
+                  "next_owner": "project",
+                  "controls": [],
+                  "pm_completed": true,
+                  "session_status": "completed",
+                  "process": {"state": "not_expected", "alive": null, "reason": null},
+                  "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null},
+                  "active_pr_phase": null
+                },
                 "active_pr": null,
                 "section": "later"
               }

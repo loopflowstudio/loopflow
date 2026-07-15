@@ -87,6 +87,19 @@
             "incorporated_summary": "Verification failures are now first."
           },
           "next_move": {"owner": "review", "reason": "waiting for review"},
+          "attention": {
+            "level": "red",
+            "reason": "waiting for review",
+            "observed_at": "2026-07-13T21:00:00Z",
+            "evidence_age_secs": 7200,
+            "next_owner": "review",
+            "controls": ["resume"],
+            "pm_completed": false,
+            "session_status": "waiting",
+            "process": {"state": "not_expected", "alive": null, "reason": null},
+            "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null},
+            "active_pr_phase": "open"
+          },
           "prs": [{
             "id": "pr_33333333333333333333333333333333",
             "sequence": 1,
@@ -126,6 +139,19 @@
           "runtime": null,
           "directive": null,
           "next_move": {"owner": "project", "reason": "Task is ready to start"},
+          "attention": {
+            "level": "black",
+            "reason": "Task is ready to start",
+            "observed_at": "2026-07-13T21:00:00Z",
+            "evidence_age_secs": null,
+            "next_owner": "project",
+            "controls": ["start"],
+            "pm_completed": false,
+            "session_status": null,
+            "process": {"state": "not_applicable", "alive": null, "reason": null},
+            "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null},
+            "active_pr_phase": null
+          },
           "prs": [],
           "active_pr": null
         }

@@ -157,19 +157,30 @@ Give reconciliation a periodic owner and real recovery.
 - Verify: R1 + R2 tests green; a killed body is recovered exactly once; a
   submitted PR is never revived (regression from the 2026-07-14 W2-129 incident).
 
-### Slice 4 — PR observation convergence (R4)
-Make merge truth reconcile from an observation, not only a live loop.
-- Reconcile by **stable PR identity + current head**, transitioning the PR
-  sequence exactly once on merge and waking the owning Project/Task decision path
-  (`reconcile_task_pr_with_authority`, `ops/task.rs:1314`). Drive it from the
-  convergence tick (Slice 3) and/or an external merge observation, not only
-  `task/runner.rs:333`.
-- Freshness: preserve the last `gh` observation with its age on GitHub failure;
-  status states freshness. Bounded probe; GitHub unavailable ⇒ explicit stale
-  evidence, never a guess. Reserved `NextMoveOwner::Ci`/`External`
-  (`waves.rs:1723`, W2-156 slot) gets wired if CI observation is in-scope; else
-  record the dependency.
-- Verify: R4 test green; a merged-out-of-band PR advances once on the next tick.
+### Slice 4 — PR observation convergence (R4) — SPLIT: landing/completion → W2-171
+**Scope partition (2026-07-15 steer).** Infrastructure launched **W2-171** to own
+the *narrow landing/completion repair*: out-of-band merged `TaskPr` reconciliation
+plus the `.lf/tmp/scratch-stash` path. W2-169 must **not** edit the same
+completion/landing slice (`reconcile_task_pr_with_authority`'s merge→settle/
+complete transition). W2-169 keeps the **read-side** and **model** aspects:
+truthful active counts, read-side PR freshness, the broader durable observation
+model, periodic Project recovery, and side-effect-free inspection.
+
+- **Handed to W2-171 (do not re-implement here):** the stable-PR-identity /
+  append-only fix for the reused-branch overwrite (a merged publication clobbered
+  by a later closed empty draft on the reused serial branch). A complete,
+  bite-verified implementation is preserved at commit **`bcb11c6cc`** (adds
+  `pr_by_number` in `ops/pr.rs`; makes `reconcile_task_pr_with_authority` observe
+  the bound PR by number, never rebinding `publication.github` to a different
+  number; test `reused_branch_probe_does_not_overwrite_a_bound_publication`).
+  W2-171 can cherry-pick it. It was reverted from this branch to keep the
+  landing/completion slice single-owner.
+- **Remains W2-169 (read-side freshness only):** let `lf status`/`roadmap` reflect
+  merge/PR truth without a live loop tick, off the shared observation model
+  (Slice 2), preserving the last `gh` observation with its age on GitHub failure
+  and stating freshness — **without** mutating the merge→settle/complete
+  transition W2-171 owns. Coordinate the shared `reconcile_task_pr_with_authority`
+  seam with W2-171 (they land the identity/settlement change; W2-169 consumes it).
 
 ### Slice 5 — shared consumers + real two-wave dogfood (end-to-end proof)
 - Ensure CLI (`lf status`/`roadmap`/`project|task status`) and Swift render the

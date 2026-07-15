@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use crate::id::WaveId;
 use crate::profile::{
-    ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount, RepoProfileRoute,
+    ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount,
+    ProviderProfileCandidate, RepoProfileRoute,
 };
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
@@ -687,6 +688,20 @@ impl Store {
         .await
     }
 
+    pub async fn select_provider_profile(
+        &self,
+        provider: Provider,
+        candidates: &[ProviderProfileCandidate],
+        provider_session_id: Option<&str>,
+    ) -> StoreResult<Option<ProviderProfileSelection>> {
+        let candidates = candidates.to_vec();
+        let provider_session_id = provider_session_id.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.select_provider_profile(provider, &candidates, provider_session_id.as_deref())
+        })
+        .await
+    }
+
     pub async fn health_check(&self) -> StoreResult<()> {
         run_sqlite(&self.sqlite, |store| store.health_check()).await
     }
@@ -796,6 +811,13 @@ pub struct ProviderAccountSelection {
     pub resume_requested_session: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderProfileSelection {
+    pub profile_id: ProfileId,
+    pub account: ProviderAccount,
+    pub resume_requested_session: bool,
+}
+
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
@@ -840,7 +862,7 @@ mod tests {
     use crate::id::WaveId;
     use crate::profile::{
         ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
-        RepoProfileRoute,
+        ProviderProfileCandidate, RepoProfileRoute,
     };
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
@@ -3063,6 +3085,86 @@ mod tests {
                 .chrome_directory,
             "Profile 7"
         );
+    }
+
+    #[tokio::test]
+    async fn profile_selection_deduplicates_shared_accounts_and_follows_route_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let shared = provider_account("claude", "shared", 90);
+        let reserve = provider_account("claude", "reserve", 0);
+        store.upsert_provider_account(&shared).await.unwrap();
+        store.upsert_provider_account(&reserve).await.unwrap();
+        for id in ["default", "alias", "backup"] {
+            store
+                .upsert_profile(&Profile {
+                    id: ProfileId::parse(id).unwrap(),
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        let candidates = vec![
+            ProviderProfileCandidate {
+                profile_id: ProfileId::parse("default").unwrap(),
+                account_id: shared.account_id.clone(),
+            },
+            ProviderProfileCandidate {
+                profile_id: ProfileId::parse("alias").unwrap(),
+                account_id: shared.account_id.clone(),
+            },
+            ProviderProfileCandidate {
+                profile_id: ProfileId::parse("backup").unwrap(),
+                account_id: reserve.account_id.clone(),
+            },
+        ];
+
+        let selected = store
+            .select_provider_profile(Provider::Claude, &candidates, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.profile_id.as_str(), "default");
+        assert_eq!(selected.account.account_id, shared.account_id);
+
+        store
+            .pin_provider_session_route(
+                Provider::Claude,
+                "session-alias",
+                &ProfileId::parse("alias").unwrap(),
+                &shared.account_id,
+            )
+            .await
+            .unwrap();
+        let resumed = store
+            .select_provider_profile(Provider::Claude, &candidates, Some("session-alias"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.profile_id.as_str(), "alias");
+        assert!(resumed.resume_requested_session);
+
+        store
+            .record_provider_account_health(
+                "claude",
+                &shared.account_id,
+                Some(100),
+                Some(OffsetDateTime::now_utc().unix_timestamp() + 3600),
+                Some("rate limited"),
+            )
+            .await
+            .unwrap();
+        let failed_over = store
+            .select_provider_profile(Provider::Claude, &candidates, Some("session-alias"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed_over.profile_id.as_str(), "backup");
+        assert_eq!(failed_over.account.account_id, reserve.account_id);
+        assert!(!failed_over.resume_requested_session);
     }
 
     #[tokio::test]

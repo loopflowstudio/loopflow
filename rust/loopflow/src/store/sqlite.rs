@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use crate::id::WaveId;
 use crate::profile::{
     ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
-    RepoProfileRoute,
+    ProviderProfileCandidate, RepoProfileRoute,
 };
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
@@ -14,7 +14,7 @@ use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
     BusMessage, PmSnapshotRow, ProviderAccount, ProviderAccountId, ProviderAccountSelection,
-    RunEventRow, StoreError, StoreResult,
+    ProviderProfileSelection, RunEventRow, StoreError, StoreResult,
 };
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
@@ -1085,6 +1085,109 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn select_provider_profile(
+        &self,
+        provider: Provider,
+        candidates: &[ProviderProfileCandidate],
+        provider_session_id: Option<&str>,
+    ) -> StoreResult<Option<ProviderProfileSelection>> {
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = now_unix();
+        let newest_selection = transaction.query_row(
+            "SELECT COALESCE(MAX(last_selected_at), 0)
+             FROM provider_accounts WHERE provider = ?1",
+            [provider.as_str()],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let selection_time = now.max(newest_selection + 1);
+        let requested = match provider_session_id {
+            Some(session_id) => transaction
+                .query_row(
+                    "SELECT profile_id, account_id FROM provider_session_accounts
+                     WHERE provider = ?1 AND provider_session_id = ?2",
+                    params![provider.as_str(), session_id],
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?,
+            None => None,
+        };
+        let mut account_statement = transaction.prepare(
+            "SELECT provider, account_id, home, login, enabled, preferred,
+                    utilization_percent, cooldown_until, cooldown_reason,
+                    last_selected_at, created_at, updated_at
+             FROM provider_accounts
+             WHERE provider = ?1 AND account_id = ?2",
+        )?;
+        let mut seen_accounts: std::collections::HashMap<ProviderAccountId, usize> =
+            std::collections::HashMap::new();
+        let mut available: Vec<(ProfileId, ProviderAccount)> = Vec::new();
+        for candidate in candidates {
+            if let Some(index) = seen_accounts.get(&candidate.account_id).copied() {
+                if requested.as_ref().is_some_and(|(profile_id, account_id)| {
+                    profile_id.as_deref() == Some(candidate.profile_id.as_str())
+                        && account_id == candidate.account_id.as_str()
+                }) {
+                    available[index].0 = candidate.profile_id.clone();
+                }
+                continue;
+            }
+            let account = account_statement
+                .query_row(
+                    params![provider.as_str(), candidate.account_id.as_str()],
+                    read_provider_account,
+                )
+                .optional()?
+                .transpose()?;
+            if let Some(account) = account.filter(|account| {
+                account.enabled && account.cooldown_until.is_none_or(|until| until <= now)
+            }) {
+                seen_accounts.insert(candidate.account_id.clone(), available.len());
+                available.push((candidate.profile_id.clone(), account));
+            }
+        }
+        drop(account_statement);
+
+        let resumed = requested.as_ref().and_then(|(profile_id, account_id)| {
+            let profile_id = profile_id.as_deref()?;
+            available.iter().position(|(candidate_profile, account)| {
+                candidate_profile.as_str() == profile_id
+                    && account.account_id.as_str() == account_id
+            })
+        });
+        let ((profile_id, mut account), resume_requested_session) = match resumed {
+            Some(index) => (available.remove(index), true),
+            None => match available.into_iter().next() {
+                Some(selection) => (selection, false),
+                None => {
+                    transaction.commit()?;
+                    return Ok(None);
+                }
+            },
+        };
+        transaction.execute(
+            "UPDATE provider_accounts
+             SET last_selected_at = ?3, updated_at = ?3
+             WHERE provider = ?1 AND account_id = ?2",
+            params![
+                provider.as_str(),
+                account.account_id.as_str(),
+                selection_time
+            ],
+        )?;
+        transaction.commit()?;
+        account.last_selected_at = Some(selection_time);
+        account.updated_at = selection_time;
+        Ok(Some(ProviderProfileSelection {
+            profile_id,
+            account,
+            resume_requested_session,
+        }))
     }
 
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

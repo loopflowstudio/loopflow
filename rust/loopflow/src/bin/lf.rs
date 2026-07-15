@@ -1238,6 +1238,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Auth { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::auth::run(cmd))
             }
+            Some(Commands::Profile { cmd }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::profile::run(cmd, repo)
+            }),
             Some(Commands::Release { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_release(cmd))
             }

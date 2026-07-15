@@ -12,10 +12,13 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::profile::{Profile, ProfileId, ProfileProviderAccount, ProviderProfileCandidate};
 use crate::provider_auth::Provider;
+use crate::repository::RepoId;
 use crate::store::{open_store, ProviderAccount, ProviderAccountId, SharedStore, StoreError};
 
 pub const FORWARDED_PROVIDER_ACCOUNTS_ENV: &str = "LF_FORWARDED_PROVIDER_ACCOUNTS";
+pub const PROFILE_REPO_ID_ENV: &str = "LF_PROFILE_REPO_ID";
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
 
@@ -41,6 +44,8 @@ pub enum ProviderAccountError {
     Runtime(String),
     #[error("all {provider} accounts are unavailable{reset}")]
     NoHealthyAccount { provider: Provider, reset: String },
+    #[error("repository {repo_id} has no {provider} account in its profile route")]
+    NoMappedAccount { provider: Provider, repo_id: RepoId },
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +96,7 @@ enum AccountCredential {
 #[derive(Clone)]
 pub struct ProviderAccountRoute {
     provider: Provider,
+    profile_id: ProfileId,
     account_id: ProviderAccountId,
     credential: AccountCredential,
     resume_requested_session: bool,
@@ -105,6 +111,7 @@ impl std::fmt::Debug for ProviderAccountRoute {
         };
         f.debug_struct("ProviderAccountRoute")
             .field("provider", &self.provider)
+            .field("profile_id", &self.profile_id)
             .field("account_id", &self.account_id)
             .field("credential", &credential)
             .field("resume_requested_session", &self.resume_requested_session)
@@ -113,6 +120,10 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
+    pub fn profile_id(&self) -> &ProfileId {
+        &self.profile_id
+    }
+
     pub fn account_id(&self) -> &ProviderAccountId {
         &self.account_id
     }
@@ -179,9 +190,10 @@ impl ProviderAccountRoute {
 
     pub async fn pin_session(&self, provider_session_id: &str) -> Result<(), ProviderAccountError> {
         self.store
-            .pin_provider_session_account(
-                self.provider.as_str(),
+            .pin_provider_session_route(
+                self.provider,
                 provider_session_id,
+                &self.profile_id,
                 &self.account_id,
             )
             .await?;
@@ -403,15 +415,33 @@ pub async fn resolve_provider_account(
     };
 
     let mut access_tokens = HashMap::new();
+    let mut routed_repo_id = None;
     let candidates = if forwarded.is_empty() {
-        store
-            .list_provider_accounts(Some(provider.as_str()))
-            .await?
-            .into_iter()
-            .filter(|account| account.enabled && account.home.is_some())
-            .map(|account| account.account_id)
-            .collect::<Vec<_>>()
+        let Some(repo_id) = current_repo_id()? else {
+            return Ok(None);
+        };
+        let Some(route) = store.repo_profile_route(&repo_id).await? else {
+            return Ok(None);
+        };
+        routed_repo_id = Some(repo_id);
+        let mut profile_ids = Vec::with_capacity(route.backup_profiles.len() + 1);
+        profile_ids.push(route.default_profile);
+        profile_ids.extend(route.backup_profiles);
+        let mut candidates = Vec::new();
+        for profile_id in profile_ids {
+            if let Some(mapping) = store
+                .profile_provider_account(&profile_id, provider)
+                .await?
+            {
+                candidates.push(ProviderProfileCandidate {
+                    profile_id,
+                    account_id: mapping.account_id,
+                });
+            }
+        }
+        candidates
     } else {
+        let mut candidates = Vec::new();
         for credential in forwarded {
             let account_id = credential.account_id.clone();
             if store
@@ -437,16 +467,42 @@ pub async fn resolve_provider_account(
                     })
                     .await?;
             }
+            let profile_id = ProfileId::parse(account_id.as_str())
+                .map_err(ProviderAccountError::InvalidAccountId)?;
+            let now = now_unix();
+            store
+                .upsert_profile(&Profile {
+                    id: profile_id.clone(),
+                    created_at: now,
+                    updated_at: now,
+                })
+                .await?;
+            store
+                .set_profile_provider_account(&ProfileProviderAccount {
+                    profile_id: profile_id.clone(),
+                    provider,
+                    account_id: account_id.clone(),
+                    created_at: now,
+                    updated_at: now,
+                })
+                .await?;
             access_tokens.insert(account_id.clone(), credential.access_token().to_string());
+            candidates.push(ProviderProfileCandidate {
+                profile_id,
+                account_id,
+            });
         }
-        access_tokens.keys().cloned().collect::<Vec<_>>()
+        candidates
     };
 
     if candidates.is_empty() {
+        if let Some(repo_id) = routed_repo_id {
+            return Err(ProviderAccountError::NoMappedAccount { provider, repo_id });
+        }
         return Ok(None);
     }
     let selection = store
-        .select_provider_account(provider.as_str(), &candidates, provider_session_id)
+        .select_provider_profile(provider, &candidates, provider_session_id)
         .await?;
     let Some(selection) = selection else {
         let accounts = store
@@ -455,13 +511,19 @@ pub async fn resolve_provider_account(
         let now = now_unix();
         let reset = accounts
             .iter()
-            .filter(|account| account.enabled && candidates.contains(&account.account_id))
+            .filter(|account| {
+                account.enabled
+                    && candidates
+                        .iter()
+                        .any(|candidate| candidate.account_id == account.account_id)
+            })
             .filter_map(|account| account.cooldown_until.filter(|until| *until > now))
             .min()
             .map(format_reset_time)
             .unwrap_or_default();
         return Err(ProviderAccountError::NoHealthyAccount { provider, reset });
     };
+    let profile_id = selection.profile_id;
     let account_id = selection.account.account_id.clone();
     let credential = match access_tokens.remove(&account_id) {
         Some(access_token) => AccountCredential::AccessToken(access_token),
@@ -480,11 +542,23 @@ pub async fn resolve_provider_account(
     };
     Ok(Some(ProviderAccountRoute {
         provider,
+        profile_id,
         account_id,
         credential,
         resume_requested_session: selection.resume_requested_session,
         store,
     }))
+}
+
+fn current_repo_id() -> Result<Option<RepoId>, ProviderAccountError> {
+    if let Ok(value) = std::env::var(PROFILE_REPO_ID_ENV) {
+        return RepoId::parse(&value)
+            .map(Some)
+            .map_err(|error| ProviderAccountError::Runtime(error.to_string()));
+    }
+    let current = std::env::current_dir()
+        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+    Ok(RepoId::discover(&current).ok())
 }
 
 pub fn resolve_provider_account_blocking(
@@ -530,7 +604,6 @@ pub fn new_account(
     account_id: ProviderAccountId,
     home: PathBuf,
     login: Option<String>,
-    preferred: bool,
 ) -> ProviderAccount {
     let now = now_unix();
     ProviderAccount {
@@ -539,7 +612,7 @@ pub fn new_account(
         home: Some(home),
         login,
         enabled: true,
-        preferred,
+        preferred: false,
         utilization_percent: None,
         cooldown_until: None,
         cooldown_reason: None,
@@ -686,6 +759,7 @@ mod tests {
         );
         let route = ProviderAccountRoute {
             provider: Provider::Codex,
+            profile_id: ProfileId::parse("reserve").unwrap(),
             account_id: parse_account_id("reserve").unwrap(),
             credential: AccountCredential::AccessToken("codex-secret".to_string()),
             resume_requested_session: false,
@@ -730,6 +804,7 @@ mod tests {
             (
                 ProviderAccountRoute {
                     provider: Provider::Claude,
+                    profile_id: ProfileId::parse("primary").unwrap(),
                     account_id: parse_account_id("primary").unwrap(),
                     credential: AccountCredential::NativeHome(claude_home.clone()),
                     resume_requested_session: false,
@@ -741,6 +816,7 @@ mod tests {
             (
                 ProviderAccountRoute {
                     provider: Provider::Codex,
+                    profile_id: ProfileId::parse("reserve").unwrap(),
                     account_id: parse_account_id("reserve").unwrap(),
                     credential: AccountCredential::NativeHome(codex_home.clone()),
                     resume_requested_session: false,
@@ -779,11 +855,11 @@ mod tests {
             account_id.clone(),
             temp.path().join("primary"),
             None,
-            true,
         );
         store.upsert_provider_account(&account).await.unwrap();
         let route = ProviderAccountRoute {
             provider: Provider::Claude,
+            profile_id: ProfileId::parse("primary").unwrap(),
             account_id: account_id.clone(),
             credential: AccountCredential::AccessToken("claude-secret".to_string()),
             resume_requested_session: false,

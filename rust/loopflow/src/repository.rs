@@ -1,4 +1,6 @@
 use std::fmt;
+use std::path::Path;
+use std::process::Command;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,35 @@ impl RepoId {
 
     pub fn from_owner_repo(owner: &str, repo: &str) -> Result<Self, RepoIdError> {
         Self::parse(&format!("{owner}/{repo}"))
+    }
+
+    pub fn from_remote_url(value: &str) -> Result<Self, RepoIdError> {
+        let value = value.trim().trim_end_matches('/').trim_end_matches(".git");
+        let path = match value.rsplit_once(':') {
+            Some((scheme, path)) if !scheme.contains('/') => path,
+            _ => value,
+        };
+        let parts = path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let [.., owner, repo] = parts.as_slice() else {
+            return Err(RepoIdError("expected a remote owner/repo URL".to_string()));
+        };
+        Self::from_owner_repo(owner, repo)
+    }
+
+    pub fn discover(path: &Path) -> Result<Self, RepoIdError> {
+        let output = Command::new("git")
+            .args(["-C", &path.to_string_lossy(), "remote", "get-url", "origin"])
+            .output()
+            .map_err(|error| RepoIdError(format!("read origin remote: {error}")))?;
+        if !output.status.success() {
+            return Err(RepoIdError("git origin remote is unavailable".to_string()));
+        }
+        let remote = String::from_utf8(output.stdout)
+            .map_err(|error| RepoIdError(format!("origin remote is not UTF-8: {error}")))?;
+        Self::from_remote_url(&remote)
     }
 
     pub fn as_str(&self) -> &str {
@@ -75,5 +106,19 @@ mod tests {
     fn repo_id_name_with_different_owner() {
         let id = RepoId::parse("acme/widgets").unwrap();
         assert_eq!(id.name(), "widgets");
+    }
+
+    #[test]
+    fn repo_id_parses_common_remote_urls() {
+        for remote in [
+            "git@github.com:loopflowstudio/loopflow.git",
+            "ssh://git@github.com/loopflowstudio/loopflow.git",
+            "https://github.com/loopflowstudio/loopflow.git",
+        ] {
+            assert_eq!(
+                RepoId::from_remote_url(remote).unwrap().as_str(),
+                "loopflowstudio/loopflow"
+            );
+        }
     }
 }

@@ -467,14 +467,23 @@ lf auth disconnect github
 Linear refreshes OAuth automatically before expiry. Connections created before
 this release may need one `lf auth linear` reconnect to record their PKCE client ID.
 
-Route new Claude or Codex sessions across several OAuth accounts:
+Register provider accounts, then route each repository through personal
+profiles:
 
 ```bash
 lf auth pair claude primary --chrome-profile jackstah@example.com
 lf auth import claude --account primary
 lf auth connect claude --account reserve --chrome-profile reserve@example.com
-lf auth use claude primary
 lf auth accounts claude
+
+lf profile create jack
+lf profile account set jack claude jackstah@example.com
+lf profile account set jack codex jackstah@example.com
+lf profile create reserve
+lf profile account set reserve claude reserve@example.com
+
+lf profile route set --default jack --backup reserve
+lf profile route show
 
 lf auth disable claude reserve
 lf auth enable claude reserve
@@ -490,11 +499,12 @@ for reconnects. `auth import` adopts an existing isolated Claude credential—or
 the current macOS Keychain login when the profile is empty—without another OAuth
 flow.
 
-Each account keeps independent provider auth and session state under
-`~/.lf/accounts/`. Shared Claude/Codex configuration and compiled skills stay in
-their canonical host-level trees. A provider session remains pinned to its
-account; after a hard rate limit, the next launch chooses a healthy account and
-starts a new provider session.
+Each provider account keeps independent auth and session state under
+`~/.lf/accounts/`. Profiles reuse those accounts and give each repository a
+default plus ordered backups. Shared accounts are tried once and share one
+cooldown. Shared Claude/Codex configuration and compiled skills stay in their
+canonical host-level trees. A provider child remains pinned to its selected
+profile and account for its lifetime.
 
 ```bash
 lf ssh mini -- lf wave product

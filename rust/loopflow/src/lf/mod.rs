@@ -178,6 +178,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: AuthCommand,
     },
+    /// Personal browser and provider account routing profiles
+    Profile {
+        #[command(subcommand)]
+        cmd: ProfileCommand,
+    },
     /// Release operations (run, check, notes, bump, tag, status)
     Release {
         #[command(subcommand)]
@@ -1315,8 +1320,6 @@ pub enum AuthCommand {
         /// Provider name (optional)
         provider: Option<String>,
     },
-    /// Prefer one account when healthy accounts have equal utilization
-    Use { provider: String, account: String },
     /// Include an account in automatic routing
     Enable { provider: String, account: String },
     /// Exclude an account from automatic routing
@@ -1326,6 +1329,54 @@ pub enum AuthCommand {
     /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileCommand {
+    /// Create a personal routing profile
+    Create { profile: String },
+    /// List personal routing profiles and their provider accounts
+    List,
+    /// Bind provider accounts to profiles
+    Account {
+        #[command(subcommand)]
+        cmd: ProfileAccountCommand,
+    },
+    /// Configure this repository's profile order
+    Route {
+        #[command(subcommand)]
+        cmd: ProfileRouteCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileAccountCommand {
+    /// Bind a provider account by account id or login email
+    Set {
+        profile: String,
+        provider: String,
+        account: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileRouteCommand {
+    /// Atomically replace the default and ordered backup profiles
+    Set {
+        #[arg(long)]
+        default: String,
+        #[arg(long = "backup")]
+        backups: Vec<String>,
+        /// Repository owner/name; defaults to the current repository
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Show the default and ordered backup profiles
+    Show {
+        /// Repository owner/name; defaults to the current repository
+        #[arg(long)]
+        repo: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1441,7 +1492,6 @@ mod tests {
             "pair",
             "import",
             "accounts",
-            "use",
             "enable",
             "disable",
             "reset",
@@ -1458,6 +1508,66 @@ mod tests {
                 .get_arguments()
                 .any(|argument| argument.get_long() == Some("account")));
         }
+    }
+
+    #[test]
+    fn profile_route_accepts_ordered_backups() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "profile",
+            "route",
+            "set",
+            "--default",
+            "jack",
+            "--backup",
+            "loopflow-eng",
+            "--backup",
+            "cadenza-eng",
+        ])
+        .expect("parse profile route");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Profile {
+                cmd: ProfileCommand::Route {
+                    cmd: ProfileRouteCommand::Set {
+                        default,
+                        backups,
+                        repo: None,
+                    }
+                }
+            }) if default == "jack"
+                && backups == vec!["loopflow-eng", "cadenza-eng"]
+        ));
+    }
+
+    #[test]
+    fn profile_account_set_accepts_a_login_email() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "profile",
+            "account",
+            "set",
+            "jack",
+            "claude",
+            "jack@loopflow.studio",
+        ])
+        .expect("parse profile account mapping");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Profile {
+                cmd: ProfileCommand::Account {
+                    cmd: ProfileAccountCommand::Set {
+                        profile,
+                        provider,
+                        account,
+                    }
+                }
+            }) if profile == "jack"
+                && provider == "claude"
+                && account == "jack@loopflow.studio"
+        ));
     }
 
     #[test]

@@ -131,6 +131,12 @@ pub struct ProfileProviderAccount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderProfileCandidate {
+    pub profile_id: ProfileId,
+    pub account_id: ProviderAccountId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoProfileRoute {
     pub repo_id: RepoId,
     pub default_profile: ProfileId,

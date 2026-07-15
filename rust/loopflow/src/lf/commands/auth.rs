@@ -93,7 +93,6 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             chrome_profile,
         } => import_account(provider, account, chrome_profile.as_deref()).await,
         AuthCommand::Accounts { provider } => accounts(provider.as_deref()).await,
-        AuthCommand::Use { provider, account } => use_account(provider, account).await,
         AuthCommand::Enable { provider, account } => {
             set_account_enabled(provider, account, true).await
         }
@@ -268,12 +267,11 @@ async fn connect_account(
             ))
         }
     };
-    let preferred = register_managed_account(provider, &account_id, profile, login).await?;
+    register_managed_account(provider, &account_id, profile, login).await?;
     println!(
-        "Connected {} account '{}'{}",
+        "Connected {} account '{}'",
         provider.display_name(),
-        account_id,
-        if preferred { " (preferred)" } else { "" }
+        account_id
     );
     Ok(())
 }
@@ -283,7 +281,7 @@ async fn register_managed_account(
     account_id: &ProviderAccountId,
     profile: PathBuf,
     login: Option<String>,
-) -> Result<bool> {
+) -> Result<()> {
     let store = open_account_store().await?;
     let accounts = store
         .list_provider_accounts(Some(provider.as_str()))
@@ -291,30 +289,16 @@ async fn register_managed_account(
     let existing = accounts
         .iter()
         .find(|account| account.account_id == *account_id);
-    let preferred = existing
-        .map(|account| account.preferred)
-        .unwrap_or_else(|| !accounts.iter().any(|account| account.preferred));
     let mut account = existing.cloned().unwrap_or_else(|| {
-        new_account(
-            provider,
-            account_id.clone(),
-            profile.clone(),
-            login.clone(),
-            preferred,
-        )
+        new_account(provider, account_id.clone(), profile.clone(), login.clone())
     });
     account.home = Some(profile);
     account.login = login;
     account.enabled = true;
-    account.preferred = preferred;
+    account.preferred = false;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
-    if preferred {
-        store
-            .set_preferred_provider_account(provider.as_str(), account_id)
-            .await?;
-    }
-    Ok(preferred)
+    Ok(())
 }
 
 fn pair_chrome_profile(
@@ -394,13 +378,11 @@ async fn import_account(
             }
         };
     let login = login.or(status_login);
-    let preferred =
-        register_managed_account(provider, &account_id, provider_profile, login).await?;
+    register_managed_account(provider, &account_id, provider_profile, login).await?;
     println!(
-        "Imported {} account '{}'{}",
+        "Imported {} account '{}'",
         provider.display_name(),
-        account_id,
-        if preferred { " (preferred)" } else { "" }
+        account_id
     );
     Ok(())
 }
@@ -624,22 +606,6 @@ async fn accounts(raw_provider: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-async fn use_account(raw_provider: &str, raw_account: &str) -> Result<()> {
-    let provider = parse_managed_provider(raw_provider)?;
-    let account_id = parse_account_id(raw_account)?;
-    let store = open_account_store().await?;
-    store
-        .set_preferred_provider_account(provider.as_str(), &account_id)
-        .await
-        .map_err(|error| account_store_error(provider, &account_id.to_string(), error))?;
-    println!(
-        "Preferred {} account '{}'",
-        provider.display_name(),
-        account_id
-    );
-    Ok(())
-}
-
 async fn set_account_enabled(raw_provider: &str, raw_account: &str, enabled: bool) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let account_id = parse_account_id(raw_account)?;
@@ -693,9 +659,6 @@ fn parse_managed_provider(raw: &str) -> Result<Provider> {
 
 fn format_account(account: &ProviderAccount) -> String {
     let mut details = Vec::new();
-    if account.preferred {
-        details.push("preferred".to_string());
-    }
     if !account.enabled {
         details.push("disabled".to_string());
     }
@@ -961,7 +924,7 @@ mod tests {
             home: None,
             login: Some("operator@example.com".to_string()),
             enabled: true,
-            preferred: true,
+            preferred: false,
             utilization_percent: Some(72),
             cooldown_until: Some(now + 3_600),
             cooldown_reason: Some("five_hour".to_string()),
@@ -972,7 +935,7 @@ mod tests {
 
         assert!(rendered.contains("claude"));
         assert!(rendered.contains("primary"));
-        assert!(rendered.contains("preferred"));
+        assert!(!rendered.contains("preferred"));
         assert!(rendered.contains("72% used"));
         assert!(rendered.contains("cooling for"));
         assert!(rendered.contains("operator@example.com"));

@@ -133,6 +133,19 @@ const MIGRATIONS: &[Migration] = &[
         name: "provider_accounts",
         sql: include_str!("migrations/0.11.005_provider_accounts.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            // Ordinal 6 belongs to an in-flight branch's `context_launch_work`
+            // migration (present in shared stores, not yet on main). Skipping to
+            // 7 keeps this migration's version string distinct so a store one
+            // branch migrated stays readable by the other.
+            ordinal: 7,
+        },
+        name: "task_session_successors",
+        sql: include_str!("migrations/0.11.007_task_session_successors.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -643,7 +656,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.005_provider_accounts"
+            "0.11.007_task_session_successors"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -660,7 +673,8 @@ mod tests {
                 "0.11.002_project_session_successors".to_string(),
                 "0.11.003_child_body_lease".to_string(),
                 "0.11.004_task_pr_ci_state".to_string(),
-                "0.11.005_provider_accounts".to_string()
+                "0.11.005_provider_accounts".to_string(),
+                "0.11.007_task_session_successors".to_string()
             ]
         );
     }
@@ -1054,7 +1068,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.005_provider_accounts"
+            "0.11.007_task_session_successors"
         );
     }
 

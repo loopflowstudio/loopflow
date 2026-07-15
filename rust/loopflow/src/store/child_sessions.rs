@@ -42,6 +42,37 @@ impl Store {
         .await
     }
 
+    pub async fn recover_task_session(
+        &self,
+        successor: &TaskSession,
+        directive: &ChildDirective,
+        predecessor_id: &TaskSessionId,
+    ) -> StoreResult<()> {
+        let successor = successor.clone();
+        let directive = directive.clone();
+        let predecessor_id = predecessor_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.recover_task_session(&successor, &directive, &predecessor_id)
+        })
+        .await
+    }
+
+    pub async fn task_sessions_for_issue(&self, issue: &str) -> StoreResult<Vec<TaskSession>> {
+        let issue = issue.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_sessions_for_issue(&issue)
+        })
+        .await
+    }
+
+    pub async fn task_chain_neighbors(
+        &self,
+        id: &TaskSessionId,
+    ) -> StoreResult<(Option<String>, Option<String>)> {
+        let id = id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_chain_neighbors(&id)).await
+    }
+
     pub async fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {

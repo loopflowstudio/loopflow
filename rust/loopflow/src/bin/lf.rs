@@ -1108,6 +1108,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let result = loopflow::ops::task::task_abandon(issue, reason.clone())?;
             print_task_control(&result, *json)
         }
+        TaskCommand::Recover {
+            issue,
+            reason,
+            json,
+        } => {
+            let session = loopflow::ops::task::recover_task(issue, reason.clone())?;
+            print_task_session(&session, *json)
+        }
     }
 }
 

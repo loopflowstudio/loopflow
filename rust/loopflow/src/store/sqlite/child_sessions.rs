@@ -63,6 +63,54 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Create a linked successor for a terminal (abandoned) Task Session, adopting
+    /// the predecessor's serial PR sequence and carrying its directive forward.
+    ///
+    /// One transaction: insert the successor row, re-point every one of the
+    /// predecessor's `task_prs` rows to it (preserving sequence and branch/base/
+    /// merge evidence), insert the carried initial directive, and record it. The
+    /// predecessor row is untouched — its `abandoned` status and reason stay as
+    /// immutable history. The partial unique index on non-terminal `issue_id`
+    /// converges concurrent recoveries: the second INSERT fails the constraint,
+    /// surfacing as a Sqlite error the caller re-reads through.
+    pub fn recover_task_session(
+        &self,
+        successor: &TaskSession,
+        directive: &ChildDirective,
+        predecessor_id: &TaskSessionId,
+    ) -> StoreResult<()> {
+        validate_task_session(successor)?;
+        ensure_directive_target(directive, "task", successor.id.as_str())?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        validate_task_project_session(&conn, successor)?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let parameters = task_session_params(successor);
+        transaction.execute(
+            TASK_SESSION_INSERT,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        transaction.execute(
+            "UPDATE task_sessions SET predecessor_session_id=?1 WHERE id=?2",
+            params![predecessor_id.as_str(), successor.id.as_str()],
+        )?;
+        transaction.execute(
+            "UPDATE task_prs SET task_session_id=?1, updated_at=?2 WHERE task_session_id=?3",
+            params![successor.id.as_str(), now_unix(), predecessor_id.as_str()],
+        )?;
+        insert_child_directive(&transaction, directive)?;
+        insert_task_event_in(
+            &transaction,
+            successor,
+            &TaskEventKind::DirectiveChanged {
+                directive_id: directive.id.clone(),
+                version: directive.version,
+                directive_kind: directive.kind,
+            },
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         validate_task_session(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -472,10 +520,39 @@ impl SqliteStore {
         .map_err(StoreError::from)
     }
 
+    /// The *current attempt* for an issue: the single non-terminal Session if one
+    /// exists, else the most recently created terminal one. A durable Task is the
+    /// chain of Sessions sharing an `issue_id`; recovery keeps a terminal
+    /// predecessor alongside one non-terminal successor, and the partial unique
+    /// index guarantees at most one non-terminal member.
     pub fn task_session_by_issue(&self, issue: &str) -> StoreResult<Option<TaskSession>> {
+        let sessions = self.task_sessions_for_issue(issue)?;
+        let mut active = sessions
+            .iter()
+            .filter(|session| !session.status.is_terminal());
+        if let Some(current) = active.next() {
+            if active.next().is_some() {
+                return Err(StoreError::InvalidData(format!(
+                    "issue {issue:?} resolves to more than one non-terminal task session"
+                )));
+            }
+            return Ok(Some(current.clone()));
+        }
+        Ok(sessions.into_iter().max_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+        }))
+    }
+
+    /// Every Session for an issue, oldest first — the chain a durable Task walks
+    /// to derive predecessor/successor linkage. Matches either the Linear UUID or
+    /// the human identifier.
+    pub fn task_sessions_for_issue(&self, issue: &str) -> StoreResult<Vec<TaskSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
-            "{TASK_SESSION_COLUMNS} WHERE issue_id = ?1 OR issue_identifier = ?1 ORDER BY created_at"
+            "{TASK_SESSION_COLUMNS} WHERE issue_id = ?1 OR issue_identifier = ?1 \
+             ORDER BY created_at, id"
         );
         let mut statement = conn.prepare(&query)?;
         let rows = statement.query_map(params![issue], map_task_session_row)?;
@@ -483,13 +560,34 @@ impl SqliteStore {
         for row in rows {
             sessions.push(row?);
         }
-        match sessions.len() {
-            0 => Ok(None),
-            1 => Ok(sessions.pop()),
-            count => Err(StoreError::InvalidData(format!(
-                "issue {issue:?} resolves to {count} task sessions"
-            ))),
-        }
+        Ok(sessions)
+    }
+
+    /// The predecessor and successor Session ids for one Session, read from the
+    /// explicit recovery link. Each predecessor has at most one successor (a
+    /// second recovery of the same abandoned Session is barred once one exists),
+    /// so both sides are unambiguous regardless of timestamp granularity.
+    pub fn task_chain_neighbors(
+        &self,
+        id: &TaskSessionId,
+    ) -> StoreResult<(Option<String>, Option<String>)> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let predecessor = conn
+            .query_row(
+                "SELECT predecessor_session_id FROM task_sessions WHERE id=?1",
+                params![id.as_str()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let successor = conn
+            .query_row(
+                "SELECT id FROM task_sessions WHERE predecessor_session_id=?1",
+                params![id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok((predecessor, successor))
     }
 
     pub fn list_task_sessions(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<TaskSession>> {

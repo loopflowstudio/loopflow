@@ -851,6 +851,14 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Recover an abandoned Task as a linked successor adopting its worktree and PR history
+    Recover {
+        issue: String,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

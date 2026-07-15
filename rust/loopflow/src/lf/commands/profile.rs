@@ -53,6 +53,23 @@ async fn create_profile(
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let profile_id = parse_profile_id(raw_profile)?;
+    let chrome_profile = raw_chrome_profile
+        .map(resolve_local_chrome_profile)
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
+    if let Some(chrome_profile) = &chrome_profile {
+        if !chrome_profile
+            .label
+            .eq_ignore_ascii_case(profile_id.as_str())
+        {
+            return Err(anyhow!(
+                "Chrome profile '{}' is signed in as '{}', not '{}'",
+                raw_chrome_profile.expect("resolved Chrome profile has an input"),
+                chrome_profile.label,
+                profile_id
+            ));
+        }
+    }
     let now = now_unix();
     let existed = store.get_profile(&profile_id).await?.is_some();
     store
@@ -62,20 +79,7 @@ async fn create_profile(
             updated_at: now,
         })
         .await?;
-    if let Some(raw_chrome_profile) = raw_chrome_profile {
-        let chrome_profile =
-            resolve_local_chrome_profile(raw_chrome_profile).map_err(|error| anyhow!(error))?;
-        if !chrome_profile
-            .label
-            .eq_ignore_ascii_case(profile_id.as_str())
-        {
-            return Err(anyhow!(
-                "Chrome profile '{}' is signed in as '{}', not '{}'",
-                raw_chrome_profile,
-                chrome_profile.label,
-                profile_id
-            ));
-        }
+    if let Some(chrome_profile) = chrome_profile {
         store
             .upsert_chrome_profile_binding(&ChromeProfileBinding {
                 profile_id: profile_id.clone(),

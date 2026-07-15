@@ -200,6 +200,7 @@ impl ProviderAccountRoute {
     }
 
     pub fn apply(&self, command: &mut Command) {
+        command.env_remove(FORWARDED_PROFILE_BUNDLE_ENV);
         match (&self.provider, &self.credential) {
             (Provider::Claude, AccountCredential::NativeHome(home)) => {
                 command.env("CLAUDE_CONFIG_DIR", home);
@@ -226,6 +227,7 @@ impl ProviderAccountRoute {
     }
 
     pub fn apply_tokio(&self, command: &mut tokio::process::Command) {
+        command.env_remove(FORWARDED_PROFILE_BUNDLE_ENV);
         match (&self.provider, &self.credential) {
             (Provider::Claude, AccountCredential::NativeHome(home)) => {
                 command.env("CLAUDE_CONFIG_DIR", home);
@@ -1020,7 +1022,15 @@ mod tests {
         );
         assert_eq!(environment.get("OPENAI_API_KEY"), Some(&None));
         assert_eq!(environment.get("CODEX_HOME"), Some(&None));
+        assert_eq!(environment.get(FORWARDED_PROFILE_BUNDLE_ENV), Some(&None));
         assert!(!environment.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+
+        let mut async_command = tokio::process::Command::new("codex");
+        route.apply_tokio(&mut async_command);
+        assert!(async_command
+            .as_std()
+            .get_envs()
+            .any(|(name, value)| name == FORWARDED_PROFILE_BUNDLE_ENV && value.is_none()));
     }
 
     #[tokio::test]

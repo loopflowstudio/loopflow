@@ -1509,8 +1509,7 @@ mod tests {
             "connect",
             "import",
             "accounts",
-            "enable",
-            "disable",
+            "set",
             "reset",
             "disconnect",
         ] {

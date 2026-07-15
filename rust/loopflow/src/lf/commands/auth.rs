@@ -285,6 +285,7 @@ async fn connect_account(
             ))
         }
     };
+    let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login)?;
     register_managed_account(provider, &account_id, profile, login).await?;
     println!(
         "Connected {} account '{}'",
@@ -351,7 +352,7 @@ async fn import_account(
         .map(String::from);
 
     let login = if provider_profile.join(".credentials.json").is_file() {
-        paired_login
+        None
     } else {
         let ambient = read_ambient_claude_status()?;
         if !ambient.logged_in {
@@ -383,7 +384,7 @@ async fn import_account(
                 ))
             }
         };
-    let login = login.or(status_login);
+    let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login.or(status_login))?;
     register_managed_account(provider, &account_id, provider_profile, login).await?;
     println!(
         "Imported {} account '{}'",
@@ -435,6 +436,25 @@ async fn resolve_auth_chrome_profile(
         .map(crate::profile::resolve_local_chrome_profile)
         .transpose()
         .map_err(|error| anyhow!(error))
+}
+
+fn verified_login_for_chrome_profile(
+    chrome_profile: Option<&LocalChromeProfile>,
+    provider_login: Option<String>,
+) -> Result<Option<String>> {
+    let expected_login = chrome_profile
+        .map(|profile| profile.label.as_str())
+        .filter(|label| label.contains('@'));
+    if let (Some(expected), Some(actual)) = (expected_login, provider_login.as_deref()) {
+        if !expected.eq_ignore_ascii_case(actual) {
+            return Err(anyhow!(
+                "provider login '{}' does not match Chrome profile '{}'",
+                actual,
+                expected
+            ));
+        }
+    }
+    Ok(provider_login.or_else(|| expected_login.map(String::from)))
 }
 
 #[cfg(target_os = "macos")]
@@ -866,7 +886,7 @@ fn format_relative_delta(seconds: i64) -> String {
 mod tests {
     use time::OffsetDateTime;
 
-    use crate::profile::EmailAddress;
+    use crate::profile::{EmailAddress, LocalChromeProfile};
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
     use crate::store::{
         CredentialState, CredentialType, ProviderAccount, ProviderAccountId, RoutingState,
@@ -874,7 +894,7 @@ mod tests {
 
     use super::{
         format_account, format_relative_delta, format_snapshot, parse_paid_through,
-        parse_routing_state,
+        parse_routing_state, verified_login_for_chrome_profile,
     };
 
     #[test]
@@ -976,5 +996,31 @@ mod tests {
         assert_eq!(format_relative_delta(180), "3m");
         assert_eq!(format_relative_delta(7_200), "2h");
         assert_eq!(format_relative_delta(172_800), "2d");
+    }
+
+    #[test]
+    fn chrome_profile_and_provider_login_must_name_the_same_account() {
+        let chrome_profile = LocalChromeProfile {
+            directory: "Profile 7".to_string(),
+            label: "jack@loopflow.studio".to_string(),
+        };
+
+        assert_eq!(
+            verified_login_for_chrome_profile(
+                Some(&chrome_profile),
+                Some("JACK@LOOPFLOW.STUDIO".to_string()),
+            )
+            .unwrap(),
+            Some("JACK@LOOPFLOW.STUDIO".to_string())
+        );
+        assert!(verified_login_for_chrome_profile(
+            Some(&chrome_profile),
+            Some("jackstah@gmail.com".to_string()),
+        )
+        .is_err());
+        assert_eq!(
+            verified_login_for_chrome_profile(Some(&chrome_profile), None).unwrap(),
+            Some("jack@loopflow.studio".to_string())
+        );
     }
 }

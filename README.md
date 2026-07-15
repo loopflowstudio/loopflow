@@ -475,21 +475,25 @@ lf profile create jack@loopflow.studio --chrome-profile jack@loopflow.studio
 lf profile create loopflow-eng@loopflow.studio --chrome-profile loopflow-eng@loopflow.studio
 lf profile create jackstah@gmail.com --chrome-profile jackstah@gmail.com
 
-lf auth import claude --account primary --profile jackstah@gmail.com
-lf auth connect claude --account loopflow --profile jack@loopflow.studio
+lf auth import claude --account personal --profile jackstah@gmail.com
+lf auth set claude personal --login-email jackstah@gmail.com
+lf auth connect claude --account jack --profile jack@loopflow.studio
+lf auth set claude jack --login-email jack@loopflow.studio --plan max
+
+lf auth connect codex --account jack
+lf auth set codex jack --login-email jack@loopflow.studio --plan max
 lf auth connect codex --account engineering
-lf auth set codex engineering \
-  --login-email loopflow-eng@loopflow.studio \
-  --routing automatic \
-  --plan max
+lf auth set codex engineering --login-email loopflow-eng@loopflow.studio --plan max
+lf auth connect codex --account personal
+lf auth set codex personal --login-email jackstah@gmail.com
 lf auth accounts claude
 
-lf profile account set jack@loopflow.studio claude loopflow
-lf profile account set jack@loopflow.studio codex loopflow
-lf profile account set loopflow-eng@loopflow.studio claude primary
-lf profile account set loopflow-eng@loopflow.studio codex engineering
-lf profile account set jackstah@gmail.com claude primary
-lf profile account set jackstah@gmail.com codex primary
+lf profile account set jack@loopflow.studio claude jack@loopflow.studio
+lf profile account set jack@loopflow.studio codex jack@loopflow.studio
+lf profile account set loopflow-eng@loopflow.studio claude jackstah@gmail.com
+lf profile account set loopflow-eng@loopflow.studio codex loopflow-eng@loopflow.studio
+lf profile account set jackstah@gmail.com claude jackstah@gmail.com
+lf profile account set jackstah@gmail.com codex jackstah@gmail.com
 
 lf profile route set \
   --default jack@loopflow.studio \
@@ -497,10 +501,10 @@ lf profile route set \
   --backup jackstah@gmail.com
 lf profile route show
 
-lf auth set claude primary --paid-through 2026-08-14
-lf auth set claude primary --routing explicit-only
-lf auth reset claude primary
-lf auth disconnect claude --account reserve
+lf auth set claude personal --paid-through 2026-08-14
+lf auth set claude personal --routing explicit-only
+lf auth reset claude personal
+lf auth disconnect claude --account personal
 ```
 
 Claude authorization runs through Claude in Chrome when its browser extension

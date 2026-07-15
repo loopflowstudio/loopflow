@@ -404,6 +404,7 @@ impl Drop for AuthMonitor {
 
 pub struct ClaudeKeychainGuard {
     credential: Option<ClaudeKeychainCredential>,
+    armed: bool,
 }
 
 struct ClaudeKeychainCredential {
@@ -418,6 +419,7 @@ impl std::fmt::Debug for ClaudeKeychainGuard {
                 "credential",
                 &self.credential.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("armed", &self.armed)
             .finish()
     }
 }
@@ -432,6 +434,7 @@ impl ClaudeKeychainGuard {
     pub fn preserve() -> Result<Self, AuthError> {
         Ok(Self {
             credential: read_claude_keychain_credential()?,
+            armed: true,
         })
     }
 
@@ -442,15 +445,20 @@ impl ClaudeKeychainGuard {
     /// Returns an error when macOS rejects the Keychain update.
     pub fn restore(mut self) -> Result<(), AuthError> {
         let result = restore_claude_keychain_blob(self.credential.as_ref());
-        self.credential.take();
+        if result.is_ok() {
+            self.armed = false;
+            self.credential.take();
+        }
         result
     }
 }
 
 impl Drop for ClaudeKeychainGuard {
     fn drop(&mut self) {
-        if let Err(error) = restore_claude_keychain_blob(self.credential.as_ref()) {
-            warn!(%error, "failed to restore Claude Keychain credential");
+        if self.armed {
+            if let Err(error) = restore_claude_keychain_blob(self.credential.as_ref()) {
+                warn!(%error, "failed to restore Claude Keychain credential");
+            }
         }
     }
 }
@@ -1425,11 +1433,13 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = self.command();
-        command.args(["auth", "logout"]);
-
-        // Best-effort CLI logout; always clean up auth files regardless
-        let _ = command.output().await;
+        if self.keychain_fallback {
+            let mut command = self.command();
+            command.args(["auth", "logout"]);
+            // Ambient logout owns the global Keychain entry. A managed profile
+            // must only remove its copied credential file.
+            let _ = command.output().await;
+        }
         self.remove_claude_auth_files()
     }
 
@@ -2549,15 +2559,31 @@ fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>,
 fn restore_claude_keychain_blob(
     credential: Option<&ClaudeKeychainCredential>,
 ) -> Result<(), AuthError> {
-    let Some(credential) = credential else {
-        return Ok(());
-    };
-    security_framework::passwords::set_generic_password(
-        CLAUDE_KEYCHAIN_SERVICE,
-        &credential.account,
-        credential.blob.expose_secret().as_bytes(),
-    )
-    .map_err(|error| AuthError::Filesystem(format!("restore Claude Keychain credential: {error}")))
+    match credential {
+        Some(credential) => security_framework::passwords::set_generic_password(
+            CLAUDE_KEYCHAIN_SERVICE,
+            &credential.account,
+            credential.blob.expose_secret().as_bytes(),
+        )
+        .map_err(|error| {
+            AuthError::Filesystem(format!("restore Claude Keychain credential: {error}"))
+        }),
+        None => {
+            let Some(current) = read_claude_keychain_credential()? else {
+                return Ok(());
+            };
+            match security_framework::passwords::delete_generic_password(
+                CLAUDE_KEYCHAIN_SERVICE,
+                &current.account,
+            ) {
+                Ok(()) => Ok(()),
+                Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
+                Err(error) => Err(AuthError::Filesystem(format!(
+                    "clear Claude Keychain credential: {error}"
+                ))),
+            }
+        }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -3957,9 +3983,7 @@ mod tests {
         assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
     }
 
-    // Requires local claude CLI; keep ignored.
     #[tokio::test]
-    #[ignore]
     async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
         let temp = tempdir().expect("tempdir");
         let claude_dir = temp.path().join(".claude");

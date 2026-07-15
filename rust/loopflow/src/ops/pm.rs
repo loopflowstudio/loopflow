@@ -303,6 +303,9 @@ async fn pm_create_project_async(
             definition: seed.definition,
             krs: seed.krs,
             initiative_ids: vec![ctx.initiative],
+            // The create result is transient — the next sync resolves the
+            // authoritative teams from Linear.
+            team_ids: None,
         },
     })
 }
@@ -1453,6 +1456,17 @@ fn identifier_has_team_prefix(identifier: &str, team_key: &str) -> bool {
     identifier.trim().to_ascii_uppercase().starts_with(&prefix)
 }
 
+/// Whether a Project sits on a team other than the wave's bound team. `None`
+/// team ids means the read did not resolve teams (an older snapshot) — unknown,
+/// not a mismatch, so no false positive. An empty set is a real mismatch: the
+/// Project belongs to no team the wave owns.
+fn project_off_team(bound_team: &str, project_team_ids: Option<&[String]>) -> bool {
+    match project_team_ids {
+        None => false,
+        Some(team_ids) => !team_ids.iter().any(|id| id == bound_team),
+    }
+}
+
 pub fn pm_reteam(
     repo: &Path,
     options: &PmReteamOptions,
@@ -1600,7 +1614,6 @@ async fn pm_sync_async(
 
     let mut linked_initiative_ids = BTreeSet::new();
     let mut provider_by_kind = BTreeMap::new();
-    let mut team_owner: BTreeMap<String, String> = BTreeMap::new();
     for wave in &all_waves {
         let provider = resolve_provider(repo, wave)?;
         provider_by_kind.insert(provider.as_str().to_string(), provider);
@@ -1609,21 +1622,16 @@ async fn pm_sync_async(
         } else {
             diagnostics.push(format!("wave/{wave} has no Linear Initiative"));
         }
-        // Every wave should own its own team so Task prefixes stay wave-scoped.
-        match read_team(repo, wave, provider) {
-            None => diagnostics.push(format!(
+        // Every wave must bind a team explicitly so creation never falls back to
+        // the shared team. Sharing one team across a product's waves (each with
+        // its own Initiative, as Cadenza does) is allowed — the Task prefix is
+        // per team, not per wave — so no "waves share a team" diagnostic here.
+        if read_team(repo, wave, provider).is_none() {
+            diagnostics.push(format!(
                 "wave/{wave} has no `pm.{}`; run `lf pm init --wave {wave} --team-key <KEY>` \
-                 so its Tasks get their own prefix",
+                 so its work lands on an explicit team",
                 provider.team_key()
-            )),
-            Some(team_id) => {
-                if let Some(other) = team_owner.insert(team_id.clone(), wave.to_string()) {
-                    diagnostics.push(format!(
-                        "wave/{wave} and wave/{other} share Linear team {team_id}; \
-                         one team per wave keeps Task prefixes distinct"
-                    ));
-                }
-            }
+            ));
         }
     }
 
@@ -1683,6 +1691,7 @@ async fn pm_sync_async(
             initiative: initiative_id.clone(),
         };
         let snapshot = fetch_pm_snapshot(wave, &ctx).await?;
+        let bound_team = read_team(repo, wave, provider);
         for project in &snapshot.projects {
             let managed_initiatives = project
                 .initiative_ids
@@ -1694,6 +1703,20 @@ async fn pm_sync_async(
                     "Linear Project `{}` ({}) belongs to {managed_initiatives} Loopflow-managed Initiatives; expected exactly one",
                     project.name, project.id
                 ));
+            }
+            // A Project stranded on a foreign team (e.g. the shared team it was
+            // created against before the wave was bound) is invisible to the
+            // team-agnostic read path — flag it and name the repair. `reteam`
+            // never touched Projects, so this is the only surface that catches it.
+            if let Some(team_id) = &bound_team {
+                if project_off_team(team_id, project.team_ids.as_deref()) {
+                    let teams = project.team_ids.as_deref().unwrap_or_default().join(", ");
+                    diagnostics.push(format!(
+                        "Linear Project `{}` ({}) in wave/{wave} belongs to team(s) [{teams}], \
+                         not the wave's team {team_id}; run `lf pm reteam --wave {wave}` to move it",
+                        project.name, project.id
+                    ));
+                }
             }
             let items: Vec<_> = snapshot
                 .items
@@ -1709,8 +1732,8 @@ async fn pm_sync_async(
         }
         // Stranded issues: a team-bound wave whose open issues still carry a
         // foreign prefix are `reteam` candidates not yet moved.
-        if let Some(team_id) = read_team(repo, wave, provider) {
-            let team_key = client.team_key(&team_id).await.map_err(pm_to_ops)?;
+        if let Some(team_id) = &bound_team {
+            let team_key = client.team_key(team_id).await.map_err(pm_to_ops)?;
             let stranded = snapshot
                 .items
                 .iter()
@@ -2159,7 +2182,8 @@ mod tests {
             "name": name,
             "description": "",
             "content": "## Definition\n\nA measured bet.\n\n## KRs\n",
-            "initiatives": { "nodes": [{ "id": "initiative-123" }] }
+            "initiatives": { "nodes": [{ "id": "initiative-123" }] },
+            "teams": { "nodes": [{ "id": "team-123" }] }
         })
     }
 
@@ -2323,6 +2347,24 @@ mod tests {
     }
 
     #[test]
+    fn project_off_team_flags_only_a_resolved_foreign_team() {
+        // Unknown teams (older snapshot) → never a mismatch.
+        assert!(!project_off_team("team-prd", None));
+        // Bound team present in the set → owned.
+        assert!(!project_off_team(
+            "team-prd",
+            Some(&["team-prd".to_string(), "team-shared".to_string()])
+        ));
+        // Bound team absent → stranded.
+        assert!(project_off_team(
+            "team-prd",
+            Some(&["team-shared".to_string()])
+        ));
+        // Belongs to no team at all → stranded.
+        assert!(project_off_team("team-prd", Some(&[])));
+    }
+
+    #[test]
     fn reteam_classifies_move_defer_leave_and_skip() {
         // Completed → historical, regardless of team.
         assert_eq!(
@@ -2389,6 +2431,7 @@ mod tests {
             definition: String::new(),
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: None,
         };
         let projects = vec![project("one", "Wave Chat"), project("two", "Wave-Chat")];
 
@@ -2416,12 +2459,14 @@ mod tests {
                     holds: true,
                 }],
                 initiative_ids: vec!["initiative-1".to_string()],
+                team_ids: Some(vec!["team-prd".to_string()]),
             }],
             items: Vec::new(),
         };
 
         let value = serde_json::to_value(result).expect("serialize PM show result");
         assert_eq!(value["synced_at"], 42);
+        assert_eq!(value["projects"][0]["team_ids"][0], "team-prd");
         assert_eq!(
             value["projects"][0]["definition"],
             "Conversation stays in flow."

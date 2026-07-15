@@ -2706,6 +2706,7 @@ mod tests {
                 },
             ],
             initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: None,
         };
 
         assert_eq!(

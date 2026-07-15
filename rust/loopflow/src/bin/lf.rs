@@ -1201,6 +1201,7 @@ fn main() -> anyhow::Result<()> {
                     loopflow::lf::commands::run::run(None, Some(&text), &cli)
                 })
             }
+            Some(Commands::Desktop) => loopflow::lf::commands::desktop::run(),
             Some(Commands::Pr { cmd }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
             }),
@@ -1394,9 +1395,10 @@ fn main() -> anyhow::Result<()> {
                     Err(err) => Err(err),
                 }
             }
-            None => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::run::run(None, None, &cli)
-            }),
+            None if raw_args.len() == 1 => loopflow::lf::commands::desktop::run(),
+            None => anyhow::bail!(
+                "no command specified; bare `lf` opens Loopflow.app; run a named skill, flow, or `lf : <prompt>` to start an agent"
+            ),
         }
     };
 
@@ -1416,8 +1418,9 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task", "project",
-            "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
+            ":", "desktop", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task",
+            "project", "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace",
+            "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
         }
@@ -1484,6 +1487,12 @@ mod tests {
     fn reorder_args_uppercase_bool_alias_after_skill() {
         let args = vec!["lf".to_string(), "debug".to_string(), "-C".to_string()];
         assert_eq!(reorder_args(args), vec!["lf", "-C", "debug"]);
+    }
+
+    #[test]
+    fn desktop_is_an_explicit_alias_for_the_bare_app_launch() {
+        let cli = Cli::try_parse_from(["lf", "desktop"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Desktop)));
     }
 
     #[test]

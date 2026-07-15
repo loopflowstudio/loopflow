@@ -137,6 +137,15 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            ordinal: 6,
+        },
+        name: "context_launch_work",
+        sql: include_str!("migrations/0.11.006_context_launch_work.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
             ordinal: 7,
         },
         name: "task_pr_parent",
@@ -670,6 +679,7 @@ mod tests {
                 "0.11.003_child_body_lease".to_string(),
                 "0.11.004_task_pr_ci_state".to_string(),
                 "0.11.005_provider_accounts".to_string(),
+                "0.11.006_context_launch_work".to_string(),
                 "0.11.007_task_pr_parent".to_string()
             ]
         );

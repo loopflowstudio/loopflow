@@ -140,6 +140,8 @@ jobs:
         # target compiles. build-for-testing gives that without launching the
         # app, so there is no test-host run loop to hang on — deterministically
         # no hang, unlike relying on the app to terminate itself.
+        # The real hosted UI run is the separately named required gate
+        # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
         run: |
           xcodebuild build-for-testing \
             -project LoopflowSwift.xcodeproj \

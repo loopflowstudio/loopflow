@@ -531,47 +531,44 @@ def _run_command(cmd: Command, artifact_dir: Path) -> Optional[str]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     log_path = artifact_dir / f"{cmd.label}.log"
     started = time.monotonic()
-    try:
-        with open(log_path, "w") as logf:
-            try:
-                proc = subprocess.Popen(
-                    cmd.argv,
-                    cwd=cmd.cwd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,  # own process group for a clean group-kill
-                    bufsize=1,
-                    text=True,
-                )
-            except FileNotFoundError:
-                return (
-                    f"MISSING TOOL: '{cmd.argv[0]}' is not installed on this host. "
-                    f"Install it or run the {cmd.label} phase where it exists."
-                )
+    with open(log_path, "w") as logf:
+        try:
+            proc = subprocess.Popen(
+                cmd.argv,
+                cwd=cmd.cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # own process group for a clean group-kill
+                bufsize=1,
+                text=True,
+            )
+        except FileNotFoundError:
+            return (
+                f"MISSING TOOL: '{cmd.argv[0]}' is not installed on this host. "
+                f"Install it or run the {cmd.label} phase where it exists."
+            )
 
-            def _pump() -> None:
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    logf.write(line)
+        def _pump() -> None:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                logf.write(line)
 
-            pump = threading.Thread(target=_pump, daemon=True)
-            pump.start()
-            try:
-                proc.wait(timeout=budget)
-            except subprocess.TimeoutExpired:
-                _kill_group(proc)
-                pump.join(timeout=5)
-                elapsed = time.monotonic() - started
-                return (
-                    f"TIMEOUT: phase '{cmd.label}' exceeded its {budget}s budget "
-                    f"(ran {elapsed:.0f}s) and was killed. No phase hangs the gate. "
-                    f"Log: {log_path}"
-                )
+        pump = threading.Thread(target=_pump, daemon=True)
+        pump.start()
+        try:
+            proc.wait(timeout=budget)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc)
             pump.join(timeout=5)
-    finally:
-        pass
+            elapsed = time.monotonic() - started
+            return (
+                f"TIMEOUT: phase '{cmd.label}' exceeded its {budget}s budget "
+                f"(ran {elapsed:.0f}s) and was killed. No phase hangs the gate. "
+                f"Log: {log_path}"
+            )
+        pump.join(timeout=5)
 
     if proc.returncode != 0:
         if proc.returncode < 0:

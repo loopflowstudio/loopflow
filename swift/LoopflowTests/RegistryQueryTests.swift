@@ -108,6 +108,45 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
+    @Test("lf home probe decodes the state and the one contextual action")
+    func homeProbeDecodesStateAndAction() async throws {
+        let json = #"""
+        {"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},
+         "state":"stopped","reason":"reachable, no resident","endpoint":null,
+         "action":{"kind":"start","home":"jack@local"}}
+        """#
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["home", "probe", "product", "--json"])
+            #expect(cwd == "/tmp/repo")
+            return json
+        }
+
+        let runtime = try await query.homeProbe(wave: "product", cwd: "/tmp/repo")
+        #expect(runtime.state == .stopped)
+        #expect(runtime.endpoint == nil)
+        #expect(runtime.action == .start(home: "jack@local"))
+    }
+
+    @Test("lf home start returns the idempotency flag and the attach identity")
+    func homeStartReturnsAttachIdentity() async throws {
+        let json = #"""
+        {"wave":"product","started":true,
+         "runtime":{"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},
+          "state":"running","reason":"resident answering","endpoint":"127.0.0.1:7777",
+          "action":{"kind":"attach","endpoint":"127.0.0.1:7777"}}}
+        """#
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["home", "start", "product", "--json"])
+            #expect(cwd == "/tmp/repo")
+            return json
+        }
+
+        let result = try await query.homeStart(wave: "product", cwd: "/tmp/repo")
+        #expect(result.started)
+        #expect(result.runtime.state == .running)
+        #expect(result.runtime.action == .attach(endpoint: "127.0.0.1:7777"))
+    }
+
     /// Unreadable evidence must reach the surface as its reason, never as an
     /// empty list — a broken ledger is not a quiet wave.
     @Test("lf status keeps unavailable evidence unavailable")

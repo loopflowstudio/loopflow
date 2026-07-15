@@ -39,4 +39,24 @@ the phase log (and any `.xcresult`) is kept under `.lf/tmp/gate/run-<pid>/`.
 
 ## Measured (this repo)
 
-<!-- MEASURED -->
+Headless measurement from this branch's CI run (GitHub `macos-15` / `ubuntu-latest`
+runners, run 29396456085) — the living repository, no local warm caches. CI runs
+each phase as its own parallel job; the serial `--all` wall-clock is roughly the
+sum, and cold local builds run longer, which is why the budgets sit well above
+these figures.
+
+| Phase (CI job) | Measured | Budget | Headroom |
+|----------------|---------:|-------:|---------:|
+| python-test | 19s | 600s | 32x |
+| rust-lint (fmt + clippy) | 45s | 1020s | 22x |
+| rust-test | 97s | 1200s | 12x |
+| website-test | 57s | 900s | 16x |
+| swift-test | 50s | 1320s | 26x |
+| e2e-smoke | 63s | 600s | 10x |
+| loopflow (xcodegen + build-for-testing) | 59s | 1380s | 23x |
+
+Every phase finished an order of magnitude inside its budget on a clean runner.
+The budgets are hang-catchers, not tight SLAs: a healthy phase never trips one, a
+wedged runner always does. Re-measure with `uv run python scripts/test.py --all`
+(the summary prints `elapsed / budget` per phase) when a phase's real time drifts
+toward its budget.

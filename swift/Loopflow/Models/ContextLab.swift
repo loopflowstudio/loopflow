@@ -307,6 +307,7 @@ public struct SourceEvidence: Decodable, Sendable, Identifiable {
     public let sourcePath: String?
     public let contentSha256: String
     public let currentContentSha256: String?
+    public let currentSourceSha256: String?
     public let precedenceLayers: [String]
     public let measurements: SourceMeasurements
     public let representatives: [RepresentativeTrace]
@@ -317,6 +318,7 @@ public struct SourceEvidence: Decodable, Sendable, Identifiable {
         case sourcePath = "source_path"
         case contentSha256 = "content_sha256"
         case currentContentSha256 = "current_content_sha256"
+        case currentSourceSha256 = "current_source_sha256"
         case precedenceLayers = "precedence_layers"
     }
 }

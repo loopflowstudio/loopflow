@@ -71,7 +71,7 @@ final class TaskTerminalStore: ObservableObject {
     }
 }
 
-private enum TaskWorkspaceSection: String, CaseIterable, Identifiable {
+enum TaskWorkspaceSection: String, Codable, CaseIterable, Identifiable, Hashable {
     case changes = "Changes"
     case agent = "Agent"
     case terminal = "Terminal"
@@ -113,7 +113,7 @@ struct TaskWorkspaceView: View {
         attention: TaskAttentionSnapshot,
         repoPath: String,
         terminalStore: TaskTerminalStore,
-        opensAgent: Bool = false
+        initialSection: TaskWorkspaceSection = .changes
     ) {
         self.task = task
         self.reference = reference
@@ -121,7 +121,7 @@ struct TaskWorkspaceView: View {
         self.attention = attention
         self.repoPath = repoPath
         self.terminalStore = terminalStore
-        _section = State(initialValue: opensAgent ? .agent : .changes)
+        _section = State(initialValue: initialSection)
     }
 
     private var workspace: TaskWorkspaceSnapshot? { reference.workspace }

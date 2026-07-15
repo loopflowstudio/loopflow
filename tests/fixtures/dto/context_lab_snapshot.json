@@ -159,6 +159,7 @@
       "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
       "content_sha256": "0123456789abcdef",
       "current_content_sha256": "0123456789abcdef",
+      "current_source_sha256": "fedcba9876543210",
       "precedence_layers": [
         "operate"
       ],

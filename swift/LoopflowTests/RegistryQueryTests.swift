@@ -349,27 +349,6 @@ struct RegistryQueryTests {
         #expect(trace.conversation.content == nil)
     }
 
-    @Test("PM snapshot exposes only filed open backlog")
-    func backlogDecodesOpenTasks() async throws {
-        let json = """
-        {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[
-          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","krs":[],"initiative_ids":["init-1"]}
-        ],"items":[
-          {"id":"TASK-1","name":"Ship loop","description":"","rank":1,"completed":false,"project":"runtime","assignee":null},
-          {"id":"TASK-2","name":"Already done","description":"","rank":2,"completed":true,"project":"runtime","assignee":"user-1"}
-        ]}
-        """
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["pm", "show", "--wave", "goals", "--json", "--no-sync"])
-            #expect(cwd == "/tmp/repo")
-            return json
-        }
-
-        let items = try await query.backlog(wave: "goals", cwd: "/tmp/repo")
-        #expect(items.map(\.id) == ["TASK-1"])
-        #expect(items[0].project == "runtime")
-    }
-
     @Test("PM snapshot maps projects and KR proof into the wave plan")
     func planDecodesProjects() async throws {
         let json = """

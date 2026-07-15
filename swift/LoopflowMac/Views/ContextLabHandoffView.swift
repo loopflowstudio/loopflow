@@ -108,7 +108,7 @@ struct TraceEvidenceView: View {
     }
 }
 
-private struct RefinementTaskChoice: Identifiable, Hashable {
+struct RefinementTaskChoice: Identifiable, Hashable {
     let waveId: String
     let waveName: String
     let repoPath: String
@@ -155,9 +155,10 @@ struct RefinementTaskSheet: View {
                         Text(evidence.sourcePath ?? evidence.label)
                             .font(Typography.code(10))
                             .textSelection(.enabled)
-                        Text(String(evidence.contentSha256.prefix(12)))
-                            .font(Typography.code(10))
+                        Text(evidence.contentSha256)
+                            .font(Typography.code(9))
                             .foregroundStyle(palette.textSecondary)
+                            .textSelection(.enabled)
                     }
 
                     if tasks.isEmpty {
@@ -206,26 +207,7 @@ struct RefinementTaskSheet: View {
         defer { isLoading = false }
         do {
             let roadmap = try await RegistryQueryLocal.shared.roadmap(wave: "intelligence")
-            let selectedRepos = Set(query.repoPaths.map(\.normalizedFilePath))
-            tasks = roadmap.waves
-                .filter { selectedRepos.isEmpty || selectedRepos.contains($0.wave.repo.normalizedFilePath) }
-                .flatMap { wave in
-                    wave.projects.items.flatMap { project in
-                        project.tasks.compactMap { task in
-                            guard !task.task.completed,
-                                  let runtime = task.runtime,
-                                  !runtime.processAlive,
-                                  task.reference.workspace != nil
-                            else { return nil }
-                            return RefinementTaskChoice(
-                                waveId: wave.wave.id,
-                                waveName: wave.wave.name,
-                                repoPath: wave.wave.repo,
-                                task: task
-                            )
-                        }
-                    }
-                }
+            tasks = refinementTaskChoices(in: roadmap, query: query)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -235,9 +217,7 @@ struct RefinementTaskSheet: View {
     @MainActor
     private func launch() async {
         guard let selectedTaskId,
-              let choice = tasks.first(where: { $0.id == selectedTaskId }),
-              let runtime = choice.task.runtime,
-              let workspace = choice.task.reference.workspace,
+              let selectedChoice = tasks.first(where: { $0.id == selectedTaskId }),
               let sourcePath = evidence.sourcePath
         else { return }
         isLaunching = true
@@ -252,6 +232,22 @@ struct RefinementTaskSheet: View {
                     "The selected source revision changed. Refresh Context Lab and select the current revision."
                 )
             }
+            let roadmap = try await RegistryQueryLocal.shared.roadmap(wave: "intelligence")
+            guard let choice = refinementTaskChoices(in: roadmap, query: query)
+                .first(where: { $0.id == selectedTaskId })
+            else {
+                throw ContextRefinementError(
+                    "The selected Task is no longer idle with a durable worktree. Let its current work finish, then reopen Refine source."
+                )
+            }
+            guard refinementWorkspaceIsCurrent(selectedChoice, current: choice),
+                  let runtime = choice.task.runtime,
+                  let workspace = choice.task.reference.workspace
+            else {
+                throw ContextRefinementError(
+                    "The selected Task workspace changed. Close this sheet, reselect the Task, and retry."
+                )
+            }
             let taskSource = try taskSourcePath(
                 sourcePath: sourcePath,
                 repoPath: choice.repoPath,
@@ -262,7 +258,9 @@ struct RefinementTaskSheet: View {
                     "The Task worktree is missing. Resume or recreate \(choice.task.task.identifier) first."
                 )
             }
-            guard effectiveSourceHash(kind: evidence.kind.rawValue, path: taskSource) == evidence.contentSha256 else {
+            guard let currentSourceSha256 = currentEvidence.currentSourceSha256,
+                  sourceFileHash(path: taskSource) == currentSourceSha256
+            else {
                 throw ContextRefinementError(
                     "The Task worktree does not contain the selected source revision. Rebase it, then retry."
                 )
@@ -284,25 +282,31 @@ struct RefinementTaskSheet: View {
 
             Improve the canonical source while preserving its intent. Inspect the linked immutable traces only as needed. Refuse to edit if the effective source hash is no longer \(evidence.contentSha256).
             """
-            let terminal = try await TaskTerminalStore.shared.addTerminal(
-                taskSessionId: runtime.sessionId,
-                issueIdentifier: choice.task.task.identifier,
-                worktree: workspace.worktree
-            )
             let lfPath = try LocalWaveAgentLauncher.resolveWaveCapableLf(originRepo: choice.repoPath)
             let encoded = Data(body.utf8).base64EncodedString()
             let command = "env \(shellQuote("LF_TASK_SESSION_ID=\(runtime.sessionId)")) "
                 + "\(shellQuote("LF_WAVE_ID=\(choice.waveId)")) \(shellQuote(lfPath)) --tui refine "
                 + "\"$(printf '%s' '\(encoded)' | /usr/bin/base64 -D)\""
-            try await TmuxSession(
-                sessionName: terminal.tmuxName,
-                worktreePath: workspace.worktree
-            ).sendCommand(command)
+            let terminal = try await TaskTerminalStore.shared.addTerminal(
+                taskSessionId: runtime.sessionId,
+                issueIdentifier: choice.task.task.identifier,
+                worktree: workspace.worktree
+            )
+            do {
+                try await TmuxSession(
+                    sessionName: terminal.tmuxName,
+                    worktreePath: workspace.worktree
+                ).sendCommand(command)
+            } catch {
+                TaskTerminalStore.shared.close(terminal, taskSessionId: runtime.sessionId)
+                throw error
+            }
             errorMessage = nil
             onLaunch(TaskWorkspaceRoute(
                 wave: choice.waveName,
                 issue: choice.task.task.identifier,
                 repoPath: choice.repoPath,
+                initialSection: .terminal,
                 context: backlink
             ))
         } catch {
@@ -343,7 +347,7 @@ struct TaskWorkspaceWindow: View {
                     runtime: task.runtime,
                     repoPath: route.repoPath,
                     terminalStore: TaskTerminalStore.shared,
-                    opensAgent: true
+                    initialSection: route.initialSection
                 )
             } else if let errorMessage {
                 ContentUnavailableView(
@@ -372,6 +376,52 @@ struct TaskWorkspaceWindow: View {
     }
 }
 
+func refinementTaskChoices(
+    in roadmap: RoadmapSnapshot,
+    query: SessionSetQuery
+) -> [RefinementTaskChoice] {
+    let selectedRepos = Set(query.repoPaths.map(\.normalizedFilePath))
+    return roadmap.waves
+        .filter { selectedRepos.isEmpty || selectedRepos.contains($0.wave.repo.normalizedFilePath) }
+        .flatMap { wave in
+            wave.projects.items.flatMap { project in
+                project.tasks.compactMap { task in
+                    guard !task.task.completed,
+                          let runtime = task.runtime,
+                          !runtime.processAlive,
+                          task.reference.workspace != nil
+                    else { return nil }
+                    return RefinementTaskChoice(
+                        waveId: wave.wave.id,
+                        waveName: wave.wave.name,
+                        repoPath: wave.wave.repo,
+                        task: task
+                    )
+                }
+            }
+        }
+}
+
+func refinementWorkspaceIsCurrent(
+    _ selected: RefinementTaskChoice,
+    current: RefinementTaskChoice
+) -> Bool {
+    guard let selectedRuntime = selected.task.runtime,
+          let currentRuntime = current.task.runtime,
+          let selectedWorkspace = selected.task.reference.workspace,
+          let currentWorkspace = current.task.reference.workspace
+    else { return false }
+    return selected.waveId == current.waveId
+        && selected.repoPath.normalizedFilePath == current.repoPath.normalizedFilePath
+        && selected.task.task.id == current.task.task.id
+        && selected.task.task.identifier == current.task.task.identifier
+        && selectedRuntime.sessionId == currentRuntime.sessionId
+        && selectedRuntime.projectSessionId == currentRuntime.projectSessionId
+        && selectedWorkspace.slug == currentWorkspace.slug
+        && selectedWorkspace.branch == currentWorkspace.branch
+        && selectedWorkspace.worktree.normalizedFilePath == currentWorkspace.worktree.normalizedFilePath
+}
+
 struct ContextRefinementError: LocalizedError {
     let message: String
 
@@ -396,27 +446,9 @@ func taskSourcePath(sourcePath: String, repoPath: String, worktree: String) thro
     return URL(fileURLWithPath: worktree).appendingPathComponent(relative).standardizedFileURL.path
 }
 
-func effectiveSourceHash(kind: String, path: String) -> String? {
-    guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
-    let effective: String
-    switch kind {
-    case "operating_instructions":
-        effective = "<lf:loopflow>\n\(content)\n</lf:loopflow>"
-    case "skill_instructions":
-        effective = skillBody(content)
-    default:
-        effective = content
-    }
-    return SHA256.hash(data: Data(effective.utf8)).map { String(format: "%02x", $0) }.joined()
-}
-
-func skillBody(_ content: String) -> String {
-    guard content.hasPrefix("---") else { return content }
-    let remainder = content.dropFirst(3)
-    guard let closing = remainder.range(of: "\n---") else { return content }
-    var body = String(remainder[closing.upperBound...])
-    if body.hasPrefix("\n") { body.removeFirst() }
-    return body
+func sourceFileHash(path: String) -> String? {
+    guard let content = FileManager.default.contents(atPath: path) else { return nil }
+    return SHA256.hash(data: content).map { String(format: "%02x", $0) }.joined()
 }
 
 private func shellQuote(_ value: String) -> String {

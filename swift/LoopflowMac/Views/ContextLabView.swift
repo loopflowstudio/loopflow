@@ -48,6 +48,7 @@ struct TaskWorkspaceRoute: Codable, Hashable {
     let wave: String
     let issue: String
     let repoPath: String
+    let initialSection: TaskWorkspaceSection
     let context: ContextLabRoute
 }
 
@@ -457,7 +458,7 @@ struct ContextLabView: View {
                 .foregroundStyle(palette.textSecondary)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.sm)
-                ForEach(sortedNodes(descendants(of: focus))) { node in
+                ForEach(sortedNodes([focus] + descendants(of: focus))) { node in
                     Button {
                         selectedNodeId = node.id
                     } label: {
@@ -548,8 +549,8 @@ struct ContextLabView: View {
                     .font(Typography.code(9))
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
-                Text(shortHash(evidence.contentSha256))
-                    .font(Typography.code(10))
+                Text(evidence.contentSha256)
+                    .font(Typography.code(9))
                     .foregroundStyle(palette.text)
                     .textSelection(.enabled)
             }
@@ -559,6 +560,13 @@ struct ContextLabView: View {
                 evidenceMetric("Turns", evidence.measurements.exposedTurns.formatted())
                 evidenceMetric("Attributed", "\(evidence.measurements.attributedTokens.formatted()) tokens")
                 evidenceMetric("Median / p95", "\(optionalTokens(evidence.measurements.medianTokensPerExposedTurn)) / \(optionalTokens(evidence.measurements.p95TokensPerExposedTurn))")
+                evidenceMetric(
+                    "First observed",
+                    evidence.measurements.firstSeen.map {
+                        Date(timeIntervalSince1970: TimeInterval($0))
+                            .formatted(date: .abbreviated, time: .shortened)
+                    } ?? "Missing"
+                )
                 evidenceMetric("Precedence", evidence.precedenceLayers.joined(separator: " · "))
             }
 
@@ -588,7 +596,6 @@ struct ContextLabView: View {
                             Spacer()
                             Button("Open trace") { traceRequest = trace.address }
                                 .buttonStyle(.borderless)
-                                .disabled(!trace.promptArtifactAvailable && !trace.conversationAvailable)
                         }
                     }
                     .padding(Spacing.sm)
@@ -623,7 +630,7 @@ struct ContextLabView: View {
                     .foregroundStyle(Color.statusWarning)
             } else {
                 comparisonMetric(
-                    "Median context / turn",
+                    "Median source tokens / turn",
                     optionalTokens(earlier.measurements.medianTokensPerExposedTurn),
                     optionalTokens(later.measurements.medianTokensPerExposedTurn)
                 )
@@ -849,7 +856,18 @@ struct ContextLabView: View {
             case .context:
                 return sessionTokens(left) > sessionTokens(right)
             case .selectedShare:
-                return selectedTokens(left, ids: selectedIds) > selectedTokens(right, ids: selectedIds)
+                let leftSelected = selectedTokens(left, ids: selectedIds)
+                let rightSelected = selectedTokens(right, ids: selectedIds)
+                let leftShare = contextSelectedSourceShare(
+                    selectedTokens: leftSelected,
+                    contextTokens: sessionTokens(left)
+                )
+                let rightShare = contextSelectedSourceShare(
+                    selectedTokens: rightSelected,
+                    contextTokens: sessionTokens(right)
+                )
+                if leftShare != rightShare { return leftShare > rightShare }
+                return leftSelected > rightSelected
             case .outcome:
                 return outcomeRank(left.outcome) > outcomeRank(right.outcome)
             case .steering:
@@ -1208,6 +1226,11 @@ private func optionalTokens(_ value: UInt64?) -> String {
 private func share(_ numerator: UInt64?, of denominator: UInt64?) -> String {
     guard let numerator, let denominator, denominator > 0 else { return "Missing" }
     return (Double(numerator) / Double(denominator)).formatted(.percent.precision(.fractionLength(1)))
+}
+
+func contextSelectedSourceShare(selectedTokens: UInt64, contextTokens: UInt64) -> Double {
+    guard contextTokens > 0 else { return 0 }
+    return Double(selectedTokens) / Double(contextTokens)
 }
 
 func contextRevisionComparisonBlocker(

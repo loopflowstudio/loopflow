@@ -179,6 +179,7 @@ pub struct SourceEvidence {
     pub source_path: Option<String>,
     pub content_sha256: String,
     pub current_content_sha256: Option<String>,
+    pub current_source_sha256: Option<String>,
     pub precedence_layers: Vec<String>,
     pub measurements: SourceMeasurements,
     pub representatives: Vec<RepresentativeTrace>,
@@ -774,17 +775,20 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                 .map(|candidate| candidate.steering_turns)
                 .collect::<Option<Vec<_>>>()
                 .map(|values| values.into_iter().sum());
-            let current_content_sha256 = key
+            let current_source_hashes = key
                 .source_path
                 .as_deref()
-                .and_then(|path| hash_effective_source(key.kind, path));
+                .and_then(|path| hash_current_source(key.kind, path));
             SourceEvidence {
                 node_id: revision_node_id(key.kind, &key.canonical_key, &key.content_sha256),
                 label: key.label,
                 kind: key.kind,
                 source_path: key.source_path,
                 content_sha256: key.content_sha256,
-                current_content_sha256,
+                current_content_sha256: current_source_hashes
+                    .as_ref()
+                    .map(|hashes| hashes.effective.clone()),
+                current_source_sha256: current_source_hashes.map(|hashes| hashes.source),
                 precedence_layers: revision.precedence_layers.into_iter().collect(),
                 measurements: SourceMeasurements {
                     exposed_sessions: revision.flame.sessions.len() as u64,
@@ -829,7 +833,11 @@ fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<Representativ
     let mut selected = Vec::new();
     if let Some(candidate) = candidates
         .iter()
-        .filter(|candidate| candidate.outcome == "completed" && candidate.capture == "complete")
+        .filter(|candidate| {
+            candidate.outcome == "completed"
+                && candidate.capture == "complete"
+                && candidate.steering_turns.unwrap_or(0) == 0
+        })
         .min_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(u64::MAX))
     {
         selected.push(representative(EvidenceRole::SmoothComplete, candidate));
@@ -947,8 +955,16 @@ fn short_hash(value: &str) -> String {
     value.chars().take(10).collect()
 }
 
-fn hash_effective_source(kind: ContextAssetKind, path: &str) -> Option<String> {
-    let content = fs::read_to_string(path).ok()?;
+#[derive(Debug, Clone)]
+struct CurrentSourceHashes {
+    effective: String,
+    source: String,
+}
+
+fn hash_current_source(kind: ContextAssetKind, path: &str) -> Option<CurrentSourceHashes> {
+    let bytes = fs::read(path).ok()?;
+    let source = hex::encode(Sha256::digest(&bytes));
+    let content = String::from_utf8(bytes).ok()?;
     let effective = match kind {
         ContextAssetKind::OperatingInstructions => {
             format!("<lf:loopflow>\n{content}\n</lf:loopflow>")
@@ -961,7 +977,10 @@ fn hash_effective_source(kind: ContextAssetKind, path: &str) -> Option<String> {
         ContextAssetKind::Goal | ContextAssetKind::Memory => return None,
         _ => content,
     };
-    Some(hex::encode(Sha256::digest(effective.as_bytes())))
+    Some(CurrentSourceHashes {
+        effective: hex::encode(Sha256::digest(effective.as_bytes())),
+        source,
+    })
 }
 
 fn artifact_available(path: &str) -> bool {
@@ -1199,6 +1218,59 @@ mod tests {
     }
 
     #[test]
+    fn smooth_representative_excludes_steered_launches() {
+        let launches = vec![
+            launch("launch-steered", "run-a", "completed", "complete", 100),
+            launch("launch-smooth", "run-b", "completed", "complete", 200),
+        ];
+        let mut steered_turn = turn("turn-steer", "launch-steered", 2, "assembled", 20, None);
+        steered_turn.input_op = "steer".to_string();
+        let turns = vec![
+            turn("turn-initial", "launch-steered", 1, "assembled", 10, None),
+            steered_turn,
+            turn("turn-smooth", "launch-smooth", 1, "assembled", 30, None),
+        ];
+        let assets = vec![
+            asset(
+                "turn-initial",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "hash",
+                10,
+            ),
+            asset(
+                "turn-steer",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "hash",
+                20,
+            ),
+            asset(
+                "turn-smooth",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "hash",
+                30,
+            ),
+        ];
+
+        let snapshot = aggregate(query(), launches, turns, assets);
+        let smooth = snapshot.evidence[0]
+            .representatives
+            .iter()
+            .find(|representative| representative.role == EvidenceRole::SmoothComplete)
+            .expect("smooth complete representative");
+
+        assert_eq!(smooth.address.launch_id, "launch-smooth");
+    }
+
+    #[test]
     fn percentiles_count_each_captured_turn_once() {
         assert_eq!(percentile(&[10, 20, 30, 40], 50), Some(20));
         assert_eq!(percentile(&[10, 20, 30, 40], 95), Some(40));
@@ -1227,6 +1299,28 @@ mod tests {
         assert_eq!(
             identity.path.as_deref(),
             Some("/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md")
+        );
+    }
+
+    #[test]
+    fn current_source_hashes_keep_file_and_effective_identity_separate() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("LOOPFLOW.md");
+        fs::write(&path, "Guide\n").unwrap();
+
+        let hashes = hash_current_source(
+            ContextAssetKind::OperatingInstructions,
+            path.to_str().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            hashes.source,
+            "3274fcad886cde4e2ca86b11d30fd7c44858eadf1c437a9583f31e7815db1af6"
+        );
+        assert_eq!(
+            hashes.effective,
+            "b779142188232028405d7f6245309de84876fde2d27c0df5c0c807bab73194ae"
         );
     }
 

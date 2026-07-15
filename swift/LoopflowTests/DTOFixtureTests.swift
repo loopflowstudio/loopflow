@@ -20,6 +20,7 @@ struct DTOFixtureTests {
         #expect(snapshot.sessions[0].task == "W2-71")
         #expect(snapshot.sessions[0].turns[1].suppliedContextTokens == nil)
         #expect(snapshot.evidence[0].isEditable)
+        #expect(snapshot.evidence[0].currentSourceSha256 == "fedcba9876543210")
         #expect(snapshot.evidence[0].representatives[0].address.turnId == "turn-1")
     }
 

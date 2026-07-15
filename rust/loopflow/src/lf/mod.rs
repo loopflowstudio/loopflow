@@ -313,6 +313,17 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Show the machine-wide roadmap: every open Task across every Wave, joined
+    /// to live evidence and bucketed into Now / Needs attention / Available /
+    /// Later. Global by default; `--wave` scopes it. Local-only, deterministic.
+    Roadmap {
+        /// Scope to one Wave (default: every Wave on this machine)
+        #[arg(long)]
+        wave: Option<String>,
+        /// Emit the roadmap snapshot as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show recent loopflow runs from the local ledger (all repos, local-only)
     Runs {
         /// Emit the run history as JSON

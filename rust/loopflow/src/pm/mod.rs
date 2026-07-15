@@ -91,6 +91,10 @@ pub struct PmWave {
 pub struct PmItem {
     pub id: String,
     pub identifier: String,
+    /// Provider-owned issue URL captured during PM sync. `None` stays explicit
+    /// when the provider did not return one; status and roadmap reads never
+    /// fetch it on demand.
+    pub url: Option<String>,
     pub name: String,
     pub description: String,
     pub rank: u32,

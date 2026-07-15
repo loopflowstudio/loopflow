@@ -1,4 +1,4 @@
-// RegistryQuery decodes the `lf ls/status/runs --json` wire snapshots. The
+// RegistryQuery decodes the `lf ls/status/roadmap/runs --json` wire snapshots. The
 // runner is injected, so these exercise parsing without spawning `lf`.
 
 import Foundation
@@ -60,7 +60,8 @@ struct RegistryQueryTests {
             "next_move":{"owner":"project","reason":"supervised Tasks are active"},
             "tasks":[{
               "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
-              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
+              "reference":{"issue_url":"https://linear.app/loopflow/issue/INF-123/wire-it","workspace":{"slug":"wire-it","branch":"jack/inf-123","worktree":"/task-wt"}},
+              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
               "prs":[],
@@ -83,12 +84,27 @@ struct RegistryQueryTests {
         #expect(result.workMap.projects[0].runtime?.status == .waiting)
         #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
         #expect(result.workMap.projects[0].tasks[0].runtime?.projectSessionId == "ps_1")
-        #expect(result.workMap.projects[0].tasks[0].runtime?.worktree == "/task-wt")
-        #expect(result.workMap.projects[0].tasks[0].runtime?.branch == "jack/inf-123")
+        #expect(result.workMap.projects[0].tasks[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
+        #expect(result.workMap.projects[0].tasks[0].reference.workspace?.slug == "wire-it")
+        #expect(result.workMap.projects[0].tasks[0].reference.workspace?.worktree == "/task-wt")
+        #expect(result.workMap.projects[0].tasks[0].reference.workspace?.branch == "jack/inf-123")
         #expect(result.runs.items[0].label == "pm sync")
         #expect(result.attention.items[0].subject == "INF-124")
         #expect(result.attention.items[0].owner == .review)
         #expect(result.attention.items[0].ageSeconds == 7200)
+    }
+
+    @Test("lf roadmap is one optionally scoped machine query")
+    func roadmapUsesOneMachineQuery() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["roadmap", "--wave", "product", "--json"])
+            #expect(cwd == nil)
+            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
+        }
+
+        let result = try await query.roadmap(wave: "product")
+        #expect(result.generatedAt == "2026-07-15T00:00:00Z")
+        #expect(result.waves.isEmpty)
     }
 
     /// Unreadable evidence must reach the surface as its reason, never as an

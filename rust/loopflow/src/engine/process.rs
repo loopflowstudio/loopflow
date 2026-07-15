@@ -109,6 +109,30 @@ pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
     Ok(status.success())
 }
 
+/// Every live tmux session name, in one subprocess. The batched form of
+/// [`tmux_session_exists`]: a caller checking many sessions looks each up in the
+/// returned set instead of paying a `has-session` fork per name. No server
+/// running means no sessions, which tmux reports as a non-zero exit — that is an
+/// empty set, not an error.
+pub(crate) async fn tmux_live_sessions() -> Result<std::collections::HashSet<String>> {
+    let output = tokio::process::Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await
+        .map_err(|err| anyhow!("tmux session list failed: {err}"))?;
+    if !output.status.success() {
+        // "no server running" / "no sessions" — nothing is live.
+        return Ok(std::collections::HashSet::new());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
     start_lf_session_with_env(session, cwd, argv, &[]).await
 }

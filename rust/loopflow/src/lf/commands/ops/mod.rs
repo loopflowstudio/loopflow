@@ -760,6 +760,7 @@ mod pm_output_tests {
             PmItem {
                 id: "done-1".to_string(),
                 identifier: "INF-1".to_string(),
+                url: None,
                 name: "Done task".to_string(),
                 description: String::new(),
                 rank: 0,
@@ -770,6 +771,7 @@ mod pm_output_tests {
             PmItem {
                 id: "open-1".to_string(),
                 identifier: "INF-2".to_string(),
+                url: None,
                 name: "Longer\ntitle".to_string(),
                 description: String::new(),
                 rank: 1,

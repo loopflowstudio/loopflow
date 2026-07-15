@@ -101,6 +101,7 @@ struct TaskWorkspaceView: View {
     @State private var loading = false
 
     private var runtime: TaskRuntimeSnapshot? { task.runtime }
+    private var workspace: TaskWorkspaceSnapshot? { task.reference.workspace }
     private var previewIdentity: String {
         "\(task.task.identifier)|\(selectedPath ?? "")|\(previewMode.rawValue)"
     }
@@ -109,7 +110,7 @@ struct TaskWorkspaceView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let runtime {
+            if let runtime, let workspace {
                 switch section {
                 case .changes:
                     changesView
@@ -117,7 +118,7 @@ struct TaskWorkspaceView: View {
                     TaskTerminalWorkspaceView(
                         taskSessionId: runtime.sessionId,
                         issueIdentifier: task.task.identifier,
-                        worktree: runtime.worktree,
+                        worktree: workspace.worktree,
                         store: terminalStore
                     )
                 }
@@ -141,8 +142,8 @@ struct TaskWorkspaceView: View {
                 Text("\(task.task.identifier) · \(task.task.name)")
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
-                if let runtime {
-                    Text(runtime.worktree)
+                if let workspace {
+                    Text(workspace.worktree)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(palette.textSecondary)
                         .textSelection(.enabled)
@@ -157,7 +158,7 @@ struct TaskWorkspaceView: View {
             .pickerStyle(.segmented)
             .frame(width: 210)
             Button("Warp") { openWarp() }
-                .disabled(runtime == nil)
+                .disabled(workspace == nil)
             Button {
                 Task { await loadChanges() }
             } label: {
@@ -165,7 +166,7 @@ struct TaskWorkspaceView: View {
             }
             .buttonStyle(.borderless)
             .help("Refresh Task changes")
-            .disabled(runtime == nil || loading)
+            .disabled(runtime == nil || workspace == nil || loading)
         }
         .padding(Spacing.md)
     }
@@ -322,12 +323,12 @@ struct TaskWorkspaceView: View {
     }
 
     private func openWarp() {
-        guard let runtime else { return }
+        guard let workspace else { return }
         var components = URLComponents()
         components.scheme = "warp"
         components.host = "action"
         components.path = "/new_window"
-        components.queryItems = [URLQueryItem(name: "path", value: runtime.worktree)]
+        components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
         guard let url = components.url, NSWorkspace.shared.open(url) else {
             error = "Warp could not open the Task worktree."
             return

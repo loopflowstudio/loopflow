@@ -26,14 +26,36 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].directive?.version == 1)
         #expect(detail.projects[0].tasks[0].directive?.version == 2)
         #expect(detail.projects[0].tasks[0].directive?.incorporatedAt != nil)
-        #expect(detail.projects[0].tasks[0].runtime?.worktree == "/src/loopflow.infrastructure.task")
+        #expect(detail.projects[0].tasks[0].reference.workspace?.slug == "infrastructure-task")
+        #expect(detail.projects[0].tasks[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
+        #expect(detail.projects[0].tasks[0].reference.issueUrl?.host == "linear.app")
         #expect(detail.projects[0].tasks[1].runtime == nil)
+        #expect(detail.projects[0].tasks[1].reference.issueUrl == nil)
+        #expect(detail.projects[0].tasks[1].reference.workspace == nil)
         #expect(detail.runs.items[0].runId == "run-1")
         #expect(detail.runs.items[0].status == "ok")
         #expect(detail.attention.items[0].subject == "INF-123")
         #expect(detail.attention.items[0].owner == .review)
         #expect(detail.attention.items[0].reason == "waiting for review")
         #expect(detail.attention.items[0].ageSeconds == 7200)
+    }
+
+    @Test("roadmap fixture preserves sections and durable Task references")
+    func roadmapFixturePreservesTaskReferences() throws {
+        let data = try loadFixtureData("roadmap_snapshot.json")
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: data)
+
+        #expect(roadmap.generatedAt == "2026-07-15T00:00:00Z")
+        #expect(roadmap.waves.count == 2)
+        let product = try #require(roadmap.waves.first)
+        #expect(product.wave.name == "product")
+        let project = try #require(product.projects.items.first)
+        #expect(project.tasks.map(\.section) == [.now, .needsAttention, .available, .later])
+        #expect(project.tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
+        #expect(project.tasks[2].reference.workspace == nil)
+        #expect(project.tasks[2].reference.issueUrl == nil)
+        #expect(project.tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
+        #expect(roadmap.waves[1].projects.unavailableReason?.contains("lf pm sync") == true)
     }
 
     @Test("child control activity preserves typed command evidence")

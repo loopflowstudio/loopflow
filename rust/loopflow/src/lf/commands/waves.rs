@@ -1,4 +1,4 @@
-//! `lf ls` and `lf status` — read the wave registry (`store`).
+//! `lf ls`, `lf status`, and `lf roadmap` — read the wave registry (`store`).
 //!
 //! `lf ls` lists every durable Wave registry row and projects authored policy
 //! from `GOAL.md` plus current listener presence. `lf status [wave]` adds the
@@ -11,6 +11,7 @@
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
 
+use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -236,15 +237,32 @@ pub struct TaskRuntimeSnapshot {
     pub status: TaskSessionStatus,
     pub reason: String,
     pub status_at: String,
-    pub worktree: String,
-    pub branch: Option<String>,
     pub provider: String,
     pub process_alive: bool,
+}
+
+/// Stable references for one Task, shared verbatim by `lf status` and
+/// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
+/// from the durable Task Session and outlives its process and final PR.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskReferenceSnapshot {
+    pub issue_url: Option<String>,
+    pub workspace: Option<TaskWorkspaceSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskWorkspaceSnapshot {
+    pub slug: String,
+    /// Full branch name from the active PR, or the last recorded PR after the
+    /// Task settles. `None` is explicit for legacy Sessions with no PR record.
+    pub branch: Option<String>,
+    pub worktree: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDetailSnapshot {
     pub task: PmTaskSummary,
+    pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub directive: Option<DirectiveSnapshot>,
     pub next_move: NextMove,
@@ -318,6 +336,70 @@ pub struct ProjectDetailSnapshot {
     pub tasks: Vec<TaskDetailSnapshot>,
 }
 
+/// Where a row's next move sends the reader's attention. A coarse view lens over
+/// the same primitives `lf status` exposes (durable intent × liveness ×
+/// ownership) — deliberately *not* a runtime-state taxonomy. It is derived once,
+/// here in Rust, and stamped on the wire so CLI, Mac, and iOS bucket identically
+/// without each re-deriving the rule.
+///
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoadmapSection {
+    /// A live body is advancing this work itself.
+    Now,
+    /// Someone other than the running body must move: review, a human, the
+    /// supervising Project or Wave — or the process died mid-flight.
+    NeedsAttention,
+    /// Filed, not started, not complete — ready for someone to pick up.
+    Available,
+    /// Done or dormant: terminal Sessions and completed plan rows.
+    Later,
+}
+
+/// `lf roadmap` — the machine-wide intent plane. Every Wave's plan joined to
+/// whatever live execution evidence exists, bucketed by attention section. Wire
+/// type consumed by Loopflow; every field required or explicitly Optional, no
+/// serde defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoadmapSnapshot {
+    /// RFC3339 time this read was taken.
+    pub generated_at: String,
+    pub waves: Vec<WaveRoadmap>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaveRoadmap {
+    pub wave: WaveSnapshot,
+    /// The Wave's plan joined to live evidence, or the reason there is none — a
+    /// Wave with no local PM snapshot reads "unavailable", never an empty plan.
+    pub projects: Evidence<RoadmapProject>,
+}
+
+/// One Project in the roadmap: its plan, live Project-Session evidence when a
+/// loop exists, its section, and its Tasks. Reuses the same leaf snapshots
+/// `lf status` emits; adds the derived `section`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoadmapProject {
+    pub project: PmProjectSummary,
+    pub runtime: Option<ProjectRuntimeSnapshot>,
+    pub next_move: NextMove,
+    pub section: RoadmapSection,
+    pub tasks: Vec<RoadmapTask>,
+}
+
+/// One Task in the roadmap: plan row, live Task-Session evidence when a Session
+/// exists, its section, and its active PR. `runtime: None` is a Task nobody has
+/// started — never confused with a dead process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoadmapTask {
+    pub task: PmTaskSummary,
+    pub reference: TaskReferenceSnapshot,
+    pub runtime: Option<TaskRuntimeSnapshot>,
+    pub next_move: NextMove,
+    pub active_pr: Option<PrSnapshot>,
+    pub section: RoadmapSection,
+}
+
 /// `lf ls` — every wave the registry knows, running and stopped alike.
 pub fn ls(json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -364,12 +446,19 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .list_task_sessions(Some(wave.id()))
             .await
             .map_err(|err| anyhow!("failed to read Task Sessions: {err}"))?;
-        let projects = snapshot_projects(&store, &wave, stored_projects, stored_tasks).await?;
-        let attention = Evidence::complete(attention(
-            &projects,
-            now(),
-            Liveness::probe(crate::engine::process::tmux_installed()),
-        ));
+        let liveness = TmuxLiveness::snapshot().await;
+        let planning = read_pm_planning(&store, &wave).await?.unwrap_or_default();
+        let projects = snapshot_projects(
+            &store,
+            &wave,
+            stored_projects,
+            stored_tasks,
+            planning,
+            &liveness,
+            true,
+        )
+        .await?;
+        let attention = Evidence::complete(attention(&projects, now(), liveness.liveness()));
         // Probe the focused Wave's Home once so the detail carries live evidence
         // and the single contextual action (Open/Attach, Start, or reason).
         let home = crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name());
@@ -390,6 +479,211 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         }
         Ok(())
     })
+}
+
+/// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
+/// scoped) with its plan joined to live evidence and each row bucketed into a
+/// section. Deterministic and local: one `tmux list-sessions` for the whole
+/// read, no git probes, no network. `lf status` answers "is it healthy"; this
+/// answers "what is being worked on and what could be".
+pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+            let roadmap = RoadmapSnapshot {
+                generated_at: format_time(now()).expect("current timestamp formats as RFC 3339"),
+                waves: Vec::new(),
+            };
+            if json {
+                println!("{}", serde_json::to_string(&roadmap)?);
+            } else {
+                print_roadmap(&roadmap);
+            }
+            return Ok(());
+        };
+        let waves = match wave {
+            Some(name) => vec![store
+                .get_wave_by_name(name)
+                .await
+                .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
+                .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"))?],
+            None => store
+                .list_waves(None)
+                .await
+                .map_err(|err| anyhow!("failed to read wave registry: {err}"))?,
+        };
+        // One tmux reading for every Session on the machine, taken once.
+        let liveness = TmuxLiveness::snapshot().await;
+        let mut roadmaps = Vec::with_capacity(waves.len());
+        for wave in &waves {
+            let snapshot = snapshot_wave(&store, wave).await?;
+            let projects = wave_roadmap_projects(&store, wave, &liveness).await;
+            roadmaps.push(WaveRoadmap {
+                wave: snapshot,
+                projects,
+            });
+        }
+        roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
+        let roadmap = RoadmapSnapshot {
+            generated_at: format_time(now()).expect("current timestamp formats as RFC 3339"),
+            waves: roadmaps,
+        };
+        if json {
+            println!("{}", serde_json::to_string(&roadmap)?);
+        } else {
+            print_roadmap(&roadmap);
+        }
+        Ok(())
+    })
+}
+
+/// Build one Wave's roadmap projects, or the reason there are none. A missing PM
+/// snapshot is `Unavailable` ("run `lf pm sync`"), never an empty plan; a read
+/// that fails carries its error rather than reading as emptiness.
+async fn wave_roadmap_projects(
+    store: &SharedStore,
+    wave: &Wave,
+    liveness: &TmuxLiveness,
+) -> Evidence<RoadmapProject> {
+    let planning = match read_pm_planning(store, wave).await {
+        Ok(Some(planning)) => planning,
+        Ok(None) => {
+            return Evidence::Unavailable {
+                reason: format!(
+                    "no local PM snapshot for wave/{}; run `lf pm sync`",
+                    wave.name()
+                ),
+            }
+        }
+        Err(err) => {
+            return Evidence::Unavailable {
+                reason: err.to_string(),
+            }
+        }
+    };
+    let project_sessions = match store.list_project_sessions(Some(wave.id())).await {
+        Ok(sessions) => sessions,
+        Err(err) => {
+            return Evidence::Unavailable {
+                reason: format!("failed to read Project Sessions: {err}"),
+            }
+        }
+    };
+    let task_sessions = match store.list_task_sessions(Some(wave.id())).await {
+        Ok(sessions) => sessions,
+        Err(err) => {
+            return Evidence::Unavailable {
+                reason: format!("failed to read Task Sessions: {err}"),
+            }
+        }
+    };
+    // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail
+    // and costs a git probe per PR; the roadmap stays subprocess-free past tmux.
+    match snapshot_projects(
+        store,
+        wave,
+        project_sessions,
+        task_sessions,
+        planning,
+        liveness,
+        false,
+    )
+    .await
+    {
+        Ok(details) => Evidence::complete(
+            details
+                .into_iter()
+                .map(|detail| roadmap_project(detail, liveness.liveness()))
+                .collect(),
+        ),
+        Err(err) => Evidence::Unavailable {
+            reason: err.to_string(),
+        },
+    }
+}
+
+/// Project a `lf status` project detail into its roadmap row, deriving the
+/// section for it and each of its Tasks.
+fn roadmap_project(detail: ProjectDetailSnapshot, liveness: Liveness) -> RoadmapProject {
+    let section = project_section(&detail, liveness);
+    let tasks = detail
+        .tasks
+        .into_iter()
+        .map(|task| roadmap_task(task, liveness))
+        .collect();
+    RoadmapProject {
+        project: detail.project,
+        runtime: detail.runtime,
+        next_move: detail.next_move,
+        section,
+        tasks,
+    }
+}
+
+fn roadmap_task(detail: TaskDetailSnapshot, liveness: Liveness) -> RoadmapTask {
+    let section = task_section(&detail, liveness);
+    let active_pr = detail
+        .active_pr
+        .as_ref()
+        .and_then(|id| detail.prs.iter().find(|pr| &pr.id == id).cloned());
+    RoadmapTask {
+        task: detail.task,
+        reference: detail.reference,
+        runtime: detail.runtime,
+        next_move: detail.next_move,
+        active_pr,
+        section,
+    }
+}
+
+/// A Task's section, from the same primitives the row already carries. Order is
+/// load-bearing: a dead process outranks a terminal record (an audit finding),
+/// and a terminal Session is `Later` before its owner is consulted.
+fn task_section(task: &TaskDetailSnapshot, liveness: Liveness) -> RoadmapSection {
+    let Some(runtime) = &task.runtime else {
+        return if task.task.completed {
+            RoadmapSection::Later
+        } else {
+            RoadmapSection::Available
+        };
+    };
+    if liveness.is_gone(runtime.status.is_process_active(), runtime.process_alive) {
+        return RoadmapSection::NeedsAttention;
+    }
+    if runtime.status.is_terminal() {
+        return RoadmapSection::Later;
+    }
+    if runtime.status == TaskSessionStatus::Blocked {
+        return RoadmapSection::Later;
+    }
+    match task.next_move.owner {
+        NextMoveOwner::Task => RoadmapSection::Now,
+        _ => RoadmapSection::NeedsAttention,
+    }
+}
+
+/// A Project's section. An unstarted Project (no loop) is `Available` — the Wave
+/// could start it — unless the plan says it is already done.
+fn project_section(project: &ProjectDetailSnapshot, liveness: Liveness) -> RoadmapSection {
+    let Some(runtime) = &project.runtime else {
+        let all_krs_hold =
+            !project.project.krs.is_empty() && project.project.krs.iter().all(|kr| kr.holds);
+        return if all_krs_hold {
+            RoadmapSection::Later
+        } else {
+            RoadmapSection::Available
+        };
+    };
+    if liveness.is_gone(runtime.status.is_process_active(), runtime.process_alive) {
+        return RoadmapSection::NeedsAttention;
+    }
+    if runtime.status.is_terminal() {
+        return RoadmapSection::Later;
+    }
+    match project.next_move.owner {
+        NextMoveOwner::Project => RoadmapSection::Now,
+        _ => RoadmapSection::NeedsAttention,
+    }
 }
 
 /// The wave `lf status` is about: the name the caller typed, else the wave this
@@ -425,6 +719,39 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
                 crate::engine::wave_context::WAVE_ID_ENV
             )
         })
+}
+
+/// One tmux reading for the whole command. `lf status` checks a handful of
+/// Sessions and `lf roadmap` checks every Session on the machine; both take a
+/// single `tmux list-sessions` snapshot here and look each name up in the set,
+/// never a `has-session` fork per Session. `installed` is kept distinct from an
+/// empty `live` set: no tmux means liveness is *unknowable*, not *nothing alive*.
+#[derive(Debug, Clone)]
+struct TmuxLiveness {
+    installed: bool,
+    live: std::collections::HashSet<String>,
+}
+
+impl TmuxLiveness {
+    async fn snapshot() -> Self {
+        let installed = crate::engine::process::tmux_installed();
+        let live = if installed {
+            crate::engine::process::tmux_live_sessions()
+                .await
+                .unwrap_or_default()
+        } else {
+            std::collections::HashSet::new()
+        };
+        Self { installed, live }
+    }
+
+    fn is_alive(&self, tmux_name: &str) -> bool {
+        self.installed && self.live.contains(tmux_name)
+    }
+
+    fn liveness(&self) -> Liveness {
+        Liveness::probe(self.installed)
+    }
 }
 
 /// Whether this machine can tell a live Session process from a dead one. Without
@@ -592,28 +919,18 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     })
 }
 
-async fn snapshot_task_runtime(
-    task: &TaskSession,
-    active_pr: Option<&TaskPr>,
-) -> TaskRuntimeSnapshot {
-    let process_alive = if task.status.is_process_active() {
-        match task.latest_process.as_ref() {
-            Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
-                .await
-                .unwrap_or(false),
-            None => false,
-        }
-    } else {
-        false
-    };
+fn snapshot_task_runtime(task: &TaskSession, liveness: &TmuxLiveness) -> TaskRuntimeSnapshot {
+    let process_alive = task.status.is_process_active()
+        && task
+            .latest_process
+            .as_ref()
+            .is_some_and(|process| liveness.is_alive(&process.tmux_name));
     TaskRuntimeSnapshot {
         session_id: task.id.to_string(),
         project_session_id: task.project_session_id.to_string(),
         status: task.status,
         reason: task.status_reason.clone(),
         status_at: format_time(task.status_at).unwrap_or_default(),
-        worktree: task.worktree.display().to_string(),
-        branch: active_pr.map(|pr| pr.branch.clone()),
         provider: task.provider.clone(),
         process_alive,
     }
@@ -622,17 +939,13 @@ async fn snapshot_task_runtime(
 async fn snapshot_project_runtime(
     store: &SharedStore,
     project: &ProjectSession,
+    liveness: &TmuxLiveness,
 ) -> Result<ProjectRuntimeSnapshot> {
-    let process_alive = if project.status.is_process_active() {
-        match project.latest_process.as_ref() {
-            Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
-                .await
-                .unwrap_or(false),
-            None => false,
-        }
-    } else {
-        false
-    };
+    let process_alive = project.status.is_process_active()
+        && project
+            .latest_process
+            .as_ref()
+            .is_some_and(|process| liveness.is_alive(&process.tmux_name));
     let pending_observations = store
         .pending_observations(&ObservationRecipient::Project {
             session_id: project.id.clone(),
@@ -652,10 +965,34 @@ async fn snapshot_project_runtime(
     })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct CachedPmSnapshot {
     projects: Vec<PmProject>,
     items: Vec<PmItem>,
+}
+
+/// The wave's local PM snapshot, or `None` when none has been synced. `None` is
+/// a real, readable state ("no plan on this machine yet") — a caller that must
+/// tell it apart from "the plan is empty" keeps the `Option`; `lf status`
+/// flattens it to an empty plan, `lf roadmap` renders it as unavailable.
+async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<CachedPmSnapshot>> {
+    let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
+        .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
+    let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
+    let Some(row) = store
+        .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().to_string())
+        .await
+        .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
+    else {
+        return Ok(None);
+    };
+    let planning = serde_json::from_str::<CachedPmSnapshot>(&row.payload).map_err(|err| {
+        anyhow!(
+            "invalid PM snapshot for wave/{}; run `lf pm sync`: {err}",
+            wave.name()
+        )
+    })?;
+    Ok(Some(planning))
 }
 
 async fn snapshot_projects(
@@ -663,27 +1000,10 @@ async fn snapshot_projects(
     wave: &Wave,
     project_sessions: Vec<ProjectSession>,
     task_sessions: Vec<TaskSession>,
+    planning: CachedPmSnapshot,
+    liveness: &TmuxLiveness,
+    probe_pr_empty: bool,
 ) -> Result<Vec<ProjectDetailSnapshot>> {
-    let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
-        .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
-    let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
-    let planning = match store
-        .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().to_string())
-        .await
-        .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
-    {
-        Some(row) => serde_json::from_str::<CachedPmSnapshot>(&row.payload).map_err(|err| {
-            anyhow!(
-                "invalid PM snapshot for wave/{}; run `lf pm sync`: {err}",
-                wave.name()
-            )
-        })?,
-        None => CachedPmSnapshot {
-            projects: Vec::new(),
-            items: Vec::new(),
-        },
-    };
-
     let mut details = planning
         .projects
         .into_iter()
@@ -707,7 +1027,8 @@ async fn snapshot_projects(
         }
         details[index].next_move =
             next_move_for_project(project_session.status, &project_session.status_reason);
-        details[index].runtime = Some(snapshot_project_runtime(store, project_session).await?);
+        details[index].runtime =
+            Some(snapshot_project_runtime(store, project_session, liveness).await?);
         details[index].directive = current_directive(
             store,
             ChildRef::Project(project_session.id.clone()),
@@ -729,9 +1050,9 @@ async fn snapshot_projects(
             session.launch.issue.id.as_str() == item.id
                 || session.launch.issue.identifier == item.identifier
         });
-        details[index]
-            .tasks
-            .push(snapshot_task_detail(store, item, runtime_session).await?);
+        details[index].tasks.push(
+            snapshot_task_detail(store, item, runtime_session, liveness, probe_pr_empty).await?,
+        );
     }
 
     for task_session in &task_sessions {
@@ -749,6 +1070,7 @@ async fn snapshot_projects(
         let task = PmItem {
             id: task_session.launch.issue.id.as_str().to_string(),
             identifier: task_session.launch.issue.identifier.clone(),
+            url: None,
             name: task_session.launch.issue.title.clone(),
             description: task_session.launch.issue.description.clone(),
             rank: u32::MAX,
@@ -756,9 +1078,9 @@ async fn snapshot_projects(
             project: Some(task_session.launch.project.slug.clone()),
             assignee: None,
         };
-        details[project_index]
-            .tasks
-            .push(snapshot_task_detail(store, task, Some(task_session)).await?);
+        details[project_index].tasks.push(
+            snapshot_task_detail(store, task, Some(task_session), liveness, probe_pr_empty).await?,
+        );
     }
 
     for project in &mut details {
@@ -788,16 +1110,16 @@ async fn snapshot_task_detail(
     store: &SharedStore,
     item: PmItem,
     session: Option<&TaskSession>,
+    liveness: &TmuxLiveness,
+    probe_pr_empty: bool,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match session {
         Some(session) => store.task_prs(&session.id).await?,
         None => Vec::new(),
     };
     let active = prs.iter().find(|pr| pr.is_active());
-    let runtime = match session {
-        Some(session) => Some(snapshot_task_runtime(session, active).await),
-        None => None,
-    };
+    let runtime = session.map(|session| snapshot_task_runtime(session, liveness));
+    let reference = task_reference(&item, session, active, &prs);
     let next_move = match session {
         Some(session) => next_move_for_task(
             session.status,
@@ -826,14 +1148,18 @@ async fn snapshot_task_detail(
     };
     Ok(TaskDetailSnapshot {
         task: task_summary(item),
+        reference,
         runtime,
         directive,
         next_move,
         prs: prs
             .iter()
             .map(|pr| {
+                // PR emptiness is an execution-plane fact (`lf status`); it costs a
+                // git probe per active PR, so `lf roadmap` opts out (`probe_pr_empty`
+                // false) to keep its machine-wide read subprocess-free.
                 let empty = match (session, active) {
-                    (Some(session), Some(active)) if active.id == pr.id => {
+                    (Some(session), Some(active)) if probe_pr_empty && active.id == pr.id => {
                         task_pr_empty(session, pr)
                     }
                     _ => None,
@@ -843,6 +1169,28 @@ async fn snapshot_task_detail(
             .collect(),
         active_pr: active.map(|pr| pr.id.to_string()),
     })
+}
+
+fn task_reference(
+    item: &PmItem,
+    session: Option<&TaskSession>,
+    active_pr: Option<&TaskPr>,
+    prs: &[TaskPr],
+) -> TaskReferenceSnapshot {
+    let workspace = session.map(|session| {
+        let branch = active_pr
+            .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
+            .map(|pr| pr.branch.clone());
+        TaskWorkspaceSnapshot {
+            slug: session.workspace_slug.clone(),
+            branch,
+            worktree: session.worktree.display().to_string(),
+        }
+    });
+    TaskReferenceSnapshot {
+        issue_url: item.url.clone(),
+        workspace,
+    }
 }
 
 fn task_pr_empty(session: &TaskSession, pr: &TaskPr) -> Option<bool> {
@@ -1120,10 +1468,24 @@ fn print_status(status: &WaveDetailSnapshot) {
                     None if task.task.completed => ("completed", task.next_move.reason.as_str()),
                     None => ("unstarted", task.next_move.reason.as_str()),
                 };
+                let active_pr = task
+                    .active_pr
+                    .as_ref()
+                    .and_then(|id| task.prs.iter().find(|pr| &pr.id == id));
                 println!(
-                    "      {issue:<12}  {status:<10}  {reason}",
-                    issue = task.task.identifier,
+                    "      {issue}  {status:<10}  {workspace:<20}  {pr:<24}  {reason}",
+                    issue = task_identifier_label(
+                        &task.task.identifier,
+                        task.reference.issue_url.as_deref(),
+                        12,
+                        std::io::stdout().is_terminal(),
+                    ),
                     status = task_status,
+                    workspace = truncate(&workspace_label(&task.reference), 20),
+                    pr = truncate(
+                        &active_pr.map(pr_label).unwrap_or_else(|| "-".to_string()),
+                        24,
+                    ),
                     reason = reason,
                 );
             }
@@ -1173,6 +1535,177 @@ fn print_runs(runs: &Evidence<RunLedgerEntry>) {
             }
             if *truncated {
                 println!("    (older runs beyond the window cap are not shown)");
+            }
+        }
+    }
+}
+
+/// One rendered roadmap line, section already decided. Project-loop rows and
+/// Task rows share the shape so a section prints them together.
+struct RoadmapRow {
+    section: RoadmapSection,
+    id: String,
+    issue_url: Option<String>,
+    title: String,
+    rank: Option<u32>,
+    age_secs: Option<i64>,
+    owner: NextMoveOwner,
+    pr: Option<String>,
+    workspace: Option<String>,
+    reason: String,
+}
+
+fn pr_label(pr: &PrSnapshot) -> String {
+    match pr
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.github.as_ref())
+    {
+        Some(github) => format!("#{}:{}", github.number, pr.slug),
+        None => format!("pr:{}", pr.slug),
+    }
+}
+
+fn workspace_label(reference: &TaskReferenceSnapshot) -> String {
+    reference
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.slug.clone())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+/// Render a fixed-width Task identifier. Terminals that support OSC 8 get the
+/// identifier itself as the link; redirected output stays plain and stable.
+fn task_identifier_label(
+    identifier: &str,
+    issue_url: Option<&str>,
+    width: usize,
+    hyperlinks: bool,
+) -> String {
+    let label = format!("{:<width$}", truncate(identifier, width));
+    let Some(url) = issue_url.filter(|url| {
+        (url.starts_with("https://") || url.starts_with("http://"))
+            && !url.chars().any(char::is_control)
+    }) else {
+        return label;
+    };
+    if !hyperlinks {
+        return label;
+    }
+    format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
+}
+
+fn section_label(section: RoadmapSection) -> &'static str {
+    match section {
+        RoadmapSection::Now => "NOW",
+        RoadmapSection::NeedsAttention => "NEEDS ATTENTION",
+        RoadmapSection::Available => "AVAILABLE",
+        RoadmapSection::Later => "LATER",
+    }
+}
+
+fn print_roadmap(roadmap: &RoadmapSnapshot) {
+    let colors = Colors::default();
+    if roadmap.waves.is_empty() {
+        println!("No waves in the registry.");
+        return;
+    }
+    let now = now();
+    for wave in &roadmap.waves {
+        println!(
+            "{bold}{name}{reset}  {status}",
+            bold = colors.bold,
+            reset = colors.reset,
+            name = wave.wave.name,
+            status = wave.wave.status,
+        );
+        let details = match &wave.projects {
+            Evidence::Unavailable { reason } => {
+                println!("  unavailable: {reason}");
+                continue;
+            }
+            Evidence::Ok { items, .. } => items,
+        };
+        let mut rows: Vec<RoadmapRow> = Vec::new();
+        for project in details {
+            // A Project appears as its own row only when a loop is running or
+            // recorded it — an unstarted Project is just the grouping for the
+            // Tasks under it, not a work item of its own.
+            if let Some(runtime) = &project.runtime {
+                rows.push(RoadmapRow {
+                    section: project.section,
+                    id: project.project.slug.clone(),
+                    issue_url: None,
+                    title: project.project.name.clone(),
+                    rank: None,
+                    age_secs: age_secs(&runtime.status_at, now),
+                    owner: project.next_move.owner,
+                    pr: None,
+                    workspace: None,
+                    reason: project.next_move.reason.clone(),
+                });
+            }
+            for task in &project.tasks {
+                rows.push(RoadmapRow {
+                    section: task.section,
+                    id: task.task.identifier.clone(),
+                    issue_url: task.reference.issue_url.clone(),
+                    title: task.task.name.clone(),
+                    rank: (task.task.rank != u32::MAX).then_some(task.task.rank),
+                    age_secs: task
+                        .runtime
+                        .as_ref()
+                        .and_then(|runtime| age_secs(&runtime.status_at, now)),
+                    owner: task.next_move.owner,
+                    pr: task.active_pr.as_ref().map(pr_label),
+                    workspace: task
+                        .reference
+                        .workspace
+                        .as_ref()
+                        .map(|workspace| workspace.slug.clone()),
+                    reason: task.next_move.reason.clone(),
+                });
+            }
+        }
+        if rows.is_empty() {
+            println!("  (no plan rows)");
+            continue;
+        }
+        for section in [
+            RoadmapSection::Now,
+            RoadmapSection::NeedsAttention,
+            RoadmapSection::Available,
+            RoadmapSection::Later,
+        ] {
+            let in_section: Vec<&RoadmapRow> =
+                rows.iter().filter(|row| row.section == section).collect();
+            if in_section.is_empty() {
+                continue;
+            }
+            println!("  {}", section_label(section));
+            for row in in_section {
+                println!(
+                    "    {id}  {rank:>4}  {owner:<8}  {age:>5}  {workspace:<20}  {pr:<24}  {title}",
+                    id = task_identifier_label(
+                        &row.id,
+                        row.issue_url.as_deref(),
+                        12,
+                        std::io::stdout().is_terminal(),
+                    ),
+                    rank = row
+                        .rank
+                        .map(|r| r.to_string())
+                        .unwrap_or_else(|| "-".into()),
+                    owner = owner_label(&row.owner),
+                    age = row
+                        .age_secs
+                        .map(format_age)
+                        .unwrap_or_else(|| "-".to_string()),
+                    workspace = truncate(row.workspace.as_deref().unwrap_or("-"), 20),
+                    pr = truncate(row.pr.as_deref().unwrap_or("-"), 24),
+                    title = truncate(&row.title, 36),
+                );
+                println!("      {}", row.reason);
             }
         }
     }
@@ -1290,6 +1823,7 @@ mod tests {
                         {
                             "id": "issue-1",
                             "identifier": "INF-123",
+                            "url": "https://linear.app/loopflow/issue/INF-123/fix-parser",
                             "name": "Fix parser",
                             "description": "Accept --hello",
                             "rank": 1,
@@ -1300,6 +1834,7 @@ mod tests {
                         {
                             "id": "issue-2",
                             "identifier": "INF-124",
+                            "url": null,
                             "name": "Update docs",
                             "description": "Explain --hello",
                             "rank": 2,
@@ -1314,9 +1849,25 @@ mod tests {
             .await
             .expect("write cached PM snapshot");
 
-        let projects = snapshot_projects(&store, &wave, Vec::new(), Vec::new())
+        let planning = read_pm_planning(&store, &wave)
             .await
-            .expect("build native hierarchy");
+            .expect("read planning")
+            .expect("snapshot present");
+        let liveness = TmuxLiveness {
+            installed: false,
+            live: std::collections::HashSet::new(),
+        };
+        let projects = snapshot_projects(
+            &store,
+            &wave,
+            Vec::new(),
+            Vec::new(),
+            planning,
+            &liveness,
+            true,
+        )
+        .await
+        .expect("build native hierarchy");
 
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].project.slug, "first-run");
@@ -1426,6 +1977,10 @@ mod tests {
                         completed: false,
                         assignee: None,
                     },
+                    reference: TaskReferenceSnapshot {
+                        issue_url: None,
+                        workspace: None,
+                    },
                     runtime: None,
                     directive: None,
                     next_move: NextMove {
@@ -1510,6 +2065,14 @@ mod tests {
                 completed: false,
                 assignee: None,
             },
+            reference: TaskReferenceSnapshot {
+                issue_url: None,
+                workspace: runtime.as_ref().map(|_| TaskWorkspaceSnapshot {
+                    slug: "task-workspace".to_string(),
+                    branch: Some("jack/task-workspace".to_string()),
+                    worktree: "/repo.task-workspace".to_string(),
+                }),
+            },
             runtime,
             directive: None,
             next_move,
@@ -1530,8 +2093,6 @@ mod tests {
             status,
             reason: reason.to_string(),
             status_at,
-            worktree: "/repo".to_string(),
-            branch: Some("b".to_string()),
             provider: "claude".to_string(),
             process_alive,
         }
@@ -1683,5 +2244,255 @@ mod tests {
         )];
 
         assert!(attention(&projects, now(), Liveness::Observable).is_empty());
+    }
+
+    fn project_runtime(
+        status: ProjectSessionStatus,
+        status_at: String,
+        process_alive: bool,
+    ) -> ProjectRuntimeSnapshot {
+        ProjectRuntimeSnapshot {
+            session_id: "ps_1".to_string(),
+            status,
+            reason: "r".to_string(),
+            status_at,
+            iteration: 1,
+            pending_observations: 0,
+            provider: "codex".to_string(),
+            process_alive,
+        }
+    }
+
+    #[test]
+    fn roadmap_fixture_round_trips_every_section_and_the_unavailable_wave() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/roadmap_snapshot.json"
+        ));
+        let snapshot: RoadmapSnapshot = serde_json::from_str(fixture).unwrap();
+
+        // Re-serialize; the shape is stable (no dropped fields, no defaults).
+        let reparsed: RoadmapSnapshot =
+            serde_json::from_str(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+        assert_eq!(reparsed.waves.len(), 2);
+
+        let product = &snapshot.waves[0];
+        assert_eq!(product.wave.name, "product");
+        let Evidence::Ok { items, .. } = &product.projects else {
+            panic!("product plan must be readable");
+        };
+        let tasks = &items[0].tasks;
+        let sections: Vec<RoadmapSection> = tasks.iter().map(|task| task.section).collect();
+        assert_eq!(
+            sections,
+            vec![
+                RoadmapSection::Now,
+                RoadmapSection::NeedsAttention,
+                RoadmapSection::Available,
+                RoadmapSection::Later,
+            ]
+        );
+        // The review row carries its live PR number; the available row has no
+        // Session at all (never a dead process).
+        assert_eq!(tasks[1].active_pr.as_ref().unwrap().phase, PrPhase::Open);
+        assert!(tasks[2].runtime.is_none());
+        assert!(tasks[2].reference.workspace.is_none());
+        assert_eq!(
+            tasks[3]
+                .reference
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.branch.as_deref()),
+            Some("jack-heart/now-available-research")
+        );
+
+        // The second wave has no local plan — unavailable, not an empty plan.
+        let context = &snapshot.waves[1];
+        let Evidence::Unavailable { reason } = &context.projects else {
+            panic!("context plan must be unavailable, not empty");
+        };
+        assert!(reason.contains("lf pm sync"));
+    }
+
+    #[test]
+    fn task_section_reads_the_row_the_same_way_every_surface_would() {
+        let observable = Liveness::Observable;
+
+        // No Session: ready to start, or already done — never a dead process.
+        let mut unstarted = task_detail(
+            "W2-1",
+            None,
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "Task is ready to start".into(),
+            },
+        );
+        assert_eq!(
+            task_section(&unstarted, observable),
+            RoadmapSection::Available
+        );
+        unstarted.task.completed = true;
+        assert_eq!(task_section(&unstarted, observable), RoadmapSection::Later);
+
+        // A live, self-owned running body is Now.
+        let running = task_detail(
+            "W2-2",
+            Some(task_runtime(
+                TaskSessionStatus::Running,
+                "step",
+                at(60),
+                true,
+            )),
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "step".into(),
+            },
+        );
+        assert_eq!(task_section(&running, observable), RoadmapSection::Now);
+
+        // Owner is someone else (review) → Needs attention.
+        let in_review = task_detail(
+            "W2-3",
+            Some(task_runtime(
+                TaskSessionStatus::Waiting,
+                "pr",
+                at(60),
+                false,
+            )),
+            NextMove {
+                owner: NextMoveOwner::Review,
+                reason: "pr open".into(),
+            },
+        );
+        assert_eq!(
+            task_section(&in_review, observable),
+            RoadmapSection::NeedsAttention
+        );
+
+        // A durable dependency block is filed work, but nobody should act on it
+        // yet; it stays in Later instead of manufacturing attention.
+        let blocked = task_detail(
+            "W2-31",
+            Some(task_runtime(
+                TaskSessionStatus::Blocked,
+                "waiting for W2-30",
+                at(60),
+                false,
+            )),
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "waiting for W2-30".into(),
+            },
+        );
+        assert_eq!(task_section(&blocked, observable), RoadmapSection::Later);
+
+        // Terminal Session → Later.
+        let done = task_detail(
+            "W2-4",
+            Some(task_runtime(
+                TaskSessionStatus::Completed,
+                "merged",
+                at(60),
+                false,
+            )),
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "merged".into(),
+            },
+        );
+        assert_eq!(task_section(&done, observable), RoadmapSection::Later);
+
+        // A running record whose process is gone outranks everything: the audit
+        // finding is Needs attention, not Now.
+        let ghost = task_detail(
+            "W2-5",
+            Some(task_runtime(
+                TaskSessionStatus::Running,
+                "step",
+                at(60),
+                false,
+            )),
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "step".into(),
+            },
+        );
+        assert_eq!(
+            task_section(&ghost, observable),
+            RoadmapSection::NeedsAttention
+        );
+        // Unobservable: the same dead-looking row is NOT asserted gone.
+        assert_eq!(
+            task_section(&ghost, Liveness::Unknowable),
+            RoadmapSection::Now
+        );
+    }
+
+    #[test]
+    fn project_section_treats_an_unstarted_project_as_available_unless_it_already_holds() {
+        let observable = Liveness::Observable;
+
+        let ready = project_detail(
+            "loopflow-api",
+            None,
+            NextMove {
+                owner: NextMoveOwner::Wave,
+                reason: "Project is ready to start".into(),
+            },
+            Vec::new(),
+        );
+        assert_eq!(
+            project_section(&ready, observable),
+            RoadmapSection::Available
+        );
+
+        let mut held = ready;
+        held.project.krs = vec![PmKrSummary {
+            text: "holds".into(),
+            holds: true,
+        }];
+        assert_eq!(project_section(&held, observable), RoadmapSection::Later);
+
+        let running = project_detail(
+            "loopflow-api",
+            Some(project_runtime(ProjectSessionStatus::Running, at(60), true)),
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "advancing".into(),
+            },
+            Vec::new(),
+        );
+        assert_eq!(project_section(&running, observable), RoadmapSection::Now);
+
+        let blocked = project_detail(
+            "loopflow-api",
+            Some(project_runtime(ProjectSessionStatus::Blocked, at(60), true)),
+            NextMove {
+                owner: NextMoveOwner::Wave,
+                reason: "blocked".into(),
+            },
+            Vec::new(),
+        );
+        assert_eq!(
+            project_section(&blocked, observable),
+            RoadmapSection::NeedsAttention
+        );
+    }
+
+    #[test]
+    fn task_identifier_is_a_safe_clickable_terminal_link() {
+        let url = "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap";
+        let linked = task_identifier_label("W2-144", Some(url), 12, true);
+        assert!(linked.contains("\x1b]8;;https://linear.app/"));
+        assert!(linked.contains("W2-144"));
+
+        assert_eq!(
+            task_identifier_label("W2-144", Some(url), 12, false),
+            "W2-144      "
+        );
+        assert_eq!(
+            task_identifier_label("W2-144", Some("javascript:bad"), 12, true),
+            "W2-144      "
+        );
     }
 }

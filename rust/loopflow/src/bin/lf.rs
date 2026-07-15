@@ -1307,6 +1307,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
             }
+            Some(Commands::Roadmap { wave, json }) => {
+                loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json)
+            }
             Some(Commands::Runs { json }) => loopflow::lf::commands::runs::list(*json),
             Some(Commands::Trace {
                 run_id,

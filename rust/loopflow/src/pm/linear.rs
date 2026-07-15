@@ -122,6 +122,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
       nodes {
         id
         identifier
+        url
         title
         description
         prioritySortOrder
@@ -753,6 +754,7 @@ struct IssueNode {
     id: String,
     #[serde(default)]
     identifier: String,
+    url: Option<String>,
     #[serde(default)]
     title: String,
     #[serde(default)]
@@ -782,6 +784,7 @@ impl IssueNode {
         PmItem {
             id: self.id,
             identifier,
+            url: self.url,
             name: self.title,
             description: self.description.unwrap_or_default(),
             rank,
@@ -1073,6 +1076,7 @@ mod tests {
                             "nodes": [
                                 {
                                     "id": "issue-1",
+                                    "url": "https://linear.app/loopflow/issue/INF-1/first",
                                     "title": "First",
                                     "description": "one",
                                     "prioritySortOrder": 10.0,
@@ -1114,6 +1118,10 @@ mod tests {
         assert_eq!(items[0].id, "issue-2");
         assert!(items[0].completed);
         assert_eq!(items[1].assignee.as_deref(), Some("user-1"));
+        assert_eq!(
+            items[1].url.as_deref(),
+            Some("https://linear.app/loopflow/issue/INF-1/first")
+        );
         let requests = requests.lock().await;
         assert_eq!(requests.len(), 1);
         assert_eq!(
@@ -1125,6 +1133,10 @@ mod tests {
             .as_str()
             .expect("query string")
             .contains("$projectId: String!"));
+        assert!(request["query"]
+            .as_str()
+            .expect("query string")
+            .contains("\n        url\n"));
     }
 
     #[tokio::test]

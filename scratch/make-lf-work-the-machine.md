@@ -1,9 +1,11 @@
 # W2-144 — `lf roadmap`: the machine-wide view of current and available work
 
-**Task:** W2-144 (Loopflow API). **Worktree:** this one. **Directive v2:** the
+**Task:** W2-144 (Loopflow API). **Worktree:** this one. **Directive v3:** the
 command is **`lf roadmap`**, not `lf work`. `lf status` stays execution/attention
 only; `lf roadmap` owns durable on-disk PM intent and overlays shared live
-evidence per item. No `lf status --all`, no `lf work` alias.
+evidence per item. Both commands carry one Task-reference contract: cached
+provider issue URL plus optional durable workspace evidence. No `lf status
+--all`, no `lf work` alias.
 
 ## The one-line boundary
 
@@ -34,6 +36,28 @@ Unstarted-Task rendering is already correct: `snapshot_projects` emits every PM
 item as a `TaskDetailSnapshot` with `runtime: None` and
 `next_move = "Task is ready to start"`. Availability is precisely
 `runtime == None && !completed`, computed from one read (W2-141's finding).
+
+## Task references (directive v3)
+
+Every status and roadmap Task row carries the same shape:
+
+```rust
+pub struct TaskReferenceSnapshot {
+    pub issue_url: Option<String>,
+    pub workspace: Option<TaskWorkspaceSnapshot>,
+}
+pub struct TaskWorkspaceSnapshot {
+    pub slug: String,
+    pub branch: Option<String>,
+    pub worktree: String,
+}
+```
+
+`issue_url` is copied into the PM cache during `lf pm sync`; status and roadmap
+never fetch it. `workspace` is absent for an unstarted Task. Once a Task Session
+exists it remains present after completion, with the active PR branch or last
+recorded PR branch. Human CLI output uses OSC 8 to make the identifier itself a
+link in a terminal and shows both the workspace and active PR slugs.
 
 ## The envelope DTO (new, additive)
 
@@ -158,16 +182,13 @@ and what could be", pm = "raw plan + mutation".
 
 ## Slices (serial PRs, one worktree)
 
-1. **Envelope + lens + batching** — `RoadmapSnapshot`/`WaveRoadmap`/
+1. **Envelope + lens + batching + shared references** — `RoadmapSnapshot`/`WaveRoadmap`/
    `RoadmapSection`, the extracted per-wave builder shared with `lf status`, the
    batched `TmuxLiveness`, `waves::roadmap`, CLI wiring, human render, Rust
-   fixture + unit tests for section derivation. Demo: `lf roadmap` lists all
-   open Tasks across Product/Infrastructure/Intelligence in one call; the six
-   proof-row kinds render distinctly.
-2. **Swift + fixture parity** — mirror types, `RegistryQuery.roadmap`, shared
-   fixture test proving CLI/Mac agree. (Mac *surface* rendering is W2-131 /
-   mac-surface-ux, not this Task — W2-144 provides the contract they consume.)
-3. **Docs** — the three-command example table; land removes this scratch file.
+   and Swift fixtures, Swift DTO mirrors, and `RegistryQuery.roadmap`. Demo: `lf
+   roadmap` lists all open Tasks across Product/Infrastructure/Intelligence in
+   one call; the six proof-row kinds render distinctly. This is the only PR in
+   directive v3.
 
 ## Deferred / not this Task
 

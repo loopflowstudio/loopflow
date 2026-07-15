@@ -206,9 +206,11 @@ For the current repo, forward:
 - every provider-account mapping referenced by those profiles;
 - each unique credential exactly once, even when multiple profiles share it.
 
-The remote side materializes process-lifetime credential homes, rewrites the
-profile mappings to those homes, and removes them when the SSH process exits.
-After a remote restart, the local controller re-forwards the same bundle. No
+The remote side creates a process-lifetime routing store and gives each selected
+provider child only its access token through the environment. The routing store
+survives provider-child restarts so rate-limit health and session pins remain
+shared, then the SSH shell removes it on exit. Restarting the SSH command makes
+the local controller resolve and forward a fresh bundle. No credential home or
 Chrome binding is forwarded: remote provider processes need credentials, while
 browser control remains on the host that owns the Chrome profile.
 

@@ -27,8 +27,8 @@ use anyhow::{anyhow, Context};
 
 use crate::pm::PmProviderKind;
 use crate::provider_account::{
-    encode_forwarded_credentials, local_forwarded_credentials, ForwardedProviderCredential,
-    FORWARDED_PROVIDER_ACCOUNTS_ENV,
+    encode_forwarded_profile_bundle, local_forwarded_profile_bundle, ForwardedProfileBundle,
+    FORWARDED_PROFILE_BUNDLE_ENV, FORWARDED_PROFILE_STORE_ENV,
 };
 use crate::provider_auth::{extract_claude_token, extract_codex_access_token};
 
@@ -42,7 +42,7 @@ pub struct Credentials {
     pub gh_token: Option<String>,
     pub claude_token: Option<String>,
     pub codex_token: Option<String>,
-    pub provider_accounts: Vec<ForwardedProviderCredential>,
+    pub profile_bundle: Option<ForwardedProfileBundle>,
     pub pm_token: Option<String>,
     /// PM provider the token belongs to (e.g. `linear`).
     pub pm_provider: Option<String>,
@@ -159,15 +159,23 @@ async fn resolve_credentials(secret_names: &[String]) -> anyhow::Result<Credenti
     for name in secret_names {
         secrets.push((name.clone(), resolve_doppler_secret(name)?));
     }
-    let provider_accounts = match crate::store::open_existing_store().await {
-        Some(store) => local_forwarded_credentials(&std::sync::Arc::new(store)).await?,
-        None => Vec::new(),
+    let profile_bundle = match crate::store::open_existing_store().await {
+        Some(store) => local_forwarded_profile_bundle(&std::sync::Arc::new(store)).await?,
+        None => None,
+    };
+    let (claude_token, codex_token) = if profile_bundle.is_some() {
+        (None, None)
+    } else {
+        (
+            extract_claude_token(&home).map(|token| token.access_token),
+            extract_codex_access_token(&home),
+        )
     };
     Ok(Credentials {
         gh_token: resolve_gh_token(),
-        claude_token: extract_claude_token(&home).map(|token| token.access_token),
-        codex_token: extract_codex_access_token(&home),
-        provider_accounts,
+        claude_token,
+        codex_token,
+        profile_bundle,
         pm_token: resolve_pm_token().await,
         pm_provider: Some(PmProviderKind::Linear.as_str().to_string()),
         secrets,
@@ -297,10 +305,10 @@ fn build_preamble(
     if let Some(token) = nonempty(&credentials.codex_token) {
         lines.push(format!("export CODEX_ACCESS_TOKEN={}", sh_quote(token)));
     }
-    if !credentials.provider_accounts.is_empty() {
-        match encode_forwarded_credentials(&credentials.provider_accounts) {
+    if let Some(profile_bundle) = &credentials.profile_bundle {
+        match encode_forwarded_profile_bundle(profile_bundle) {
             Ok(bundle) => lines.push(format!(
-                "export {FORWARDED_PROVIDER_ACCOUNTS_ENV}={}",
+                "export {FORWARDED_PROFILE_BUNDLE_ENV}={}",
                 sh_quote(&bundle)
             )),
             Err(error) => lines.push(format!(
@@ -308,6 +316,21 @@ fn build_preamble(
                 sh_quote(&format!("could not encode provider accounts: {error}"))
             )),
         }
+        lines.push(
+            "LF_PROFILE_LEASE_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/lf-profile.XXXXXX\") || exit 1"
+                .to_string(),
+        );
+        lines.push("export LF_PROFILE_LEASE_DIR".to_string());
+        lines.push(format!(
+            "export {FORWARDED_PROFILE_STORE_ENV}=\"$LF_PROFILE_LEASE_DIR/router.db\""
+        ));
+        lines.push(
+            "trap 'status=$?; trap - EXIT; rm -rf -- \"$LF_PROFILE_LEASE_DIR\"; exit \"$status\"' EXIT"
+                .to_string(),
+        );
+        lines.push("trap 'exit 129' HUP".to_string());
+        lines.push("trap 'exit 130' INT".to_string());
+        lines.push("trap 'exit 143' TERM".to_string());
     }
     if let Some(token) = nonempty(&credentials.pm_token) {
         lines.push(format!("export LF_FORWARDED_PM_TOKEN={}", sh_quote(token)));
@@ -335,7 +358,11 @@ fn build_preamble(
         .map(|arg| sh_quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
-    lines.push(format!("exec {remote_cmd}"));
+    lines.push(if credentials.profile_bundle.is_some() {
+        remote_cmd
+    } else {
+        format!("exec {remote_cmd}")
+    });
 
     let mut preamble = lines.join("\n");
     preamble.push('\n');
@@ -506,22 +533,74 @@ mod tests {
     use super::*;
 
     fn full_bundle() -> Credentials {
+        let jack = crate::profile::ProfileId::parse("jack@loopflow.studio").unwrap();
+        let engineering = crate::profile::ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
+        let personal = crate::profile::ProfileId::parse("jackstah@gmail.com").unwrap();
+        let claude = crate::provider_account::parse_account_id("primary").unwrap();
+        let codex = crate::provider_account::parse_account_id("reserve").unwrap();
         Credentials {
             gh_token: Some("gh-secret".to_string()),
-            claude_token: Some("claude-secret".to_string()),
-            codex_token: Some("codex-secret".to_string()),
-            provider_accounts: vec![
-                ForwardedProviderCredential::new(
-                    crate::provider_auth::Provider::Claude,
-                    crate::provider_account::parse_account_id("primary").unwrap(),
-                    "claude-primary".to_string(),
-                ),
-                ForwardedProviderCredential::new(
-                    crate::provider_auth::Provider::Codex,
-                    crate::provider_account::parse_account_id("reserve").unwrap(),
-                    "codex-reserve".to_string(),
-                ),
-            ],
+            claude_token: None,
+            codex_token: None,
+            profile_bundle: Some(ForwardedProfileBundle::new(
+                crate::repository::RepoId::parse("loopflowstudio/loopflow").unwrap(),
+                jack.clone(),
+                vec![engineering.clone(), personal.clone()],
+                vec![
+                    crate::provider_account::ForwardedProfileProviderAccount {
+                        profile_id: jack,
+                        provider: crate::provider_auth::Provider::Claude,
+                        account_id: claude.clone(),
+                    },
+                    crate::provider_account::ForwardedProfileProviderAccount {
+                        profile_id: engineering.clone(),
+                        provider: crate::provider_auth::Provider::Claude,
+                        account_id: claude.clone(),
+                    },
+                    crate::provider_account::ForwardedProfileProviderAccount {
+                        profile_id: engineering,
+                        provider: crate::provider_auth::Provider::Codex,
+                        account_id: codex.clone(),
+                    },
+                    crate::provider_account::ForwardedProfileProviderAccount {
+                        profile_id: personal,
+                        provider: crate::provider_auth::Provider::Claude,
+                        account_id: claude.clone(),
+                    },
+                ],
+                vec![
+                    crate::provider_account::ForwardedProviderAccount {
+                        provider: crate::provider_auth::Provider::Claude,
+                        account_id: claude.clone(),
+                        login: Some("jackstah@gmail.com".to_string()),
+                        enabled: true,
+                        utilization_percent: None,
+                        cooldown_until: None,
+                        cooldown_reason: None,
+                    },
+                    crate::provider_account::ForwardedProviderAccount {
+                        provider: crate::provider_auth::Provider::Codex,
+                        account_id: codex.clone(),
+                        login: Some("loopflow-eng@loopflow.studio".to_string()),
+                        enabled: true,
+                        utilization_percent: None,
+                        cooldown_until: None,
+                        cooldown_reason: None,
+                    },
+                ],
+                vec![
+                    crate::provider_account::ForwardedProviderCredential::new(
+                        crate::provider_auth::Provider::Claude,
+                        claude,
+                        "claude-primary".to_string(),
+                    ),
+                    crate::provider_account::ForwardedProviderCredential::new(
+                        crate::provider_auth::Provider::Codex,
+                        codex,
+                        "codex-reserve".to_string(),
+                    ),
+                ],
+            )),
             pm_token: Some("linear-secret".to_string()),
             pm_provider: Some("linear".to_string()),
             secrets: vec![("STRIPE_KEY".to_string(), "sk-live-123".to_string())],
@@ -534,17 +613,22 @@ mod tests {
         let preamble = build_preamble(&full_bundle(), "mini-heart", "src/loopflow", &cmd, &[]);
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
-        assert!(preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN='claude-secret'"));
-        assert!(preamble.contains("export CODEX_ACCESS_TOKEN='codex-secret'"));
-        let encoded = encode_forwarded_credentials(&full_bundle().provider_accounts).unwrap();
+        assert!(!preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN="));
+        assert!(!preamble.contains("export CODEX_ACCESS_TOKEN="));
+        let encoded =
+            encode_forwarded_profile_bundle(full_bundle().profile_bundle.as_ref().unwrap())
+                .unwrap();
         assert!(preamble.contains(&format!(
-            "export {FORWARDED_PROVIDER_ACCOUNTS_ENV}='{}'",
+            "export {FORWARDED_PROFILE_BUNDLE_ENV}='{}'",
             encoded
         )));
         assert!(!preamble.contains("claude-primary"));
         assert!(!preamble.contains("codex-reserve"));
         assert!(!preamble.contains("refresh_token"));
         assert!(!preamble.contains("/accounts/"));
+        assert!(preamble.contains("LF_PROFILE_LEASE_DIR=$(mktemp -d"));
+        assert!(preamble.contains(&format!("export {FORWARDED_PROFILE_STORE_ENV}=")));
+        assert!(preamble.contains("trap - EXIT; rm -rf --"));
         assert!(preamble.contains("export LF_FORWARDED_PM_TOKEN='linear-secret'"));
         assert!(preamble.contains("export LF_FORWARDED_PM_PROVIDER='linear'"));
         // Locally-resolved Doppler secret, forwarded by value; no Doppler token.
@@ -557,9 +641,9 @@ mod tests {
         assert!(preamble.contains("export GIT_CONFIG_VALUE_0=''"));
         assert!(preamble.contains("export GIT_CONFIG_KEY_1='credential.https://github.com.helper'"));
         assert!(preamble.contains("password=$GH_TOKEN"));
-        // cd into the repo and exec the command
+        // cd into the repo and run under the cleanup trap.
         assert!(preamble.contains("cd \"$HOME\"/'src/loopflow'"));
-        assert!(preamble.trim_end().ends_with("exec 'lf' 'op' 'pr'"));
+        assert!(preamble.trim_end().ends_with("'lf' 'op' 'pr'"));
     }
 
     #[test]

@@ -517,12 +517,14 @@ profile and account for its lifetime.
 lf ssh mini -- lf wave product
 ```
 
-`lf ssh` forwards every enabled, connected Claude and Codex account for that
-remote process tree without writing credential files on the remote host. Child
-restarts inherit the lease. Before connecting, the local provider CLIs validate
-or refresh each enabled login; `lf ssh` fails instead of sending an incomplete
-account pool. After the Wave, tmux session, or host restarts, start or reconnect
-from the local machine to resolve and forward fresh credentials.
+`lf ssh` forwards the current repository's ordered profile route and each
+referenced Claude or Codex credential once, even when profiles share an
+account. It writes no credential files on the remote host. Provider-child
+restarts inherit the routing lease and its accrued cooldowns. Before connecting,
+the local provider CLIs validate or refresh each enabled routed login; `lf ssh`
+fails instead of sending an incomplete route. After the Wave, tmux session, or
+host restarts, start or reconnect from the local machine to resolve and forward
+fresh credentials.
 
 ```bash
 lf status product          # inspect live execution and attention in one Wave

@@ -66,10 +66,36 @@ pub fn run(
             "lf ssh needs a command after `--`, e.g. `lf ssh {host} -- lf pr open`"
         ));
     }
+    run_with_env(host, repo, secret_names, forward_agent, cmd, &[])
+}
+
+/// Run a Wave-home-routed `lf` command on `host`, exporting `LF_HOME_ROUTED=1`
+/// so the remote `lf` runs the command locally instead of routing it back to
+/// its own home — the single break in the forward loop. Reuses the same
+/// credential-forwarding preamble as `lf ssh`; no new transport or secret path.
+pub fn run_routed(host: &str, repo: Option<&str>, cmd: &[String]) -> anyhow::Result<()> {
+    run_with_env(
+        host,
+        repo,
+        &[],
+        false,
+        cmd,
+        &[(crate::engine::wave_home::HOME_ROUTED_ENV, "1")],
+    )
+}
+
+fn run_with_env(
+    host: &str,
+    repo: Option<&str>,
+    secret_names: &[String],
+    forward_agent: bool,
+    cmd: &[String],
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
     let repo = repo.unwrap_or(DEFAULT_REPO);
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     let credentials = runtime.block_on(resolve_credentials(secret_names))?;
-    let preamble = build_preamble(&credentials, host, repo, cmd);
+    let preamble = build_preamble(&credentials, host, repo, cmd, extra_env);
     run_ssh(host, forward_agent, &preamble)
 }
 
@@ -158,7 +184,13 @@ fn is_valid_env_name(name: &str) -> bool {
 /// Assemble the bash preamble piped to the remote over stdin. Every secret value
 /// is single-quote escaped so it can never break out of the assignment; the
 /// values travel only through this channel, never through argv.
-fn build_preamble(credentials: &Credentials, host: &str, repo: &str, cmd: &[String]) -> String {
+fn build_preamble(
+    credentials: &Credentials,
+    host: &str,
+    repo: &str,
+    cmd: &[String],
+    extra_env: &[(&str, &str)],
+) -> String {
     let mut lines: Vec<String> = Vec::new();
 
     // Give the remote a sane PATH so `lf`, `gh` resolve under a
@@ -167,6 +199,12 @@ fn build_preamble(credentials: &Credentials, host: &str, repo: &str, cmd: &[Stri
         "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\""
             .to_string(),
     );
+
+    // Router-supplied markers (e.g. LF_HOME_ROUTED) exported before creds so the
+    // remote sees them regardless of which credentials resolve.
+    for (name, value) in extra_env {
+        lines.push(format!("export {name}={}", sh_quote(value)));
+    }
 
     if let Some(token) = nonempty(&credentials.gh_token) {
         lines.push(format!("export GH_TOKEN={}", sh_quote(token)));
@@ -362,7 +400,7 @@ mod tests {
     #[test]
     fn preamble_exports_every_credential_and_execs_command() {
         let cmd = vec!["lf".to_string(), "op".to_string(), "pr".to_string()];
-        let preamble = build_preamble(&full_bundle(), "mini-heart", "src/loopflow", &cmd);
+        let preamble = build_preamble(&full_bundle(), "mini-heart", "src/loopflow", &cmd, &[]);
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
         assert!(preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN='claude-secret'"));
@@ -390,13 +428,28 @@ mod tests {
             ..Credentials::default()
         };
         let cmd = vec!["lf".to_string(), "runs".to_string()];
-        let preamble = build_preamble(&creds, "host", "src/loopflow", &cmd);
+        let preamble = build_preamble(&creds, "host", "src/loopflow", &cmd, &[]);
 
         assert!(preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN='only-claude'"));
         assert!(!preamble.contains("GH_TOKEN"));
         assert!(!preamble.contains("LF_FORWARDED_PM_TOKEN"));
         assert!(!preamble.contains("GIT_CONFIG_COUNT"));
         assert!(!preamble.contains("credential.helper"));
+        assert!(!preamble.contains("LF_HOME_ROUTED"));
+    }
+
+    #[test]
+    fn routed_preamble_marks_the_home_hop_to_break_the_forward_loop() {
+        let cmd = vec!["lf".to_string(), "pr".to_string(), "open".to_string()];
+        let preamble = build_preamble(
+            &Credentials::default(),
+            "mini-heart",
+            "src/loopflow",
+            &cmd,
+            &[("LF_HOME_ROUTED", "1")],
+        );
+        assert!(preamble.contains("export LF_HOME_ROUTED='1'"));
+        assert!(preamble.trim_end().ends_with("exec 'lf' 'pr' 'open'"));
     }
 
     #[test]
@@ -408,7 +461,7 @@ mod tests {
             ..Credentials::default()
         };
         let cmd = vec!["lf".to_string()];
-        let preamble = build_preamble(&creds, "host", "src/loopflow", &cmd);
+        let preamble = build_preamble(&creds, "host", "src/loopflow", &cmd, &[]);
 
         assert!(preamble.contains(r#"export GH_TOKEN='a'\''b; rm -rf ~ #'"#));
         // The dangerous substring never appears unquoted at a statement start.

@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
 
+use crate::engine::wave_home::WaveHome;
+
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
 /// The wave's resident loop reads these and opens a system pass when a
 /// schedule comes due (`crate::flowloop::wave`) — no daemon poller, no table.
@@ -35,6 +37,32 @@ pub struct WaveConfig {
     /// live (`crate::wave::runtime::WaveRuntime::paused`), not the registry
     /// row.
     pub paused: Option<bool>,
+    /// The wave's execution home: `local` (default) or `ssh://<host>[/<repo>]`.
+    /// Authored here, parsed via [`WaveConfig::home`], and used to route
+    /// top-level `lf` commands to that target. Absent or invalid reads as
+    /// `local`.
+    #[serde(default)]
+    pub home: Option<String>,
+}
+
+impl WaveConfig {
+    /// The authored execution home, defaulting to `Local` when the field is
+    /// absent or unparseable.
+    pub fn home(&self) -> WaveHome {
+        self.home
+            .as_deref()
+            .and_then(WaveHome::parse)
+            .unwrap_or(WaveHome::Local)
+    }
+}
+
+/// Read the wave's execution home straight from `GOAL.md`, defaulting to
+/// `Local`. The single read site for routing and launch inheritance — keyed by
+/// the wave name (identity), never a string parsed from a branch or path.
+pub fn read_wave_home(repo: &Path, name: &str) -> WaveHome {
+    read_wave_config(repo, name)
+        .map(|config| config.home())
+        .unwrap_or(WaveHome::Local)
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.

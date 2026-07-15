@@ -17,6 +17,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child_session::{ChildRef, DirectiveKind, ObservationRecipient};
+use crate::engine::wave_home::WaveHomeDto;
 use crate::lf::commands::runs::RunLedgerEntry;
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
@@ -76,6 +77,9 @@ pub struct WaveSnapshot {
     pub created_at: Option<String>,
     /// Parent wave id in the chord tree, `null` for a root wave.
     pub parent_wave_id: Option<String>,
+    /// Execution home: `local` or one SSH target. Lets a consumer distinguish a
+    /// local Wave from a remote-home one without owning transport.
+    pub home: WaveHomeDto,
 }
 
 /// `lf status <wave>` snapshot: native work hierarchy, the wave's runs, what
@@ -545,6 +549,12 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         .filter(|session| !session.status.is_terminal())
         .count() as u32;
     let config = crate::engine::wave_config::read_wave_config(Path::new(&repo), wave.name());
+    let home = WaveHomeDto::from(
+        &config
+            .as_ref()
+            .map(|config| config.home())
+            .unwrap_or(crate::engine::wave_home::WaveHome::Local),
+    );
     let paused = config.and_then(|config| config.paused).unwrap_or(false);
     let live = endpoint.is_some();
     let status = if paused {
@@ -568,6 +578,7 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         endpoint,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
+        home,
     })
 }
 
@@ -1297,6 +1308,10 @@ mod tests {
             endpoint: Some("127.0.0.1:5678".into()),
             created_at: Some("2026-07-06T00:00:00Z".into()),
             parent_wave_id: None,
+            home: WaveHomeDto::Ssh {
+                host: "mini-heart".into(),
+                repo: None,
+            },
         };
         let value: serde_json::Value = serde_json::to_value(&snapshot).expect("serialize");
         assert_eq!(value["name"], "goals");
@@ -1304,6 +1319,9 @@ mod tests {
         assert_eq!(value["live"], true);
         assert_eq!(value["endpoint"], "127.0.0.1:5678");
         assert_eq!(value["active_tasks"], 2);
+        // A remote-home wave is distinguishable in the wire shape.
+        assert_eq!(value["home"]["kind"], "ssh");
+        assert_eq!(value["home"]["host"], "mini-heart");
         // Explicitly-null Optional stays present (no serde skip): a stopped
         // wave's endpoint is `null`, not absent — one stable shape.
         assert!(value.as_object().unwrap().contains_key("parent_wave_id"));
@@ -1326,6 +1344,7 @@ mod tests {
                 endpoint: None,
                 created_at: None,
                 parent_wave_id: None,
+                home: WaveHomeDto::Local,
             },
             loop_state: None,
             runs: Evidence::complete(Vec::new()),

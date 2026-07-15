@@ -29,6 +29,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public var id: String { task.id }
 
     public let task: TaskPlanningSnapshot
+    public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
@@ -36,7 +37,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, runtime, directive, prs
+        case task, reference, runtime, directive, prs
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -93,17 +94,73 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let status: TaskSessionStatus
     public let reason: String
     public let statusAt: String
-    public let worktree: String
-    public let branch: String?
     public let provider: String
     public let processAlive: Bool
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, worktree, branch, provider
+        case status, reason, provider
         case sessionId = "session_id"
         case projectSessionId = "project_session_id"
         case statusAt = "status_at"
         case processAlive = "process_alive"
+    }
+}
+
+/// Stable Task references shared by `lf status` and `lf roadmap`. The issue URL
+/// comes from the cached PM snapshot; workspace evidence comes from the durable
+/// Task Session and remains after execution finishes.
+public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
+    public let issueUrl: URL?
+    public let workspace: TaskWorkspaceSnapshot?
+
+    enum CodingKeys: String, CodingKey {
+        case workspace
+        case issueUrl = "issue_url"
+    }
+}
+
+public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
+    public let slug: String
+    public let branch: String?
+    public let worktree: String
+}
+
+public enum RoadmapSection: String, Decodable, Sendable, Hashable {
+    case now
+    case needsAttention = "needs_attention"
+    case available
+    case later
+}
+
+public struct RoadmapProject: Decodable, Sendable, Identifiable, Hashable {
+    public var id: String { project.id }
+
+    public let project: ProjectPlanningSnapshot
+    public let runtime: ProjectRuntimeSnapshot?
+    public let nextMove: WorkNextMove
+    public let section: RoadmapSection
+    public let tasks: [RoadmapTask]
+
+    enum CodingKeys: String, CodingKey {
+        case project, runtime, section, tasks
+        case nextMove = "next_move"
+    }
+}
+
+public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
+    public var id: String { task.id }
+
+    public let task: TaskPlanningSnapshot
+    public let reference: TaskReferenceSnapshot
+    public let runtime: TaskRuntimeSnapshot?
+    public let nextMove: WorkNextMove
+    public let activePr: PrSnapshot?
+    public let section: RoadmapSection
+
+    enum CodingKeys: String, CodingKey {
+        case task, reference, runtime, section
+        case nextMove = "next_move"
+        case activePr = "active_pr"
     }
 }
 

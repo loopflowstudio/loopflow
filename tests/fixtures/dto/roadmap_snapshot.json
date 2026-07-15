@@ -1,0 +1,215 @@
+{
+  "generated_at": "2026-07-15T00:00:00Z",
+  "waves": [
+    {
+      "wave": {
+        "id": "wave-1",
+        "name": "product",
+        "status": "running",
+        "paused": false,
+        "goal": "Conduct goal-authored work everywhere.",
+        "repo": "/src/loopflow",
+        "active_tasks": 2,
+        "active_projects": 1,
+        "live": true,
+        "endpoint": "127.0.0.1:7777",
+        "created_at": "2026-07-01T00:00:00Z",
+        "parent_wave_id": null,
+        "home": {
+          "address": "jack@local",
+          "owner": "jack",
+          "location": {"kind": "local"}
+        }
+      },
+      "projects": {
+        "state": "ok",
+        "truncated": false,
+        "items": [
+          {
+            "project": {
+              "id": "project-1",
+              "slug": "loopflow-api",
+              "name": "Loopflow API",
+              "summary": "One coherent model everywhere.",
+              "definition": "The product contract for goal-authored computation.",
+              "krs": [
+                {"text": "A parallel concept anywhere is a failure event", "holds": false}
+              ]
+            },
+            "runtime": {
+              "session_id": "ps_11111111111111111111111111111111",
+              "status": "waiting",
+              "reason": "supervised Tasks are active",
+              "status_at": "2026-07-14T20:00:00Z",
+              "iteration": 2,
+              "pending_observations": 0,
+              "provider": "codex",
+              "process_alive": true
+            },
+            "next_move": {"owner": "project", "reason": "supervised Tasks are active"},
+            "section": "now",
+            "tasks": [
+              {
+                "task": {
+                  "id": "issue-now",
+                  "identifier": "W2-144",
+                  "name": "Make lf roadmap the machine-wide view",
+                  "description": "Envelope over the per-wave join.",
+                  "rank": 4,
+                  "completed": false,
+                  "assignee": null
+                },
+                "reference": {
+                  "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
+                  "workspace": {
+                    "slug": "make-lf-work-the-machine",
+                    "branch": "jack-heart/make-lf-work-the-machine",
+                    "worktree": "/src/loopflow.make-lf-work-the-machine"
+                  }
+                },
+                "runtime": {
+                  "session_id": "ts_now00000000000000000000000000000",
+                  "project_session_id": "ps_11111111111111111111111111111111",
+                  "status": "running",
+                  "reason": "Task flow iteration 1, step 2/3: task_pursue",
+                  "status_at": "2026-07-14T23:44:00Z",
+                  "provider": "claude",
+                  "process_alive": true
+                },
+                "next_move": {"owner": "task", "reason": "Task flow iteration 1, step 2/3: task_pursue"},
+                "active_pr": null,
+                "section": "now"
+              },
+              {
+                "task": {
+                  "id": "issue-review",
+                  "identifier": "W2-131",
+                  "name": "Show the all-wave roadmap and launch or attach",
+                  "description": "Consume the shared roadmap DTO.",
+                  "rank": 1,
+                  "completed": false,
+                  "assignee": null
+                },
+                "reference": {
+                  "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
+                  "workspace": {
+                    "slug": "all-wave-roadmap",
+                    "branch": "jack-heart/all-wave-roadmap",
+                    "worktree": "/src/loopflow.all-wave-roadmap"
+                  }
+                },
+                "runtime": {
+                  "session_id": "ts_review00000000000000000000000000",
+                  "project_session_id": "ps_11111111111111111111111111111111",
+                  "status": "waiting",
+                  "reason": "PR open for review",
+                  "status_at": "2026-07-14T22:00:00Z",
+                  "provider": "claude",
+                  "process_alive": false
+                },
+                "next_move": {"owner": "review", "reason": "PR open for review"},
+                "active_pr": {
+                  "id": "pr-review",
+                  "sequence": 1,
+                  "slug": "all-wave-roadmap",
+                  "branch": "jack-heart/all-wave-roadmap",
+                  "base_commit": "abc1234",
+                  "phase": "open",
+                  "empty": null,
+                  "publication": {
+                    "requested_at": "2026-07-14T22:05:00Z",
+                    "after_merge": "review",
+                    "next_slug": null,
+                    "github": {"number": 899, "url": "https://github.com/loopflow/loopflow/pull/899"}
+                  },
+                  "merge_commit": null,
+                  "abandoned_at": null
+                },
+                "section": "needs_attention"
+              },
+              {
+                "task": {
+                  "id": "issue-available",
+                  "identifier": "W2-156",
+                  "name": "Wave Chat consumes the roadmap snapshot",
+                  "description": "Derive Now/Available from one read.",
+                  "rank": 6,
+                  "completed": false,
+                  "assignee": null
+                },
+                "reference": {
+                  "issue_url": null,
+                  "workspace": null
+                },
+                "runtime": null,
+                "next_move": {"owner": "project", "reason": "Task is ready to start"},
+                "active_pr": null,
+                "section": "available"
+              },
+              {
+                "task": {
+                  "id": "issue-later",
+                  "identifier": "W2-141",
+                  "name": "Now + Available work views — research",
+                  "description": "Research delivered in merged PR.",
+                  "rank": 0,
+                  "completed": true,
+                  "assignee": null
+                },
+                "reference": {
+                  "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
+                  "workspace": {
+                    "slug": "now-available-research",
+                    "branch": "jack-heart/now-available-research",
+                    "worktree": "/src/loopflow.now-available-research"
+                  }
+                },
+                "runtime": {
+                  "session_id": "ts_later000000000000000000000000000",
+                  "project_session_id": "ps_11111111111111111111111111111111",
+                  "status": "completed",
+                  "reason": "Research delivered in merged PR",
+                  "status_at": "2026-07-14T21:00:00Z",
+                  "provider": "claude",
+                  "process_alive": false
+                },
+                "next_move": {"owner": "project", "reason": "Linear Task is complete"},
+                "active_pr": null,
+                "section": "later"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "wave": {
+        "id": "wave-2",
+        "name": "context",
+        "status": "idle",
+        "paused": false,
+        "goal": "context",
+        "repo": "/src/context",
+        "active_tasks": 0,
+        "active_projects": 0,
+        "live": false,
+        "endpoint": null,
+        "created_at": null,
+        "parent_wave_id": null,
+        "home": {
+          "address": "ssh://jack@mini-heart",
+          "owner": "jack",
+          "location": {
+            "kind": "ssh",
+            "host": "mini-heart",
+            "port": null
+          }
+        }
+      },
+      "projects": {
+        "state": "unavailable",
+        "reason": "no local PM snapshot for wave/context; run `lf pm sync`"
+      }
+    }
+  ]
+}

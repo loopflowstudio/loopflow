@@ -428,6 +428,18 @@ lf auth disconnect github
 Linear refreshes OAuth automatically before expiry. Connections created before
 this release may need one `lf auth linear` reconnect to record their PKCE client ID.
 
+```bash
+lf status product          # inspect live execution and attention in one Wave
+lf roadmap                 # read planned work across every Wave on this machine
+lf roadmap --wave product  # scope the same roadmap snapshot to one Wave
+lf pm show --wave product  # read the raw cached plan
+```
+
+`lf status` answers what is running and whether it is healthy. `lf roadmap`
+starts from the durable local plan and overlays live Task evidence, including
+clickable Linear identifiers and Task workspaces. `lf pm` owns planning sync and
+mutation.
+
 Planning lives in Linear. Pin a wave to its Linear Initiative and its own team
 in `wave/<name>/GOAL.md` frontmatter — `lf pm init` writes both for you:
 

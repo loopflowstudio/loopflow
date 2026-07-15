@@ -408,7 +408,7 @@ private struct WaveWorkInspector: View {
                     location: taskLocation,
                     prs: task.prs
                 )
-                if task.runtime != nil {
+                if task.reference.workspace != nil {
                     Button("Open Task workspace") { showsTaskWorkspace = true }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -442,9 +442,9 @@ private struct WaveWorkInspector: View {
     }
 
     private var taskLocation: String? {
-        guard let runtime = task?.runtime else { return nil }
-        guard let branch = runtime.branch else { return runtime.worktree }
-        return "\(runtime.worktree)\n\(branch)"
+        guard let workspace = task?.reference.workspace else { return nil }
+        guard let branch = workspace.branch else { return workspace.worktree }
+        return "\(workspace.worktree)\n\(branch)"
     }
 
     @ViewBuilder

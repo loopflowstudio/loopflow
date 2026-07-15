@@ -6,7 +6,7 @@
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
 // CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
 //
-// This runs `lf ls/status/runs --json` as a subprocess and decodes the wire
+// This runs `lf ls/status/roadmap/runs --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it resolves and execs a local `lf`. There is no
@@ -63,6 +63,19 @@ public struct RegistryQuery: Sendable {
             runs: snapshot.runs,
             attention: snapshot.attention
         )
+    }
+
+    /// Every durable plan row across the machine, joined to the same Task
+    /// references and live evidence as `lf status`. One subprocess reads every
+    /// Wave; an optional scope filters that shared snapshot at the source.
+    public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
+        var args = ["roadmap"]
+        if let wave {
+            args.append(contentsOf: ["--wave", wave])
+        }
+        args.append("--json")
+        let stdout = try await run(args, nil)
+        return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
     /// Files changed by one Task, classified across commits, index, worktree,
@@ -228,14 +241,14 @@ public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
 /// address (owner plus location). `address` is the canonical string to show
 /// (`jack@local` or `ssh://jack@host[:port]`); `location` is the structured form
 /// to navigate/open. The app never parses or reimplements SSH — it reads these.
-struct WaveHome: Decodable, Equatable {
-    let address: String
-    let owner: String
-    let location: HomeLocation
+public struct WaveHome: Decodable, Sendable, Hashable {
+    public let address: String
+    public let owner: String
+    public let location: HomeLocation
 }
 
 /// `HomeLocationDto` — where a Home's execution context lives.
-enum HomeLocation: Decodable, Equatable {
+public enum HomeLocation: Decodable, Sendable, Hashable {
     case local
     case ssh(host: String, port: Int?)
 
@@ -243,7 +256,7 @@ enum HomeLocation: Decodable, Equatable {
         case kind, host, port
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "local":
@@ -313,20 +326,20 @@ struct HomeRuntime: Decodable, Equatable {
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
-struct WaveSnapshot: Decodable {
-    let id: String
-    let name: String
-    let status: WaveStatus
-    let paused: Bool
-    let goal: String
-    let repo: String
-    let activeTasks: Int
-    let activeProjects: Int
-    let live: Bool
-    let endpoint: String?
-    let createdAt: String?
-    let parentWaveId: String?
-    let home: WaveHome
+public struct WaveSnapshot: Decodable, Sendable, Hashable {
+    public let id: String
+    public let name: String
+    public let status: WaveStatus
+    public let paused: Bool
+    public let goal: String
+    public let repo: String
+    public let activeTasks: Int
+    public let activeProjects: Int
+    public let live: Bool
+    public let endpoint: String?
+    public let createdAt: String?
+    public let parentWaveId: String?
+    public let home: WaveHome
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, paused, goal, repo, live, endpoint, home
@@ -345,6 +358,21 @@ struct WaveSnapshot: Decodable {
             status: status
         )
     }
+}
+
+public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
+    public let generatedAt: String
+    public let waves: [WaveRoadmap]
+
+    enum CodingKeys: String, CodingKey {
+        case waves
+        case generatedAt = "generated_at"
+    }
+}
+
+public struct WaveRoadmap: Decodable, Sendable, Hashable {
+    public let wave: WaveSnapshot
+    public let projects: WorkEvidence<RoadmapProject>
 }
 
 /// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot`.

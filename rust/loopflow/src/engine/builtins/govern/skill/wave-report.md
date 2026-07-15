@@ -183,6 +183,25 @@ Interpret:
    Hot signals first. A wave that's quiet on all five dimensions gets
    one line, not a section.
 
+## Task references
+
+When the report names more than one Task, read `lf roadmap --wave <wave>
+--json` for plan-wide rows and `lf status <wave> --json` for live execution.
+Render every Task with the shared reference:
+
+```markdown
+[identifier](provider URL) — readable active PR/workspace slug — status/next owner
+```
+
+Fill the link from `task.identifier` and `reference.issue_url`. Use
+`active_pr.slug` from roadmap; for status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Take status from
+`runtime.status`, or from the roadmap `section` when runtime is absent;
+`next_move.owner` supplies next owner. Never reconstruct a provider URL, branch,
+or slug from an identifier, title, worktree, or naming convention. Omit only a
+link or slug whose snapshot evidence is explicitly absent; keep the Task and
+its available status/next owner.
+
 ## Output
 
 Write `scratch/wave-report.md`:

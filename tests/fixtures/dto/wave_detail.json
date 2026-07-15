@@ -61,14 +61,20 @@
             "completed": false,
             "assignee": "user-1"
           },
+          "reference": {
+            "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
+            "workspace": {
+              "slug": "infrastructure-task",
+              "branch": "jack/infrastructure.task.20260713_1200",
+              "worktree": "/src/loopflow.infrastructure.task"
+            }
+          },
           "runtime": {
             "session_id": "ts_22222222222222222222222222222222",
             "project_session_id": "ps_11111111111111111111111111111111",
             "status": "waiting",
             "reason": "waiting for review",
             "status_at": "2026-07-13T19:00:00Z",
-            "worktree": "/src/loopflow.infrastructure.task",
-            "branch": "jack/infrastructure.task.20260713_1200",
             "provider": "codex",
             "process_alive": false
           },
@@ -112,6 +118,10 @@
             "rank": 2,
             "completed": false,
             "assignee": null
+          },
+          "reference": {
+            "issue_url": null,
+            "workspace": null
           },
           "runtime": null,
           "directive": null,

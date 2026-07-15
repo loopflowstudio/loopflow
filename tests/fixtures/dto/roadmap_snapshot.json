@@ -14,7 +14,12 @@
         "live": true,
         "endpoint": "127.0.0.1:7777",
         "created_at": "2026-07-01T00:00:00Z",
-        "parent_wave_id": null
+        "parent_wave_id": null,
+        "home": {
+          "address": "jack@local",
+          "owner": "jack",
+          "location": {"kind": "local"}
+        }
       },
       "projects": {
         "state": "ok",
@@ -190,7 +195,16 @@
         "live": false,
         "endpoint": null,
         "created_at": null,
-        "parent_wave_id": null
+        "parent_wave_id": null,
+        "home": {
+          "address": "ssh://jack@mini-heart",
+          "owner": "jack",
+          "location": {
+            "kind": "ssh",
+            "host": "mini-heart",
+            "port": null
+          }
+        }
       },
       "projects": {
         "state": "unavailable",

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
@@ -11,8 +12,10 @@ use crate::provider_account::{
     parse_account_id, remove_account_profile,
 };
 use crate::provider_auth::{
-    disconnect_provider_account_auth, no_event_sink, provider_account_auth_status,
-    start_provider_account_auth, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
+    capture_claude_profile_credentials, disconnect_provider_account_auth,
+    drive_claude_browser_authorization, no_event_sink, provider_account_auth_status,
+    start_provider_account_auth, AuthStatus, ClaudeKeychainGuard, Provider, ProviderAuthService,
+    ProviderAuthSnapshot,
 };
 use crate::store::{
     open_store, CredentialType, ProviderAccount, ProviderToken, SharedStore, StoreError,
@@ -101,6 +104,11 @@ async fn connect_account(raw_provider: &str, raw_account: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let account_id = parse_account_id(raw_account)?;
     let profile = ensure_account_profile(provider, &account_id)?;
+    let keychain_guard = if provider == Provider::Claude {
+        Some(ClaudeKeychainGuard::preserve()?)
+    } else {
+        None
+    };
     let handle = start_provider_account_auth(provider, profile.clone()).await?;
     let flow = handle.response.clone();
     let verification_url = flow
@@ -112,11 +120,29 @@ async fn connect_account(raw_provider: &str, raw_account: &str) -> Result<()> {
         provider.display_name(),
         account_id
     );
-    println!("If the browser does not open, visit:\n{verification_url}");
-    if let Some(user_code) = &flow.user_code {
-        println!("Enter code: {user_code}");
+    if handle.requires_authorization_code() {
+        println!("Authorizing with Claude in Chrome...");
+        if let Some(code) = drive_claude_browser_authorization(&verification_url, None).await? {
+            handle
+                .submit_authorization_code(code.expose_secret())
+                .await?;
+        } else {
+            println!("Chrome controller unavailable. Open:\n{verification_url}");
+            open_url(&verification_url);
+            let code = SecretString::new(rpassword::prompt_password(
+                "Paste the one-time code from the browser: ",
+            )?);
+            handle
+                .submit_authorization_code(code.expose_secret())
+                .await?;
+        }
+    } else {
+        println!("If the browser does not open, visit:\n{verification_url}");
+        if let Some(user_code) = &flow.user_code {
+            println!("Enter code: {user_code}");
+        }
+        open_url(&verification_url);
     }
-    open_url(&verification_url);
     tokio::time::timeout(AUTH_STATUS_POLL_TIMEOUT, handle.wait())
         .await
         .map_err(|_| {
@@ -127,9 +153,30 @@ async fn connect_account(raw_provider: &str, raw_account: &str) -> Result<()> {
             )
         })??;
 
+    let observed_claude_login = if provider == Provider::Claude {
+        capture_claude_profile_credentials(&profile)?;
+        let login = match provider_account_auth_status(provider, profile.clone()).await? {
+            AuthStatus::Active { login } => login,
+            other => {
+                return Err(anyhow!(
+                    "{} account '{}' finished login with status {}",
+                    provider.display_name(),
+                    account_id,
+                    other.as_str()
+                ));
+            }
+        };
+        if let Some(guard) = keychain_guard {
+            guard.restore()?;
+        }
+        login
+    } else {
+        None
+    };
+
     let status = provider_account_auth_status(provider, profile.clone()).await?;
     let login = match status {
-        AuthStatus::Active { login } => login,
+        AuthStatus::Active { login } => observed_claude_login.or(login),
         other => {
             return Err(anyhow!(
                 "{} account '{}' finished login with status {}",

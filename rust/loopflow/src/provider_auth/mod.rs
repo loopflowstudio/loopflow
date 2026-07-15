@@ -13,6 +13,7 @@ pub mod credential_socket;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
@@ -26,12 +27,15 @@ use base64::Engine;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
+use secrecy::{ExposeSecret, SecretString};
+#[cfg(target_os = "macos")]
+use security_framework::item::{ItemClass, ItemSearchOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{ChildStdin, Command};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
@@ -57,6 +61,12 @@ const LINEAR_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
 const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
 const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
 const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
+const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+#[cfg(target_os = "macos")]
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
+const CLAUDE_BROWSER_AUTH_TIMEOUT: Duration = Duration::from_secs(120);
+const CLAUDE_BROWSER_OUTPUT_SCHEMA: &str = r#"{"type":"object","properties":{"status":{"type":"string","enum":["authorized","unavailable"]},"authorization_code":{"type":["string","null"]}},"required":["status","authorization_code"],"additionalProperties":false}"#;
+const CLAUDE_BROWSER_ALLOWED_TOOLS: &str = "Skill,ToolSearch,mcp__claude-in-chrome__list_connected_browsers,mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__computer";
 pub(crate) const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -68,6 +78,9 @@ static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static ANSI_ESCAPE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
+static CLAUDE_AUTHORIZATION_CODE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^[A-Za-z0-9_-]{20,}#[A-Za-z0-9_-]{20,}$").expect("Claude authorization code regex")
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -248,6 +261,7 @@ pub struct ProviderAuthSnapshot {
 pub struct AuthFlowHandle {
     pub response: AuthFlowResponse,
     monitor: AuthMonitor,
+    authorization_code_input: Option<AuthorizationCodeInput>,
 }
 
 impl std::fmt::Debug for AuthFlowHandle {
@@ -263,11 +277,94 @@ impl AuthFlowHandle {
         Self {
             response,
             monitor: AuthMonitor::new(monitor),
+            authorization_code_input: None,
         }
     }
 
+    fn with_authorization_code_input(
+        response: AuthFlowResponse,
+        monitor: JoinHandle<Result<(), AuthError>>,
+        authorization_code_input: AuthorizationCodeInput,
+    ) -> Self {
+        Self {
+            response,
+            monitor: AuthMonitor::new(monitor),
+            authorization_code_input: Some(authorization_code_input),
+        }
+    }
+
+    pub fn requires_authorization_code(&self) -> bool {
+        self.authorization_code_input.is_some()
+    }
+
+    pub async fn submit_authorization_code(&self, code: &str) -> Result<(), AuthError> {
+        let input = self
+            .authorization_code_input
+            .as_ref()
+            .ok_or(AuthError::CompletionUnavailable(self.response.provider))?;
+        input.submit(code).await
+    }
+
     pub async fn wait(self) -> Result<(), AuthError> {
-        self.monitor.wait(self.response.provider).await
+        let Self {
+            response,
+            monitor,
+            authorization_code_input: _authorization_code_input,
+        } = self;
+        monitor.wait(response.provider).await
+    }
+}
+
+#[derive(Clone)]
+struct AuthorizationCodeInput {
+    provider: Provider,
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+}
+
+impl AuthorizationCodeInput {
+    fn new(provider: Provider, stdin: ChildStdin) -> Self {
+        Self {
+            provider,
+            stdin: Arc::new(Mutex::new(Some(stdin))),
+        }
+    }
+
+    async fn submit(&self, code: &str) -> Result<(), AuthError> {
+        let code = code.trim();
+        if code.is_empty() {
+            return Err(AuthError::CommandFailed {
+                provider: self.provider,
+                message: "authorization code cannot be empty".to_string(),
+            });
+        }
+
+        let mut stdin = self
+            .stdin
+            .lock()
+            .await
+            .take()
+            .ok_or(AuthError::CompletionUnavailable(self.provider))?;
+        stdin
+            .write_all(code.as_bytes())
+            .await
+            .map_err(|source| AuthError::CommandIo {
+                provider: self.provider,
+                source,
+            })?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|source| AuthError::CommandIo {
+                provider: self.provider,
+                source,
+            })?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|source| AuthError::CommandIo {
+                provider: self.provider,
+                source,
+            })
     }
 }
 
@@ -301,6 +398,71 @@ impl Drop for AuthMonitor {
             task.abort();
         }
     }
+}
+
+pub struct ClaudeKeychainGuard {
+    credential: Option<ClaudeKeychainCredential>,
+}
+
+struct ClaudeKeychainCredential {
+    account: String,
+    blob: SecretString,
+}
+
+impl std::fmt::Debug for ClaudeKeychainGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClaudeKeychainGuard")
+            .field(
+                "credential",
+                &self.credential.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
+impl ClaudeKeychainGuard {
+    /// Preserve the Claude credential active before managed-account login.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when macOS refuses the Keychain query or the existing
+    /// credential cannot be decoded.
+    pub fn preserve() -> Result<Self, AuthError> {
+        Ok(Self {
+            credential: read_claude_keychain_credential()?,
+        })
+    }
+
+    /// Restore the credential that was active before managed-account login.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when macOS rejects the Keychain update.
+    pub fn restore(mut self) -> Result<(), AuthError> {
+        let result = restore_claude_keychain_blob(self.credential.as_ref());
+        self.credential.take();
+        result
+    }
+}
+
+impl Drop for ClaudeKeychainGuard {
+    fn drop(&mut self) {
+        if let Err(error) = restore_claude_keychain_blob(self.credential.as_ref()) {
+            warn!(%error, "failed to restore Claude Keychain credential");
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserControllerEnvelope {
+    is_error: bool,
+    structured_output: Option<BrowserControllerResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserControllerResult {
+    status: String,
+    authorization_code: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -711,8 +873,13 @@ impl AuthBroker for SocketAuthBroker {
 #[derive(Clone)]
 pub struct ProviderAuthService {
     brokers: HashMap<Provider, Arc<dyn AuthBroker>>,
-    pending: Arc<Mutex<HashMap<Provider, JoinHandle<()>>>>,
+    pending: Arc<Mutex<HashMap<Provider, PendingAuth>>>,
     store: Option<SharedStore>,
+}
+
+struct PendingAuth {
+    lifecycle: JoinHandle<()>,
+    authorization_code_input: Option<AuthorizationCodeInput>,
 }
 
 impl std::fmt::Debug for ProviderAuthService {
@@ -873,7 +1040,11 @@ impl ProviderAuthService {
         }
 
         let broker = self.broker(provider)?;
-        let AuthFlowHandle { response, monitor } = broker.start_auth().await?;
+        let AuthFlowHandle {
+            response,
+            monitor,
+            authorization_code_input,
+        } = broker.start_auth().await?;
 
         events(AuthEvent::FlowStarted {
             provider,
@@ -938,11 +1109,26 @@ impl ProviderAuthService {
             pending.remove(&provider);
         });
 
-        self.pending.lock().await.insert(provider, lifecycle);
+        self.pending.lock().await.insert(
+            provider,
+            PendingAuth {
+                lifecycle,
+                authorization_code_input,
+            },
+        );
         Ok(response)
     }
 
     pub async fn complete_auth(&self, provider: Provider, code: &str) -> Result<(), AuthError> {
+        let authorization_code_input = self
+            .pending
+            .lock()
+            .await
+            .get(&provider)
+            .and_then(|pending| pending.authorization_code_input.clone());
+        if let Some(input) = authorization_code_input {
+            return input.submit(code).await;
+        }
         self.broker(provider)?.complete_auth(code).await
     }
 
@@ -963,15 +1149,15 @@ impl ProviderAuthService {
     }
 
     async fn abort_pending(&self, provider: Provider) {
-        let handle = self.pending.lock().await.remove(&provider);
-        if let Some(handle) = handle {
-            handle.abort();
+        let pending = self.pending.lock().await.remove(&provider);
+        if let Some(pending) = pending {
+            pending.lifecycle.abort();
         }
     }
 
     async fn prune_finished_pending(&self) {
         let mut pending = self.pending.lock().await;
-        pending.retain(|_, handle| !handle.is_finished());
+        pending.retain(|_, auth| !auth.lifecycle.is_finished());
     }
 
     async fn is_pending(&self, provider: Provider) -> bool {
@@ -1095,7 +1281,14 @@ impl AuthBroker for GhAuthBroker {
         ]);
         command.env("GH_BROWSER", "echo");
 
-        start_auth_command(Provider::GitHub, "gh", command, parse_github_auth_line).await
+        start_auth_command(
+            Provider::GitHub,
+            "gh",
+            command,
+            AuthCommandInput::None,
+            parse_github_auth_line,
+        )
+        .await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -1200,7 +1393,14 @@ impl AuthBroker for ClaudeAuthBroker {
         command.env("BROWSER", "echo");
         command.env("CLAUDE_BROWSER", "echo");
 
-        start_auth_command(Provider::Claude, "claude", command, parse_generic_auth_line).await
+        start_auth_command(
+            Provider::Claude,
+            "claude",
+            command,
+            AuthCommandInput::AuthorizationCode,
+            parse_generic_auth_line,
+        )
+        .await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -1311,7 +1511,14 @@ impl AuthBroker for CodexAuthBroker {
         self.add_file_store_override(&mut command);
         command.args(["login", "--device-auth"]);
 
-        start_auth_command(Provider::Codex, "codex", command, parse_generic_auth_line).await
+        start_auth_command(
+            Provider::Codex,
+            "codex",
+            command,
+            AuthCommandInput::None,
+            parse_generic_auth_line,
+        )
+        .await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -1448,6 +1655,7 @@ impl AuthBroker for DopplerAuthBroker {
             Provider::Doppler,
             "doppler",
             command,
+            AuthCommandInput::None,
             parse_generic_auth_line,
         )
         .await
@@ -1630,17 +1838,160 @@ fn kill_auth_process_group(pid: u32) {
     crate::engine::platform::kill_process(pid);
 }
 
+/// Ask the connected Claude-in-Chrome bridge to complete a Claude OAuth page.
+///
+/// `Ok(None)` means the browser controller is unavailable and the caller should
+/// use its interactive fallback.
+///
+/// # Errors
+///
+/// Returns an error for an untrusted URL, malformed controller output, or
+/// controller process I/O failure.
+pub async fn drive_claude_browser_authorization(
+    verification_url: &str,
+    controller_profile: Option<&Path>,
+) -> Result<Option<SecretString>, AuthError> {
+    validate_claude_authorization_url(verification_url)?;
+
+    let prompt = format!(
+        "Act only as Loopflow's Claude OAuth browser controller. Load the claude-in-chrome skill. First list connected browsers. If none are connected, return status unavailable. Otherwise open this exact URL in a new tab: {verification_url}\nOnly interact with claude.com and platform.claude.com. If an already signed-in account can continue, click Authorize. Do not sign in, create an account, handle MFA or CAPTCHA, or change account settings. After the callback page appears, read its complete one-time code#state handoff. Return status authorized with that value. Never include the handoff in prose."
+    );
+
+    let mut command = Command::new("claude");
+    command.args([
+        "--chrome",
+        "--print",
+        "--model",
+        "haiku",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+        "--permission-mode",
+        "dontAsk",
+        "--allowedTools",
+        CLAUDE_BROWSER_ALLOWED_TOOLS,
+        "--max-budget-usd",
+        "1",
+        "--json-schema",
+        CLAUDE_BROWSER_OUTPUT_SCHEMA,
+    ]);
+    if let Some(profile) = controller_profile {
+        command.env("CLAUDE_CONFIG_DIR", profile);
+    }
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(AuthError::CommandSpawn {
+                provider: Provider::Claude,
+                source,
+            });
+        }
+    };
+    let process_group = AuthProcessGroup::new(child.id());
+    let mut stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
+        provider: Provider::Claude,
+        message: "browser controller did not expose stdin".to_string(),
+    })?;
+    stdin
+        .write_all(prompt.as_bytes())
+        .await
+        .map_err(|source| AuthError::CommandIo {
+            provider: Provider::Claude,
+            source,
+        })?;
+    stdin
+        .shutdown()
+        .await
+        .map_err(|source| AuthError::CommandIo {
+            provider: Provider::Claude,
+            source,
+        })?;
+    drop(stdin);
+
+    let output = tokio::time::timeout(CLAUDE_BROWSER_AUTH_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| AuthError::CommandFailed {
+            provider: Provider::Claude,
+            message: "browser controller timed out".to_string(),
+        })?
+        .map_err(|source| AuthError::CommandIo {
+            provider: Provider::Claude,
+            source,
+        })?;
+    process_group.complete();
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    parse_browser_controller_output(&output.stdout)
+}
+
+fn validate_claude_authorization_url(verification_url: &str) -> Result<(), AuthError> {
+    let url = Url::parse(verification_url).map_err(|_| AuthError::CommandFailed {
+        provider: Provider::Claude,
+        message: "browser controller received an invalid authorization URL".to_string(),
+    })?;
+    if url.scheme() != "https" || url.host_str() != Some("claude.com") {
+        return Err(AuthError::CommandFailed {
+            provider: Provider::Claude,
+            message: "browser controller refused a non-Claude authorization URL".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn parse_browser_controller_output(output: &[u8]) -> Result<Option<SecretString>, AuthError> {
+    let envelope: BrowserControllerEnvelope =
+        serde_json::from_slice(output).map_err(|_| AuthError::CommandFailed {
+            provider: Provider::Claude,
+            message: "browser controller returned invalid JSON".to_string(),
+        })?;
+    if envelope.is_error {
+        return Ok(None);
+    }
+    let Some(result) = envelope.structured_output else {
+        return Ok(None);
+    };
+    match (result.status.as_str(), result.authorization_code) {
+        ("unavailable", _) => Ok(None),
+        ("authorized", Some(code)) if CLAUDE_AUTHORIZATION_CODE_RE.is_match(&code) => {
+            Ok(Some(SecretString::new(code)))
+        }
+        _ => Err(AuthError::CommandFailed {
+            provider: Provider::Claude,
+            message: "browser controller returned a malformed authorization handoff".to_string(),
+        }),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthCommandInput {
+    None,
+    AuthorizationCode,
+}
+
 async fn start_auth_command(
     provider: Provider,
     command_name: &'static str,
     mut command: Command,
+    input: AuthCommandInput,
     mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder),
 ) -> Result<AuthFlowHandle, AuthError> {
-    command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    match input {
+        AuthCommandInput::None => command.stdin(Stdio::null()),
+        AuthCommandInput::AuthorizationCode => command.stdin(Stdio::piped()),
+    };
+    command.kill_on_drop(true);
     #[cfg(unix)]
     command.process_group(0);
 
@@ -1661,6 +2012,16 @@ async fn start_auth_command(
     };
 
     let process_group = AuthProcessGroup::new(child.id());
+    let authorization_code_input = match input {
+        AuthCommandInput::None => None,
+        AuthCommandInput::AuthorizationCode => {
+            let stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
+                provider,
+                message: "missing authorization code input pipe".to_string(),
+            })?;
+            Some(AuthorizationCodeInput::new(provider, stdin))
+        }
+    };
     let stdout = child
         .stdout
         .take()
@@ -1707,7 +2068,12 @@ async fn start_auth_command(
                     process_group.complete();
                     command_exit_result(provider, status)
                 });
-                return Ok(AuthFlowHandle::new(response, monitor));
+                return Ok(match authorization_code_input {
+                    Some(input) => {
+                        AuthFlowHandle::with_authorization_code_input(response, monitor, input)
+                    }
+                    None => AuthFlowHandle::new(response, monitor),
+                });
             }
 
             drop(process_group);
@@ -1733,7 +2099,12 @@ async fn start_auth_command(
                     process_group.complete();
                     command_exit_result(provider, status)
                 });
-                return Ok(AuthFlowHandle::new(response, monitor));
+                return Ok(match authorization_code_input {
+                    Some(input) => {
+                        AuthFlowHandle::with_authorization_code_input(response, monitor, input)
+                    }
+                    None => AuthFlowHandle::new(response, monitor),
+                });
             }
         }
     }
@@ -2035,22 +2406,141 @@ fn claude_token_from_credentials_json(content: &str) -> Option<ProviderToken> {
     })
 }
 
+/// Copy Claude's current macOS Keychain credential into an isolated profile.
+///
+/// Non-macOS Claude installations already write the native credentials file,
+/// so this is a no-op there.
+///
+/// # Errors
+///
+/// Returns an error when the Keychain credential is missing or the private
+/// profile file cannot be written atomically.
+pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthError> {
+    #[cfg(target_os = "macos")]
+    {
+        let credential = read_claude_keychain_credential()?.ok_or_else(|| {
+            AuthError::Filesystem(
+                "Claude completed login without a readable macOS Keychain credential".to_string(),
+            )
+        })?;
+        write_claude_profile_credentials(config_dir, &credential.blob)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = config_dir;
+        Ok(())
+    }
+}
+
+fn write_claude_profile_credentials(
+    config_dir: &Path,
+    credential: &SecretString,
+) -> Result<(), AuthError> {
+    if claude_token_from_credentials_json(credential.expose_secret()).is_none() {
+        return Err(AuthError::Filesystem(
+            "Claude Keychain credential has an unknown format".to_string(),
+        ));
+    }
+    fs::create_dir_all(config_dir).map_err(|error| {
+        AuthError::Filesystem(format!("create {}: {error}", config_dir.display()))
+    })?;
+    let destination = config_dir.join(".credentials.json");
+    let mut temporary = tempfile::NamedTempFile::new_in(config_dir).map_err(|error| {
+        AuthError::Filesystem(format!("create private Claude credential file: {error}"))
+    })?;
+    temporary
+        .write_all(credential.expose_secret().as_bytes())
+        .map_err(|error| {
+            AuthError::Filesystem(format!("write private Claude credential file: {error}"))
+        })?;
+    temporary.as_file().sync_all().map_err(|error| {
+        AuthError::Filesystem(format!("sync private Claude credential file: {error}"))
+    })?;
+    temporary.persist(&destination).map_err(|error| {
+        AuthError::Filesystem(format!("install private Claude credential file: {error}"))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o600)).map_err(|error| {
+            AuthError::Filesystem(format!("protect {}: {error}", destination.display()))
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>, AuthError> {
+    let mut search = ItemSearchOptions::new();
+    search
+        .class(ItemClass::generic_password())
+        .service(CLAUDE_KEYCHAIN_SERVICE)
+        .load_attributes(true)
+        .limit(1);
+    let items = match search.search() {
+        Ok(items) => items,
+        Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => return Ok(None),
+        Err(error) => {
+            return Err(AuthError::Filesystem(format!(
+                "read Claude Keychain credential metadata: {error}"
+            )))
+        }
+    };
+    let account = items.into_iter().find_map(|item| {
+        item.simplify_dict()
+            .and_then(|attributes| attributes.get("acct").cloned())
+    });
+    let Some(account) = account else {
+        return Err(AuthError::Filesystem(
+            "Claude Keychain credential is missing its account metadata".to_string(),
+        ));
+    };
+    let blob =
+        security_framework::passwords::get_generic_password(CLAUDE_KEYCHAIN_SERVICE, &account)
+            .map_err(|error| {
+                AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
+            })?;
+    let blob = String::from_utf8(blob).map_err(|_| {
+        AuthError::Filesystem("Claude Keychain credential is not valid UTF-8".to_string())
+    })?;
+    Ok(Some(ClaudeKeychainCredential {
+        account,
+        blob: SecretString::new(blob),
+    }))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>, AuthError> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn restore_claude_keychain_blob(
+    credential: Option<&ClaudeKeychainCredential>,
+) -> Result<(), AuthError> {
+    let Some(credential) = credential else {
+        return Ok(());
+    };
+    security_framework::passwords::set_generic_password(
+        CLAUDE_KEYCHAIN_SERVICE,
+        &credential.account,
+        credential.blob.expose_secret().as_bytes(),
+    )
+    .map_err(|error| AuthError::Filesystem(format!("restore Claude Keychain credential: {error}")))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restore_claude_keychain_blob(
+    _credential: Option<&ClaudeKeychainCredential>,
+) -> Result<(), AuthError> {
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn read_claude_keychain_token() -> Option<ProviderToken> {
-    let output = std::process::Command::new("security")
-        .args([
-            "find-generic-password",
-            "-s",
-            "Claude Code-credentials",
-            "-w",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let blob = String::from_utf8(output.stdout).ok()?;
-    claude_token_from_credentials_json(blob.trim())
+    let credential = read_claude_keychain_credential().ok().flatten()?;
+    claude_token_from_credentials_json(credential.blob.expose_secret())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -3250,9 +3740,15 @@ mod tests {
             "echo $$ > \"$AUTH_PID_PATH\"; echo https://example.com/oauth/authorize; sleep 30",
         ]);
 
-        let handle = start_auth_command(Provider::Claude, "sh", command, parse_generic_auth_line)
-            .await
-            .expect("start fake auth command");
+        let handle = start_auth_command(
+            Provider::Claude,
+            "sh",
+            command,
+            AuthCommandInput::None,
+            parse_generic_auth_line,
+        )
+        .await
+        .expect("start fake auth command");
         let pid: i32 = fs::read_to_string(pid_path)
             .expect("read auth pid")
             .trim()
@@ -3274,6 +3770,90 @@ mod tests {
         })
         .await
         .expect("auth process should exit when its handle is dropped");
+    }
+
+    #[tokio::test]
+    async fn authorization_code_completes_command_auth() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "echo https://example.com/oauth/authorize; IFS= read -r code; test \"$code\" = expected-code",
+        ]);
+
+        let handle = start_auth_command(
+            Provider::Claude,
+            "sh",
+            command,
+            AuthCommandInput::AuthorizationCode,
+            parse_generic_auth_line,
+        )
+        .await
+        .expect("start fake auth command");
+
+        assert!(handle.requires_authorization_code());
+        handle
+            .submit_authorization_code("expected-code")
+            .await
+            .expect("submit authorization code");
+        handle.wait().await.expect("auth command should complete");
+    }
+
+    #[test]
+    fn browser_controller_returns_only_valid_structured_handoffs() {
+        let expected = "abcdefghijklmnopqrstuvwxyz0123456789#ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let output = serde_json::to_vec(&serde_json::json!({
+            "is_error": false,
+            "structured_output": {
+                "status": "authorized",
+                "authorization_code": expected,
+            }
+        }))
+        .expect("controller output");
+
+        let code = parse_browser_controller_output(&output)
+            .expect("valid controller output")
+            .expect("authorization code");
+        assert_eq!(code.expose_secret(), expected);
+
+        let malformed = serde_json::to_vec(&serde_json::json!({
+            "is_error": false,
+            "structured_output": {
+                "status": "authorized",
+                "authorization_code": "explanation instead of a handoff",
+            }
+        }))
+        .expect("malformed controller output");
+        assert!(parse_browser_controller_output(&malformed).is_err());
+    }
+
+    #[test]
+    fn claude_profile_credentials_are_private_and_native() {
+        let temp = tempdir().expect("tempdir");
+        let payload =
+            r#"{"claudeAiOauth":{"accessToken":"test-access-token","expiresAt":4102444800000}}"#;
+        let credential = SecretString::new(payload.to_string());
+
+        write_claude_profile_credentials(temp.path(), &credential)
+            .expect("write profile credentials");
+
+        let path = temp.path().join(".credentials.json");
+        assert_eq!(fs::read_to_string(&path).expect("credential file"), payload);
+        assert_eq!(
+            fs::metadata(&path)
+                .expect("credential metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+
+        let replacement = r#"{"claudeAiOauth":{"accessToken":"replacement-access-token","expiresAt":4102444800000}}"#;
+        write_claude_profile_credentials(temp.path(), &SecretString::new(replacement.to_string()))
+            .expect("replace profile credentials");
+        assert_eq!(
+            fs::read_to_string(&path).expect("replacement credential file"),
+            replacement
+        );
     }
 
     #[test]
@@ -3435,6 +4015,59 @@ mod tests {
 
         let status = service.status(Provider::GitHub).await.expect("status");
         assert_eq!(status.status, AuthStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn service_completes_pending_command_with_authorization_code() {
+        #[derive(Debug)]
+        struct CommandBroker;
+
+        #[async_trait]
+        impl AuthBroker for CommandBroker {
+            fn provider(&self) -> Provider {
+                Provider::Claude
+            }
+
+            async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+                let mut command = Command::new("sh");
+                command.args([
+                    "-c",
+                    "echo https://example.com/oauth/authorize; IFS= read -r code; test \"$code\" = expected-code",
+                ]);
+                start_auth_command(
+                    Provider::Claude,
+                    "sh",
+                    command,
+                    AuthCommandInput::AuthorizationCode,
+                    parse_generic_auth_line,
+                )
+                .await
+            }
+
+            async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+                Ok(AuthStatus::Active { login: None })
+            }
+
+            async fn disconnect(&self) -> Result<(), AuthError> {
+                Ok(())
+            }
+        }
+
+        let service = ProviderAuthService::with_brokers(vec![Arc::new(CommandBroker)]);
+        service
+            .start_auth(Provider::Claude, no_event_sink())
+            .await
+            .expect("start auth");
+        service
+            .complete_auth(Provider::Claude, "expected-code")
+            .await
+            .expect("complete auth");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while service.is_pending(Provider::Claude).await {
+            assert!(Instant::now() < deadline, "auth lifecycle did not finish");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     #[derive(Debug, Clone)]

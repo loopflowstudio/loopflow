@@ -29,13 +29,12 @@ active after the global Keychain credential changes again.
 ## Data structures
 
 ```rust
-enum AuthorizationCodeSource {
-    Chrome,
-    Terminal,
+struct AuthorizationCodeInput {
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
 }
 
-struct BrowserAuthorization {
-    code: SecretString,
+struct ClaudeKeychainGuard {
+    credential: Option<ClaudeKeychainCredential>,
 }
 ```
 
@@ -45,22 +44,22 @@ argv, trace, or log.
 ## Key functions
 
 ```rust
-async fn drive_claude_authorization(
+async fn drive_claude_browser_authorization(
     verification_url: &str,
     controller_profile: Option<&Path>,
 ) -> Result<Option<SecretString>, AuthError>;
 
-fn capture_claude_keychain_credentials(profile: &Path) -> Result<(), AuthError>;
+fn capture_claude_profile_credentials(profile: &Path) -> Result<(), AuthError>;
 ```
 
-`drive_claude_authorization` runs `claude --chrome --print` with only the
+`drive_claude_browser_authorization` runs `claude --chrome --print` with only the
 built-in skill loader and exact Chrome tab/navigation/read/click tools
 preapproved. Its structured output must contain one value matching Claude's
 `code#state` handoff shape. Missing extension connectivity returns `None` so the
 CLI can fall back to its no-echo terminal prompt; malformed or verbose output
 is rejected.
 
-`capture_claude_keychain_credentials` reads service
+`capture_claude_profile_credentials` reads service
 `Claude Code-credentials` directly into target `.credentials.json` with mode
 0600 and validates the JSON shape without printing it. Non-macOS homes already
 receive the provider-native file and need no copy.

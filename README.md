@@ -481,6 +481,10 @@ lf auth reset claude primary
 lf auth disconnect claude --account reserve
 ```
 
+Claude authorization runs through Claude in Chrome when its browser extension
+is connected. If the controller is unavailable, Loopflow falls back to a hidden
+terminal prompt for the one-time handoff code.
+
 Each account keeps independent provider auth and session state under
 `~/.lf/accounts/`. Shared Claude/Codex configuration and compiled skills stay in
 their canonical host-level trees. A provider session remains pinned to its

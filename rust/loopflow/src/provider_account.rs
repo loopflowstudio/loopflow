@@ -31,6 +31,12 @@ pub enum ProviderAccountError {
     Filesystem(String),
     #[error("invalid forwarded provider credential bundle: {0}")]
     ForwardedBundle(String),
+    #[error("cannot forward {provider} account '{account_id}': {reason}")]
+    ForwardingCredential {
+        provider: Provider,
+        account_id: ProviderAccountId,
+        reason: String,
+    },
     #[error("provider account runtime failed: {0}")]
     Runtime(String),
     #[error("all {provider} accounts are unavailable{reset}")]
@@ -345,11 +351,19 @@ pub async fn local_forwarded_credentials(
         let Some(home) = account.home.as_deref() else {
             continue;
         };
-        let Some(access_token) =
-            crate::provider_auth::extract_provider_account_access_token(provider, home)
-        else {
-            continue;
-        };
+        let access_token =
+            crate::provider_auth::prepare_provider_account_access_token(provider, home)
+                .await
+                .map_err(|error| ProviderAccountError::ForwardingCredential {
+                    provider,
+                    account_id: account.account_id.clone(),
+                    reason: error.to_string(),
+                })?
+                .ok_or_else(|| ProviderAccountError::ForwardingCredential {
+                    provider,
+                    account_id: account.account_id.clone(),
+                    reason: "provider CLI reports no active OAuth login".to_string(),
+                })?;
         credentials.push(ForwardedProviderCredential::new(
             provider,
             account.account_id,

@@ -173,7 +173,7 @@ async fn connect_account(raw_provider: &str, raw_account: &str) -> Result<()> {
         "Connected {} account '{}'{}",
         provider.display_name(),
         account_id,
-        preferred.then_some(" (preferred)").unwrap_or_default()
+        if preferred { " (preferred)" } else { "" }
     );
     Ok(())
 }

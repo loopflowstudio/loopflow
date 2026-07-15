@@ -114,11 +114,13 @@ of repeatedly launching a known-limited account.
 > "Process-lifetime credentials: preserve current 'bring auth, leave nothing
 > behind' semantics, but re-forward after remote restart."
 
-`lf ssh` resolves every enabled local Claude/Codex profile, serializes only its
-provider, account id, and current access token, and writes the bundle through
-SSH stdin. It never appears in argv or logs. The remote router prefers this
-bundle over host-local profiles and injects only the chosen account into the
-vendor child (`CLAUDE_CODE_OAUTH_TOKEN` or `CODEX_ACCESS_TOKEN`).
+`lf ssh` asks each local provider CLI to validate or refresh every enabled
+Claude/Codex profile, serializes only its provider, account id, and current
+access token, and writes the bundle through SSH stdin. It fails before opening
+SSH if an enabled profile cannot produce a fresh token. The token never appears
+in argv or logs. The remote router prefers this bundle over host-local profiles
+and injects only the chosen account into the vendor child
+(`CLAUDE_CODE_OAUTH_TOKEN` or `CODEX_ACCESS_TOKEN`).
 
 Provider-child restarts reuse the inherited lease. A Wave/tmux/host restart
 destroys it; the next local start or reconnect resolves and forwards a fresh
@@ -153,7 +155,8 @@ harness reports one.
    rate-limit frames mark the active account cooling.
 5. SSH tests prove all enabled OAuth accounts travel only in the stdin preamble,
    Codex and Claude are both represented, quoting cannot execute input, and no
-   profile home or refresh token is forwarded.
+   profile home or refresh token is forwarded. Auth tests prove Codex requests
+   a proactive managed-auth refresh before an SSH lease is minted.
 6. With no configured accounts, existing Claude/Codex and `lf ssh` behavior is
    unchanged.
 7. README examples describe multi-account OAuth and remote credential lifetime.

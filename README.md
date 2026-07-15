@@ -455,8 +455,10 @@ lf ssh mini -- lf wave product
 
 `lf ssh` forwards every enabled, connected Claude and Codex account for that
 remote process tree without writing credential files on the remote host. Child
-restarts inherit the lease. After the Wave, tmux session, or host restarts, start
-or reconnect from the local machine to resolve and forward fresh credentials.
+restarts inherit the lease. Before connecting, the local provider CLIs validate
+or refresh each enabled login; `lf ssh` fails instead of sending an incomplete
+account pool. After the Wave, tmux session, or host restarts, start or reconnect
+from the local machine to resolve and forward fresh credentials.
 
 ```bash
 lf status product          # inspect live execution and attention in one Wave

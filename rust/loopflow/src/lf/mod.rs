@@ -178,6 +178,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: AuthCommand,
     },
+    /// Personal browser and provider account routing profiles
+    Profile {
+        #[command(subcommand)]
+        cmd: ProfileCommand,
+    },
     /// Release operations (run, check, notes, bump, tag, status)
     Release {
         #[command(subcommand)]
@@ -1288,23 +1293,108 @@ pub enum AuthCommand {
         /// Create or reconnect an isolated OAuth account profile
         #[arg(long)]
         account: Option<String>,
+        /// Chrome profile directory, name, or signed-in email for Claude OAuth
+        #[arg(long, requires = "account", conflicts_with = "profile")]
+        chrome_profile: Option<String>,
+        /// Use this Loopflow profile's host-local Chrome binding
+        #[arg(long, requires = "account")]
+        profile: Option<String>,
+    },
+    /// Adopt an existing Claude login into a managed account
+    Import {
+        provider: String,
+        /// Create or register this isolated OAuth account profile
+        #[arg(long)]
+        account: String,
+        /// Chrome profile directory, name, or signed-in email
+        #[arg(long, conflicts_with = "profile")]
+        chrome_profile: Option<String>,
+        /// Use this Loopflow profile's host-local Chrome binding
+        #[arg(long)]
+        profile: Option<String>,
     },
     /// List managed Claude and Codex OAuth accounts
     Accounts {
         /// Provider name (optional)
         provider: Option<String>,
     },
-    /// Prefer one account when healthy accounts have equal utilization
-    Use { provider: String, account: String },
-    /// Include an account in automatic routing
-    Enable { provider: String, account: String },
-    /// Exclude an account from automatic routing
-    Disable { provider: String, account: String },
+    /// Record provider-specific account identity, routing, and billing state
+    Set {
+        provider: String,
+        account: String,
+        #[arg(long)]
+        login_email: Option<String>,
+        /// automatic, explicit-only, or disabled
+        #[arg(long)]
+        routing: Option<String>,
+        #[arg(long, conflicts_with = "clear_plan")]
+        plan: Option<String>,
+        #[arg(long)]
+        clear_plan: bool,
+        /// Last paid day, as YYYY-MM-DD
+        #[arg(long, conflicts_with = "clear_paid_through")]
+        paid_through: Option<String>,
+        #[arg(long)]
+        clear_paid_through: bool,
+    },
     /// Clear observed utilization and cooldown for an account
     Reset { provider: String, account: String },
     /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileCommand {
+    /// Create a personal routing profile
+    Create {
+        profile: String,
+        /// Chrome profile directory, name, or signed-in email on this host
+        #[arg(long)]
+        chrome_profile: Option<String>,
+    },
+    /// List personal routing profiles and their provider accounts
+    List,
+    /// Bind provider accounts to profiles
+    Account {
+        #[command(subcommand)]
+        cmd: ProfileAccountCommand,
+    },
+    /// Configure this repository's profile order
+    Route {
+        #[command(subcommand)]
+        cmd: ProfileRouteCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileAccountCommand {
+    /// Bind a provider account by account id or login email
+    Set {
+        profile: String,
+        provider: String,
+        account: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileRouteCommand {
+    /// Atomically replace the default and ordered backup profiles
+    Set {
+        #[arg(long)]
+        default: String,
+        #[arg(long = "backup")]
+        backups: Vec<String>,
+        /// Repository owner/name; defaults to the current repository
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Show the default and ordered backup profiles
+    Show {
+        /// Repository owner/name; defaults to the current repository
+        #[arg(long)]
+        repo: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1417,10 +1507,9 @@ mod tests {
 
         for flow in [
             "connect",
+            "import",
             "accounts",
-            "use",
-            "enable",
-            "disable",
+            "set",
             "reset",
             "disconnect",
         ] {
@@ -1438,6 +1527,90 @@ mod tests {
     }
 
     #[test]
+    fn profile_route_accepts_ordered_backups() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "profile",
+            "route",
+            "set",
+            "--default",
+            "jack@loopflow.studio",
+            "--backup",
+            "loopflow-eng@loopflow.studio",
+            "--backup",
+            "jackstah@gmail.com",
+        ])
+        .expect("parse profile route");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Profile {
+                cmd: ProfileCommand::Route {
+                    cmd: ProfileRouteCommand::Set {
+                        default,
+                        backups,
+                        repo: None,
+                    }
+                }
+            }) if default == "jack@loopflow.studio"
+                && backups == vec!["loopflow-eng@loopflow.studio", "jackstah@gmail.com"]
+        ));
+    }
+
+    #[test]
+    fn profile_create_accepts_a_host_local_chrome_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "profile",
+            "create",
+            "loopflow-eng@loopflow.studio",
+            "--chrome-profile",
+            "loopflow-eng@loopflow.studio",
+        ])
+        .expect("parse profile Chrome binding");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Profile {
+                cmd: ProfileCommand::Create {
+                    profile,
+                    chrome_profile: Some(chrome_profile),
+                }
+            }) if profile == "loopflow-eng@loopflow.studio"
+                && chrome_profile == "loopflow-eng@loopflow.studio"
+        ));
+    }
+
+    #[test]
+    fn profile_account_set_accepts_a_login_email() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "profile",
+            "account",
+            "set",
+            "jack@loopflow.studio",
+            "claude",
+            "jack@loopflow.studio",
+        ])
+        .expect("parse profile account mapping");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Profile {
+                cmd: ProfileCommand::Account {
+                    cmd: ProfileAccountCommand::Set {
+                        profile,
+                        provider,
+                        account,
+                    }
+                }
+            }) if profile == "jack@loopflow.studio"
+                && provider == "claude"
+                && account == "jack@loopflow.studio"
+        ));
+    }
+
+    #[test]
     fn auth_connect_accepts_managed_account_slug() {
         let cli = Cli::try_parse_from(["lf", "auth", "connect", "claude", "--account", "primary"])
             .expect("parse managed account login");
@@ -1445,8 +1618,141 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
-                cmd: AuthCommand::Connect { provider, account }
+                cmd: AuthCommand::Connect {
+                    provider,
+                    account,
+                    chrome_profile: None,
+                    profile: None,
+                }
             }) if provider == "claude" && account.as_deref() == Some("primary")
+        ));
+    }
+
+    #[test]
+    fn auth_connect_accepts_matching_chrome_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "connect",
+            "claude",
+            "--account",
+            "loopflow",
+            "--chrome-profile",
+            "operator@example.com",
+        ])
+        .expect("parse Chrome profile pairing");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Connect {
+                    provider,
+                    account,
+                    chrome_profile: Some(chrome_profile),
+                    profile: None,
+                }
+            }) if provider == "claude"
+                && account.as_deref() == Some("loopflow")
+                && chrome_profile == "operator@example.com"
+        ));
+    }
+
+    #[test]
+    fn auth_connect_accepts_a_loopflow_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "connect",
+            "claude",
+            "--account",
+            "primary",
+            "--profile",
+            "jackstah@gmail.com",
+        ])
+        .expect("parse Loopflow profile binding");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Connect {
+                    provider,
+                    account,
+                    chrome_profile: None,
+                    profile: Some(profile),
+                }
+            }) if provider == "claude"
+                && account.as_deref() == Some("primary")
+                && profile == "jackstah@gmail.com"
+        ));
+    }
+
+    #[test]
+    fn auth_import_accepts_managed_account_and_chrome_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "import",
+            "claude",
+            "--account",
+            "loopflow",
+            "--chrome-profile",
+            "jack@example.com",
+        ])
+        .expect("parse existing login import");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Import {
+                    provider,
+                    account,
+                    chrome_profile: Some(chrome_profile),
+                    profile: None,
+                }
+            }) if provider == "claude"
+                && account == "loopflow"
+                && chrome_profile == "jack@example.com"
+        ));
+    }
+
+    #[test]
+    fn auth_set_accepts_provider_specific_billing_and_routing_state() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "set",
+            "codex",
+            "loopflow",
+            "--login-email",
+            "loopflow-eng@loopflow.studio",
+            "--routing",
+            "automatic",
+            "--plan",
+            "max",
+            "--paid-through",
+            "2026-08-14",
+        ])
+        .expect("parse provider account lifecycle");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Set {
+                    provider,
+                    account,
+                    login_email: Some(login_email),
+                    routing: Some(routing),
+                    plan: Some(plan),
+                    paid_through: Some(paid_through),
+                    clear_plan: false,
+                    clear_paid_through: false,
+                }
+            }) if provider == "codex"
+                && account == "loopflow"
+                && login_email == "loopflow-eng@loopflow.studio"
+                && routing == "automatic"
+                && plan == "max"
+                && paid_through == "2026-08-14"
         ));
     }
 

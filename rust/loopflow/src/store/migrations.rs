@@ -160,6 +160,24 @@ const MIGRATIONS: &[Migration] = &[
         name: "interactive_handoffs",
         sql: include_str!("migrations/0.11.008_interactive_handoffs.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 9,
+        },
+        name: "profiles",
+        sql: include_str!("migrations/0.11.009_profiles.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 10,
+        },
+        name: "provider_account_lifecycle",
+        sql: include_str!("migrations/0.11.010_provider_account_lifecycle.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -670,7 +688,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.008_interactive_handoffs"
+            "0.11.010_provider_account_lifecycle"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -690,8 +708,107 @@ mod tests {
                 "0.11.005_provider_accounts".to_string(),
                 "0.11.006_context_launch_work".to_string(),
                 "0.11.007_task_pr_parent".to_string(),
-                "0.11.008_interactive_handoffs".to_string()
+                "0.11.008_interactive_handoffs".to_string(),
+                "0.11.009_profiles".to_string(),
+                "0.11.010_provider_account_lifecycle".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn profile_migration_preserves_accounts_and_session_pins() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, &MIGRATIONS[..8]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO provider_accounts (
+                provider, account_id, home, login, enabled, preferred,
+                utilization_percent, cooldown_until, cooldown_reason,
+                last_selected_at, created_at, updated_at
+             ) VALUES
+                ('claude', 'primary', '/accounts/claude/primary',
+                 'jack@example.com', 1, 1, 80, NULL, NULL, 5, 1, 5),
+                ('claude', 'duplicate', '/accounts/claude/duplicate',
+                 'jack@example.com', 1, 0, 0, NULL, NULL, NULL, 2, 2),
+                ('codex', 'primary', '/accounts/codex/primary',
+                 'jack@example.com', 1, 1, 20, NULL, NULL, 6, 1, 6);
+             INSERT INTO provider_session_accounts (
+                provider, provider_session_id, account_id, created_at
+             ) VALUES ('claude', 'session-1', 'primary', 7);",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM profiles WHERE profile_id = 'jack@example.com'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM profile_provider_accounts
+                 WHERE profile_id = 'jack@example.com'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT profile_id FROM provider_session_accounts
+                 WHERE provider_session_id = 'session-1'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "jack@example.com"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT utilization_percent FROM provider_accounts
+                 WHERE provider = 'claude' AND account_id = 'primary'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            80
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT login_email || ':' || credential_state || ':' || routing_state
+                 FROM provider_accounts
+                 WHERE provider = 'claude' AND account_id = 'primary'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "jack@example.com:connected:automatic"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM provider_accounts
+                 WHERE provider = 'claude' AND login_email = 'jack@example.com'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('provider_accounts')
+                 WHERE name IN ('enabled', 'preferred')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
         );
     }
 
@@ -1084,7 +1201,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.008_interactive_handoffs"
+            "0.11.010_provider_account_lifecycle"
         );
     }
 

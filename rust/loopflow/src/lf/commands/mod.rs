@@ -11,6 +11,7 @@ pub mod home;
 pub mod list;
 pub mod memory;
 pub mod ops;
+pub mod profile;
 pub mod radio;
 pub mod run;
 pub mod runs;

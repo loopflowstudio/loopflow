@@ -467,36 +467,77 @@ lf auth disconnect github
 Linear refreshes OAuth automatically before expiry. Connections created before
 this release may need one `lf auth linear` reconnect to record their PKCE client ID.
 
-Route new Claude or Codex sessions across several OAuth accounts:
+Register provider accounts, then route each repository through personal
+profiles:
 
 ```bash
-lf auth connect claude --account primary
-lf auth connect claude --account reserve
-lf auth use claude primary
+lf profile create jack@loopflow.studio --chrome-profile jack@loopflow.studio
+lf profile create loopflow-eng@loopflow.studio --chrome-profile loopflow-eng@loopflow.studio
+lf profile create jackstah@gmail.com --chrome-profile jackstah@gmail.com
+
+lf auth import claude --account personal --profile jackstah@gmail.com
+lf auth set claude personal --login-email jackstah@gmail.com
+lf auth connect claude --account jack --profile jack@loopflow.studio
+lf auth set claude jack --login-email jack@loopflow.studio --plan max
+
+lf auth connect codex --account jack
+lf auth set codex jack --login-email jack@loopflow.studio --plan max
+lf auth connect codex --account engineering
+lf auth set codex engineering --login-email loopflow-eng@loopflow.studio --plan max
+lf auth connect codex --account personal
+lf auth set codex personal --login-email jackstah@gmail.com
 lf auth accounts claude
 
-lf auth disable claude reserve
-lf auth enable claude reserve
-lf auth reset claude primary
-lf auth disconnect claude --account reserve
+lf profile account set jack@loopflow.studio claude jack@loopflow.studio
+lf profile account set jack@loopflow.studio codex jack@loopflow.studio
+lf profile account set loopflow-eng@loopflow.studio claude jackstah@gmail.com
+lf profile account set loopflow-eng@loopflow.studio codex loopflow-eng@loopflow.studio
+lf profile account set jackstah@gmail.com claude jackstah@gmail.com
+lf profile account set jackstah@gmail.com codex jackstah@gmail.com
+
+lf profile route set \
+  --default jack@loopflow.studio \
+  --backup loopflow-eng@loopflow.studio \
+  --backup jackstah@gmail.com
+lf profile route show
+
+lf auth set claude personal --paid-through 2026-08-14
+lf auth set claude personal --routing explicit-only
+lf auth reset claude personal
+lf auth disconnect claude --account personal
 ```
 
-Each account keeps independent provider auth and session state under
-`~/.lf/accounts/`. Shared Claude/Codex configuration and compiled skills stay in
-their canonical host-level trees. A provider session remains pinned to its
-account; after a hard rate limit, the next launch chooses a healthy account and
-starts a new provider session.
+Claude authorization runs through Claude in Chrome when its browser extension
+is connected. If the controller is unavailable, Loopflow falls back to a hidden
+terminal prompt for the one-time handoff code. `profile create
+--chrome-profile` binds the profile directory, name, or signed-in email on this
+host; `auth connect --profile` reuses that binding. `auth import` adopts an
+existing isolated Claude credential—or the current macOS Keychain login when
+the account home is empty—without another OAuth flow.
+
+Each provider account keeps independent auth and session state under
+`~/.lf/accounts/`. Profiles reuse those accounts and give each repository a
+default plus ordered backups. Shared accounts are tried once and share one
+cooldown. Shared Claude/Codex configuration and compiled skills stay in their
+canonical host-level trees. A provider child remains pinned to its selected
+profile and account for its lifetime.
+
+`paid-through` is provider-specific. Once that date passes, automatic routing
+treats the account as `explicit-only`; clear the date and set `automatic` if a
+downgraded account should remain a normal fallback.
 
 ```bash
 lf ssh mini -- lf wave product
 ```
 
-`lf ssh` forwards every enabled, connected Claude and Codex account for that
-remote process tree without writing credential files on the remote host. Child
-restarts inherit the lease. Before connecting, the local provider CLIs validate
-or refresh each enabled login; `lf ssh` fails instead of sending an incomplete
-account pool. After the Wave, tmux session, or host restarts, start or reconnect
-from the local machine to resolve and forward fresh credentials.
+`lf ssh` forwards the current repository's ordered profile route and each
+referenced Claude or Codex credential once, even when profiles share an
+account. It writes no credential files on the remote host. Provider-child
+restarts inherit the routing lease and its accrued cooldowns. Before connecting,
+the local provider CLIs validate or refresh each automatically eligible routed
+login; `lf ssh` fails instead of sending an incomplete route. After the Wave,
+tmux session, or host restarts, start or reconnect from the local machine to
+resolve and forward fresh credentials.
 
 ```bash
 lf status product          # inspect live execution and attention in one Wave

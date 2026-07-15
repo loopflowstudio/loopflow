@@ -4,11 +4,17 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
 use crate::id::WaveId;
+use crate::profile::{
+    ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
+    ProviderProfileCandidate, RepoProfileRoute,
+};
+use crate::provider_auth::Provider;
+use crate::repository::RepoId;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    BusMessage, PmSnapshotRow, ProviderAccount, ProviderAccountId, ProviderAccountSelection,
-    RunEventRow, StoreError, StoreResult,
+    BusMessage, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
+    ProviderProfileSelection, RoutingState, RunEventRow, StoreError, StoreResult,
 };
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
@@ -162,28 +168,111 @@ fn read_provider_account(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<Pr
     let home = row
         .get::<_, Option<String>>(2)?
         .map(std::path::PathBuf::from);
-    let login = row.get(3)?;
-    let enabled = row.get(4)?;
-    let preferred = row.get(5)?;
-    let utilization_percent = row.get(6)?;
-    let cooldown_until = row.get(7)?;
-    let cooldown_reason = row.get(8)?;
-    let last_selected_at = row.get(9)?;
-    let created_at = row.get(10)?;
-    let updated_at = row.get(11)?;
-    Ok(ProviderAccountId::parse(&account_id)
-        .map_err(StoreError::InvalidData)
-        .map(|account_id| ProviderAccount {
+    let login_email = row.get::<_, Option<String>>(3)?;
+    let credential_state = row.get::<_, String>(4)?;
+    let routing_state = row.get::<_, String>(5)?;
+    let plan = row.get(6)?;
+    let paid_through = row.get::<_, Option<i32>>(7)?;
+    let utilization_percent = row.get(8)?;
+    let cooldown_until = row.get(9)?;
+    let cooldown_reason = row.get(10)?;
+    let last_selected_at = row.get(11)?;
+    let created_at = row.get(12)?;
+    let updated_at = row.get(13)?;
+    Ok((|| {
+        let account_id = ProviderAccountId::parse(&account_id).map_err(StoreError::InvalidData)?;
+        let login_email = login_email
+            .map(|value| EmailAddress::parse(&value))
+            .transpose()
+            .map_err(StoreError::InvalidData)?;
+        let credential_state =
+            CredentialState::from_db(&credential_state).map_err(StoreError::InvalidData)?;
+        let routing_state =
+            RoutingState::from_db(&routing_state).map_err(StoreError::InvalidData)?;
+        let paid_through = paid_through
+            .map(time::Date::from_julian_day)
+            .transpose()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        Ok(ProviderAccount {
             provider,
             account_id,
             home,
-            login,
-            enabled,
-            preferred,
+            login_email,
+            credential_state,
+            routing_state,
+            plan,
+            paid_through,
             utilization_percent,
             cooldown_until,
             cooldown_reason,
             last_selected_at,
+            created_at,
+            updated_at,
+        })
+    })())
+}
+
+fn read_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<Profile>> {
+    let profile_id = row.get::<_, String>(0)?;
+    let created_at = row.get(1)?;
+    let updated_at = row.get(2)?;
+    Ok(ProfileId::parse(&profile_id)
+        .map_err(StoreError::InvalidData)
+        .map(|id| Profile {
+            id,
+            created_at,
+            updated_at,
+        }))
+}
+
+fn read_profile_provider_account(
+    row: &rusqlite::Row,
+) -> rusqlite::Result<StoreResult<ProfileProviderAccount>> {
+    let profile_id = row.get::<_, String>(0)?;
+    let provider = row.get::<_, String>(1)?;
+    let account_id = row.get::<_, String>(2)?;
+    let created_at = row.get(3)?;
+    let updated_at = row.get(4)?;
+    Ok(ProfileId::parse(&profile_id)
+        .map_err(StoreError::InvalidData)
+        .and_then(|profile_id| {
+            provider
+                .parse::<Provider>()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))
+                .map(|provider| (profile_id, provider))
+        })
+        .and_then(|(profile_id, provider)| {
+            ProviderAccountId::parse(&account_id)
+                .map_err(StoreError::InvalidData)
+                .map(|account_id| ProfileProviderAccount {
+                    profile_id,
+                    provider,
+                    account_id,
+                    created_at,
+                    updated_at,
+                })
+        }))
+}
+
+fn read_chrome_profile_binding(
+    row: &rusqlite::Row,
+) -> rusqlite::Result<StoreResult<ChromeProfileBinding>> {
+    let profile_id = row.get::<_, String>(0)?;
+    let host_id = row.get::<_, String>(1)?;
+    let chrome_directory = row.get(2)?;
+    let created_at = row.get(3)?;
+    let updated_at = row.get(4)?;
+    Ok(ProfileId::parse(&profile_id)
+        .map_err(StoreError::InvalidData)
+        .and_then(|profile_id| {
+            HostId::parse(&host_id)
+                .map_err(StoreError::InvalidData)
+                .map(|host_id| (profile_id, host_id))
+        })
+        .map(|(profile_id, host_id)| ChromeProfileBinding {
+            profile_id,
+            host_id,
+            chrome_directory,
             created_at,
             updated_at,
         }))
@@ -422,15 +511,21 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO provider_accounts (
-                provider, account_id, home, login, enabled, preferred,
-                utilization_percent, cooldown_until, cooldown_reason,
-                last_selected_at, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                provider, account_id, home, login_email, credential_state,
+                routing_state, plan, paid_through, utilization_percent,
+                cooldown_until, cooldown_reason, last_selected_at, created_at,
+                updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14
+             )
              ON CONFLICT(provider, account_id) DO UPDATE SET
                 home = excluded.home,
-                login = excluded.login,
-                enabled = excluded.enabled,
-                preferred = excluded.preferred,
+                login_email = excluded.login_email,
+                credential_state = excluded.credential_state,
+                routing_state = excluded.routing_state,
+                plan = excluded.plan,
+                paid_through = excluded.paid_through,
                 utilization_percent = excluded.utilization_percent,
                 cooldown_until = excluded.cooldown_until,
                 cooldown_reason = excluded.cooldown_reason,
@@ -443,9 +538,11 @@ impl SqliteStore {
                     .home
                     .as_ref()
                     .map(|path| path.to_string_lossy().to_string()),
-                account.login,
-                account.enabled,
-                account.preferred,
+                account.login_email.as_ref().map(EmailAddress::as_str),
+                account.credential_state.as_str(),
+                account.routing_state.as_str(),
+                account.plan,
+                account.paid_through.map(time::Date::to_julian_day),
                 account.utilization_percent,
                 account.cooldown_until,
                 account.cooldown_reason,
@@ -464,9 +561,10 @@ impl SqliteStore {
     ) -> StoreResult<Option<ProviderAccount>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT provider, account_id, home, login, enabled, preferred,
-                    utilization_percent, cooldown_until, cooldown_reason,
-                    last_selected_at, created_at, updated_at
+            "SELECT provider, account_id, home, login_email, credential_state,
+                    routing_state, plan, paid_through, utilization_percent,
+                    cooldown_until, cooldown_reason, last_selected_at,
+                    created_at, updated_at
              FROM provider_accounts
              WHERE provider = ?1 AND account_id = ?2",
         )?;
@@ -486,19 +584,21 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let sql = match provider {
             Some(_) => {
-                "SELECT provider, account_id, home, login, enabled, preferred,
-                        utilization_percent, cooldown_until, cooldown_reason,
-                        last_selected_at, created_at, updated_at
+                "SELECT provider, account_id, home, login_email, credential_state,
+                        routing_state, plan, paid_through, utilization_percent,
+                        cooldown_until, cooldown_reason, last_selected_at,
+                        created_at, updated_at
                  FROM provider_accounts
                  WHERE provider = ?1
-                 ORDER BY provider, preferred DESC, account_id"
+                 ORDER BY provider, account_id"
             }
             None => {
-                "SELECT provider, account_id, home, login, enabled, preferred,
-                        utilization_percent, cooldown_until, cooldown_reason,
-                        last_selected_at, created_at, updated_at
+                "SELECT provider, account_id, home, login_email, credential_state,
+                        routing_state, plan, paid_through, utilization_percent,
+                        cooldown_until, cooldown_reason, last_selected_at,
+                        created_at, updated_at
                  FROM provider_accounts
-                 ORDER BY provider, preferred DESC, account_id"
+                 ORDER BY provider, account_id"
             }
         };
         let mut statement = conn.prepare(sql)?;
@@ -520,66 +620,25 @@ impl SqliteStore {
         Ok(accounts)
     }
 
-    pub fn delete_provider_account(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "DELETE FROM provider_accounts WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account_id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn set_preferred_provider_account(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let exists = transaction.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM provider_accounts
-                WHERE provider = ?1 AND account_id = ?2
-             )",
-            params![provider, account_id.as_str()],
-            |row| row.get::<_, bool>(0),
-        )?;
-        if !exists {
-            return Err(StoreError::NotFound);
-        }
-        transaction.execute(
-            "UPDATE provider_accounts SET preferred = 0, updated_at = ?2 WHERE provider = ?1",
-            params![provider, now_unix()],
-        )?;
-        transaction.execute(
-            "UPDATE provider_accounts
-             SET preferred = 1, updated_at = ?3
-             WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account_id.as_str(), now_unix()],
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn set_provider_account_enabled(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        enabled: bool,
-    ) -> StoreResult<()> {
+    pub fn update_provider_account_lifecycle(&self, account: &ProviderAccount) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
             "UPDATE provider_accounts
-             SET enabled = ?3, updated_at = ?4
+             SET login_email = ?3,
+                 routing_state = ?4,
+                 plan = ?5,
+                 paid_through = ?6,
+                 updated_at = ?7
              WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account_id.as_str(), enabled, now_unix()],
+            params![
+                account.provider,
+                account.account_id.as_str(),
+                account.login_email.as_ref().map(EmailAddress::as_str),
+                account.routing_state.as_str(),
+                account.plan,
+                account.paid_through.map(time::Date::to_julian_day),
+                account.updated_at,
+            ],
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
@@ -626,72 +685,356 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn select_provider_account(
+    // -- Profiles -------------------------------------------------------------
+
+    pub fn upsert_profile(&self, profile: &Profile) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO profiles (profile_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(profile_id) DO UPDATE SET updated_at = excluded.updated_at",
+            params![profile.id.as_str(), profile.created_at, profile.updated_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_profile(&self, profile_id: &ProfileId) -> StoreResult<Option<Profile>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT profile_id, created_at, updated_at
+             FROM profiles WHERE profile_id = ?1",
+            [profile_id.as_str()],
+            read_profile,
+        )
+        .optional()?
+        .transpose()
+    }
+
+    pub fn list_profiles(&self) -> StoreResult<Vec<Profile>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT profile_id, created_at, updated_at FROM profiles ORDER BY profile_id",
+        )?;
+        let rows = statement.query_map([], read_profile)?;
+        let mut profiles = Vec::new();
+        for row in rows {
+            profiles.push(row??);
+        }
+        Ok(profiles)
+    }
+
+    pub fn set_profile_provider_account(
         &self,
-        provider: &str,
-        candidates: &[ProviderAccountId],
+        mapping: &ProfileProviderAccount,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO profile_provider_accounts (
+                profile_id, provider, account_id, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(profile_id, provider) DO UPDATE SET
+                account_id = excluded.account_id,
+                updated_at = excluded.updated_at",
+            params![
+                mapping.profile_id.as_str(),
+                mapping.provider.as_str(),
+                mapping.account_id.as_str(),
+                mapping.created_at,
+                mapping.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn profile_provider_account(
+        &self,
+        profile_id: &ProfileId,
+        provider: Provider,
+    ) -> StoreResult<Option<ProfileProviderAccount>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT profile_id, provider, account_id, created_at, updated_at
+             FROM profile_provider_accounts
+             WHERE profile_id = ?1 AND provider = ?2",
+            params![profile_id.as_str(), provider.as_str()],
+            read_profile_provider_account,
+        )
+        .optional()?
+        .transpose()
+    }
+
+    pub fn list_profile_provider_accounts(
+        &self,
+        profile_id: Option<&ProfileId>,
+    ) -> StoreResult<Vec<ProfileProviderAccount>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let sql = match profile_id {
+            Some(_) => {
+                "SELECT profile_id, provider, account_id, created_at, updated_at
+                 FROM profile_provider_accounts
+                 WHERE profile_id = ?1
+                 ORDER BY profile_id, provider"
+            }
+            None => {
+                "SELECT profile_id, provider, account_id, created_at, updated_at
+                 FROM profile_provider_accounts
+                 ORDER BY profile_id, provider"
+            }
+        };
+        let mut statement = conn.prepare(sql)?;
+        let mut mappings = Vec::new();
+        match profile_id {
+            Some(profile_id) => {
+                let rows =
+                    statement.query_map([profile_id.as_str()], read_profile_provider_account)?;
+                for row in rows {
+                    mappings.push(row??);
+                }
+            }
+            None => {
+                let rows = statement.query_map([], read_profile_provider_account)?;
+                for row in rows {
+                    mappings.push(row??);
+                }
+            }
+        }
+        Ok(mappings)
+    }
+
+    pub fn upsert_chrome_profile_binding(&self, binding: &ChromeProfileBinding) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO chrome_profile_bindings (
+                profile_id, host_id, chrome_directory, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(profile_id, host_id) DO UPDATE SET
+                chrome_directory = excluded.chrome_directory,
+                updated_at = excluded.updated_at",
+            params![
+                binding.profile_id.as_str(),
+                binding.host_id.as_str(),
+                binding.chrome_directory,
+                binding.created_at,
+                binding.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn chrome_profile_binding(
+        &self,
+        profile_id: &ProfileId,
+        host_id: &HostId,
+    ) -> StoreResult<Option<ChromeProfileBinding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT profile_id, host_id, chrome_directory, created_at, updated_at
+             FROM chrome_profile_bindings
+             WHERE profile_id = ?1 AND host_id = ?2",
+            params![profile_id.as_str(), host_id.as_str()],
+            read_chrome_profile_binding,
+        )
+        .optional()?
+        .transpose()
+    }
+
+    pub fn set_repo_profile_route(&self, route: &RepoProfileRoute) -> StoreResult<()> {
+        if route
+            .backup_profiles
+            .iter()
+            .any(|profile_id| profile_id == &route.default_profile)
+        {
+            return Err(StoreError::InvalidData(
+                "default profile cannot also be a backup".to_string(),
+            ));
+        }
+        let unique = route
+            .backup_profiles
+            .iter()
+            .collect::<std::collections::HashSet<_>>();
+        if unique.len() != route.backup_profiles.len() {
+            return Err(StoreError::InvalidData(
+                "backup profiles must be unique".to_string(),
+            ));
+        }
+
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            "INSERT INTO repo_profile_routes (
+                repo_id, default_profile, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(repo_id) DO UPDATE SET
+                default_profile = excluded.default_profile,
+                updated_at = excluded.updated_at",
+            params![
+                route.repo_id.as_str(),
+                route.default_profile.as_str(),
+                route.created_at,
+                route.updated_at,
+            ],
+        )?;
+        transaction.execute(
+            "DELETE FROM repo_backup_profiles WHERE repo_id = ?1",
+            [route.repo_id.as_str()],
+        )?;
+        for (position, profile_id) in route.backup_profiles.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO repo_backup_profiles (repo_id, position, profile_id)
+                 VALUES (?1, ?2, ?3)",
+                params![route.repo_id.as_str(), position as i64, profile_id.as_str()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn repo_profile_route(&self, repo_id: &RepoId) -> StoreResult<Option<RepoProfileRoute>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let route = conn
+            .query_row(
+                "SELECT default_profile, created_at, updated_at
+                 FROM repo_profile_routes WHERE repo_id = ?1",
+                [repo_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((default_profile, created_at, updated_at)) = route else {
+            return Ok(None);
+        };
+        let default_profile =
+            ProfileId::parse(&default_profile).map_err(StoreError::InvalidData)?;
+        let mut statement = conn.prepare(
+            "SELECT profile_id FROM repo_backup_profiles
+             WHERE repo_id = ?1 ORDER BY position",
+        )?;
+        let rows = statement.query_map([repo_id.as_str()], |row| row.get::<_, String>(0))?;
+        let mut backup_profiles = Vec::new();
+        for row in rows {
+            backup_profiles.push(ProfileId::parse(&row?).map_err(StoreError::InvalidData)?);
+        }
+        Ok(Some(RepoProfileRoute {
+            repo_id: repo_id.clone(),
+            default_profile,
+            backup_profiles,
+            created_at,
+            updated_at,
+        }))
+    }
+
+    pub fn pin_provider_session_route(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+        profile_id: &ProfileId,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_session_accounts (
+                provider, provider_session_id, account_id, profile_id, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(provider, provider_session_id) DO UPDATE SET
+                account_id = excluded.account_id,
+                profile_id = excluded.profile_id,
+                created_at = excluded.created_at",
+            params![
+                provider.as_str(),
+                provider_session_id,
+                account_id.as_str(),
+                profile_id.as_str(),
+                now_unix(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn select_provider_profile(
+        &self,
+        provider: Provider,
+        candidates: &[ProviderProfileCandidate],
         provider_session_id: Option<&str>,
-    ) -> StoreResult<Option<ProviderAccountSelection>> {
+    ) -> StoreResult<Option<ProviderProfileSelection>> {
         if candidates.is_empty() {
             return Ok(None);
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_unix();
+        let today = time::OffsetDateTime::now_utc().date();
         let newest_selection = transaction.query_row(
             "SELECT COALESCE(MAX(last_selected_at), 0)
              FROM provider_accounts WHERE provider = ?1",
-            [provider],
+            [provider.as_str()],
             |row| row.get::<_, i64>(0),
         )?;
         let selection_time = now.max(newest_selection + 1);
-        let requested_account = match provider_session_id {
+        let requested = match provider_session_id {
             Some(session_id) => transaction
                 .query_row(
-                    "SELECT account_id FROM provider_session_accounts
+                    "SELECT profile_id, account_id FROM provider_session_accounts
                      WHERE provider = ?1 AND provider_session_id = ?2",
-                    params![provider, session_id],
-                    |row| row.get::<_, String>(0),
+                    params![provider.as_str(), session_id],
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()?,
             None => None,
         };
-
-        let mut statement = transaction.prepare(
-            "SELECT provider, account_id, home, login, enabled, preferred,
-                    utilization_percent, cooldown_until, cooldown_reason,
-                    last_selected_at, created_at, updated_at
+        let mut account_statement = transaction.prepare(
+            "SELECT provider, account_id, home, login_email, credential_state,
+                    routing_state, plan, paid_through, utilization_percent,
+                    cooldown_until, cooldown_reason, last_selected_at,
+                    created_at, updated_at
              FROM provider_accounts
-             WHERE provider = ?1
-             ORDER BY COALESCE(utilization_percent, 0), preferred DESC,
-                      COALESCE(last_selected_at, 0), account_id",
+             WHERE provider = ?1 AND account_id = ?2",
         )?;
-        let rows = statement.query_map([provider], read_provider_account)?;
-        let candidate_ids = candidates
-            .iter()
-            .map(ProviderAccountId::as_str)
-            .collect::<std::collections::HashSet<_>>();
-        let mut available = Vec::new();
-        for row in rows {
-            let account = row??;
-            if candidate_ids.contains(account.account_id.as_str())
-                && account.enabled
-                && account.cooldown_until.is_none_or(|until| until <= now)
-            {
-                available.push(account);
+        let mut seen_accounts: std::collections::HashMap<ProviderAccountId, usize> =
+            std::collections::HashMap::new();
+        let mut available: Vec<(ProfileId, ProviderAccount)> = Vec::new();
+        for candidate in candidates {
+            if let Some(index) = seen_accounts.get(&candidate.account_id).copied() {
+                if requested.as_ref().is_some_and(|(profile_id, account_id)| {
+                    profile_id.as_deref() == Some(candidate.profile_id.as_str())
+                        && account_id == candidate.account_id.as_str()
+                }) {
+                    available[index].0 = candidate.profile_id.clone();
+                }
+                continue;
+            }
+            let account = account_statement
+                .query_row(
+                    params![provider.as_str(), candidate.account_id.as_str()],
+                    read_provider_account,
+                )
+                .optional()?
+                .transpose()?;
+            if let Some(account) = account.filter(|account| {
+                account.eligible_for_automatic_routing(today)
+                    && account.cooldown_until.is_none_or(|until| until <= now)
+            }) {
+                seen_accounts.insert(candidate.account_id.clone(), available.len());
+                available.push((candidate.profile_id.clone(), account));
             }
         }
-        drop(statement);
+        drop(account_statement);
 
-        let resumed = requested_account.as_deref().and_then(|requested| {
-            available
-                .iter()
-                .position(|account| account.account_id.as_str() == requested)
+        let resumed = requested.as_ref().and_then(|(profile_id, account_id)| {
+            let profile_id = profile_id.as_deref()?;
+            available.iter().position(|(candidate_profile, account)| {
+                candidate_profile.as_str() == profile_id
+                    && account.account_id.as_str() == account_id
+            })
         });
-        let (mut account, resume_requested_session) = match resumed {
+        let ((profile_id, mut account), resume_requested_session) = match resumed {
             Some(index) => (available.remove(index), true),
             None => match available.into_iter().next() {
-                Some(account) => (account, false),
+                Some(selection) => (selection, false),
                 None => {
                     transaction.commit()?;
                     return Ok(None);
@@ -702,39 +1045,20 @@ impl SqliteStore {
             "UPDATE provider_accounts
              SET last_selected_at = ?3, updated_at = ?3
              WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account.account_id.as_str(), selection_time],
+            params![
+                provider.as_str(),
+                account.account_id.as_str(),
+                selection_time
+            ],
         )?;
         transaction.commit()?;
         account.last_selected_at = Some(selection_time);
         account.updated_at = selection_time;
-        Ok(Some(ProviderAccountSelection {
+        Ok(Some(ProviderProfileSelection {
+            profile_id,
             account,
             resume_requested_session,
         }))
-    }
-
-    pub fn pin_provider_session_account(
-        &self,
-        provider: &str,
-        provider_session_id: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO provider_session_accounts (
-                provider, provider_session_id, account_id, created_at
-             ) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(provider, provider_session_id) DO UPDATE SET
-                account_id = excluded.account_id,
-                created_at = excluded.created_at",
-            params![
-                provider,
-                provider_session_id,
-                account_id.as_str(),
-                now_unix()
-            ],
-        )?;
-        Ok(())
     }
 
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

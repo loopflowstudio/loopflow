@@ -40,8 +40,12 @@ Target: **5/5** clean runs on the maintained host.
 - On a non-macOS host, or when UI automation is missing, the gate fails and
   prints `MISSING CAPABILITY: …` naming the permission and the next action.
 - A **runner-bootstrap** failure (the runner never begins executing, exit 65,
-  Apple-events/TCC denials) is classified as the same capability gap — not a red
-  test — so a permission problem never reads as a broken test.
+  Apple-events/TCC denials, or a hung control session that never connects) is
+  classified as the same capability gap — not a red test — so a permission
+  problem never reads as a broken test. On macOS 26 / Xcode 26 the denial
+  surfaces as `The test runner hung before establishing connection` /
+  `Timed out … initiating control session with daemon`, so those signatures
+  count as the gap too.
 - A genuine test assertion failure stays a raw `FAILED`, with its log preserved.
 
 ## Simulating the bootstrap failure
@@ -55,3 +59,31 @@ LF_UI_HOST_SIMULATE_NO_PERMISSION=1 uv run python scripts/test.py --ui-host
 
 This short-circuits before Xcode and exits non-zero with the capability message
 and next action — no Xcode, no hang.
+
+## Verification log
+
+**2026-07-15 — Jacks-MacBook-Pro (macOS 26.0.1 / Xcode 26.2), 5/5 NOT met — blocked on permission.**
+
+Two independent real-host attempts both hung: the `LoopflowUITests-Runner`
+launched, printed `Running tests…`, then `The test runner hung before
+establishing connection` after `Timed out after 120.0s while initiating control
+session with daemon` — `** TEST FAILED **`, exit 65, ~710s per run.
+`LoopflowUITests` **never executed** (`ui_executed=no`). This is the
+UI-automation permission gap, not a red test: the maintained host has not
+granted the test runner (and the process launching it) Automation +
+Accessibility.
+
+Two real gate defects were found and fixed while attempting the proof:
+- `_ui_host_commands` wrote to a **fixed** `-resultBundlePath`; `xcodebuild test`
+  exits **64** rather than overwrite an existing bundle, so the 2nd run onward
+  died in ~1s. Now pid-scoped (`_run_artifact_root()`), matching this doc.
+- The macOS 26 / Xcode 26 hung-control-session signature was **not** in the
+  classifier's marker set, so the permission gap misreported as a raw red.
+  Now classified as `MISSING CAPABILITY` (verified against the real captured log).
+
+**One operator action to unblock 5/5:** on this host, System Settings → Privacy
+& Security → **Automation** and **Accessibility**, grant the terminal/agent that
+runs the gate (and the `LoopflowUITests-Runner`) permission to control the app,
+then run `uv run python scripts/test.py --ui-host` 5×. It cannot be granted
+headlessly — the TCC approval is an interactive dialog. Until then the required
+gate honestly reports `MISSING CAPABILITY`; the 5/5 green run stays open.

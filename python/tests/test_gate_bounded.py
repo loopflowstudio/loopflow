@@ -99,6 +99,34 @@ def test_ui_host_classify_keeps_a_genuine_assertion_failure_raw():
     assert gate._ui_host_classify(log) is None
 
 
+def test_ui_host_classify_recognises_a_hung_control_session():
+    # macOS 26 / Xcode 26 denial signature: the runner launches but hangs before
+    # connecting, so LoopflowUITests never executes. Observed on the real host
+    # (exit 65, ~710s hang). Must classify as a capability gap, not a red test.
+    log = (
+        "Timed out after 120.0s while initiating control session with daemon.\n"
+        "Testing failed:\n"
+        "\tLoopflowUITests-Runner (37114) encountered an error "
+        "(The test runner hung before establishing connection.)\n"
+        "** TEST FAILED **\n"
+    )
+    refined = gate._ui_host_classify(log)
+    assert refined is not None and "MISSING CAPABILITY" in refined
+
+
+def test_ui_host_result_bundle_is_per_run_not_a_fixed_path():
+    # xcodebuild test exits 64 rather than overwrite an existing -resultBundlePath,
+    # so a fixed path made the second --ui-host run onward die before launching a
+    # test. The bundle must live under this run's pid-scoped artifact dir.
+    cmds = gate._ui_host_commands([])
+    test_cmd = next(c for c in cmds if c.label == "ui-host")
+    idx = test_cmd.argv.index("-resultBundlePath")
+    bundle = Path(test_cmd.argv[idx + 1])
+    assert bundle.parent.parent == gate._run_artifact_root()
+    assert bundle != ROOT / gate.XCODE_DERIVED_DATA / "ui-host.xcresult"
+    assert str(gate._run_artifact_root()).endswith(f"run-{gate.os.getpid()}")
+
+
 def test_loopflow_summary_says_it_does_not_run_hosted_ui():
     loopflow = next(s for s in gate.SUITES if s.name == "loopflow")
     assert loopflow.proves is not None

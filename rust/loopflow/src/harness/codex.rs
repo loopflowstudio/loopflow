@@ -452,6 +452,11 @@ impl Harness for CodexHarness {
         self.raw_provider = raw_provider;
     }
 
+    fn process_group_id(&self) -> Option<u32> {
+        let group = self.child_group.load(Ordering::SeqCst);
+        (group > 1).then_some(group)
+    }
+
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());

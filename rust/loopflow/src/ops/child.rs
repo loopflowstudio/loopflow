@@ -7,14 +7,73 @@
 use std::time::Duration;
 
 use crate::child_session::{
-    AbandonIntent, ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildRef,
+    AbandonIntent, ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand, ChildCommandEffect,
+    ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective,
+    ChildProcessGeneration, ChildRef,
 };
 use crate::project_session::{ProjectEventKind, ProjectSession, ProjectSessionStatus};
 use crate::store::SharedStore;
 use crate::task::{TaskEventKind, TaskSession, TaskSessionStatus};
 
 use super::{OpsError, OpsResult};
+
+const CHILD_STARTUP_GRACE_SECONDS: i64 = 10;
+pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
+
+pub(crate) fn child_body_reservation_is_fresh(process: &ChildProcessGeneration) -> bool {
+    if process.state != crate::child_session::ChildLeaseState::Reserved {
+        return false;
+    }
+    process
+        .started_at
+        .checked_add(time::Duration::seconds(CHILD_STARTUP_GRACE_SECONDS))
+        .is_some_and(|deadline| time::OffsetDateTime::now_utc() < deadline)
+}
+
+pub(crate) fn lost_child_body_outcome(
+    process: &ChildProcessGeneration,
+    reason: &str,
+) -> ChildBodyOutcome {
+    if process.state == crate::child_session::ChildLeaseState::Legacy {
+        ChildBodyOutcome::LegacyStopped {
+            reason: reason.to_string(),
+        }
+    } else {
+        ChildBodyOutcome::Lost {
+            reason: reason.to_string(),
+        }
+    }
+}
+
+pub(crate) async fn revoke_and_reap_child_body(
+    store: &SharedStore,
+    target: &ChildRef,
+    outcome: ChildBodyOutcome,
+) -> OpsResult<ChildProcessGeneration> {
+    let revoked = match target {
+        ChildRef::Project(session_id) => store
+            .revoke_project_process(session_id, &outcome)
+            .await
+            .map_err(child_error)?,
+        ChildRef::Task(session_id) => store
+            .revoke_task_process(session_id, &outcome)
+            .await
+            .map_err(child_error)?,
+    };
+    crate::engine::process::reap_child_process(&revoked, Duration::from_secs(2))
+        .await
+        .map_err(child_error)?;
+    match target {
+        ChildRef::Project(session_id) => store
+            .finish_revoked_project_process(session_id, revoked.generation)
+            .await
+            .map_err(child_error),
+        ChildRef::Task(session_id) => store
+            .finish_revoked_task_process(session_id, revoked.generation)
+            .await
+            .map_err(child_error),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ChildReceiptUntil {
@@ -718,12 +777,15 @@ fn child_error(error: impl std::fmt::Display) -> OpsError {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::CommandExt;
     use std::sync::Arc;
 
     use time::OffsetDateTime;
 
     use crate::child_session::{
-        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcessGeneration,
+        ChildBodyOutcome, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildLeaseState,
+        ChildProcessGeneration, ChildRef,
     };
     use crate::id::WaveId;
     use crate::project_session::{
@@ -737,7 +799,107 @@ mod tests {
     use crate::task::{GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
     use crate::wave::Wave;
 
-    use super::{handoff_request, queue_command, resume_session, ChildSession};
+    use super::{
+        child_body_reservation_is_fresh, handoff_request, queue_command, resume_session,
+        revoke_and_reap_child_body, ChildSession,
+    };
+
+    #[test]
+    fn a_fresh_reservation_is_adopted_while_a_stale_one_can_be_reaped() {
+        let mut process = ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "starting".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            started_at: OffsetDateTime::now_utc(),
+            state: crate::child_session::ChildLeaseState::Reserved,
+            outcome: None,
+        };
+        assert!(child_body_reservation_is_fresh(&process));
+        process.started_at -= time::Duration::seconds(11);
+        assert!(!child_body_reservation_is_fresh(&process));
+    }
+
+    #[tokio::test]
+    async fn recovery_reaps_the_old_process_group_before_reserving_its_successor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("recovery-body".to_string());
+        let lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .expect("reserve generation one");
+
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 60 & echo $!; wait")
+            .process_group(0)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn isolated body process group");
+        let group = child.id();
+        let stdout = child.stdout.take().expect("capture grandchild pid");
+        let mut line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut line)
+            .expect("read grandchild pid");
+        let grandchild: u32 = line.trim().parse().expect("grandchild pid");
+        let waiter = std::thread::spawn(move || child.wait().expect("reap shell"));
+
+        let process = task.latest_process.as_mut().expect("reserved process");
+        process.pid = Some(group);
+        process.process_group_id = Some(group);
+        process.state = ChildLeaseState::Active;
+        task.set_status(TaskSessionStatus::Running, "fake provider is alive");
+        store.activate_task_process(&task, &lease).await.unwrap();
+
+        let finished = revoke_and_reap_child_body(
+            &store,
+            &ChildRef::Task(task.id.clone()),
+            ChildBodyOutcome::Superseded {
+                reason: "deterministic recovery".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        waiter.join().unwrap();
+        assert_eq!(finished.state, ChildLeaseState::Finished);
+        // SAFETY: signal 0 is an existence probe and uses no pointers.
+        assert_ne!(unsafe { libc::kill(group as i32, 0) }, 0);
+        // SAFETY: signal 0 is an existence probe and uses no pointers.
+        assert_ne!(unsafe { libc::kill(grandchild as i32, 0) }, 0);
+
+        let mut stopped = store.get_task_session(&task.id).await.unwrap().unwrap();
+        stopped.set_status(TaskSessionStatus::Waiting, "old body fully reaped");
+        store.update_task_session(&stopped).await.unwrap();
+        let mut successor = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!(
+            successor.begin_generation("recovery-successor".to_string()),
+            2
+        );
+        assert!(store
+            .reserve_task_process(&successor, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .is_some());
+    }
 
     fn make_wave(repo: &str) -> Wave {
         let id = WaveId::new();
@@ -773,8 +935,14 @@ mod tests {
             latest_process: active.then_some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
+                process_group_id: None,
                 tmux_name: "lf-project-test".to_string(),
+                agent: "codex".to_string(),
+                provider: "codex".to_string(),
+                provider_session_id: active.then(|| "thread-project".to_string()),
                 started_at: now,
+                state: crate::child_session::ChildLeaseState::Active,
+                outcome: None,
             }),
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
@@ -819,8 +987,14 @@ mod tests {
             latest_process: active.then_some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
+                process_group_id: None,
                 tmux_name: "lf-task-test".to_string(),
+                agent: "claude".to_string(),
+                provider: "claude".to_string(),
+                provider_session_id: active.then(|| "thread-task".to_string()),
                 started_at: now,
+                state: crate::child_session::ChildLeaseState::Active,
+                outcome: None,
             }),
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
@@ -1082,8 +1256,16 @@ mod tests {
         project.latest_process = Some(ChildProcessGeneration {
             generation: 4,
             pid: None,
+            process_group_id: None,
             tmux_name: "lf-project-old".to_string(),
+            agent: "claude:sonnet".to_string(),
+            provider: "claude".to_string(),
+            provider_session_id: Some("claude-thread".to_string()),
             started_at: project.updated_at,
+            state: crate::child_session::ChildLeaseState::Finished,
+            outcome: Some(crate::child_session::ChildBodyOutcome::LegacyStopped {
+                reason: "test body stopped".to_string(),
+            }),
         });
         project.agent = "claude:sonnet".to_string();
         project.provider = "claude".to_string();

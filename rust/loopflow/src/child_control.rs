@@ -10,7 +10,7 @@ use anyhow::Result;
 
 use crate::child_session::{
     ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
-    ChildDecisionId, ChildRef,
+    ChildDecisionId, ChildRef, ChildWriteLease,
 };
 use crate::harness::Harness;
 use crate::project_session::{ProjectEventKind, ProjectSessionId};
@@ -19,16 +19,29 @@ use crate::task::{TaskEventKind, TaskSessionId};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChildTarget<'a> {
-    Project(&'a ProjectSessionId),
-    Task(&'a TaskSessionId),
+    Project(&'a ProjectSessionId, &'a ChildWriteLease),
+    Task(&'a TaskSessionId, &'a ChildWriteLease),
 }
 
-impl ChildTarget<'_> {
+impl<'a> ChildTarget<'a> {
     fn as_ref(self) -> ChildRef {
         match self {
-            Self::Project(id) => ChildRef::Project(id.clone()),
-            Self::Task(id) => ChildRef::Task(id.clone()),
+            Self::Project(id, _) => ChildRef::Project(id.clone()),
+            Self::Task(id, _) => ChildRef::Task(id.clone()),
         }
+    }
+
+    fn lease(self) -> &'a ChildWriteLease {
+        match self {
+            Self::Project(_, lease) | Self::Task(_, lease) => lease,
+        }
+    }
+
+    async fn validate_write_lease(self, store: &SharedStore) -> Result<()> {
+        store
+            .validate_child_write_lease(&self.as_ref(), self.lease())
+            .await?;
+        Ok(())
     }
 
     async fn command_is_deliverable(
@@ -41,10 +54,12 @@ impl ChildTarget<'_> {
             .await?
             .is_some_and(|command| {
                 let targets_match = match (self, &command.target) {
-                    (Self::Project(target_id), ChildRef::Project(command_id)) => {
+                    (Self::Project(target_id, _), ChildRef::Project(command_id)) => {
                         target_id == command_id
                     }
-                    (Self::Task(target_id), ChildRef::Task(command_id)) => target_id == command_id,
+                    (Self::Task(target_id, _), ChildRef::Task(command_id)) => {
+                        target_id == command_id
+                    }
                     _ => false,
                 };
                 targets_match
@@ -68,8 +83,14 @@ impl ChildTarget<'_> {
             .ok_or_else(|| anyhow::anyhow!("child command {command_id} disappeared"))?;
         match command.state {
             ChildCommandState::Claimed => {
+                let target = self.as_ref();
                 store
-                    .mark_child_command_delivering(&command_id, effect)
+                    .mark_child_command_delivering_for_lease(
+                        &target,
+                        self.lease(),
+                        &command_id,
+                        effect,
+                    )
                     .await?;
                 self.record_command_changed(
                     store,
@@ -105,7 +126,10 @@ impl ChildTarget<'_> {
         command_id: ChildCommandId,
         effect: Option<ChildCommandEffect>,
     ) -> Result<()> {
-        store.accept_child_command(&command_id, effect).await?;
+        let target = self.as_ref();
+        store
+            .accept_child_command_for_lease(&target, self.lease(), &command_id, effect)
+            .await?;
         self.record_command_changed(store, command_id, ChildCommandState::Accepted, effect, None)
             .await
     }
@@ -118,8 +142,9 @@ impl ChildTarget<'_> {
         error: &str,
     ) -> Result<()> {
         let error = crate::security::sanitize_operator_message(error);
+        let target = self.as_ref();
         store
-            .fail_child_command(&command_id, effect, error.clone())
+            .fail_child_command_for_lease(&target, self.lease(), &command_id, effect, error.clone())
             .await?;
         self.record_command_changed(
             store,
@@ -140,10 +165,11 @@ impl ChildTarget<'_> {
         error: Option<String>,
     ) -> Result<()> {
         match self {
-            Self::Project(session_id) => {
+            Self::Project(session_id, lease) => {
                 store
-                    .append_project_event(
+                    .append_project_event_for_lease(
                         session_id,
+                        lease,
                         &ProjectEventKind::CommandChanged {
                             command_id,
                             state,
@@ -153,10 +179,11 @@ impl ChildTarget<'_> {
                     )
                     .await?;
             }
-            Self::Task(session_id) => {
+            Self::Task(session_id, lease) => {
                 store
-                    .append_task_event(
+                    .append_task_event_for_lease(
                         session_id,
+                        lease,
                         &TaskEventKind::CommandChanged {
                             command_id,
                             state,
@@ -176,10 +203,11 @@ impl ChildTarget<'_> {
         decision: DecisionResolution,
     ) -> Result<()> {
         match self {
-            Self::Project(session_id) => {
+            Self::Project(session_id, lease) => {
                 store
-                    .append_project_event(
+                    .append_project_event_for_lease(
                         session_id,
+                        lease,
                         &ProjectEventKind::DecisionResolved {
                             decision_id: decision.decision_id,
                             choice: decision.choice,
@@ -188,10 +216,11 @@ impl ChildTarget<'_> {
                     )
                     .await?;
             }
-            Self::Task(session_id) => {
+            Self::Task(session_id, lease) => {
                 store
-                    .append_task_event(
+                    .append_task_event_for_lease(
                         session_id,
+                        lease,
                         &TaskEventKind::DecisionResolved {
                             decision_id: decision.decision_id,
                             choice: decision.choice,
@@ -399,6 +428,7 @@ pub(crate) async fn apply_input(
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
+    target.validate_write_lease(store).await?;
     if let Some(command_id) = input.command_id.as_ref() {
         target
             .begin_delivery(store, command_id.clone(), input.effect)
@@ -439,6 +469,7 @@ async fn interrupt_harness(
             .begin_delivery(store, command_id.clone(), effect)
             .await?;
     }
+    target.validate_write_lease(store).await?;
     if let Err(error) = harness.interrupt().await {
         target
             .fail_command(store, command_id, effect, &error.to_string())
@@ -451,10 +482,9 @@ async fn interrupt_harness(
 pub(crate) async fn reconcile_stale_deliveries(
     store: &SharedStore,
     target: ChildTarget<'_>,
-    generation: u32,
 ) -> Result<()> {
     let commands = store
-        .mark_stale_child_deliveries_uncertain(&target.as_ref(), generation)
+        .mark_stale_child_deliveries_uncertain_for_lease(&target.as_ref(), target.lease())
         .await?;
     for command in commands {
         target

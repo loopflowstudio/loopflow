@@ -59,6 +59,15 @@ review feedback, and CI repair resume the same Task Session. Plain resume keeps
 compatible provider history; `lf task resume <id> --model <agent>` leases the
 next body generation to another provider without replacing the Session.
 
+```bash
+lf task status W2-135 --json \
+  | jq '.latest_process | {generation, agent, provider, state, outcome, tmux_name, pid, process_group_id}'
+```
+
+The generation receipt exposes the current provider, lease state, terminal
+outcome, tmux/PID, and owned process group. The write-lease token stays private
+to the runner and never enters status or events.
+
 Waves are independent by default. Humans steer a running Wave with `lf chat`;
 agents report on its bus with `lf radio pub --channel <name> "…"`, even while the
 wave sleeps.

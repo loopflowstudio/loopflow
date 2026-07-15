@@ -99,8 +99,9 @@ own — it decodes `MemoryFact`/`Receipt` via the shared Codable types and rende
   last-good list retained, consistent with `RoadmapView`'s refresh-failure idiom.
 - Record with no live Home → the write's `no live listener` error is caught and
   shown as the Start-on-Home hint; the field disables rather than throwing.
-- Malformed `--receipt` token → rejected at the CLI boundary (parse error); the
-  Mac composes receipts from typed fields so it can only emit valid tokens.
+- Malformed `--receipt` token → rejected at the CLI boundary (parse error). The
+  Mac's evidence field takes space-separated `kind:reference` tokens; a bad token
+  surfaces the CLI's parse error inline rather than fabricating a receipt.
 - A receipt whose reference no longer resolves (deleted branch, migrated id) →
   the chip still renders the token (receipts are stable pointers, not live
   fetches); only `pr:` chips attempt a link.

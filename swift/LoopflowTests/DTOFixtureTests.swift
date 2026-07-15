@@ -80,6 +80,30 @@ struct DTOFixtureTests {
         #expect(decoded == fact)
     }
 
+    @Test("a pr receipt resolves to its pull-request URL; other kinds do not")
+    func receiptBrowserURLResolvesOnlyPullRequests() throws {
+        let data = try loadFixtureData("receipt.json")
+        let fact = try JSONDecoder().decode(MemoryFact.self, from: data)
+
+        // The pinned `@sha` PR reference targets the pull request, sha dropped.
+        let pr = try #require(fact.receipts.last)
+        #expect(pr.kind == .pr)
+        #expect(pr.browserURL == URL(string: "https://github.com/loopflow/loopflow/pull/912"))
+
+        // Kinds with no canonical web view render the token only, no link.
+        for receipt in fact.receipts where receipt.kind != .pr {
+            #expect(receipt.browserURL == nil, "\(receipt.kind) should have no browser URL")
+        }
+
+        // An unpinned PR reference resolves the same way.
+        let unpinned = Receipt(kind: .pr, reference: "loopflow/loopflow#42", wave: "product")
+        #expect(unpinned.browserURL == URL(string: "https://github.com/loopflow/loopflow/pull/42"))
+
+        // A malformed PR reference (no number) does not fabricate a link.
+        let malformed = Receipt(kind: .pr, reference: "loopflow/loopflow", wave: "product")
+        #expect(malformed.browserURL == nil)
+    }
+
     @Test("child control activity preserves typed command evidence")
     func childControlActivityPreservesTypedCommandEvidence() throws {
         let data = try loadFixtureData("child_control_activity.json")

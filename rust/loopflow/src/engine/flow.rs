@@ -98,8 +98,16 @@ pub enum FlowAction {
     RunSkill { skill: ConcreteSkill },
     RunOps { ops: ConcreteOp },
     WaitInteractive { skill: ConcreteSkill },
+    DeferInteractive { skill: ConcreteSkill },
     Xor { branch: ConcreteXor },
     Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionPolicy {
+    Require,
+    Defer,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -161,6 +169,14 @@ pub struct Direction {
 }
 
 pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
+    next_action_with_policy(items, step_index, InteractionPolicy::Require)
+}
+
+pub fn next_action_with_policy(
+    items: &[ConcreteStep],
+    step_index: usize,
+    policy: InteractionPolicy,
+) -> FlowAction {
     let item = match items.get(step_index) {
         Some(item) => item,
         None => return FlowAction::Complete,
@@ -168,7 +184,10 @@ pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
     match item.clone() {
         ConcreteStep::Skill(skill) => {
             if skill.skill.interactive.unwrap_or(false) {
-                FlowAction::WaitInteractive { skill }
+                match policy {
+                    InteractionPolicy::Require => FlowAction::WaitInteractive { skill },
+                    InteractionPolicy::Defer => FlowAction::DeferInteractive { skill },
+                }
             } else {
                 FlowAction::RunSkill { skill }
             }
@@ -1497,6 +1516,48 @@ Be careful.
         let items = expand_flow(&flow, repo.path()).unwrap();
         let action = next_action(&items, 0);
         assert!(matches!(action, FlowAction::WaitInteractive { .. }));
+    }
+
+    #[test]
+    fn interaction_policy_defers_the_same_interactive_step() {
+        let flow = Flow {
+            name: "reviewed-code".to_string(),
+            items: vec![Step::Skill(Skill {
+                name: "demo".to_string(),
+                agent: None,
+                default_agent: None,
+                directions: Vec::new(),
+                action_style: None,
+                interactive: Some(true),
+                content: None,
+                fast_path: None,
+            })],
+        };
+
+        let repo = TempDir::new().unwrap();
+        let items = expand_flow(&flow, repo.path()).unwrap();
+
+        assert!(matches!(
+            next_action_with_policy(&items, 0, InteractionPolicy::Require),
+            FlowAction::WaitInteractive { .. }
+        ));
+        assert!(matches!(
+            next_action_with_policy(&items, 0, InteractionPolicy::Defer),
+            FlowAction::DeferInteractive { .. }
+        ));
+    }
+
+    #[test]
+    fn interaction_policy_does_not_skip_headless_steps() {
+        let items = vec![ConcreteStep::Skill(ConcreteSkill {
+            skill: Skill::named("implement"),
+            flow_parents: vec!["reviewed-code".to_string()],
+        })];
+
+        assert!(matches!(
+            next_action_with_policy(&items, 0, InteractionPolicy::Defer),
+            FlowAction::RunSkill { .. }
+        ));
     }
 
     #[test]

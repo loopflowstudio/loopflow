@@ -177,11 +177,15 @@ commit dropping.
   local `<default>`. Six unit tests cover all five Proof scenarios (parity,
   contamination-refuse, stale-heal, squash-heal, no-remote, rotated
   continuation).
-- **PR2 (next serial) — Gap B, placement guards.** In `task_run` placement +
-  the rotation path: explicit no-remote fallback (skip fetch, record local
-  `<default>`), and the ahead-of-upstream control-plane stop before placement.
-  This stops contamination at the source; PR1 is the durable publication
-  backstop.
+- **Gap B shipped (same PR).** `resolve_upstream_base` (`ops/task.rs`) anchors
+  placement + rotation on fetched `origin/<default>`, falling back explicitly to
+  local `refs/heads/<default>` when the repo has no remote.
+  `refuse_if_canonical_ahead` stops `task_run` placement when canonical
+  `<default>` carries commits its upstream lacks (the #877/#882 root cause),
+  naming the unpushed commits. Four more unit tests cover origin-anchoring,
+  no-remote fallback, the ahead-of-origin refusal, and the in-sync allow.
+  Placement now prevents contamination at the source; the publication proof
+  (Gap A) is the durable backstop.
 
 ## Exclusions
 

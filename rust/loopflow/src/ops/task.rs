@@ -559,7 +559,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             })
         })
         .transpose()?;
-    let base_ref = match &stack_parent {
+    let (base_ref, base_commit) = match &stack_parent {
         Some(parent) => {
             fetch(&main_repo, "origin", &parent.branch).map_err(|error| {
                 task_error(format!(
@@ -567,17 +567,24 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     parent.branch
                 ))
             })?;
-            format!("origin/{}", parent.branch)
+            let base_ref = format!("origin/{}", parent.branch);
+            let base_commit = rev_parse(&main_repo, &base_ref).map_err(|error| {
+                task_error(format!("failed to resolve task base {base_ref}: {error}"))
+            })?;
+            (base_ref, base_commit)
         }
         None => {
-            fetch(&main_repo, "origin", &default_branch)
-                .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
-            format!("origin/{default_branch}")
+            let (base_ref, base_commit) =
+                resolve_upstream_base(&main_repo, &default_branch)?;
+            if base_ref.starts_with("origin/") {
+                // Placement anchors on fetched origin; stop before contaminating
+                // a new worktree with an ahead-of-upstream canonical main.
+                refuse_if_canonical_ahead(&main_repo, &default_branch)?;
+            }
+            (base_ref, base_commit)
         }
     };
     plan.base_ref = base_ref.clone();
-    let base_commit = rev_parse(&main_repo, &base_ref)
-        .map_err(|error| task_error(format!("failed to resolve task base: {error}")))?;
     let project_session = crate::ops::project::ensure_project_session_for_task(
         &main_repo,
         crate::ops::task_pm::ResolvedProject {
@@ -1094,6 +1101,46 @@ pub(crate) fn request_task_pr_publication(
 /// Whether the repository has at least one configured git remote.
 fn has_remote(repo: &Path) -> OpsResult<bool> {
     Ok(!git_output(repo, &["remote"])?.trim().is_empty())
+}
+
+/// Resolve `(base_ref, base_commit)` for a new Task PR. With a remote, fetch and
+/// anchor on `origin/<default>`; without one, fall back explicitly to local
+/// `<default>`. The `base_ref` prefix (`origin/` vs `refs/heads/`) tells callers
+/// which case applied.
+fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String, String)> {
+    let base_ref = if has_remote(repo)? {
+        fetch(repo, "origin", default_branch)
+            .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+        format!("origin/{default_branch}")
+    } else {
+        format!("refs/heads/{default_branch}")
+    };
+    let base_commit = rev_parse(repo, &base_ref)
+        .map_err(|error| task_error(format!("failed to resolve task base {base_ref}: {error}")))?;
+    Ok((base_ref, base_commit))
+}
+
+/// Refuse placement when the canonical `<default>` checkout carries commits its
+/// upstream lacks. A new Task worktree cut from an ahead-of-origin main inherits
+/// the unpushed commit — the control-plane violation behind W2-132/#877 and
+/// W2-130/#882. Requires a prior fetch so `origin/<default>` is current.
+fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()> {
+    if rev_parse(repo, &format!("refs/heads/{default_branch}")).is_err() {
+        // No local default branch checked out (fresh clone / detached) — nothing
+        // can be ahead.
+        return Ok(());
+    }
+    let range = format!("origin/{default_branch}..{default_branch}");
+    let ahead = git_output(repo, &["log", "--oneline", "--no-decorate", &range])?;
+    let ahead = ahead.trim();
+    if !ahead.is_empty() {
+        return Err(task_error(format!(
+            "canonical {default_branch} is ahead of origin/{default_branch}; new Task worktrees \
+             would inherit these unpushed commit(s):\n{ahead}\nThis is a control-plane violation. \
+             Push or reset {default_branch} to origin/{default_branch} before placing Task worktrees."
+        )));
+    }
+    Ok(())
 }
 
 /// Prove the active Task PR's range contains only Task-authored work before any
@@ -2042,11 +2089,7 @@ async fn ensure_working_pr_with_authority(
     let branch = format!("{author}/{}-{slug}", session.workspace_slug);
     let default_branch = get_default_branch(&session.worktree)
         .map_err(|error| task_error(format!("failed to resolve default branch: {error}")))?;
-    fetch(&session.worktree, "origin", &default_branch)
-        .map_err(|error| task_error(format!("failed to fetch next PR base: {error}")))?;
-    let base_ref = format!("origin/{default_branch}");
-    let base_commit = rev_parse(&session.worktree, &base_ref)
-        .map_err(|error| task_error(format!("failed to resolve next PR base: {error}")))?;
+    let (base_ref, base_commit) = resolve_upstream_base(&session.worktree, &default_branch)?;
     if !rotate.carry_dirty
         && !is_clean(&session.worktree)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
@@ -3071,8 +3114,9 @@ mod tests {
     use super::{
         _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
         diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
-        parse_pr_slug, parse_workspace_slug, project_context, resolve_task_flow,
-        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
+        parse_pr_slug, parse_workspace_slug, project_context, refuse_if_canonical_ahead,
+        resolve_task_flow, resolve_upstream_base, verify_task_pr_range_with_authority,
+        RotateOptions, TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
     use crate::id::WaveId;
@@ -3758,5 +3802,68 @@ mod tests {
         verify_task_pr_range_with_authority(&store, &session, None, repo.path())
             .await
             .expect("rotated continuation PR verifies");
+    }
+
+    #[test]
+    fn placement_base_anchors_on_origin_when_a_remote_exists() {
+        let repo = TestRepo::new();
+        let origin = repo.head_sha();
+        // A local-only commit ahead of origin must NOT move the recorded base.
+        repo.create_file("local.txt", "unpushed\n");
+        repo.stage_all();
+        repo.commit("unpushed local commit");
+
+        let (base_ref, base_commit) =
+            resolve_upstream_base(repo.path(), "main").expect("resolve base");
+        assert_eq!(base_ref, "origin/main");
+        assert_eq!(
+            base_commit, origin,
+            "the base must anchor on fetched origin, not the ahead-of-origin local tip"
+        );
+    }
+
+    #[test]
+    fn placement_base_falls_back_to_local_main_without_a_remote() {
+        let repo = TestRepo::new();
+        git(repo.path(), &["remote", "remove", "origin"]);
+        repo.create_file("local.txt", "local only\n");
+        repo.stage_all();
+        repo.commit("local commit");
+        let local_tip = repo.head_sha();
+
+        let (base_ref, base_commit) =
+            resolve_upstream_base(repo.path(), "main").expect("resolve base");
+        assert_eq!(base_ref, "refs/heads/main");
+        assert_eq!(base_commit, local_tip);
+    }
+
+    #[test]
+    fn placement_refuses_when_canonical_main_is_ahead_of_origin() {
+        let repo = TestRepo::new();
+        // Simulate the #877/#882 root cause: canonical main carries an unpushed
+        // commit its upstream lacks.
+        repo.create_file("ahead.txt", "unpushed canonical work\n");
+        repo.stage_all();
+        repo.commit("unpushed canonical commit");
+
+        let err = refuse_if_canonical_ahead(repo.path(), "main")
+            .expect_err("ahead-of-origin canonical main must refuse placement");
+        let message = err.to_string();
+        assert!(
+            message.contains("ahead of origin/main"),
+            "expected control-plane refusal, got: {message}"
+        );
+        assert!(
+            message.contains("unpushed canonical commit"),
+            "refusal must name the unpushed commit, got: {message}"
+        );
+    }
+
+    #[test]
+    fn placement_allows_a_canonical_main_in_sync_with_origin() {
+        let repo = TestRepo::new();
+        refuse_if_canonical_ahead(repo.path(), "main").expect("in-sync canonical main is allowed");
+        // Origin ahead of local is fine too — only local-ahead is a violation.
+        refuse_if_canonical_ahead(repo.path(), "main").expect("still allowed");
     }
 }

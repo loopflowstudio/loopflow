@@ -96,6 +96,28 @@ them.
 R5 is the cheapest and most mechanical — land its fix early to unblock clean
 dogfooding of R1–R4 (today you cannot even inspect without perturbing main).
 
+## Lifecycle evidence — merged-not-rotated boundary (W2-166, shared with W2-171)
+
+W2-166 observed PR #907 merged, yet its worker stayed on the **sequence-1
+branch** with uncommitted PR2 work and **no sequence-2 `TaskPr` row**; it was
+steered to stop before push. The rule: a merged publication must either
+**complete intent** or **atomically rotate to a recorded next serial PR** before
+the body resumes writes. Otherwise a body writes work that belongs to a sequence
+the store has not recorded — durable intent and the live body have diverged.
+
+Two owners, cleanly split:
+- **W2-171 (mechanism):** make merge→settle/complete-or-rotate atomic —
+  allocate/record the sequence-2 `TaskPr` (via `ensure_working_pr_with_authority`,
+  `ops/task.rs`) in the same transaction that settles the merged one, so a body
+  never resumes on an unrecorded sequence. Plus the `.lf/tmp/scratch-stash` path.
+- **W2-169 (model):** the durable observation model must *represent* this state —
+  "merged publication + body still on sequence-1 + no sequence-2 row" is a
+  distinct, un-reconciled boundary, not a healthy running Task. Periodic recovery
+  (Slice 3) must surface it as `NeedsInput` and **gate body writes** rather than
+  let a stale-sequence body silently continue. This is the durable-intent/body
+  lease boundary (W2-135): the body's write lease is not valid for a sequence the
+  store has not rotated to.
+
 ## Slice plan (serial PRs, one worktree)
 
 Boundaries may shift when the code proves a simpler sequence.
@@ -151,6 +173,13 @@ Give reconciliation a periodic owner and real recovery.
   becomes `NeedsInput` with evidence, never a silent relaunch. Honor
   `supervisor_restart_bar` (`project_session/mod.rs:148`) — the W2-135 lesson
   (submitted/interrupted/abandoned work is never revived).
+- **Merged-not-rotated is `NeedsInput`, not running** (W2-166): a Task whose
+  publication is merged while its body still holds sequence-1 with no recorded
+  sequence-2 row is an un-reconciled boundary — the model must not count it
+  healthy or let the body resume writes on a sequence the store has not rotated
+  to. W2-169 observes and gates; **W2-171 owns the atomic merge→rotate mechanism**
+  (record sequence-2 before writes resume). Consume that seam; do not re-implement
+  the rotation here.
 - Idempotent + restart-safe: fencing via `ChildProcessGeneration` /
   `begin_generation` (`project_session/mod.rs:187`) guarantees exactly-once
   adoption under concurrent ticks; a second tick is a no-op.

@@ -1284,6 +1284,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Task { cmd }) => {
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }
+            Some(Commands::Handoff { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::handoff::run(cmd))
+            }
             Some(Commands::TaskRunner {
                 session_id,
                 generation,

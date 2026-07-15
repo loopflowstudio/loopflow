@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::id::WaveId;
 use crate::wave::Wave;
 mod child_sessions;
+mod interactive_handoffs;
 pub mod migrations;
 pub mod rows;
 pub mod sqlite;

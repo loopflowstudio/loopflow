@@ -10,9 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = (
-    "jack@loopflow.studio",
-    "loopflow-eng@loopflow.studio",
-    "jackstah@gmail.com",
+    "primary@example.com",
+    "engineering@example.com",
+    "personal@example.com",
 )
 
 
@@ -43,14 +43,14 @@ def _run(binary: Path, env: dict[str, str], *args: str) -> str:
 def _seed_accounts(database: Path, demo_home: Path) -> None:
     now = int(time.time())
     accounts = (
-        ("claude", "jack-claude", "jack@loopflow.studio", "max"),
-        ("codex", "jack-codex", "jack@loopflow.studio", "max"),
-        ("claude", "personal-claude", "jackstah@gmail.com", "personal"),
-        ("codex", "personal-codex", "jackstah@gmail.com", "personal"),
+        ("claude", "primary-claude", "primary@example.com", "max"),
+        ("codex", "primary-codex", "primary@example.com", "max"),
+        ("claude", "personal-claude", "personal@example.com", "personal"),
+        ("codex", "personal-codex", "personal@example.com", "personal"),
         (
             "codex",
-            "loopflow-eng-codex",
-            "loopflow-eng@loopflow.studio",
+            "engineering-codex",
+            "engineering@example.com",
             "max",
         ),
     )
@@ -100,16 +100,16 @@ def main() -> int:
         _seed_accounts(database, demo_home)
 
         mappings = (
-            ("jack@loopflow.studio", "claude", "jack-claude"),
-            ("jack@loopflow.studio", "codex", "jack-codex"),
-            ("loopflow-eng@loopflow.studio", "claude", "personal-claude"),
+            ("primary@example.com", "claude", "primary-claude"),
+            ("primary@example.com", "codex", "primary-codex"),
+            ("engineering@example.com", "claude", "personal-claude"),
             (
-                "loopflow-eng@loopflow.studio",
+                "engineering@example.com",
                 "codex",
-                "loopflow-eng-codex",
+                "engineering-codex",
             ),
-            ("jackstah@gmail.com", "claude", "personal-claude"),
-            ("jackstah@gmail.com", "codex", "personal-codex"),
+            ("personal@example.com", "claude", "personal-claude"),
+            ("personal@example.com", "codex", "personal-codex"),
         )
         for profile, provider, account in mappings:
             _run(
@@ -130,11 +130,11 @@ def main() -> int:
             "route",
             "set",
             "--default",
-            "jack@loopflow.studio",
+            "primary@example.com",
             "--backup",
-            "loopflow-eng@loopflow.studio",
+            "engineering@example.com",
             "--backup",
-            "jackstah@gmail.com",
+            "personal@example.com",
         )
 
         _print_step("Profiles", _run(binary, env, "profile", "list"))
@@ -147,7 +147,7 @@ def main() -> int:
         print("\nLook for:")
         print("  1. Profiles are the Google/Chrome login emails.")
         print("  2. Claude and Codex map independently per profile.")
-        print("  3. jackstah@gmail.com Claude is marked shared with loopflow-eng@loopflow.studio.")
+        print("  3. personal@example.com Claude is shared with engineering@example.com.")
         print("  4. The demo home is deleted on exit; live Loopflow is untouched.")
     return 0
 

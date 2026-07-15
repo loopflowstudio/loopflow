@@ -1202,10 +1202,10 @@ mod tests {
             .await
             .unwrap(),
         );
-        let jack = ProfileId::parse("jack@loopflow.studio").unwrap();
-        let engineering = ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
-        let personal = ProfileId::parse("jackstah@gmail.com").unwrap();
-        for profile_id in [&jack, &engineering, &personal] {
+        let primary = ProfileId::parse("primary@example.com").unwrap();
+        let engineering = ProfileId::parse("engineering@example.com").unwrap();
+        let personal = ProfileId::parse("personal@example.com").unwrap();
+        for profile_id in [&primary, &engineering, &personal] {
             store
                 .upsert_profile(&Profile {
                     id: profile_id.clone(),
@@ -1219,20 +1219,20 @@ mod tests {
             Provider::Claude,
             parse_account_id("personal").unwrap(),
             temp.path().join("claude-personal"),
-            Some(crate::profile::EmailAddress::parse("jackstah@gmail.com").unwrap()),
+            Some(crate::profile::EmailAddress::parse("personal@example.com").unwrap()),
         );
         let codex_account = new_account(
             Provider::Codex,
             parse_account_id("engineering").unwrap(),
             temp.path().join("codex-engineering"),
-            Some(crate::profile::EmailAddress::parse("loopflow-eng@loopflow.studio").unwrap()),
+            Some(crate::profile::EmailAddress::parse("engineering@example.com").unwrap()),
         );
         store
             .upsert_provider_account(&claude_account)
             .await
             .unwrap();
         store.upsert_provider_account(&codex_account).await.unwrap();
-        for profile_id in [&jack, &engineering, &personal] {
+        for profile_id in [&primary, &engineering, &personal] {
             store
                 .set_profile_provider_account(&ProfileProviderAccount {
                     profile_id: profile_id.clone(),
@@ -1256,7 +1256,7 @@ mod tests {
             .unwrap();
         let route = RepoProfileRoute {
             repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            default_profile: jack,
+            default_profile: primary,
             backup_profiles: vec![engineering, personal],
             created_at: 1,
             updated_at: 1,
@@ -1277,17 +1277,17 @@ mod tests {
 
     #[test]
     fn forwarded_bundle_round_trips_without_debugging_tokens() {
-        let jack = ProfileId::parse("jack@loopflow.studio").unwrap();
-        let engineering = ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
+        let primary = ProfileId::parse("primary@example.com").unwrap();
+        let engineering = ProfileId::parse("engineering@example.com").unwrap();
         let claude = parse_account_id("primary").unwrap();
         let codex = parse_account_id("reserve").unwrap();
         let bundle = ForwardedProfileBundle::new(
             RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            jack.clone(),
+            primary.clone(),
             vec![engineering.clone()],
             vec![
                 ForwardedProfileProviderAccount {
-                    profile_id: jack,
+                    profile_id: primary,
                     provider: Provider::Claude,
                     account_id: claude.clone(),
                 },
@@ -1301,7 +1301,7 @@ mod tests {
                 provider: Provider::Claude,
                 account_id: claude.clone(),
                 login_email: Some(
-                    crate::profile::EmailAddress::parse("jackstah@gmail.com").unwrap(),
+                    crate::profile::EmailAddress::parse("personal@example.com").unwrap(),
                 ),
                 credential_state: CredentialState::Connected,
                 routing_state: RoutingState::Automatic,
@@ -1344,7 +1344,7 @@ mod tests {
             .await
             .unwrap(),
         );
-        let profile_id = ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
+        let profile_id = ProfileId::parse("engineering@example.com").unwrap();
         let account_id = parse_account_id("engineering").unwrap();
         let bundle = ForwardedProfileBundle::new(
             RepoId::parse("loopflowstudio/loopflow").unwrap(),
@@ -1359,7 +1359,7 @@ mod tests {
                 provider: Provider::Codex,
                 account_id: account_id.clone(),
                 login_email: Some(
-                    crate::profile::EmailAddress::parse("loopflow-eng@loopflow.studio").unwrap(),
+                    crate::profile::EmailAddress::parse("engineering@example.com").unwrap(),
                 ),
                 credential_state: CredentialState::Connected,
                 routing_state: RoutingState::Automatic,

@@ -533,9 +533,9 @@ mod tests {
     use super::*;
 
     fn full_bundle() -> Credentials {
-        let jack = crate::profile::ProfileId::parse("jack@loopflow.studio").unwrap();
-        let engineering = crate::profile::ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
-        let personal = crate::profile::ProfileId::parse("jackstah@gmail.com").unwrap();
+        let primary = crate::profile::ProfileId::parse("primary@example.com").unwrap();
+        let engineering = crate::profile::ProfileId::parse("engineering@example.com").unwrap();
+        let personal = crate::profile::ProfileId::parse("personal@example.com").unwrap();
         let claude = crate::provider_account::parse_account_id("primary").unwrap();
         let codex = crate::provider_account::parse_account_id("reserve").unwrap();
         Credentials {
@@ -544,11 +544,11 @@ mod tests {
             codex_token: None,
             profile_bundle: Some(ForwardedProfileBundle::new(
                 crate::repository::RepoId::parse("loopflowstudio/loopflow").unwrap(),
-                jack.clone(),
+                primary.clone(),
                 vec![engineering.clone(), personal.clone()],
                 vec![
                     crate::provider_account::ForwardedProfileProviderAccount {
-                        profile_id: jack,
+                        profile_id: primary,
                         provider: crate::provider_auth::Provider::Claude,
                         account_id: claude.clone(),
                     },
@@ -573,7 +573,7 @@ mod tests {
                         provider: crate::provider_auth::Provider::Claude,
                         account_id: claude.clone(),
                         login_email: Some(
-                            crate::profile::EmailAddress::parse("jackstah@gmail.com").unwrap(),
+                            crate::profile::EmailAddress::parse("personal@example.com").unwrap(),
                         ),
                         credential_state: crate::store::CredentialState::Connected,
                         routing_state: crate::store::RoutingState::Automatic,
@@ -587,8 +587,7 @@ mod tests {
                         provider: crate::provider_auth::Provider::Codex,
                         account_id: codex.clone(),
                         login_email: Some(
-                            crate::profile::EmailAddress::parse("loopflow-eng@loopflow.studio")
-                                .unwrap(),
+                            crate::profile::EmailAddress::parse("engineering@example.com").unwrap(),
                         ),
                         credential_state: crate::store::CredentialState::Connected,
                         routing_state: crate::store::RoutingState::Automatic,

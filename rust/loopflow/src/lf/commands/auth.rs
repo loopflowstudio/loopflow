@@ -1008,25 +1008,25 @@ mod tests {
     fn chrome_profile_and_provider_login_must_name_the_same_account() {
         let chrome_profile = LocalChromeProfile {
             directory: "Profile 7".to_string(),
-            label: "jack@loopflow.studio".to_string(),
+            label: "primary@example.com".to_string(),
         };
 
         assert_eq!(
             verified_login_for_chrome_profile(
                 Some(&chrome_profile),
-                Some("JACK@LOOPFLOW.STUDIO".to_string()),
+                Some("PRIMARY@EXAMPLE.COM".to_string()),
             )
             .unwrap(),
-            Some("JACK@LOOPFLOW.STUDIO".to_string())
+            Some("PRIMARY@EXAMPLE.COM".to_string())
         );
         assert!(verified_login_for_chrome_profile(
             Some(&chrome_profile),
-            Some("jackstah@gmail.com".to_string()),
+            Some("personal@example.com".to_string()),
         )
         .is_err());
         assert_eq!(
             verified_login_for_chrome_profile(Some(&chrome_profile), None).unwrap(),
-            Some("jack@loopflow.studio".to_string())
+            Some("primary@example.com".to_string())
         );
     }
 }

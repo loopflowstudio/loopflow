@@ -354,13 +354,13 @@ mod tests {
     fn route_format_preserves_declared_order() {
         assert_eq!(
             format_route(
-                &ProfileId::parse("jack@loopflow.studio").unwrap(),
+                &ProfileId::parse("primary@example.com").unwrap(),
                 &[
-                    ProfileId::parse("loopflow-eng@loopflow.studio").unwrap(),
-                    ProfileId::parse("jackstah@gmail.com").unwrap(),
+                    ProfileId::parse("engineering@example.com").unwrap(),
+                    ProfileId::parse("personal@example.com").unwrap(),
                 ],
             ),
-            "jack@loopflow.studio -> loopflow-eng@loopflow.studio -> jackstah@gmail.com"
+            "primary@example.com -> engineering@example.com -> personal@example.com"
         );
     }
 }

@@ -4265,7 +4265,7 @@ mod tests {
                 refresh_token: Some("linear-refresh".to_string()),
                 oauth_client_id: Some("linear-client".to_string()),
                 expires_at: Some(expires_at),
-                login: Some("jack@loopflow.studio".to_string()),
+                login: Some("primary@example.com".to_string()),
                 updated_at: now_unix(),
                 credential_type: CredentialType::OAuth,
             })
@@ -4277,7 +4277,7 @@ mod tests {
         assert_eq!(
             snapshot.status,
             AuthStatus::Active {
-                login: Some("jack@loopflow.studio".to_string())
+                login: Some("primary@example.com".to_string())
             }
         );
         assert_eq!(snapshot.expires_at, Some(expires_at));

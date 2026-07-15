@@ -2923,9 +2923,9 @@ mod tests {
         store.upsert_provider_account(&shared).await.unwrap();
 
         for id in [
-            "jack@loopflow.studio",
-            "loopflow-eng@loopflow.studio",
-            "jackstah@gmail.com",
+            "primary@example.com",
+            "engineering@example.com",
+            "personal@example.com",
         ] {
             let profile = Profile {
                 id: ProfileId::parse(id).unwrap(),
@@ -2934,7 +2934,7 @@ mod tests {
             };
             store.upsert_profile(&profile).await.unwrap();
         }
-        for id in ["loopflow-eng@loopflow.studio", "jackstah@gmail.com"] {
+        for id in ["engineering@example.com", "personal@example.com"] {
             store
                 .set_profile_provider_account(&ProfileProviderAccount {
                     profile_id: ProfileId::parse(id).unwrap(),
@@ -2948,7 +2948,7 @@ mod tests {
         }
         store
             .upsert_chrome_profile_binding(&ChromeProfileBinding {
-                profile_id: ProfileId::parse("jack@loopflow.studio").unwrap(),
+                profile_id: ProfileId::parse("primary@example.com").unwrap(),
                 host_id: HostId::parse("studio-mac").unwrap(),
                 chrome_directory: "Profile 7".to_string(),
                 created_at: 1,
@@ -2958,7 +2958,7 @@ mod tests {
             .unwrap();
         store
             .upsert_chrome_profile_binding(&ChromeProfileBinding {
-                profile_id: ProfileId::parse("jack@loopflow.studio").unwrap(),
+                profile_id: ProfileId::parse("primary@example.com").unwrap(),
                 host_id: HostId::parse("mini-heart").unwrap(),
                 chrome_directory: "Default".to_string(),
                 created_at: 1,
@@ -2968,10 +2968,10 @@ mod tests {
             .unwrap();
         let route = RepoProfileRoute {
             repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            default_profile: ProfileId::parse("jack@loopflow.studio").unwrap(),
+            default_profile: ProfileId::parse("primary@example.com").unwrap(),
             backup_profiles: vec![
-                ProfileId::parse("loopflow-eng@loopflow.studio").unwrap(),
-                ProfileId::parse("jackstah@gmail.com").unwrap(),
+                ProfileId::parse("engineering@example.com").unwrap(),
+                ProfileId::parse("personal@example.com").unwrap(),
             ],
             created_at: 1,
             updated_at: 1,
@@ -2989,7 +2989,7 @@ mod tests {
         assert_eq!(
             store
                 .profile_provider_account(
-                    &ProfileId::parse("loopflow-eng@loopflow.studio").unwrap(),
+                    &ProfileId::parse("engineering@example.com").unwrap(),
                     Provider::Claude,
                 )
                 .await
@@ -3001,7 +3001,7 @@ mod tests {
         assert_eq!(
             store
                 .chrome_profile_binding(
-                    &ProfileId::parse("jack@loopflow.studio").unwrap(),
+                    &ProfileId::parse("primary@example.com").unwrap(),
                     &HostId::parse("studio-mac").unwrap(),
                 )
                 .await
@@ -3013,7 +3013,7 @@ mod tests {
         assert_eq!(
             store
                 .chrome_profile_binding(
-                    &ProfileId::parse("jack@loopflow.studio").unwrap(),
+                    &ProfileId::parse("primary@example.com").unwrap(),
                     &HostId::parse("mini-heart").unwrap(),
                 )
                 .await
@@ -3030,7 +3030,7 @@ mod tests {
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
             .await
             .unwrap();
-        let profile_id = ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
+        let profile_id = ProfileId::parse("engineering@example.com").unwrap();
         store
             .upsert_profile(&Profile {
                 id: profile_id.clone(),

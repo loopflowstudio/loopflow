@@ -45,7 +45,9 @@ impl EmailAddress {
         if local.is_empty()
             || domain.is_empty()
             || domain.contains('@')
-            || value.chars().any(char::is_whitespace)
+            || value
+                .chars()
+                .any(|character| character.is_whitespace() || character.is_control())
         {
             return Err("invalid email address".to_string());
         }

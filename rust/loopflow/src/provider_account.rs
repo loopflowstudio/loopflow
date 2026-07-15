@@ -19,6 +19,7 @@ use crate::profile::{
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{open_store, ProviderAccount, ProviderAccountId, SharedStore, StoreError};
+use crate::store::{CredentialState, RoutingState};
 
 pub const FORWARDED_PROFILE_BUNDLE_ENV: &str = "LF_FORWARDED_PROFILE_BUNDLE";
 pub const FORWARDED_PROFILE_STORE_ENV: &str = "LF_FORWARDED_PROFILE_STORE";
@@ -94,8 +95,11 @@ impl ForwardedProviderCredential {
 pub struct ForwardedProviderAccount {
     pub provider: Provider,
     pub account_id: ProviderAccountId,
-    pub login: Option<String>,
-    pub enabled: bool,
+    pub login_email: Option<crate::profile::EmailAddress>,
+    pub credential_state: CredentialState,
+    pub routing_state: RoutingState,
+    pub plan: Option<String>,
+    pub paid_through: Option<time::Date>,
     pub utilization_percent: Option<u8>,
     pub cooldown_until: Option<i64>,
     pub cooldown_reason: Option<String>,
@@ -451,13 +455,16 @@ pub async fn local_forwarded_profile_bundle(
             accounts.push(ForwardedProviderAccount {
                 provider,
                 account_id: account.account_id.clone(),
-                login: account.login.clone(),
-                enabled: account.enabled,
+                login_email: account.login_email.clone(),
+                credential_state: account.credential_state,
+                routing_state: account.routing_state,
+                plan: account.plan.clone(),
+                paid_through: account.paid_through,
                 utilization_percent: account.utilization_percent,
                 cooldown_until: account.cooldown_until,
                 cooldown_reason: account.cooldown_reason.clone(),
             });
-            if !account.enabled {
+            if !account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date()) {
                 continue;
             }
             let home = account.home.as_deref().ok_or_else(|| {
@@ -567,7 +574,7 @@ pub async fn resolve_provider_account(
         let reset = accounts
             .iter()
             .filter(|account| {
-                account.enabled
+                account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date())
                     && candidates
                         .iter()
                         .any(|candidate| candidate.account_id == account.account_id)
@@ -634,9 +641,11 @@ async fn hydrate_forwarded_profile_bundle(
                     provider: account.provider.as_str().to_string(),
                     account_id: account.account_id.clone(),
                     home: None,
-                    login: account.login.clone(),
-                    enabled: account.enabled,
-                    preferred: false,
+                    login_email: account.login_email.clone(),
+                    credential_state: account.credential_state,
+                    routing_state: account.routing_state,
+                    plan: account.plan.clone(),
+                    paid_through: account.paid_through,
                     utilization_percent: account.utilization_percent,
                     cooldown_until: account.cooldown_until,
                     cooldown_reason: account.cooldown_reason.clone(),
@@ -807,16 +816,18 @@ pub fn new_account(
     provider: Provider,
     account_id: ProviderAccountId,
     home: PathBuf,
-    login: Option<String>,
+    login_email: Option<crate::profile::EmailAddress>,
 ) -> ProviderAccount {
     let now = now_unix();
     ProviderAccount {
         provider: provider.as_str().to_string(),
         account_id,
         home: Some(home),
-        login,
-        enabled: true,
-        preferred: false,
+        login_email,
+        credential_state: CredentialState::Connected,
+        routing_state: RoutingState::Automatic,
+        plan: None,
+        paid_through: None,
         utilization_percent: None,
         cooldown_until: None,
         cooldown_reason: None,
@@ -1116,7 +1127,7 @@ mod tests {
                 Provider::Claude,
                 account_id.clone(),
                 account_home,
-                Some("jack@example.com".to_string()),
+                Some(crate::profile::EmailAddress::parse("jack@example.com").unwrap()),
             ))
             .await
             .unwrap();
@@ -1176,8 +1187,13 @@ mod tests {
             vec![ForwardedProviderAccount {
                 provider: Provider::Claude,
                 account_id: claude.clone(),
-                login: Some("jackstah@gmail.com".to_string()),
-                enabled: true,
+                login_email: Some(
+                    crate::profile::EmailAddress::parse("jackstah@gmail.com").unwrap(),
+                ),
+                credential_state: CredentialState::Connected,
+                routing_state: RoutingState::Automatic,
+                plan: Some("max".to_string()),
+                paid_through: None,
                 utilization_percent: None,
                 cooldown_until: None,
                 cooldown_reason: None,
@@ -1229,8 +1245,13 @@ mod tests {
             vec![ForwardedProviderAccount {
                 provider: Provider::Codex,
                 account_id: account_id.clone(),
-                login: Some("loopflow-eng@loopflow.studio".to_string()),
-                enabled: true,
+                login_email: Some(
+                    crate::profile::EmailAddress::parse("loopflow-eng@loopflow.studio").unwrap(),
+                ),
+                credential_state: CredentialState::Connected,
+                routing_state: RoutingState::Automatic,
+                plan: Some("max".to_string()),
+                paid_through: None,
                 utilization_percent: None,
                 cooldown_until: None,
                 cooldown_reason: None,

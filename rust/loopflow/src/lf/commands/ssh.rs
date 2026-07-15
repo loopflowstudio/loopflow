@@ -572,8 +572,13 @@ mod tests {
                     crate::provider_account::ForwardedProviderAccount {
                         provider: crate::provider_auth::Provider::Claude,
                         account_id: claude.clone(),
-                        login: Some("jackstah@gmail.com".to_string()),
-                        enabled: true,
+                        login_email: Some(
+                            crate::profile::EmailAddress::parse("jackstah@gmail.com").unwrap(),
+                        ),
+                        credential_state: crate::store::CredentialState::Connected,
+                        routing_state: crate::store::RoutingState::Automatic,
+                        plan: Some("max".to_string()),
+                        paid_through: None,
                         utilization_percent: None,
                         cooldown_until: None,
                         cooldown_reason: None,
@@ -581,8 +586,14 @@ mod tests {
                     crate::provider_account::ForwardedProviderAccount {
                         provider: crate::provider_auth::Provider::Codex,
                         account_id: codex.clone(),
-                        login: Some("loopflow-eng@loopflow.studio".to_string()),
-                        enabled: true,
+                        login_email: Some(
+                            crate::profile::EmailAddress::parse("loopflow-eng@loopflow.studio")
+                                .unwrap(),
+                        ),
+                        credential_state: crate::store::CredentialState::Connected,
+                        routing_state: crate::store::RoutingState::Automatic,
+                        plan: Some("max".to_string()),
+                        paid_through: None,
                         utilization_percent: None,
                         cooldown_until: None,
                         cooldown_reason: None,

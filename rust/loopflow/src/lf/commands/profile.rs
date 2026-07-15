@@ -122,7 +122,7 @@ async fn list_profiles(store: &SharedStore) -> Result<()> {
                     mapping.provider.as_str().to_string(),
                     mapping.account_id.clone(),
                 ))
-                .and_then(|account| account.login.as_deref())
+                .and_then(|account| account.login_email.as_ref().map(|email| email.as_str()))
                 .unwrap_or(mapping.account_id.as_str());
             println!("  {:<7} {}", mapping.provider.as_str(), label);
         }
@@ -161,8 +161,9 @@ async fn set_profile_account(
         profile_id,
         provider,
         account
-            .login
-            .as_deref()
+            .login_email
+            .as_ref()
+            .map(|email| email.as_str())
             .unwrap_or(account.account_id.as_str())
     );
     Ok(())
@@ -261,8 +262,9 @@ async fn find_provider_account(
         .iter()
         .filter(|account| {
             account
-                .login
-                .as_deref()
+                .login_email
+                .as_ref()
+                .map(|email| email.as_str())
                 .is_some_and(|login| login.eq_ignore_ascii_case(raw_account.trim()))
         })
         .cloned()
@@ -312,7 +314,7 @@ fn account_label<'a>(
     accounts
         .iter()
         .find(|account| account.provider == provider.as_str() && account.account_id == *account_id)
-        .and_then(|account| account.login.as_deref())
+        .and_then(|account| account.login_email.as_ref().map(|email| email.as_str()))
         .unwrap_or(account_id.as_str())
 }
 

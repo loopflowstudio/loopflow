@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
-use crate::profile::{HostId, LocalChromeProfile, ProfileId};
+use crate::profile::{EmailAddress, HostId, LocalChromeProfile, ProfileId};
 use crate::provider_account::{
     account_profile_path, ensure_account_profile, new_account, open_account_store,
     parse_account_id, remove_account_profile,
@@ -22,8 +22,8 @@ use crate::provider_auth::{
     ProviderAuthSnapshot,
 };
 use crate::store::{
-    open_store, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken, SharedStore,
-    StoreError,
+    open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
+    RoutingState, SharedStore, StoreError,
 };
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -33,6 +33,16 @@ const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
 struct ClaudeAuthStatusOutput {
     logged_in: bool,
     email: Option<String>,
+}
+
+#[derive(Debug)]
+struct AccountLifecycleUpdate<'a> {
+    login_email: Option<&'a str>,
+    routing: Option<&'a str>,
+    plan: Option<&'a str>,
+    clear_plan: bool,
+    paid_through: Option<&'a str>,
+    clear_paid_through: bool,
 }
 
 pub fn run(cmd: &AuthCommand) -> Result<()> {
@@ -80,11 +90,29 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             .await
         }
         AuthCommand::Accounts { provider } => accounts(provider.as_deref()).await,
-        AuthCommand::Enable { provider, account } => {
-            set_account_enabled(provider, account, true).await
-        }
-        AuthCommand::Disable { provider, account } => {
-            set_account_enabled(provider, account, false).await
+        AuthCommand::Set {
+            provider,
+            account,
+            login_email,
+            routing,
+            plan,
+            clear_plan,
+            paid_through,
+            clear_paid_through,
+        } => {
+            set_account_lifecycle(
+                provider,
+                account,
+                AccountLifecycleUpdate {
+                    login_email: login_email.as_deref(),
+                    routing: routing.as_deref(),
+                    plan: plan.as_deref(),
+                    clear_plan: *clear_plan,
+                    paid_through: paid_through.as_deref(),
+                    clear_paid_through: *clear_paid_through,
+                },
+            )
+            .await
         }
         AuthCommand::Reset { provider, account } => reset_account(provider, account).await,
         AuthCommand::External(args) => {
@@ -279,13 +307,23 @@ async fn register_managed_account(
     let existing = accounts
         .iter()
         .find(|account| account.account_id == *account_id);
+    let login_email = login
+        .map(|value| EmailAddress::parse(&value))
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
     let mut account = existing.cloned().unwrap_or_else(|| {
-        new_account(provider, account_id.clone(), profile.clone(), login.clone())
+        new_account(
+            provider,
+            account_id.clone(),
+            profile.clone(),
+            login_email.clone(),
+        )
     });
     account.home = Some(profile);
-    account.login = login;
-    account.enabled = true;
-    account.preferred = false;
+    if let Some(login_email) = login_email {
+        account.login_email = Some(login_email);
+    }
+    account.credential_state = CredentialState::Connected;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
     Ok(())
@@ -444,7 +482,7 @@ async fn disconnect_account(raw_provider: &str, raw_account: &str) -> Result<()>
     let provider = parse_managed_provider(raw_provider)?;
     let account_id = parse_account_id(raw_account)?;
     let store = open_account_store().await?;
-    let account = store
+    let mut account = store
         .get_provider_account(provider.as_str(), &account_id)
         .await?
         .ok_or_else(|| anyhow!("unknown {} account '{}'", provider, account_id))?;
@@ -460,9 +498,12 @@ async fn disconnect_account(raw_provider: &str, raw_account: &str) -> Result<()>
         disconnect_provider_account_auth(provider, expected_profile.clone()).await?;
         remove_account_profile(&expected_profile)?;
     }
-    store
-        .delete_provider_account(provider.as_str(), &account_id)
-        .await?;
+    account.credential_state = CredentialState::Missing;
+    account.utilization_percent = None;
+    account.cooldown_until = None;
+    account.cooldown_reason = None;
+    account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
+    store.upsert_provider_account(&account).await?;
     println!(
         "Disconnected {} account '{}'",
         provider.display_name(),
@@ -491,21 +532,85 @@ async fn accounts(raw_provider: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-async fn set_account_enabled(raw_provider: &str, raw_account: &str, enabled: bool) -> Result<()> {
+async fn set_account_lifecycle(
+    raw_provider: &str,
+    raw_account: &str,
+    update: AccountLifecycleUpdate<'_>,
+) -> Result<()> {
+    if update.login_email.is_none()
+        && update.routing.is_none()
+        && update.plan.is_none()
+        && !update.clear_plan
+        && update.paid_through.is_none()
+        && !update.clear_paid_through
+    {
+        return Err(anyhow!(
+            "lf auth set needs --login-email, --routing, --plan, or --paid-through"
+        ));
+    }
     let provider = parse_managed_provider(raw_provider)?;
     let account_id = parse_account_id(raw_account)?;
+    let login_email = update
+        .login_email
+        .map(EmailAddress::parse)
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
+    let routing_state = update.routing.map(parse_routing_state).transpose()?;
+    let plan = update.plan.map(parse_plan).transpose()?;
+    let paid_through = update.paid_through.map(parse_paid_through).transpose()?;
     let store = open_account_store().await?;
+    let mut account = store
+        .get_provider_account(provider.as_str(), &account_id)
+        .await?
+        .ok_or_else(|| anyhow!("unknown {} account '{}'", provider, account_id))?;
+    if let Some(login_email) = login_email {
+        account.login_email = Some(login_email);
+    }
+    if let Some(routing_state) = routing_state {
+        account.routing_state = routing_state;
+    }
+    if update.clear_plan {
+        account.plan = None;
+    } else if let Some(plan) = plan {
+        account.plan = Some(plan);
+    }
+    if update.clear_paid_through {
+        account.paid_through = None;
+    } else if let Some(paid_through) = paid_through {
+        account.paid_through = Some(paid_through);
+    }
+    account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store
-        .set_provider_account_enabled(provider.as_str(), &account_id, enabled)
+        .update_provider_account_lifecycle(&account)
         .await
         .map_err(|error| account_store_error(provider, &account_id.to_string(), error))?;
-    println!(
-        "{} {} account '{}'",
-        if enabled { "Enabled" } else { "Disabled" },
-        provider.display_name(),
-        account_id
-    );
+    println!("Updated {}", format_account(&account));
     Ok(())
+}
+
+fn parse_routing_state(value: &str) -> Result<RoutingState> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "automatic" => Ok(RoutingState::Automatic),
+        "explicit-only" | "explicit_only" => Ok(RoutingState::ExplicitOnly),
+        "disabled" => Ok(RoutingState::Disabled),
+        _ => Err(anyhow!(
+            "invalid routing state '{value}': expected automatic, explicit-only, or disabled"
+        )),
+    }
+}
+
+fn parse_plan(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 64 || value.chars().any(char::is_control) {
+        return Err(anyhow!("plan must be 1-64 printable characters"));
+    }
+    Ok(value.to_string())
+}
+
+fn parse_paid_through(value: &str) -> Result<time::Date> {
+    let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]")?;
+    time::Date::parse(value.trim(), &format)
+        .map_err(|_| anyhow!("invalid paid-through date '{value}': expected YYYY-MM-DD"))
 }
 
 async fn reset_account(raw_provider: &str, raw_account: &str) -> Result<()> {
@@ -544,8 +649,18 @@ fn parse_managed_provider(raw: &str) -> Result<Provider> {
 
 fn format_account(account: &ProviderAccount) -> String {
     let mut details = Vec::new();
-    if !account.enabled {
-        details.push("disabled".to_string());
+    let routing_state = account.effective_routing_state(OffsetDateTime::now_utc().date());
+    if routing_state != RoutingState::Automatic {
+        details.push(routing_state.as_str().replace('_', "-"));
+    }
+    if account.credential_state != CredentialState::Connected {
+        details.push(account.credential_state.as_str().to_string());
+    }
+    if let Some(plan) = &account.plan {
+        details.push(plan.clone());
+    }
+    if let Some(paid_through) = account.paid_through {
+        details.push(format!("paid through {paid_through}"));
     }
     if let Some(utilization) = account.utilization_percent {
         details.push(format!("{utilization}% used"));
@@ -557,8 +672,8 @@ fn format_account(account: &ProviderAccount) -> String {
             format_relative_delta(cooldown_until - now)
         ));
     }
-    if let Some(login) = &account.login {
-        details.push(login.clone());
+    if let Some(login) = &account.login_email {
+        details.push(login.to_string());
     }
     if details.is_empty() {
         details.push("ready".to_string());
@@ -751,10 +866,16 @@ fn format_relative_delta(seconds: i64) -> String {
 mod tests {
     use time::OffsetDateTime;
 
+    use crate::profile::EmailAddress;
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
-    use crate::store::{CredentialType, ProviderAccount, ProviderAccountId};
+    use crate::store::{
+        CredentialState, CredentialType, ProviderAccount, ProviderAccountId, RoutingState,
+    };
 
-    use super::{format_account, format_relative_delta, format_snapshot};
+    use super::{
+        format_account, format_relative_delta, format_snapshot, parse_paid_through,
+        parse_routing_state,
+    };
 
     #[test]
     fn format_account_shows_routing_state() {
@@ -763,9 +884,11 @@ mod tests {
             provider: "claude".to_string(),
             account_id: ProviderAccountId::parse("primary").unwrap(),
             home: None,
-            login: Some("operator@example.com".to_string()),
-            enabled: true,
-            preferred: false,
+            login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: Some("max".to_string()),
+            paid_through: None,
             utilization_percent: Some(72),
             cooldown_until: Some(now + 3_600),
             cooldown_reason: Some("five_hour".to_string()),
@@ -777,6 +900,7 @@ mod tests {
         assert!(rendered.contains("claude"));
         assert!(rendered.contains("primary"));
         assert!(!rendered.contains("preferred"));
+        assert!(rendered.contains("max"));
         assert!(rendered.contains("72% used"));
         assert!(rendered.contains("cooling for"));
         assert!(rendered.contains("operator@example.com"));
@@ -799,6 +923,37 @@ mod tests {
         assert!(rendered.contains("oauth"));
         assert!(rendered.contains("@jackdanger"));
         assert!(rendered.contains("expires 1h") || rendered.contains("expires 2h"));
+    }
+
+    #[test]
+    fn lifecycle_values_are_strict_and_expired_plans_become_explicit_only() {
+        assert_eq!(
+            parse_routing_state("explicit-only").unwrap(),
+            RoutingState::ExplicitOnly
+        );
+        assert!(parse_routing_state("fallback").is_err());
+        assert!(parse_paid_through("08/14/2026").is_err());
+
+        let today = OffsetDateTime::now_utc().date();
+        let account = ProviderAccount {
+            provider: "codex".to_string(),
+            account_id: ProviderAccountId::parse("personal").unwrap(),
+            home: None,
+            login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: Some("plus".to_string()),
+            paid_through: Some(today - time::Duration::days(1)),
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+
+        assert!(format_account(&account).contains("explicit-only"));
+        assert!(!account.eligible_for_automatic_routing(today));
     }
 
     #[test]

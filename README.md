@@ -477,14 +477,19 @@ lf profile create jackstah@gmail.com --chrome-profile jackstah@gmail.com
 
 lf auth import claude --account primary --profile jackstah@gmail.com
 lf auth connect claude --account loopflow --profile jack@loopflow.studio
+lf auth connect codex --account engineering
+lf auth set codex engineering \
+  --login-email loopflow-eng@loopflow.studio \
+  --routing automatic \
+  --plan max
 lf auth accounts claude
 
-lf profile account set jack@loopflow.studio claude jack@loopflow.studio
-lf profile account set jack@loopflow.studio codex jack@loopflow.studio
-lf profile account set loopflow-eng@loopflow.studio claude jackstah@gmail.com
-lf profile account set loopflow-eng@loopflow.studio codex loopflow-eng@loopflow.studio
-lf profile account set jackstah@gmail.com claude jackstah@gmail.com
-lf profile account set jackstah@gmail.com codex jackstah@gmail.com
+lf profile account set jack@loopflow.studio claude loopflow
+lf profile account set jack@loopflow.studio codex loopflow
+lf profile account set loopflow-eng@loopflow.studio claude primary
+lf profile account set loopflow-eng@loopflow.studio codex engineering
+lf profile account set jackstah@gmail.com claude primary
+lf profile account set jackstah@gmail.com codex primary
 
 lf profile route set \
   --default jack@loopflow.studio \
@@ -492,8 +497,8 @@ lf profile route set \
   --backup jackstah@gmail.com
 lf profile route show
 
-lf auth disable claude primary
-lf auth enable claude primary
+lf auth set claude primary --paid-through 2026-08-14
+lf auth set claude primary --routing explicit-only
 lf auth reset claude primary
 lf auth disconnect claude --account reserve
 ```
@@ -513,6 +518,10 @@ cooldown. Shared Claude/Codex configuration and compiled skills stay in their
 canonical host-level trees. A provider child remains pinned to its selected
 profile and account for its lifetime.
 
+`paid-through` is provider-specific. Once that date passes, automatic routing
+treats the account as `explicit-only`; clear the date and set `automatic` if a
+downgraded account should remain a normal fallback.
+
 ```bash
 lf ssh mini -- lf wave product
 ```
@@ -521,10 +530,10 @@ lf ssh mini -- lf wave product
 referenced Claude or Codex credential once, even when profiles share an
 account. It writes no credential files on the remote host. Provider-child
 restarts inherit the routing lease and its accrued cooldowns. Before connecting,
-the local provider CLIs validate or refresh each enabled routed login; `lf ssh`
-fails instead of sending an incomplete route. After the Wave, tmux session, or
-host restarts, start or reconnect from the local machine to resolve and forward
-fresh credentials.
+the local provider CLIs validate or refresh each automatically eligible routed
+login; `lf ssh` fails instead of sending an incomplete route. After the Wave,
+tmux session, or host restarts, start or reconnect from the local machine to
+resolve and forward fresh credentials.
 
 ```bash
 lf status product          # inspect live execution and attention in one Wave

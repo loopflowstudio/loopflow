@@ -1318,10 +1318,25 @@ pub enum AuthCommand {
         /// Provider name (optional)
         provider: Option<String>,
     },
-    /// Include an account in automatic routing
-    Enable { provider: String, account: String },
-    /// Exclude an account from automatic routing
-    Disable { provider: String, account: String },
+    /// Record provider-specific account identity, routing, and billing state
+    Set {
+        provider: String,
+        account: String,
+        #[arg(long)]
+        login_email: Option<String>,
+        /// automatic, explicit-only, or disabled
+        #[arg(long)]
+        routing: Option<String>,
+        #[arg(long, conflicts_with = "clear_plan")]
+        plan: Option<String>,
+        #[arg(long)]
+        clear_plan: bool,
+        /// Last paid day, as YYYY-MM-DD
+        #[arg(long, conflicts_with = "clear_paid_through")]
+        paid_through: Option<String>,
+        #[arg(long)]
+        clear_paid_through: bool,
+    },
     /// Clear observed utilization and cooldown for an account
     Reset { provider: String, account: String },
     /// External: provider name (so `lf auth linear` works)
@@ -1698,6 +1713,47 @@ mod tests {
             }) if provider == "claude"
                 && account == "loopflow"
                 && chrome_profile == "jack@example.com"
+        ));
+    }
+
+    #[test]
+    fn auth_set_accepts_provider_specific_billing_and_routing_state() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "set",
+            "codex",
+            "loopflow",
+            "--login-email",
+            "loopflow-eng@loopflow.studio",
+            "--routing",
+            "automatic",
+            "--plan",
+            "max",
+            "--paid-through",
+            "2026-08-14",
+        ])
+        .expect("parse provider account lifecycle");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Set {
+                    provider,
+                    account,
+                    login_email: Some(login_email),
+                    routing: Some(routing),
+                    plan: Some(plan),
+                    paid_through: Some(paid_through),
+                    clear_plan: false,
+                    clear_paid_through: false,
+                }
+            }) if provider == "codex"
+                && account == "loopflow"
+                && login_email == "loopflow-eng@loopflow.studio"
+                && routing == "automatic"
+                && plan == "max"
+                && paid_through == "2026-08-14"
         ));
     }
 

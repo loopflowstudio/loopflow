@@ -169,6 +169,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "profiles",
         sql: include_str!("migrations/0.11.009_profiles.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 10,
+        },
+        name: "provider_account_lifecycle",
+        sql: include_str!("migrations/0.11.010_provider_account_lifecycle.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -677,7 +686,10 @@ mod tests {
         assert!(conn
             .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, bool>(0))
             .unwrap());
-        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.009_profiles");
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.11.010_provider_account_lifecycle"
+        );
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
@@ -697,7 +709,8 @@ mod tests {
                 "0.11.006_context_launch_work".to_string(),
                 "0.11.007_task_pr_parent".to_string(),
                 "0.11.008_interactive_handoffs".to_string(),
-                "0.11.009_profiles".to_string()
+                "0.11.009_profiles".to_string(),
+                "0.11.010_provider_account_lifecycle".to_string()
             ]
         );
     }
@@ -715,6 +728,8 @@ mod tests {
              ) VALUES
                 ('claude', 'primary', '/accounts/claude/primary',
                  'jack@example.com', 1, 1, 80, NULL, NULL, 5, 1, 5),
+                ('claude', 'duplicate', '/accounts/claude/duplicate',
+                 'jack@example.com', 1, 0, 0, NULL, NULL, NULL, 2, 2),
                 ('codex', 'primary', '/accounts/codex/primary',
                  'jack@example.com', 1, 1, 20, NULL, NULL, 6, 1, 6);
              INSERT INTO provider_session_accounts (
@@ -763,6 +778,37 @@ mod tests {
             )
             .unwrap(),
             80
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT login_email || ':' || credential_state || ':' || routing_state
+                 FROM provider_accounts
+                 WHERE provider = 'claude' AND account_id = 'primary'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "jack@example.com:connected:automatic"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM provider_accounts
+                 WHERE provider = 'claude' AND login_email = 'jack@example.com'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('provider_accounts')
+                 WHERE name IN ('enabled', 'preferred')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
         );
     }
 
@@ -1153,7 +1199,10 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_sqlite(&conn).unwrap();
-        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.009_profiles");
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.11.010_provider_account_lifecycle"
+        );
     }
 
     #[test]

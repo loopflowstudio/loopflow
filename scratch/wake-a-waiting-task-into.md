@@ -113,7 +113,18 @@ wake.
 
 - **Slice 1 shipped** (`529b19888`): the `(head, failure_set)` dedup key on
   `CiObservation` (`woken_failure_set` + `wake_warranted()` + `mark_woken()` +
-  reconcile carry-forward), tested. Slices 2–3 remain (see this doc's Mechanism).
+  reconcile carry-forward), tested.
+- **Slice 2a shipped** (`eb8a20a27`): `TaskSession::ci_fix_restart_bar` — the
+  launch gate that permits an open-PR restart only on a `wake_warranted()`
+  current-head failure, leaving the W2-129 supervisor bar intact elsewhere.
+  Tested. Shared prelude factored.
+- **Next — slice 2b:** wire `LaunchIntent::CiFix` in `ops/child.rs`
+  (`launch()` → a `ChildSession::ci_fix_restart_bar` dispatcher → the TaskSession
+  gate) and the supervisor trigger (project `inspect_outcome` launches a
+  Waiting-on-open-PR task with `LaunchIntent::CiFix` when its fresh reading is
+  `wake_warranted()`). Then slice 2c (runner `ci-fix.yaml` turn + `mark_woken` +
+  rearm) and slice 3 (W2-144 queue bridge, `lf status` "fixing CI" owner,
+  integration harness).
 - **Recurring control-plane blocker (not W2-156's to fix):** a Context Lab worker
   keeps migrating the shared `~/.lf/loopflow.db` with its *unmerged* migration
   (first `0.11.004_context_launch_work`, now renumbered to `0.11.006`), bricking

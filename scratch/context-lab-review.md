@@ -175,6 +175,55 @@ selected-source-share, workspace-recheck, and source-byte-hash tests);
 build-for-testing` for LoopflowMac (**TEST BUILD SUCCEEDED**). This pass changed
 no product code, so Python, website, E2E, and hosted UI suites were not rerun.
 
+## Second independent pass (2026-07-15): representative dedup
+
+A fresh reviewer re-read the committed feature diff (`main...HEAD`, tip
+`ec28945b`) end to end against the design's "Done when," re-deriving rather than
+restating the prior claims. The read reconfirmed exact flame summing, the
+smooth-representative filter, ratio-based selected-source-share sorting, the
+effective/source hash split, the ordered pre-terminal handoff guard, per-launch
+candidate dedup, and DTO discipline. It surfaced one genuine correction the
+earlier passes missed.
+
+**Correction — representatives no longer repeat one address across roles.**
+`select_representatives` chose each of the four roles (smooth complete,
+high-context complete, failed/steered, recent) independently. On a small
+revision where a single completed, complete-capture, zero-steer launch is
+simultaneously the smoothest, the highest-context, and the most recent, the same
+`TraceAddress` was emitted three times. The evidence rail renders one row per
+representative (role + run-id short hash + Open trace), so that population would
+show one session as three "independent" pieces of evidence — a false read of the
+evidence base the design describes as distinct sessions. The function now claims
+addresses in priority order and skips any role whose winning candidate was
+already claimed, so a lone qualifying run surfaces exactly once under its
+highest-priority label. Populations large enough to have distinct smooth,
+high-context, failed/steered, and recent traces are unchanged: on the live
+`LOOPFLOW.md` population the smooth and high-context representatives were already
+different traces, so this only collapses the tiny-population duplication.
+
+New test `representatives_never_repeat_one_address_across_roles` builds a
+single completed/zero-steer launch and asserts exactly one representative
+(`SmoothComplete`). `smooth_representative_excludes_steered_launches` and the
+rest of the context suite still pass.
+
+The seed-wording versus byte-guard inconsistency from the prior pass was left as
+deliberate soft guidance; nothing else in token attribution, flame summing,
+revision identity, the handoff guard, or DTO discipline warranted a change.
+
+This pass did **not** advance the still-missing continuous journey: no real
+Intelligence Task refinement, source diff, lifecycle, or backlink was exercised,
+and none is claimed here. See Risk 1 and the Refinement-truth audit below.
+
+Checks run this pass, all green: `cargo fmt --check`; `cargo clippy -p loopflow
+--lib -- -D warnings`; `cargo test -p loopflow --lib context` (67 tests,
+including the new `representatives_never_repeat_one_address_across_roles` and the
+Swift contract round-trip); `scripts/check_migrations.py` (chain intact through
+`0.11.006_context_launch_work`); and
+`scripts/check_swift_multiplatform_boundaries.py`. The change touches only Rust
+aggregation semantics and adds no wire field, so the committed pass's Swift suite
+(117 tests) and `xcodebuild build-for-testing` still hold and were not re-run;
+Python, website, E2E, and hosted UI suites were likewise untouched.
+
 ## Risks and bottlenecks
 
 1. **The refinement loop is not yet live.** The PM cache contains W2-71 under

@@ -1,0 +1,2 @@
+run	gate_exit	ui_executed	ui_test_result	gate_result	started	elapsed_s
+1	1	no	NONE	Result: FAIL (1 passed, 1 failed: ui-host) in 719s / 1980s budget	2026-07-15T08:07:55Z	720

@@ -43,6 +43,17 @@ XCODE_DERIVED_DATA = ".build/xcode-derived-data"
 # repair the first red signal without reopening Xcode. Ignored (.lf/tmp/*).
 GATE_ARTIFACT_ROOT = REPO_ROOT / ".lf" / "tmp" / "gate"
 
+
+def _run_artifact_root() -> Path:
+    """This invocation's artifact directory, unique per process.
+
+    Scoping it by pid keeps successive gate runs from colliding — notably the
+    UI-host `.xcresult`, which `xcodebuild test` refuses to overwrite (it exits
+    64 on an existing `-resultBundlePath`). A fresh pid-scoped path per run means
+    `--ui-host` can run back-to-back, which the 5/5 host proof requires.
+    """
+    return GATE_ARTIFACT_ROOT / f"run-{os.getpid()}"
+
 # Per-phase wall-clock budgets in seconds, keyed by Command.label. Generous
 # headroom over the measured real-run times in release/GATE_BUDGET.md: a
 # healthy phase never trips its budget, a hung one always does. No phase runs
@@ -272,6 +283,12 @@ _UI_BOOTSTRAP_MARKERS = (
     "UI Testing Failure - App accessibility isn't loaded",
     "The test runner exited with code",
     "Timed out waiting",
+    # The runner launches but never connects because UI automation is denied —
+    # the signature on macOS 26 / Xcode 26 is a hung control session, not an
+    # Apple-events denial. Without these two, a permission gap on this host
+    # misreports as a raw red test (observed: run hung ~710s, exit 65).
+    "hung before establishing connection",
+    "initiating control session with daemon",
     "not permitted to send Apple events",
     "not authorized to send Apple events",
     "AutomationPermission",
@@ -290,7 +307,12 @@ _UI_CAPABILITY_HELP = (
 
 def _ui_host_commands(_changed: list[str]) -> list[Command]:
     swift_dir = REPO_ROOT / "swift"
-    xcresult = REPO_ROOT / XCODE_DERIVED_DATA / "ui-host.xcresult"
+    # Land the result bundle beside this run's phase logs, under the pid-scoped
+    # artifact dir (release/GATE_BUDGET.md, release/UI_HOST_GATE.md). A fixed
+    # path in derived data collided across runs — xcodebuild exits 64 rather
+    # than overwrite an existing bundle, so the second `--ui-host` run onward
+    # died before launching a test. This path is fresh per invocation.
+    xcresult = _run_artifact_root() / "ui-host" / "ui-host.xcresult"
     return [
         Command(["xcodegen", "generate"], swift_dir, "xcodegen"),
         Command(
@@ -611,7 +633,7 @@ def _run_suite(plan: Plan, artifact_root: Path) -> SuiteOutcome:
 
 
 def run_plans(plans: list[Plan]) -> int:
-    artifact_root = GATE_ARTIFACT_ROOT / f"run-{os.getpid()}"
+    artifact_root = _run_artifact_root()
     total_budget = sum(_plan_budget(p) for p in plans if p.run)
     running = [p.suite.name for p in plans if p.run]
     if running:

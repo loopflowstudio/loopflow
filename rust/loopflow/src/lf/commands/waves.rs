@@ -689,36 +689,22 @@ fn project_section(project: &ProjectDetailSnapshot, liveness: Liveness) -> Roadm
 /// The wave `lf status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
-    if let Some(name) = requested {
-        return store
-            .get_wave_by_name(name)
-            .await
-            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-            .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"));
-    }
-    let ambient = ambient_wave()
-        .ok_or_else(|| anyhow!("no wave given and none in context; pass a wave name"))?;
-    // `LF_WAVE_ID` carries the durable wave *id*. Read it as one — a name lookup
-    // is the fallback so a hand-set `LF_WAVE_ID=<name>` still works.
-    if let Ok(id) = ambient.parse::<crate::id::WaveId>() {
-        if let Some(wave) = store
-            .get_wave(&id)
-            .await
-            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-        {
-            return Ok(wave);
-        }
-    }
+    // One shared rule for `--wave` and ambient `LF_WAVE_ID` (durable UUID
+    // first, hand-set name as an intentional fallback). Status needs the row,
+    // so it resolves the name, then requires a registry row for it — a wave
+    // with no row has no runs to report.
+    let name = crate::engine::wave_context::resolve_managed_wave_name(
+        Some(&**store),
+        requested,
+        ambient_wave().as_deref(),
+    )
+    .await
+    .map_err(|err| anyhow!("{err}"))?;
     store
-        .get_wave_by_name(&ambient)
+        .get_wave_by_name(&name)
         .await
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-        .ok_or_else(|| {
-            anyhow!(
-                "ambient wave '{ambient}' ({}) is not in this machine's registry; the context is stale — pass a wave name",
-                crate::engine::wave_context::WAVE_ID_ENV
-            )
-        })
+        .ok_or_else(|| anyhow!("wave '{name}' is not in this machine's registry"))
 }
 
 /// One tmux reading for the whole command. `lf status` checks a handful of

@@ -37,62 +37,63 @@ trace attribution) derive from the resolved row.
 
 ## The one resolver
 
-Add to `engine/wave_context.rs`:
+In `engine/wave_context.rs` (SHIPPED, PR1). The resolver returns a **name**,
+not a `Wave` row — name is the common currency (PM keys files/snapshots by name;
+status looks the row up by name), and only the UUID arm needs the registry, so a
+name-based wave with no registry row (PM's file model) is never gated:
 
 ```rust
 pub enum WaveResolveError {
     NoContext,                 // no --wave and no LF_WAVE_ID
-    StaleIdentity(String),     // LF_WAVE_ID present but not in this registry
-    UnknownExplicit(String),   // --wave <name> not found
+    StaleIdentity(String),     // LF_WAVE_ID (id or name) not in this registry
+    UnknownExplicit(String),   // --wave present but empty after normalization
+    Registry(String),          // the registry read itself failed (I/O)
 }
 
-// Async core: for consumers that already hold a SharedStore (chat/radio/memory).
-// explicit --wave always wins; else LF_WAVE_ID: UUID-first, name fallback.
-pub async fn resolve_managed_wave(
-    store: &SharedStore,
+// Async core: for consumers that already hold a Store (status; later chat/radio).
+pub async fn resolve_managed_wave_name(
+    store: Option<&Store>,
     explicit: Option<&str>,
-) -> Result<Wave, WaveResolveError>;
+    env_wave_id: Option<&str>,
+) -> Result<String, WaveResolveError>;
 
-// Sync wrapper: opens the store on a scratch thread (the existing
-// `resolve_explicit_wave` / `wave_name_for_id` idiom) for sync, store-free
-// call sites like `run_pm`. No store on this machine ⇒ NoContext.
-pub fn resolve_managed_wave_sync(
+// Sync wrapper: reads LF_WAVE_ID from the env; opens the store on a scratch
+// thread ONLY for the UUID arm (the `resolve_explicit_wave` idiom). Explicit
+// and hand-set-name arms touch no store. For sync, store-free `run_pm`.
+pub fn resolve_managed_wave_name_sync(
     explicit: Option<&str>,
-) -> Result<Wave, WaveResolveError>;
+) -> Result<String, WaveResolveError>;
 ```
 
 Resolution order (the contract, verbatim):
-1. **explicit `--wave`** → `normalize_wave_name` → `get_wave_by_name`;
-   `None` ⇒ `UnknownExplicit`. Always wins.
-2. **`LF_WAVE_ID` as durable UUID** → if it parses as `WaveId`, `get_wave`;
-   `Some` ⇒ row. A UUID-shaped id that misses the registry ⇒ `StaleIdentity`.
+1. **explicit `--wave`** → `normalize_wave_name`, returned as a name. No registry
+   membership required. Empty ⇒ `UnknownExplicit`. Always wins.
+2. **`LF_WAVE_ID` as durable UUID** → parses as `WaveId` ⇒ `get_wave` ⇒ its
+   name. A UUID the registry misses ⇒ `StaleIdentity` (never re-read as a name).
 3. **`LF_WAVE_ID` as hand-set name** (intentional fallback) → not UUID-shaped ⇒
-   `get_wave_by_name`; `Some` ⇒ row, `None` ⇒ `StaleIdentity`.
+   used directly as the name. Membership is the consumer's concern.
 4. nothing ⇒ `NoContext`.
 
-This is `resolve_status_wave` generalized: + name-fallback for the UUID-miss
-path is deliberately *stale*, not *retry-as-name* (a real UUID that misses means
-the context outlived its registry, exactly the stale case).
-
-`resolve_status_wave` is deleted and re-expressed as a thin call to this.
+`resolve_status_wave` is re-expressed as: resolve the name, then require a
+registry row for it (a wave with no row has no runs to report).
 
 ## Where the resolver runs (keeps ops registry-free)
 
 PM ops must **not** grow a store dependency — they read `GOAL.md` by wave *name*
 and must stay daemon-less / cache-only. `run_pm` (`lf/commands/ops/mod.rs:373`)
 is **sync and holds no `CliContext`/store** — only `repo_root`. So the seam
-calls `resolve_managed_wave_sync(explicit)`, which opens the local store on a
-scratch thread (exactly as `resolve_explicit_wave` / `wave_name_for_id` already
-do), resolves the row, and passes its resolved **name** down into
-`pm_show`/`pm_update`/… unchanged. `ops/pm.rs::resolve_wave` keeps taking a name;
-the seam guarantees a name is always supplied inside managed context.
+(a shared `ambient_wave` closure in `run_pm`) calls
+`resolve_managed_wave_name_sync(explicit)` for **every** arm and passes the
+resolved name down into `pm_show`/`pm_update`/… unchanged. `NoContext` maps back
+to `None` so a bare command outside managed context keeps its "all waves" /
+"pass --wave" behavior; a stale id is a loud error. `ops/pm.rs::resolve_wave`
+still just normalizes a name.
 
-Async consumers that already hold a `SharedStore` (`chat`, `radio`, `memory`
-via `resolve_target`/`ambient_wave`) call the async core directly — no scratch
-thread. Their `LF_CHANNEL` arm is untouched; only the `WaveId` arm routes
-through the resolver so a hand-set name resolves and errors classify.
-`resolve_status_wave` (`lf status`) already holds a store and becomes a thin
-call to the async core.
+Later PRs: async consumers that hold a `Store` (`chat`, `radio`, `memory` via
+`resolve_target`/`ambient_wave`) call the async core directly — their
+`LF_CHANNEL` arm untouched; only the `WaveId` arm routes through the resolver.
+`resolve_status_wave` (`lf status`, SHIPPED PR1) already holds a store and calls
+the async core, then requires a row for the resolved name.
 
 ## Cache-only preservation
 

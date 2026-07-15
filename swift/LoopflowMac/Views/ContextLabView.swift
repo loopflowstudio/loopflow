@@ -30,11 +30,18 @@ private enum ContextNodeSort: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private struct ContextLabSavedView: Codable, Identifiable {
-    let id: UUID
-    let name: String
+private struct ContextLabSavedView: Codable, Hashable {
     let query: SessionSetQuery
     let mode: ContextLabMode
+
+    var name: String {
+        let repo = query.repoPaths.first
+            .flatMap { URL(fileURLWithPath: $0).lastPathComponent }
+            ?? "All repos"
+        let days = max(1, (query.startedBefore - query.startedAfter) / (24 * 60 * 60))
+        let end = Date(timeIntervalSince1970: TimeInterval(query.startedBefore))
+        return "\(repo) · \(days)d · \(end.formatted(date: .abbreviated, time: .omitted))"
+    }
 }
 
 struct TaskWorkspaceRoute: Codable, Hashable {
@@ -52,31 +59,19 @@ struct ContextLabRoute: Codable, Hashable {
 }
 
 struct ContextLabView: View {
-    let initialRepoPath: String?
+    private let defaultQuery: SessionSetQuery
 
     @Environment(\.palette) private var palette
     @Environment(\.openWindow) private var openWindow
 
+    @State private var query: SessionSetQuery
     @State private var snapshot: ContextLabSnapshot?
     @State private var selectedNodeId = "session-set"
     @State private var focusNodeId = "session-set"
     @State private var mode = ContextLabMode.aggregate
     @State private var laneSort = ContextLaneSort.context
     @State private var nodeSort = ContextNodeSort.tokens
-    @State private var windowDays = 30
-    @State private var windowEnd = Int64(Date().timeIntervalSince1970)
-    @State private var repoPath: String
     @State private var repoDraft: String
-    @State private var wave = ""
-    @State private var project = ""
-    @State private var task = ""
-    @State private var flow = ""
-    @State private var skill = ""
-    @State private var provider = ""
-    @State private var model = ""
-    @State private var surface = ""
-    @State private var outcomes: Set<SessionOutcome> = []
-    @State private var captureStates: Set<CaptureState> = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var traceRequest: TraceAddress?
@@ -85,27 +80,28 @@ struct ContextLabView: View {
 
     init(initialRepoPath: String?, route: ContextLabRoute? = nil) {
         let resolvedInitialPath = initialRepoPath.map(WaveOrigin.resolve)
-        self.initialRepoPath = resolvedInitialPath
-        let path = (route?.query.repoPaths.first ?? resolvedInitialPath).map(WaveOrigin.resolve) ?? ""
-        _repoPath = State(initialValue: path)
-        _repoDraft = State(initialValue: path)
+        let now = Int64(Date().timeIntervalSince1970)
+        let defaultQuery = SessionSetQuery(
+            repoPaths: resolvedInitialPath.map { [$0] } ?? [],
+            startedAfter: now - 30 * 24 * 60 * 60,
+            startedBefore: now,
+            waves: [],
+            projects: [],
+            tasks: [],
+            flows: [],
+            skills: [],
+            providers: [],
+            models: [],
+            surfaces: [],
+            outcomes: [],
+            captureStates: []
+        )
+        self.defaultQuery = defaultQuery
+        var initialQuery = route?.query ?? defaultQuery
+        initialQuery.repoPaths = initialQuery.repoPaths.map(WaveOrigin.resolve)
+        _query = State(initialValue: initialQuery)
+        _repoDraft = State(initialValue: initialQuery.repoPaths.first ?? "")
         if let route {
-            let query = route.query
-            _windowEnd = State(initialValue: query.startedBefore)
-            _windowDays = State(initialValue: max(
-                1,
-                Int((query.startedBefore - query.startedAfter) / (24 * 60 * 60))
-            ))
-            _wave = State(initialValue: query.waves.first ?? "")
-            _project = State(initialValue: query.projects.first ?? "")
-            _task = State(initialValue: query.tasks.first ?? "")
-            _flow = State(initialValue: query.flows.first ?? "")
-            _skill = State(initialValue: query.skills.first ?? "")
-            _provider = State(initialValue: query.providers.first ?? "")
-            _model = State(initialValue: query.models.first ?? "")
-            _surface = State(initialValue: query.surfaces.first ?? "")
-            _outcomes = State(initialValue: Set(query.outcomes))
-            _captureStates = State(initialValue: Set(query.captureStates))
             _selectedNodeId = State(initialValue: route.selectedNodeId)
             _focusNodeId = State(initialValue: route.focusNodeId)
             _mode = State(initialValue: route.mode)
@@ -113,21 +109,14 @@ struct ContextLabView: View {
         _savedViews = State(initialValue: Self.loadSavedViews())
     }
 
-    private var query: SessionSetQuery {
-        SessionSetQuery(
-            repoPaths: repoPath.isEmpty ? [] : [repoPath],
-            startedAfter: windowEnd - Int64(windowDays * 24 * 60 * 60),
-            startedBefore: windowEnd,
-            waves: wave.isEmpty ? [] : [wave],
-            projects: project.isEmpty ? [] : [project],
-            tasks: task.isEmpty ? [] : [task],
-            flows: flow.isEmpty ? [] : [flow],
-            skills: skill.isEmpty ? [] : [skill],
-            providers: provider.isEmpty ? [] : [provider],
-            models: model.isEmpty ? [] : [model],
-            surfaces: surface.isEmpty ? [] : [surface],
-            outcomes: outcomes.sorted { $0.rawValue < $1.rawValue },
-            captureStates: captureStates.sorted { $0.rawValue < $1.rawValue }
+    private var windowDays: Int {
+        max(1, Int((query.startedBefore - query.startedAfter) / (24 * 60 * 60)))
+    }
+
+    private var windowDaysBinding: Binding<Int> {
+        Binding(
+            get: { windowDays },
+            set: { query.startedAfter = query.startedBefore - Int64($0 * 24 * 60 * 60) }
         )
     }
 
@@ -188,7 +177,9 @@ struct ContextLabView: View {
                         .foregroundStyle(palette.textSecondary)
                 }
                 Button {
-                    windowEnd = Int64(Date().timeIntervalSince1970)
+                    let duration = query.startedBefore - query.startedAfter
+                    query.startedBefore = Int64(Date().timeIntervalSince1970)
+                    query.startedAfter = query.startedBefore - duration
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -258,42 +249,42 @@ struct ContextLabView: View {
                     TextField("All local repos", text: $repoDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(Typography.code(10))
-                        .onSubmit { repoPath = repoDraft.trimmingCharacters(in: .whitespaces) }
-                    if repoDraft != repoPath {
-                        Button("Apply repo") {
-                            repoPath = repoDraft.trimmingCharacters(in: .whitespaces)
-                        }
+                        .onSubmit { applyRepoDraft() }
+                    if repoDraft != (query.repoPaths.first ?? "") {
+                        Button("Apply repo") { applyRepoDraft() }
                         .buttonStyle(.borderless)
                         .font(Typography.caption(10))
                     }
                 }
-                Picker("Window", selection: $windowDays) {
+                Picker("Window", selection: windowDaysBinding) {
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
                     Text("90 days").tag(90)
                 }
                 .pickerStyle(.menu)
 
-                facetPicker("Wave", selection: $wave, values: facets(\.wave))
-                facetPicker("Project", selection: $project, values: facets(\.project))
-                facetPicker("Task", selection: $task, values: facets(\.task))
-                facetPicker("Flow", selection: $flow, values: facets(\.flow))
-                facetPicker("Skill", selection: $skill, values: facets(\.skill))
-                facetPicker("Provider", selection: $provider, values: facets { $0.provider })
-                facetPicker("Model", selection: $model, values: facets(\.model))
-                facetPicker("Surface", selection: $surface, values: facets { $0.surface })
+                facetPicker("Wave", query: \.waves, values: facets(\.wave))
+                facetPicker("Project", query: \.projects, values: facets(\.project))
+                facetPicker("Task", query: \.tasks, values: facets(\.task))
+                facetPicker("Flow", query: \.flows, values: facets(\.flow))
+                facetPicker("Skill", query: \.skills, values: facets(\.skill))
+                facetPicker("Provider", query: \.providers, values: facets { $0.provider })
+                facetPicker("Model", query: \.models, values: facets(\.model))
+                facetPicker("Surface", query: \.surfaces, values: facets { $0.surface })
 
                 Divider()
                 railTitle("Outcome")
                 ForEach(SessionOutcome.allCases, id: \.self) { value in
-                    filterToggle(value.rawValue.capitalized, selected: outcomes.contains(value)) {
-                        toggle(value, in: &outcomes)
+                    filterToggle(value.rawValue.capitalized, selected: query.outcomes.contains(value)) {
+                        toggle(value, in: &query.outcomes)
+                        query.outcomes.sort { $0.rawValue < $1.rawValue }
                     }
                 }
                 railTitle("Capture")
                 ForEach(CaptureState.allCases, id: \.self) { value in
-                    filterToggle(displayCapture(value), selected: captureStates.contains(value)) {
-                        toggle(value, in: &captureStates)
+                    filterToggle(displayCapture(value), selected: query.captureStates.contains(value)) {
+                        toggle(value, in: &query.captureStates)
+                        query.captureStates.sort { $0.rawValue < $1.rawValue }
                     }
                 }
 
@@ -303,7 +294,7 @@ struct ContextLabView: View {
 
                 Divider()
                 railTitle("Saved views")
-                ForEach(savedViews) { saved in
+                ForEach(savedViews, id: \.self) { saved in
                     Button {
                         apply(saved)
                     } label: {
@@ -756,10 +747,14 @@ struct ContextLabView: View {
 
     private func facetPicker(
         _ title: String,
-        selection: Binding<String>,
+        query keyPath: WritableKeyPath<SessionSetQuery, [String]>,
         values: [String]
     ) -> some View {
-        Picker(title, selection: selection) {
+        let selection = Binding(
+            get: { query[keyPath: keyPath].first ?? "" },
+            set: { query[keyPath: keyPath] = $0.isEmpty ? [] : [$0] }
+        )
+        return Picker(title, selection: selection) {
             Text("Any").tag("")
             ForEach(values, id: \.self) { Text($0).tag($0) }
         }
@@ -899,57 +894,34 @@ struct ContextLabView: View {
         }
     }
 
+    private func applyRepoDraft() {
+        let path = repoDraft.trimmingCharacters(in: .whitespaces)
+        repoDraft = path
+        query.repoPaths = path.isEmpty ? [] : [WaveOrigin.resolve(path)]
+    }
+
     private func clearFilters() {
-        repoPath = initialRepoPath ?? ""
-        repoDraft = repoPath
-        windowDays = 30
-        windowEnd = Int64(Date().timeIntervalSince1970)
-        wave = ""
-        project = ""
-        task = ""
-        flow = ""
-        skill = ""
-        provider = ""
-        model = ""
-        surface = ""
-        outcomes = []
-        captureStates = []
+        query = defaultQuery
+        query.startedBefore = Int64(Date().timeIntervalSince1970)
+        query.startedAfter = query.startedBefore - 30 * 24 * 60 * 60
+        repoDraft = defaultQuery.repoPaths.first ?? ""
     }
 
     private func saveCurrentView() {
-        let repo = query.repoPaths.first
-            .flatMap { URL(fileURLWithPath: $0).lastPathComponent }
-            ?? "All repos"
-        let name = "\(repo) · \(windowDays)d · \(Date().formatted(date: .abbreviated, time: .omitted))"
-        savedViews.append(ContextLabSavedView(
-            id: UUID(),
-            name: name,
-            query: query,
-            mode: mode
-        ))
+        let saved = ContextLabSavedView(query: query, mode: mode)
+        savedViews.removeAll { $0 == saved }
+        savedViews.append(saved)
         persistSavedViews()
     }
 
     private func apply(_ saved: ContextLabSavedView) {
-        repoPath = saved.query.repoPaths.first ?? ""
-        repoDraft = repoPath
-        windowEnd = saved.query.startedBefore
-        windowDays = max(1, Int((saved.query.startedBefore - saved.query.startedAfter) / (24 * 60 * 60)))
-        wave = saved.query.waves.first ?? ""
-        project = saved.query.projects.first ?? ""
-        task = saved.query.tasks.first ?? ""
-        flow = saved.query.flows.first ?? ""
-        skill = saved.query.skills.first ?? ""
-        provider = saved.query.providers.first ?? ""
-        model = saved.query.models.first ?? ""
-        surface = saved.query.surfaces.first ?? ""
-        outcomes = Set(saved.query.outcomes)
-        captureStates = Set(saved.query.captureStates)
+        query = saved.query
+        repoDraft = query.repoPaths.first ?? ""
         mode = saved.mode
     }
 
     private func delete(_ saved: ContextLabSavedView) {
-        savedViews.removeAll { $0.id == saved.id }
+        savedViews.removeAll { $0 == saved }
         persistSavedViews()
     }
 
@@ -962,14 +934,15 @@ struct ContextLabView: View {
         guard let data = UserDefaults.standard.data(forKey: "contextLabSavedViews"),
               let views = try? JSONDecoder().decode([ContextLabSavedView].self, from: data)
         else { return [] }
-        return views
+        var seen = Set<ContextLabSavedView>()
+        return views.filter { seen.insert($0).inserted }
     }
 
     private var filtersAreEmpty: Bool {
-        repoPath == (initialRepoPath ?? "") && windowDays == 30 && wave.isEmpty && project.isEmpty
-            && task.isEmpty && flow.isEmpty && skill.isEmpty
-            && provider.isEmpty && model.isEmpty && surface.isEmpty && outcomes.isEmpty
-            && captureStates.isEmpty
+        var filters = query
+        filters.startedAfter = defaultQuery.startedAfter
+        filters.startedBefore = defaultQuery.startedBefore
+        return windowDays == 30 && filters == defaultQuery
     }
 }
 
@@ -1289,7 +1262,11 @@ private func editabilityReason(_ evidence: SourceEvidence) -> String {
     return "The source changed since this revision was captured. Select the current revision or restore the file."
 }
 
-private func toggle<Value: Hashable>(_ value: Value, in set: inout Set<Value>) {
-    if set.contains(value) { set.remove(value) } else { set.insert(value) }
+private func toggle<Value: Equatable>(_ value: Value, in values: inout [Value]) {
+    if let index = values.firstIndex(of: value) {
+        values.remove(at: index)
+    } else {
+        values.append(value)
+    }
 }
 #endif

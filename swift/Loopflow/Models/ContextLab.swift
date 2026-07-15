@@ -21,19 +21,19 @@ public enum ContextAssetKind: String, Codable, Sendable, Equatable {
 }
 
 public struct SessionSetQuery: Codable, Hashable, Sendable {
-    public let repoPaths: [String]
-    public let startedAfter: Int64
-    public let startedBefore: Int64
-    public let waves: [String]
-    public let projects: [String]
-    public let tasks: [String]
-    public let flows: [String]
-    public let skills: [String]
-    public let providers: [String]
-    public let models: [String]
-    public let surfaces: [String]
-    public let outcomes: [SessionOutcome]
-    public let captureStates: [CaptureState]
+    public var repoPaths: [String]
+    public var startedAfter: Int64
+    public var startedBefore: Int64
+    public var waves: [String]
+    public var projects: [String]
+    public var tasks: [String]
+    public var flows: [String]
+    public var skills: [String]
+    public var providers: [String]
+    public var models: [String]
+    public var surfaces: [String]
+    public var outcomes: [SessionOutcome]
+    public var captureStates: [CaptureState]
 
     public init(
         repoPaths: [String],

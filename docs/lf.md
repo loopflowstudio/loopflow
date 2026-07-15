@@ -291,6 +291,7 @@ lf trace 66863649               # select an exec; render its process tree
 lf trace 66863649 --json        # inspect the same tree and its skill launches
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
+lf top                          # last-hour output throughput + live lf processes
 lf doctor                       # audit continuity, identity, lineage, coverage
 lf doctor --json                # machine-readable audit
 ```

@@ -1301,7 +1301,7 @@ pub enum AuthCommand {
         /// Create or reconnect an isolated OAuth account profile
         #[arg(long)]
         account: Option<String>,
-        /// Chrome profile directory, name, or signed-in email for Claude OAuth
+        /// Chrome profile directory, name, or signed-in email for browser OAuth
         #[arg(long, requires = "account", conflicts_with = "profile")]
         chrome_profile: Option<String>,
         /// Use this Loopflow profile's host-local Chrome binding
@@ -1691,6 +1691,35 @@ mod tests {
             }) if provider == "claude"
                 && account.as_deref() == Some("primary")
                 && profile == "personal@example.com"
+        ));
+    }
+
+    #[test]
+    fn auth_connect_accepts_a_codex_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "connect",
+            "codex",
+            "--account",
+            "engineering",
+            "--profile",
+            "engineering@example.com",
+        ])
+        .expect("parse Codex profile binding");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Connect {
+                    provider,
+                    account,
+                    chrome_profile: None,
+                    profile: Some(profile),
+                }
+            }) if provider == "codex"
+                && account.as_deref() == Some("engineering")
+                && profile == "engineering@example.com"
         ));
     }
 

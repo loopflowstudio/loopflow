@@ -16,7 +16,7 @@ use crate::profile::{
     ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount,
     ProviderProfileCandidate, RepoProfileRoute,
 };
-use crate::provider_auth::Provider;
+use crate::provider_auth::{provider_account_auth_status, AuthStatus, Provider};
 use crate::repository::RepoId;
 use crate::store::{open_store, ProviderAccount, ProviderAccountId, SharedStore, StoreError};
 use crate::store::{CredentialState, RoutingState};
@@ -56,6 +56,11 @@ pub enum ProviderAccountError {
     Runtime(String),
     #[error("all {provider} accounts are unavailable{reset}")]
     NoHealthyAccount { provider: Provider, reset: String },
+    #[error("no authenticated {provider} account remains; reconnect {accounts}")]
+    NoAuthenticatedAccount {
+        provider: Provider,
+        accounts: String,
+    },
     #[error("repository {repo_id} has no {provider} account in its profile route")]
     NoMappedAccount { provider: Provider, repo_id: RepoId },
 }
@@ -585,53 +590,90 @@ pub async fn resolve_provider_account(
             repo_id: routed_repo_id,
         });
     }
-    let selection = store
-        .select_provider_profile(provider, &candidates, provider_session_id)
-        .await?;
-    let Some(selection) = selection else {
-        let accounts = store
-            .list_provider_accounts(Some(provider.as_str()))
+    let mut unauthenticated = Vec::new();
+    loop {
+        let selection = store
+            .select_provider_profile(provider, &candidates, provider_session_id)
             .await?;
-        let now = now_unix();
-        let reset = accounts
-            .iter()
-            .filter(|account| {
-                account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date())
-                    && candidates
-                        .iter()
-                        .any(|candidate| candidate.account_id == account.account_id)
-            })
-            .filter_map(|account| account.cooldown_until.filter(|until| *until > now))
-            .min()
-            .map(format_reset_time)
-            .unwrap_or_default();
-        return Err(ProviderAccountError::NoHealthyAccount { provider, reset });
-    };
-    let profile_id = selection.profile_id;
-    let account_id = selection.account.account_id.clone();
-    let credential = match access_tokens.remove(&account_id) {
-        Some(access_token) => AccountCredential::AccessToken(access_token),
-        None => match selection.account.home {
-            Some(home) => {
-                let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                ensure_account_profile_at(&operator_home, &home, provider)?;
-                AccountCredential::NativeHome(home)
+        let Some(selection) = selection else {
+            if !unauthenticated.is_empty() {
+                return Err(ProviderAccountError::NoAuthenticatedAccount {
+                    provider,
+                    accounts: unauthenticated.join(", "),
+                });
             }
-            None => {
-                return Err(ProviderAccountError::ForwardedBundle(format!(
-                    "missing access token for {provider}/{account_id}"
-                )))
-            }
-        },
-    };
-    Ok(Some(ProviderAccountRoute {
-        provider,
-        profile_id,
-        account_id,
-        credential,
-        resume_requested_session: selection.resume_requested_session,
-        store,
-    }))
+            let accounts = store
+                .list_provider_accounts(Some(provider.as_str()))
+                .await?;
+            let now = now_unix();
+            let reset = accounts
+                .iter()
+                .filter(|account| {
+                    account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date())
+                        && candidates
+                            .iter()
+                            .any(|candidate| candidate.account_id == account.account_id)
+                })
+                .filter_map(|account| account.cooldown_until.filter(|until| *until > now))
+                .min()
+                .map(format_reset_time)
+                .unwrap_or_default();
+            return Err(ProviderAccountError::NoHealthyAccount { provider, reset });
+        };
+        let profile_id = selection.profile_id;
+        let account_id = selection.account.account_id.clone();
+        let credential = match access_tokens.remove(&account_id) {
+            Some(access_token) => AccountCredential::AccessToken(access_token),
+            None => match selection.account.home.as_deref() {
+                Some(home) => {
+                    let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+                    ensure_account_profile_at(&operator_home, home, provider)?;
+                    let status = provider_account_auth_status(provider, home.to_path_buf())
+                        .await
+                        .map_err(|error| {
+                            ProviderAccountError::Runtime(format!(
+                                "check {provider} account '{account_id}': {error}"
+                            ))
+                        })?;
+                    if !retain_authenticated_account(&store, &selection.account, &status).await? {
+                        unauthenticated.push(format!(
+                            "'{account_id}' with `lf auth connect {provider} --account {account_id}`"
+                        ));
+                        continue;
+                    }
+                    AccountCredential::NativeHome(home.to_path_buf())
+                }
+                None => {
+                    return Err(ProviderAccountError::ForwardedBundle(format!(
+                        "missing access token for {provider}/{account_id}"
+                    )))
+                }
+            },
+        };
+        return Ok(Some(ProviderAccountRoute {
+            provider,
+            profile_id,
+            account_id,
+            credential,
+            resume_requested_session: selection.resume_requested_session,
+            store,
+        }));
+    }
+}
+
+async fn retain_authenticated_account(
+    store: &SharedStore,
+    account: &ProviderAccount,
+    status: &AuthStatus,
+) -> Result<bool, ProviderAccountError> {
+    if matches!(status, AuthStatus::Active { .. }) {
+        return Ok(true);
+    }
+    let mut account = account.clone();
+    account.credential_state = CredentialState::Missing;
+    account.updated_at = now_unix();
+    store.upsert_provider_account(&account).await?;
+    Ok(false)
 }
 
 async fn hydrate_forwarded_profile_bundle(
@@ -1082,6 +1124,38 @@ mod tests {
                 .map(PathBuf::from);
             assert_eq!(selected_home.as_deref(), Some(expected_home.as_path()));
         }
+    }
+
+    #[tokio::test]
+    async fn expired_native_account_leaves_automatic_rotation() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&crate::store::StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let account_id = parse_account_id("primary").unwrap();
+        let account = new_account(
+            Provider::Claude,
+            account_id.clone(),
+            temp.path().join("primary"),
+            None,
+        );
+        store.upsert_provider_account(&account).await.unwrap();
+
+        let retained = retain_authenticated_account(&store, &account, &AuthStatus::Expired)
+            .await
+            .unwrap();
+
+        assert!(!retained);
+        let account = store
+            .get_provider_account(Provider::Claude.as_str(), &account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.credential_state, CredentialState::Missing);
     }
 
     #[tokio::test]

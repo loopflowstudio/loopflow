@@ -305,6 +305,21 @@ impl SqliteStore {
         })
     }
 
+    /// Open only the stable run ledger surface without schema or token writes.
+    /// Observability commands use this when a source build may be older than
+    /// the machine's release-owned database.
+    pub(crate) fn open_run_ledger_read_only(path: &Path) -> StoreResult<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
+        validate_run_events_schema(&conn)?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
     pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

@@ -44,6 +44,30 @@ private struct RoadmapTaskSelection: Identifiable {
     var id: String { "\(wave.id):\(task.id)" }
 }
 
+/// One query, two shapes. Both read the single `lf roadmap` snapshot: NOW
+/// re-shapes it into a flat, cross-wave, attention-grouped list; ROADMAP keeps
+/// the Wave › Project › Task tree.
+enum WorkLens: String, CaseIterable, Identifiable {
+    case now
+    case roadmap
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .now: "Now"
+        case .roadmap: "Roadmap"
+        }
+    }
+}
+
+/// A Task row is actionable when the user can click something on it — the one
+/// contextual action, or Interrupt. When neither applies the row is not hidden;
+/// it is greyed with its `next_move.reason` attached, so nothing silently
+/// disappears (the OmniFocus failure mode). One hiding mechanism, never two.
+func roadmapTaskIsActionable(_ task: RoadmapTask) -> Bool {
+    roadmapTaskAction(task) != nil || roadmapTaskCanInterrupt(task)
+}
+
 /// The default Wave Chat surface: one machine-wide `lf roadmap --json` read,
 /// rendered without re-querying each Wave or inventing another work model.
 struct RoadmapView: View {
@@ -52,6 +76,7 @@ struct RoadmapView: View {
 
     @Environment(\.palette) private var palette
     @StateObject private var terminalStore = TaskTerminalStore.shared
+    @State private var lens: WorkLens = .now
     @State private var snapshot: RoadmapSnapshot?
     @State private var queryError: String?
     @State private var controlError: String?
@@ -124,14 +149,28 @@ struct RoadmapView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text("Roadmap")
+                Text("Work")
                     .font(Typography.sectionTitle(20))
                     .foregroundStyle(palette.text)
-                Text(repoPath == nil ? "Every registered Wave" : "Registered Waves in this repository")
-                    .font(Typography.caption(11))
-                    .foregroundStyle(palette.textSecondary)
+                HStack(spacing: Spacing.xs) {
+                    Text(repoPath == nil ? "Every registered Wave" : "Registered Waves in this repository")
+                    if let synced = snapshot?.generatedAt {
+                        Text("· as of \(syncedLabel(synced))")
+                    }
+                }
+                .font(Typography.caption(11))
+                .foregroundStyle(palette.textSecondary)
             }
             Spacer()
+            Picker("Lens", selection: $lens) {
+                ForEach(WorkLens.allCases) { lens in
+                    Text(lens.title).tag(lens)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityIdentifier("work-lens")
             if isRefreshing {
                 ProgressView()
                     .controlSize(.small)
@@ -143,11 +182,22 @@ struct RoadmapView: View {
             }
             .buttonStyle(.borderless)
             .disabled(isRefreshing)
-            .help("Refresh roadmap")
-            .accessibilityLabel("Refresh roadmap")
+            .help("Refresh work")
+            .accessibilityLabel("Refresh work")
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
+    }
+
+    /// The roadmap read's clock. RFC3339 in, short local time out; the raw
+    /// string if it will not parse — staleness must always be visible, never
+    /// swallowed by a formatting failure.
+    private func syncedLabel(_ iso: String) -> String {
+        guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
+        let out = DateFormatter()
+        out.dateStyle = .none
+        out.timeStyle = .short
+        return out.string(from: date)
     }
 
     @ViewBuilder
@@ -167,18 +217,37 @@ struct RoadmapView: View {
                 systemImage: "map"
             )
         } else {
+            switch lens {
+            case .now: nowContent
+            case .roadmap: roadmapContent
+            }
+        }
+    }
+
+    private var nowSectionsList: [NowSection] {
+        nowSections(from: visibleWaves)
+    }
+
+    @ViewBuilder
+    private var nowContent: some View {
+        if nowSectionsList.isEmpty {
+            ContentUnavailableView(
+                "Nothing needs attention",
+                systemImage: "checkmark.circle",
+                description: Text("No live or stopped work across these Waves. Switch to Roadmap for the full plan.")
+            )
+        } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                    ForEach(visibleWaves, id: \.wave.id) { roadmap in
-                        RoadmapWaveCard(
-                            roadmap: roadmap,
+                    ForEach(nowSectionsList) { section in
+                        NowSectionView(
+                            section: section,
                             activeControlId: activeControlId,
-                            onOpen: { openWave(roadmap.wave) },
-                            onTaskAction: { task, action in
-                                perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
+                            onTaskAction: { row, action in
+                                perform(action, on: RoadmapTaskSelection(wave: row.wave, task: row.task))
                             },
-                            onInterrupt: { task in
-                                interruptSelection = RoadmapTaskSelection(wave: roadmap.wave, task: task)
+                            onInterrupt: { row in
+                                interruptSelection = RoadmapTaskSelection(wave: row.wave, task: row.task)
                             },
                             onOpenWorktree: openWorktree
                         )
@@ -188,8 +257,34 @@ struct RoadmapView: View {
                 .frame(maxWidth: 920, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
-            .accessibilityIdentifier("wave-roadmap")
+            .accessibilityIdentifier("work-now")
         }
+    }
+
+    @ViewBuilder
+    private var roadmapContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                ForEach(visibleWaves, id: \.wave.id) { roadmap in
+                    RoadmapWaveCard(
+                        roadmap: roadmap,
+                        activeControlId: activeControlId,
+                        onOpen: { openWave(roadmap.wave) },
+                        onTaskAction: { task, action in
+                            perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
+                        },
+                        onInterrupt: { task in
+                            interruptSelection = RoadmapTaskSelection(wave: roadmap.wave, task: task)
+                        },
+                        onOpenWorktree: openWorktree
+                    )
+                }
+            }
+            .padding(Spacing.xl)
+            .frame(maxWidth: 920, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .accessibilityIdentifier("wave-roadmap")
     }
 
     private func evidenceBanner(title: String, detail: String) -> some View {
@@ -491,42 +586,212 @@ private struct RoadmapTaskRow: View {
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(2)
-                if let runtime = task.runtime {
-                    Text("\(runtime.status.rawValue) · \(runtime.provider)")
-                        .font(Typography.caption(9))
-                        .foregroundStyle(palette.textSecondary)
-                }
-                HStack(spacing: Spacing.xs) {
-                    if let action = roadmapTaskAction(task) {
-                        Button(action.label) { onAction(action) }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .disabled(activeControlId != nil)
-                    }
-                    if roadmapTaskCanInterrupt(task) {
-                        Button("Interrupt", role: .destructive) { onInterrupt() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(activeControlId != nil)
-                    }
-                    if let workspace = task.reference.workspace {
-                        Button("Worktree") { onOpenWorktree(workspace) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                    if let github = task.activePr?.publication?.github {
-                        Link("PR #\(github.number)", destination: github.url)
-                            .font(Typography.caption(10))
-                    }
-                    if isActing {
-                        ProgressView().controlSize(.small)
-                    }
-                }
+                WorkChannelChips(task: task)
+                TaskActionCluster(
+                    task: task,
+                    isActing: isActing,
+                    controlsDisabled: activeControlId != nil,
+                    onAction: onAction,
+                    onInterrupt: onInterrupt,
+                    onOpenWorktree: onOpenWorktree
+                )
             }
         }
         .padding(Spacing.sm)
         .background(palette.background.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
+    }
+}
+
+/// The three orthogonal facts every work row carries, on independent channels,
+/// never collapsed into one status word: PM completion, Session status, and
+/// process liveness. `runtime == nil` means no Session — an Available Task,
+/// distinct from a dead process.
+private struct WorkChannelChips: View {
+    let task: RoadmapTask
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            channel("PM", task.task.completed ? "done" : "open",
+                    task.task.completed ? Color.statusSuccess : palette.textSecondary)
+            if let runtime = task.runtime {
+                channel("Session", runtime.status.rawValue, sessionColor(runtime.status))
+                channel("Process", runtime.processAlive ? "alive" : "dead",
+                        runtime.processAlive ? Color.statusSuccess : Color.statusNeutral)
+            } else {
+                channel("Session", "none", palette.textSecondary)
+            }
+        }
+    }
+
+    private func channel(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 2) {
+            Text(label).foregroundStyle(palette.textSecondary)
+            Text(value).foregroundStyle(color)
+        }
+        .font(Typography.caption(9))
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, 1)
+        .background(palette.surfaceMuted.opacity(0.5))
+        .clipShape(Capsule())
+    }
+
+    private func sessionColor(_ status: TaskSessionStatus) -> Color {
+        switch status {
+        case .running, .starting: .statusSuccess
+        case .failed: .statusError
+        case .blocked, .waiting: .statusWarning
+        case .completed, .abandoned: .statusNeutral
+        case .created: .statusInfo
+        }
+    }
+}
+
+/// The one contextual action plus the always-available Worktree/PR affordances,
+/// shared by the ROADMAP tree and the NOW list so both drive the exact same
+/// audited lifecycle verbs.
+private struct TaskActionCluster: View {
+    let task: RoadmapTask
+    let isActing: Bool
+    let controlsDisabled: Bool
+    let onAction: (RoadmapTaskAction) -> Void
+    let onInterrupt: () -> Void
+    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            if let action = roadmapTaskAction(task) {
+                Button(action.label) { onAction(action) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(controlsDisabled)
+            }
+            if roadmapTaskCanInterrupt(task) {
+                Button("Interrupt", role: .destructive) { onInterrupt() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(controlsDisabled)
+            }
+            if let workspace = task.reference.workspace {
+                Button("Worktree") { onOpenWorktree(workspace) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            if let github = task.activePr?.publication?.github {
+                Link("PR #\(github.number)", destination: github.url)
+                    .font(Typography.caption(10))
+            }
+            if isActing {
+                ProgressView().controlSize(.small)
+            }
+        }
+    }
+}
+
+private struct NowSectionView: View {
+    let section: NowSection
+    let activeControlId: String?
+    let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
+    let onInterrupt: (NowRow) -> Void
+    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                Text(section.group.title)
+                    .font(Typography.sectionTitle(15))
+                    .foregroundStyle(nowColor(section.group))
+                Text("\(section.rows.count)")
+                    .font(Typography.caption(10).weight(.semibold))
+                    .foregroundStyle(palette.textSecondary)
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, 1)
+                    .background(palette.surfaceMuted.opacity(0.6))
+                    .clipShape(Capsule())
+                Spacer()
+            }
+            ForEach(section.rows) { row in
+                NowRowView(
+                    row: row,
+                    activeControlId: activeControlId,
+                    onAction: { action in onTaskAction(row, action) },
+                    onInterrupt: { onInterrupt(row) },
+                    onOpenWorktree: onOpenWorktree
+                )
+            }
+        }
+    }
+
+    private func nowColor(_ group: NowGroup) -> Color {
+        switch group {
+        case .readyForReview: .statusInfo
+        case .needsInput: .statusWarning
+        case .working: .statusSuccess
+        case .stopped: .statusNeutral
+        case .failed: .statusError
+        }
+    }
+}
+
+private struct NowRowView: View {
+    let row: NowRow
+    let activeControlId: String?
+    let onAction: (RoadmapTaskAction) -> Void
+    let onInterrupt: () -> Void
+    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+
+    @Environment(\.palette) private var palette
+
+    private var task: RoadmapTask { row.task }
+    private var isActing: Bool { activeControlId == "task:\(task.id)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                if let issueURL = task.reference.issueUrl {
+                    Link(task.task.identifier, destination: issueURL)
+                        .font(Typography.caption(10).weight(.semibold))
+                } else {
+                    Text(task.task.identifier)
+                        .font(Typography.caption(10).weight(.semibold))
+                        .foregroundStyle(palette.textSecondary)
+                }
+                Text(task.task.name)
+                    .font(Typography.caption(12))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(2)
+                Spacer()
+                Text("\(row.wave.name) · \(row.projectName)")
+                    .font(Typography.caption(9))
+                    .foregroundStyle(palette.textSecondary)
+                    .lineLimit(1)
+            }
+            Text(task.nextMove.reason)
+                .font(Typography.caption(10))
+                .foregroundStyle(palette.textSecondary)
+                .lineLimit(2)
+            WorkChannelChips(task: task)
+            TaskActionCluster(
+                task: task,
+                isActing: isActing,
+                controlsDisabled: activeControlId != nil,
+                onAction: onAction,
+                onInterrupt: onInterrupt,
+                onOpenWorktree: onOpenWorktree
+            )
+        }
+        .padding(Spacing.sm)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.sm)
+                .stroke(palette.border, lineWidth: 1)
+        }
+        .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
 

@@ -26,8 +26,8 @@ use crate::session_context::{
 };
 use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::task::{
-    AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
-    TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionStatus,
+    AfterMerge, CiCheck, CiObservation, CiState, GithubPr, PmWritebackOperation, PmWritebackState,
+    PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionStatus,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -423,6 +423,7 @@ pub fn task_run(
             publication: None,
             merge_commit: None,
             abandoned_at: None,
+            ci_observation: None,
             created_at: now,
             updated_at: now,
         };
@@ -874,6 +875,7 @@ pub(crate) fn attach_task_github_pr(
         publication.github = Some(GithubPr {
             number,
             url: url.clone(),
+            head_sha: github_pr.head_sha.clone(),
         });
         pr.updated_at = time::OffsetDateTime::now_utc();
         match lease.as_ref() {
@@ -1313,6 +1315,41 @@ pub(crate) async fn reconcile_task_pr_for_lease(
     reconcile_task_pr_with_authority(store, session, Some(lease)).await
 }
 
+/// Read the open PR's required checks and classify them for `head_sha`. Returns
+/// `None` — CI state unknown, status falls back to plain review waiting — when
+/// GitHub reports no head, there are no required checks, or gh is unavailable.
+/// Failure dominates: any failing required check makes the head `Failing` even
+/// while others are still pending.
+fn observe_required_checks(
+    worktree: &Path,
+    branch: &str,
+    head_sha: Option<&str>,
+    now: time::OffsetDateTime,
+) -> Option<CiObservation> {
+    let head_sha = head_sha?.to_string();
+    let checks = crate::ops::pr::required_check_state(worktree, branch)?;
+    let state = if checks.failing {
+        CiState::Failing
+    } else if checks.pending {
+        CiState::Pending
+    } else {
+        CiState::Passing
+    };
+    Some(CiObservation {
+        head_sha,
+        state,
+        failing_checks: checks
+            .failing_checks
+            .into_iter()
+            .map(|check| CiCheck {
+                name: check.name,
+                url: check.url,
+            })
+            .collect(),
+        observed_at: now,
+    })
+}
+
 async fn reconcile_task_pr_with_authority(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -1351,6 +1388,7 @@ async fn reconcile_task_pr_with_authority(
     publication.github = Some(GithubPr {
         number,
         url: url.clone(),
+        head_sha: github_pr.head_sha.clone(),
     });
 
     let pr_event = match github_pr.state.as_str() {
@@ -1362,6 +1400,7 @@ async fn reconcile_task_pr_with_authority(
                 ))
             })?;
             pr.merge_commit = Some(merge_commit.clone());
+            pr.ci_observation = None;
             if pr
                 .publication
                 .as_ref()
@@ -1394,6 +1433,7 @@ async fn reconcile_task_pr_with_authority(
         }
         "closed" => {
             pr.abandoned_at = Some(now);
+            pr.ci_observation = None;
             if !session.status.is_process_active() {
                 session.set_status(
                     TaskSessionStatus::Waiting,
@@ -1409,6 +1449,8 @@ async fn reconcile_task_pr_with_authority(
                     format!("pull request #{} is open for review", github_pr.number),
                 );
             }
+            pr.ci_observation =
+                observe_required_checks(&session.worktree, &pr.branch, github_pr.head_sha.as_deref(), now);
             Some(TaskEventKind::PrOpened {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
@@ -1658,6 +1700,7 @@ async fn ensure_working_pr_with_authority(
         publication: None,
         merge_commit: None,
         abandoned_at: None,
+        ci_observation: None,
         created_at: now,
         updated_at: now,
     };
@@ -2742,6 +2785,7 @@ mod tests {
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         store.create_wave(&wave).await.expect("create wave");
         store
@@ -2822,6 +2866,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 911,
                 url: "https://example.com/pr/911".to_string(),
+                head_sha: None,
             }),
         });
         first.merge_commit = Some("merge-911".to_string());
@@ -2869,6 +2914,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 907,
                 url: "https://example.com/pr/907".to_string(),
+                head_sha: None,
             }),
         });
         first.merge_commit = Some("merge-907".to_string());

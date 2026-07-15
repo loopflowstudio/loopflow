@@ -24,7 +24,9 @@ use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{AfterMerge, PrPhase, TaskPr, TaskSession, TaskSessionStatus};
+use crate::task::{
+    AfterMerge, CiObservation, CiState, PrPhase, TaskPr, TaskSession, TaskSessionStatus,
+};
 use crate::wave::server::live_endpoint;
 use crate::wave::Wave;
 
@@ -1110,6 +1112,7 @@ async fn snapshot_task_detail(
         Some(session) => next_move_for_task(
             session.status,
             active.map(TaskPr::phase),
+            active.and_then(|pr| pr.fresh_ci()),
             &session.status_reason,
         ),
         None if item.completed => NextMove {
@@ -1284,24 +1287,59 @@ fn next_move_for_project(status: ProjectSessionStatus, reason: &str) -> NextMove
 fn next_move_for_task(
     status: TaskSessionStatus,
     pr_phase: Option<PrPhase>,
+    ci: Option<&CiObservation>,
     reason: &str,
 ) -> NextMove {
-    let owner = if pr_phase == Some(PrPhase::Open) {
-        NextMoveOwner::Review
-    } else {
-        match status {
-            TaskSessionStatus::Created
-            | TaskSessionStatus::Starting
-            | TaskSessionStatus::Running => NextMoveOwner::Task,
-            TaskSessionStatus::Waiting | TaskSessionStatus::Blocked | TaskSessionStatus::Failed => {
-                NextMoveOwner::Project
-            }
-            TaskSessionStatus::Completed | TaskSessionStatus::Abandoned => NextMoveOwner::Project,
+    // An open PR's next move is CI-derived while a fresh required-check reading
+    // exists for the current head; otherwise it is the review/merge gate.
+    if pr_phase == Some(PrPhase::Open) {
+        if let Some(ci) = ci {
+            return match ci.state {
+                CiState::Pending => NextMove {
+                    owner: NextMoveOwner::Ci,
+                    reason: "required checks are still running".to_string(),
+                },
+                CiState::Failing => NextMove {
+                    owner: NextMoveOwner::Ci,
+                    reason: ci_failure_reason(ci),
+                },
+                CiState::Passing => NextMove {
+                    owner: NextMoveOwner::Review,
+                    reason: "checks passed; awaiting review".to_string(),
+                },
+            };
         }
+        return NextMove {
+            owner: NextMoveOwner::Review,
+            reason: reason.to_string(),
+        };
+    }
+    let owner = match status {
+        TaskSessionStatus::Created | TaskSessionStatus::Starting | TaskSessionStatus::Running => {
+            NextMoveOwner::Task
+        }
+        TaskSessionStatus::Waiting | TaskSessionStatus::Blocked | TaskSessionStatus::Failed => {
+            NextMoveOwner::Project
+        }
+        TaskSessionStatus::Completed | TaskSessionStatus::Abandoned => NextMoveOwner::Project,
     };
     NextMove {
         owner,
         reason: reason.to_string(),
+    }
+}
+
+/// A one-line reason naming the failing required checks, for `lf status`.
+fn ci_failure_reason(ci: &CiObservation) -> String {
+    let names: Vec<&str> = ci
+        .failing_checks
+        .iter()
+        .map(|check| check.name.as_str())
+        .collect();
+    if names.is_empty() {
+        "required checks failed".to_string()
+    } else {
+        format!("required checks failed: {}", names.join(", "))
     }
 }
 

@@ -1014,6 +1014,7 @@ mod tests {
             publication: None,
             merge_commit: None,
             abandoned_at: None,
+            ci_observation: None,
             created_at: task.created_at,
             updated_at: task.updated_at,
         }
@@ -1184,6 +1185,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 878,
                 url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+                head_sha: None,
             }),
         });
         store.update_task_pr(&pr).await.unwrap();
@@ -1228,6 +1230,7 @@ mod tests {
                 github: Some(GithubPr {
                     number: 878,
                     url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+                    head_sha: None,
                 }),
             });
             (task, pr)
@@ -1362,6 +1365,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 898,
                 url: "https://github.com/loopflow/loopflow/pull/898".to_string(),
+                head_sha: None,
             }),
         });
         store.update_task_pr(&pr).await.unwrap();

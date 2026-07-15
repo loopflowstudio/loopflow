@@ -705,6 +705,7 @@ mod tests {
             publication: None,
             merge_commit: None,
             abandoned_at: None,
+            ci_observation: None,
             created_at: session.created_at,
             updated_at: session.updated_at,
         }
@@ -1365,6 +1366,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 101,
                 url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+                head_sha: None,
             }),
         });
         first.merge_commit = Some("merge-101".to_string());
@@ -1382,6 +1384,7 @@ mod tests {
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
@@ -1417,6 +1420,7 @@ mod tests {
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         assert!(store
             .settle_task_pr(&abandoned, Some(&conflicting))
@@ -1462,6 +1466,7 @@ mod tests {
         pr.publication.as_mut().unwrap().github = Some(GithubPr {
             number: 101,
             url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+            head_sha: None,
         });
         store.update_task_pr(&pr).await.unwrap();
 

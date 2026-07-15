@@ -1273,6 +1273,7 @@ mod tests {
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         store.create_task_session(&session, &pr).await.unwrap();
         session.begin_generation(format!("task-{provider}"));

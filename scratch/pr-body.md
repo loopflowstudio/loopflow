@@ -28,14 +28,17 @@ cargo run -q -p loopflow --bin lf -- \
   context --days 30 --repo "$PWD" --current-revision-only --json
 ```
 
-On the July 15 live Loopflow ledger, 55 sessions, 131 launches, and 139 turns
-produced 1,053,450 attributed tokens. The aggregate root and sum of its children
-both equal 1,053,450; eight provider-total-only turns remain visible only in
+On the July 15 live Loopflow ledger, 57 sessions, 133 launches, and 141 turns
+produced 1,055,973 attributed tokens. The aggregate root and sum of its children
+both equal 1,055,973; eight provider-total-only turns remain visible only in
 coverage. **Observed steering only** reduces that population to two sessions,
 three launches, 11 turns, and 31,318 tokens. **Contains current file
 instruction** returns three sessions, three launches, three turns, and 30,982
-tokens. The captured `LOOPFLOW.md` revision is now historical and is correctly
-excluded as a matching revision rather than mislabeled current.
+tokens. Historical coarse capture is visibly labeled **Unattributed** rather
+than presented as prompt formatting; new captures preserve nested and repeated
+semantic sources instead of dropping them into that remainder. The captured
+`LOOPFLOW.md` revision is now historical and is correctly excluded as a matching
+revision rather than mislabeled current.
 
 ## Intent
 
@@ -63,6 +66,9 @@ historical trace.
 - Keep the session set as the primary object; there is no instruction-admin
   catalog or copied prompt database.
 - Keep prompt and conversation bodies closed until **Open trace**.
+- Keep historical capture immutable and name its residual category
+  **Unattributed**. For new captures, specific source ranges win and enclosing
+  generated goals receive the unclaimed gaps around them.
 - Build flame identity as context kind → canonical source → content revision,
   with provider-total-only capture excluded from attributed geometry.
 - Treat observed steering and current-file identity as launch predicates, then

@@ -549,22 +549,25 @@ pub(crate) fn attributed_context(
                     label: String,
                     source_path: Option<String>,
                     included_by: &str| {
-        let channel = if system_prompt.contains(content) {
-            Some(ContextChannel::System)
-        } else if task_prompt.contains(content) {
-            Some(ContextChannel::Task)
-        } else {
-            None
-        };
-        if let Some(channel) = channel.filter(|_| !content.is_empty()) {
+        if content.is_empty() {
+            return;
+        }
+        for channel in [ContextChannel::System, ContextChannel::Task]
+            .into_iter()
+            .filter(|channel| match channel {
+                ContextChannel::System => system_prompt.contains(content),
+                ContextChannel::Task => task_prompt.contains(content),
+            })
+        {
             specs.push(ContextAssetSpec {
                 channel,
                 kind,
                 scope,
-                label,
-                source_path,
+                label: label.clone(),
+                source_path: source_path.clone(),
                 included_by: included_by.to_string(),
                 content: content.to_string(),
+                match_all_occurrences: !matches!(included_by, "message" | "vendor_skill"),
             });
         }
     };
@@ -845,9 +848,14 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_interactive_run, should_launch_via_skill, skill_launch_seed, split_skill_args};
+    use super::{
+        attributed_context, is_interactive_run, should_launch_via_skill, skill_launch_seed,
+        split_skill_args,
+    };
+    use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
     use crate::engine::{Config, Skill, Surface};
     use crate::lf::Cli;
+    use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
 
     #[test]
@@ -970,6 +978,50 @@ mod tests {
         assert!(!should_launch_via_skill("npx/vercel-labs/deep-research"));
         assert!(!should_launch_via_skill("rams/rams"));
         assert!(should_launch_via_skill("implement"));
+    }
+
+    #[test]
+    fn attributed_context_keeps_nested_message_and_repeated_channel_sources() {
+        let components = PromptComponents {
+            wave_memory: Some(Document {
+                path: "wave/product/MEMORY.md".to_string(),
+                content: "MEMORY".to_string(),
+                source: DocumentSource::WaveMemory,
+            }),
+            message: Some("outer MEMORY remainder".to_string()),
+            message_context: Some((ContextAssetKind::Goal, ContextScope::Step)),
+            ..PromptComponents::default()
+        };
+
+        let prepared = attributed_context(&components, "MEMORY", "outer MEMORY remainder", &[]);
+
+        assert_eq!(
+            prepared.system.unwrap().assets[0].kind,
+            ContextAssetKind::Memory
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Memory)
+                .count(),
+            1
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Goal)
+                .count(),
+            2
+        );
+        assert!(prepared
+            .task
+            .assets
+            .iter()
+            .all(|asset| asset.kind != ContextAssetKind::Assembly));
     }
 
     #[test]

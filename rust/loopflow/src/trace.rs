@@ -341,6 +341,8 @@ pub struct ContextAssetSpec {
     pub source_path: Option<String>,
     pub included_by: String,
     pub content: String,
+    /// Attribute intentional duplicate renderings; false for speech and short vendor names.
+    pub match_all_occurrences: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -498,11 +500,34 @@ fn render_attributed_channel(
         while let Some(relative) = text[offset..].find(&spec.content) {
             let start = offset + relative;
             let end = start + spec.content.len();
-            if claimed
+            let mut blockers = claimed
                 .iter()
-                .all(|(other_start, other_end, _)| end <= *other_start || start >= *other_end)
-            {
-                claimed.push((start, end, spec));
+                .filter_map(|(other_start, other_end, _)| {
+                    let overlap_start = start.max(*other_start);
+                    let overlap_end = end.min(*other_end);
+                    (overlap_start < overlap_end).then_some((overlap_start, overlap_end))
+                })
+                .collect::<Vec<_>>();
+            blockers.sort_unstable();
+
+            // Specs are ordered from specific sources to enclosing messages.
+            // Preserve earlier ownership and give the enclosing source its gaps.
+            let mut cursor = start;
+            for (blocker_start, blocker_end) in blockers {
+                if blocker_start > cursor {
+                    let mut fragment = spec.clone();
+                    fragment.content = text[cursor..blocker_start].to_string();
+                    claimed.push((cursor, blocker_start, fragment));
+                }
+                cursor = cursor.max(blocker_end);
+            }
+            if cursor < end {
+                let mut fragment = spec.clone();
+                fragment.content = text[cursor..end].to_string();
+                claimed.push((cursor, end, fragment));
+            }
+
+            if !spec.match_all_occurrences {
                 break;
             }
             offset = end;
@@ -525,6 +550,7 @@ fn render_attributed_channel(
         source_path: None,
         included_by: "provider_invocation".to_string(),
         content: content.to_string(),
+        match_all_occurrences: false,
     };
 
     let mut segments = Vec::new();
@@ -1569,6 +1595,7 @@ mod tests {
                 source_path: None,
                 included_by: "test".to_string(),
                 content: "GUIDE".to_string(),
+                match_all_occurrences: false,
             }],
             Vec::new(),
         );
@@ -1595,6 +1622,122 @@ mod tests {
     }
 
     #[test]
+    fn semantic_attribution_covers_repeated_and_nested_sources() {
+        let prepared = PreparedTurnContext::from_attributed_prompts(
+            "",
+            "GUIDE\nouter MEMORY remainder\nGUIDE",
+            vec![
+                ContextAssetSpec {
+                    channel: ContextChannel::Task,
+                    kind: ContextAssetKind::OperatingInstructions,
+                    scope: ContextScope::Global,
+                    label: "guide".to_string(),
+                    source_path: None,
+                    included_by: "test".to_string(),
+                    content: "GUIDE".to_string(),
+                    match_all_occurrences: true,
+                },
+                ContextAssetSpec {
+                    channel: ContextChannel::Task,
+                    kind: ContextAssetKind::Memory,
+                    scope: ContextScope::Wave,
+                    label: "memory".to_string(),
+                    source_path: None,
+                    included_by: "test".to_string(),
+                    content: "MEMORY".to_string(),
+                    match_all_occurrences: true,
+                },
+                ContextAssetSpec {
+                    channel: ContextChannel::Task,
+                    kind: ContextAssetKind::Goal,
+                    scope: ContextScope::Step,
+                    label: "inherited launch goal".to_string(),
+                    source_path: None,
+                    included_by: "message".to_string(),
+                    content: "outer MEMORY remainder".to_string(),
+                    match_all_occurrences: false,
+                },
+            ],
+            Vec::new(),
+        );
+
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::OperatingInstructions)
+                .count(),
+            2
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Goal)
+                .count(),
+            2
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Assembly)
+                .map(|asset| asset.bytes)
+                .sum::<u64>(),
+            2
+        );
+        assert_eq!(
+            prepared.total_tokens(),
+            prepared
+                .assets()
+                .map(|asset| asset.attributed_tokens)
+                .sum::<u64>()
+        );
+    }
+
+    #[test]
+    fn first_match_sources_do_not_claim_matching_words_elsewhere() {
+        let prepared = PreparedTurnContext::from_attributed_prompts(
+            "",
+            "go then go",
+            vec![ContextAssetSpec {
+                channel: ContextChannel::Task,
+                kind: ContextAssetKind::UserMessage,
+                scope: ContextScope::User,
+                label: "user message".to_string(),
+                source_path: None,
+                included_by: "message".to_string(),
+                content: "go".to_string(),
+                match_all_occurrences: false,
+            }],
+            Vec::new(),
+        );
+
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::UserMessage)
+                .count(),
+            1
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Assembly)
+                .map(|asset| asset.bytes)
+                .sum::<u64>(),
+            8
+        );
+    }
+
+    #[test]
     fn large_prompt_attribution_remains_exact() {
         let sections = (0..12)
             .map(|index| {
@@ -1616,6 +1759,7 @@ mod tests {
                 source_path: None,
                 included_by: "test".to_string(),
                 content,
+                match_all_occurrences: false,
             })
             .collect();
 

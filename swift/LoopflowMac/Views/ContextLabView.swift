@@ -1398,7 +1398,8 @@ private func observationDuration(_ seconds: Int64) -> String {
 }
 
 private func displayKind(_ kind: ContextAssetKind?) -> String {
-    kind?.rawValue.replacingOccurrences(of: "_", with: " ").capitalized ?? "Session set"
+    if kind == .assembly { return "Unattributed" }
+    return kind?.rawValue.replacingOccurrences(of: "_", with: " ").capitalized ?? "Session set"
 }
 
 private func displayCapture(_ capture: CaptureState) -> String {

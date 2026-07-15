@@ -589,7 +589,7 @@ fn lane_asset(launch: &AgentLaunchRow, row: &ContextAssetRow) -> ContextLaneAsse
     ContextLaneAsset {
         node_id: revision_node_id(row.asset.kind, &canonical.key, &row.asset.content_sha256),
         kind: row.asset.kind,
-        label: row.asset.label.clone(),
+        label: canonical.label,
         attributed_tokens: row.asset.attributed_tokens,
     }
 }
@@ -1037,8 +1037,20 @@ fn canonical_identity(launch: &AgentLaunchRow, row: &ContextAssetRow) -> Canonic
     let key = format!("@{}/{}", row.asset.kind.as_str(), row.asset.label);
     CanonicalIdentity {
         key,
-        label: row.asset.label.clone(),
+        label: context_source_label(row.asset.kind, &row.asset.label),
         path: None,
+    }
+}
+
+fn context_source_label(kind: ContextAssetKind, label: &str) -> String {
+    if kind != ContextAssetKind::Assembly {
+        return label.to_string();
+    }
+    match label {
+        "prompt assembly" => "unattributed prompt remainder".to_string(),
+        "task prompt" => "unattributed task prompt".to_string(),
+        "system prompt" => "unattributed system prompt".to_string(),
+        _ => label.to_string(),
     }
 }
 
@@ -1160,6 +1172,9 @@ fn is_instruction_kind(kind: ContextAssetKind) -> bool {
 }
 
 fn kind_label(kind: &str) -> String {
+    if kind == ContextAssetKind::Assembly.as_str() {
+        return "Unattributed".to_string();
+    }
     kind.split('_')
         .map(|word| {
             let mut chars = word.chars();
@@ -1290,6 +1305,32 @@ mod tests {
         );
         assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
         assert!(snapshot.sessions[0].turns[1].assets.is_empty());
+    }
+
+    #[test]
+    fn assembly_capture_is_presented_as_unattributed() {
+        let snapshot = aggregate(
+            query(),
+            vec![launch("launch-a", "run-a", "completed", "complete", 10)],
+            vec![turn("turn-a", "launch-a", 1, "assembled", 10, None)],
+            vec![asset(
+                "turn-a",
+                0,
+                ContextAssetKind::Assembly,
+                "prompt assembly",
+                None,
+                "remainder-hash",
+                10,
+            )],
+        );
+
+        let kind = &snapshot.aggregate_root.children[0];
+        assert_eq!(kind.label, "Unattributed");
+        assert_eq!(kind.children[0].label, "unattributed prompt remainder");
+        assert_eq!(
+            snapshot.sessions[0].turns[0].assets[0].label,
+            "unattributed prompt remainder"
+        );
     }
 
     #[test]

@@ -35,8 +35,11 @@ then start a separate refinement session against the canonical source.
 - Refinement refuses copied text and in-place historical mutation. It must map
   one current canonical source hash into an existing Task worktree.
 - Provider-total-only turns remain in coverage denominators but contribute no
-  flame or lane width. This keeps missing assembly attribution missing and makes
+  flame or lane width. This keeps missing attribution missing and makes
   flame widths reconcile exactly with measured supplied context.
+- The historical `assembly` wire kind is presented as **Unattributed**. It is a
+  visible accounting remainder, not a claim that hundreds of thousands of
+  tokens are prompt formatting.
 
 ## Live evidence
 
@@ -81,6 +84,13 @@ after the explicit trace action.
 
 ## Review changes already made
 
+- Fixed semantic attribution after the native demo exposed an implausibly large
+  Assembly band. The renderer had discarded an enclosing inherited goal when a
+  specific memory asset overlapped it and attributed only the first occurrence
+  of repeated goal, memory, or operating text. Earlier specific sources now win
+  their exact ranges, enclosing sources own the remaining ranges, and every
+  occurrence in both prompt channels is counted. Historical rows remain
+  immutable and are labeled **Unattributed prompt remainder/task prompt**.
 - Rebased through PR #906 so the development binary can read the current live
   ledger schema.
 - Preserved the explicit development-to-production-ledger opt-in through the

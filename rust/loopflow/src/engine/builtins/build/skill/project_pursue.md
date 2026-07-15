@@ -23,6 +23,25 @@ lf pm show --wave <exact-wave> --project <project> --no-sync
 lf pm task create --project <project> --title "..." --notes "..."
 ```
 
+## Task references
+
+When selecting, supervising, or reporting more than one Task, read `lf roadmap
+--wave <exact-wave> --json` for plan-wide rows and `lf status <exact-wave>
+--json` for live execution. Render every Task with the shared reference:
+
+```markdown
+[identifier](provider URL) — readable active PR/workspace slug — status/next owner
+```
+
+Fill the link from `task.identifier` and `reference.issue_url`. Use
+`active_pr.slug` from roadmap; for status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Take status from
+`runtime.status`, or from the roadmap `section` when runtime is absent;
+`next_move.owner` supplies next owner. Never reconstruct a provider URL, branch,
+or slug from an identifier, title, worktree, or naming convention. Omit only a
+link or slug whose snapshot evidence is explicitly absent; keep the Task and
+its available status/next owner.
+
 ## Work
 
 - Acknowledge the seed's current directive before pursuit with its exact `lf

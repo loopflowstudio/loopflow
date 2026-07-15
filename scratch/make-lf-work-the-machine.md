@@ -180,6 +180,30 @@ teach `lf status`, `lf roadmap`, `lf pm` by example, one promise each, no
 overlap — status = "is it running / healthy", roadmap = "what's being worked on
 and what could be", pm = "raw plan + mutation".
 
+## Review iteration: make the machine view the exercised convention
+
+Keep the shipped README command examples unchanged. Encode the behavior that
+made this Task successful only where an agent has to exercise it:
+
+- `task_clarify` makes a Task computable by requiring a user-visible outcome,
+  an end-to-end proof, the source of truth, every affected surface/consumer,
+  explicit absent/error states, a relevant operational or latency boundary,
+  and clear exclusions. Files changed, tests added, and a PR opened are
+  supporting receipts, not the finish line.
+- `wave_pursue` and `project_pursue` use the `lf roadmap`/`lf status` Task
+  reference fields whenever they select, supervise, or report multiple Tasks.
+- `scan`, `assess`, and `wave-report` preserve that same reference in any
+  multi-Task output:
+  `[identifier](provider URL) — active PR/workspace slug — status/next owner`.
+  They take the URL, active PR slug, workspace slug, runtime status/roadmap
+  section, and next owner from the snapshots; they never synthesize a provider
+  URL or branch. A link or slug may disappear only when the corresponding
+  evidence is explicitly absent.
+
+Done when focused builtin tests lock both prompt contracts, the builtin test
+suite passes, README examples and global `LOOPFLOW.md` are untouched, and PR
+#900 is refreshed but remains open.
+
 ## Slices (serial PRs, one worktree)
 
 1. **Envelope + lens + batching + shared references** — `RoadmapSnapshot`/`WaveRoadmap`/

@@ -69,6 +69,25 @@ be fine. Look past activity to actual progress toward finish lines.
 4. **Identify the pressure points.** What are the 1-3 things that, if
    changed, would have the biggest impact on overall progress?
 
+## Task references
+
+When the assessment names more than one Task, preserve or refresh their rows
+from `lf roadmap --wave <wave> --json` and `lf status <wave> --json`. Render
+every Task with the shared reference:
+
+```markdown
+[identifier](provider URL) — readable active PR/workspace slug — status/next owner
+```
+
+Fill the link from `task.identifier` and `reference.issue_url`. Use
+`active_pr.slug` from roadmap; for status, match `active_pr` to `prs[].id` and
+use that PR's `slug`. Fall back to `reference.workspace.slug`. Take status from
+`runtime.status`, or from the roadmap `section` when runtime is absent;
+`next_move.owner` supplies next owner. Never reconstruct a provider URL, branch,
+or slug from an identifier, title, worktree, or naming convention. Omit only a
+link or slug whose snapshot evidence is explicitly absent; keep the Task and
+its available status/next owner.
+
 ## Output
 
 Write `scratch/garden-assessment.md`:

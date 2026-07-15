@@ -273,6 +273,46 @@ mod tests {
     }
 
     #[test]
+    fn task_design_and_multi_task_outputs_share_the_machine_contract() {
+        let clarify = get_builtin_skill("task_clarify").expect("task clarify");
+        for requirement in [
+            "User-visible outcome",
+            "End-to-end proof",
+            "Source of truth",
+            "Affected surfaces and consumers",
+            "Absent and error states",
+            "Operational boundary",
+            "Exclusions",
+            "implementation receipts",
+        ] {
+            assert!(clarify.contains(requirement));
+        }
+
+        for name in [
+            "wave_pursue",
+            "project_pursue",
+            "scan",
+            "assess",
+            "wave-report",
+        ] {
+            let skill = get_builtin_skill(name).expect("multi-Task output skill");
+            assert!(skill.contains("lf roadmap"));
+            assert!(skill.contains("lf status"));
+            assert!(skill.contains(
+                "[identifier](provider URL) — readable active PR/workspace slug — status/next owner"
+            ));
+            assert!(skill.contains("task.identifier"));
+            assert!(skill.contains("reference.issue_url"));
+            assert!(skill.contains("active_pr.slug"));
+            assert!(skill.contains("reference.workspace.slug"));
+            assert!(skill.contains("runtime.status"));
+            assert!(skill.contains("next_move.owner"));
+            assert!(skill.contains("reconstruct a provider URL"));
+            assert!(skill.contains("is explicitly absent"));
+        }
+    }
+
+    #[test]
     fn build_is_one_bounded_pass_without_delivery() {
         let flow = get_builtin_flow("build").expect("build flow");
         for step in [

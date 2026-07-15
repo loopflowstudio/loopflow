@@ -2303,6 +2303,7 @@ mod tests {
         PmItem {
             id: format!("uuid-of-{identifier}"),
             identifier: identifier.to_string(),
+            url: None,
             name: format!("Task {identifier}"),
             description: String::new(),
             rank: 0,

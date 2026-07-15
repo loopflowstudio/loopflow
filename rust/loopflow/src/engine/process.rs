@@ -87,6 +87,15 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
+/// Whether this machine can look for tmux sessions at all.
+///
+/// Ask PATH, not the binary. A generic `--version` probe reports tmux as absent
+/// on every machine — tmux only accepts `-V` — which silently downgrades Session
+/// liveness to "unknowable" and hides processes that are actually gone.
+pub(crate) fn tmux_installed() -> bool {
+    which_on_path(Path::new("tmux")).is_some()
+}
+
 pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
     // A missing session is the answer, not an error: tmux's "can't find session"
     // on stderr would otherwise scribble over a caller's own output.
@@ -189,7 +198,22 @@ pub(crate) fn tmux_session_slug(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::lf_session_shell_command;
+    use super::{lf_session_shell_command, tmux_installed};
+
+    /// The probe must agree with whether tmux can actually be run. The previous
+    /// `--version` probe disagreed on every machine that has tmux, which pinned
+    /// Session liveness to "unknowable" and let gone processes read as running.
+    #[test]
+    fn tmux_probe_agrees_with_running_tmux() {
+        let runnable = std::process::Command::new("tmux")
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        assert_eq!(tmux_installed(), runnable);
+    }
 
     #[test]
     fn lf_session_clears_parent_identity_and_exports_its_own() {

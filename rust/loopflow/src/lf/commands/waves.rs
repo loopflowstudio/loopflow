@@ -360,7 +360,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let attention = Evidence::complete(attention(
             &projects,
             now(),
-            Liveness::probe(crate::ops::util::command_exists("tmux")),
+            Liveness::probe(crate::engine::process::tmux_installed()),
         ));
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),

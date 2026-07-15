@@ -126,6 +126,55 @@ after the explicit trace action.
   carries a pre-rebase local `0.11.004_context_launch_work` stamp and is not the
   production-ledger demo surface.
 
+## Independent review pass (2026-07-15)
+
+A separate reviewer read commit `e71c8b5` end to end against the design's
+"Done when" and found no correction or simplification owed. The pass verified,
+did not just restate, the prior changes:
+
+- **The source-hash split is a real reduction, not a rename.** Rust now returns
+  both the effective prompt hash and the raw source-file hash from one read
+  (`hash_current_source`), and Swift's launch guard compares exact Task-worktree
+  bytes against `current_source_sha256`. This deleted `effectiveSourceHash` and
+  `skillBody` from Swift, so operating-guide wrapping and skill-frontmatter
+  parsing live in exactly one language. The safety chain still closes:
+  `isEditable` proves the current file's *effective* hash equals the studied
+  revision, and the byte guard proves the worktree file equals the current
+  source file — together the worktree's effective hash equals the studied one.
+- **Both current-hash fields earn their place.** `current_content_sha256` drives
+  editability and the missing-source message; `current_source_sha256` drives the
+  worktree byte guard. Neither is dead, and collapsing them would force Swift to
+  re-wrap prompts — the exact duplication this pass removed.
+- **The identity revalidation is sound.** `refinementWorkspaceIsCurrent` rejects
+  any post-selection drift in Wave, repo, Task id/identifier, Task Session,
+  Project Session, workspace slug, branch, or normalized worktree path; the
+  terminal is created only after every guard passes and is closed on a failed
+  command dispatch. The route now targets `.terminal` via a typed
+  `initialSection` that replaced the `opensAgent` boolean.
+- **`[focus] + descendants(of: focus)` is duplicate-free** because `descendants`
+  starts from children; a leaf focus now populates the table instead of showing
+  an empty parity view.
+- **DTO discipline holds.** `current_source_sha256` is explicit `Option`/`String?`
+  with no serde default, is present in the shared fixture, and is asserted by the
+  Swift fixture test; the Rust round-trip fixture test still passes.
+
+One cosmetic inconsistency was left in place deliberately: the refinement seed
+still instructs the agent to refuse edits when the *effective* hash drifts, while
+the launch guard enforces raw-byte equality. It is soft guidance the agent cannot
+cheaply recompute anyway, and tightening the wording would add churn without
+changing behavior.
+
+Checks run this pass, all green: `cargo fmt --check`; `cargo clippy -p loopflow
+--all-targets -- -D warnings`; `cargo test -p loopflow --lib context` (66 tests,
+including `smooth_representative_excludes_steered_launches`,
+`current_source_hashes_keep_file_and_effective_identity_separate`, and the Swift
+contract round-trip); `scripts/check_migrations.py` (chain intact through
+`0.11.006_context_launch_work`); `swift test` (117 tests, including the
+selected-source-share, workspace-recheck, and source-byte-hash tests);
+`scripts/check_swift_multiplatform_boundaries.py`; and `xcodebuild
+build-for-testing` for LoopflowMac (**TEST BUILD SUCCEEDED**). This pass changed
+no product code, so Python, website, E2E, and hosted UI suites were not rerun.
+
 ## Risks and bottlenecks
 
 1. **The refinement loop is not yet live.** The PM cache contains W2-71 under

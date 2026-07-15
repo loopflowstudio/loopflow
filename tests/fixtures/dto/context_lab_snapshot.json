@@ -8,6 +8,12 @@
     "waves": [
       "intelligence"
     ],
+    "projects": [
+      "context"
+    ],
+    "tasks": [
+      "W2-71"
+    ],
     "flows": [],
     "skills": [
       "implement"
@@ -118,6 +124,8 @@
       "model": "gpt-5",
       "surface": "headless",
       "wave": "intelligence",
+      "project": "context",
+      "task": "W2-71",
       "flow": null,
       "skill": "implement",
       "turns": [

@@ -192,7 +192,7 @@ lf trace <exec-or-trace-id>
 lf trace <exec-or-trace-id> --events
 lf trace <exec-or-trace-id> --events --jsonl --launch <launch-id-prefix>
 lf trace <exec-or-trace-id> --json --content --launch <launch-id> --turn <turn-id>
-lf context --days 14 --repo "$PWD" --wave intelligence --json
+lf context --days 14 --repo "$PWD" --wave intelligence --project context --task W2-71 --json
 ```
 
 `lf trace` accepts the exec ids shown by `lf execs` and the trace ids carried by
@@ -202,7 +202,9 @@ bodies. `--events` explicitly reads the recorded exchange; `--content` opens
 the exact prompt and normalized conversation for one trace address.
 `lf context --json` emits one atomic session-set snapshot: totals, coverage,
 context flame, prompt-ordered lanes, canonical revisions, and representative
-trace addresses. Missing capture remains missing rather than becoming zero.
+trace addresses. Project and Task filters use durable launch attribution; old
+unattributed launches do not guess from worktree names. Missing capture remains
+missing rather than becoming zero.
 
 ### Crons
 

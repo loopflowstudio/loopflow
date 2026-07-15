@@ -82,6 +82,8 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         wave: Some(wave_name.to_string()),
         flow: Some("wave".to_string()),
         skill: Some("wave_mutate".to_string()),
+        project: None,
+        task: None,
         provider: "codex".to_string(),
         model: Some("gpt-5".to_string()),
         surface: "headless".to_string(),

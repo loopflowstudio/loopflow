@@ -201,6 +201,8 @@ public struct RegistryQuery: Sendable {
         ]
         Self.append(query.repoPaths, flag: "--repo", to: &args)
         Self.append(query.waves, flag: "--wave", to: &args)
+        Self.append(query.projects, flag: "--project", to: &args)
+        Self.append(query.tasks, flag: "--task", to: &args)
         Self.append(query.flows, flag: "--flow", to: &args)
         Self.append(query.skills, flag: "--skill", to: &args)
         Self.append(query.providers, flag: "--provider", to: &args)

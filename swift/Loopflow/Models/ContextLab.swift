@@ -25,6 +25,8 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
     public let startedAfter: Int64
     public let startedBefore: Int64
     public let waves: [String]
+    public let projects: [String]
+    public let tasks: [String]
     public let flows: [String]
     public let skills: [String]
     public let providers: [String]
@@ -38,6 +40,8 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
         startedAfter: Int64,
         startedBefore: Int64,
         waves: [String],
+        projects: [String],
+        tasks: [String],
         flows: [String],
         skills: [String],
         providers: [String],
@@ -50,6 +54,8 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
         self.startedAfter = startedAfter
         self.startedBefore = startedBefore
         self.waves = waves
+        self.projects = projects
+        self.tasks = tasks
         self.flows = flows
         self.skills = skills
         self.providers = providers
@@ -60,7 +66,7 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case waves, flows, skills, providers, models, surfaces, outcomes
+        case waves, projects, tasks, flows, skills, providers, models, surfaces, outcomes
         case repoPaths = "repo_paths"
         case startedAfter = "started_after"
         case startedBefore = "started_before"
@@ -177,12 +183,14 @@ public struct SessionLane: Decodable, Identifiable, Sendable {
     public let model: String?
     public let surface: String
     public let wave: String?
+    public let project: String?
+    public let task: String?
     public let flow: String?
     public let skill: String?
     public let turns: [TurnLane]
 
     enum CodingKeys: String, CodingKey {
-        case id, outcome, provider, model, surface, wave, flow, skill, turns
+        case id, outcome, provider, model, surface, wave, project, task, flow, skill, turns
         case runId = "run_id"
         case startedAt = "started_at"
         case steeringTurns = "steering_turns"

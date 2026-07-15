@@ -35,6 +35,8 @@ struct ContextLabTests {
             startedAfter: 10,
             startedBefore: 20,
             waves: ["intelligence"],
+            projects: ["context"],
+            tasks: ["W2-71"],
             flows: [],
             skills: ["implement"],
             providers: ["codex"],

@@ -289,7 +289,9 @@ struct RefinementTaskSheet: View {
             )
             let lfPath = try LocalWaveAgentLauncher.resolveWaveCapableLf(originRepo: choice.repoPath)
             let encoded = Data(body.utf8).base64EncodedString()
-            let command = "\(shellQuote(lfPath)) --tui refine \"$(printf '%s' '\(encoded)' | /usr/bin/base64 -D)\""
+            let command = "env \(shellQuote("LF_TASK_SESSION_ID=\(runtime.sessionId)")) "
+                + "\(shellQuote("LF_WAVE_ID=\(choice.wave)")) \(shellQuote(lfPath)) --tui refine "
+                + "\"$(printf '%s' '\(encoded)' | /usr/bin/base64 -D)\""
             try await TmuxSession(
                 sessionName: terminal.tmuxName,
                 worktreePath: workspace.worktree

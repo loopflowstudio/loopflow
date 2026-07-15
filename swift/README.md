@@ -36,8 +36,9 @@ codebase tree, and registry health.
 Open **Go → Context Lab** to filter a local session set, compare its aggregate
 context flame and prompt-ordered session lanes, inspect exact trace evidence,
 and launch a fresh refinement session in an existing Intelligence Task
-worktree. Selecting a segment never opens prompt bodies; **Open trace** is the
-explicit boundary. Saved views retain only the query and visualization mode.
+worktree. Project and Task facets appear only for durably attributed launches;
+historical gaps stay unattributed. Selecting a segment never opens prompt bodies;
+**Open trace** is the explicit boundary. Saved views retain only the query and visualization mode.
 Revision comparisons stay unavailable until both revisions have enough
 similarly captured launches.
 

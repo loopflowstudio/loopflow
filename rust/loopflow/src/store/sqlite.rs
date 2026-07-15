@@ -1385,11 +1385,12 @@ impl SqliteStore {
         tx.execute(
             "INSERT INTO agent_launches (
                 id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                skill, provider, model, surface, capture_status, incomplete_reason, outcome,
-                artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                provider_session_path, conversation_event_count, conversation_bytes
+                skill, project, task, provider, model, surface, capture_status,
+                incomplete_reason, outcome, artifact_dir, conversation_path,
+                provider_events_path, provider_session_id, provider_session_path,
+                conversation_event_count, conversation_bytes
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             params![
                 launch.id,
                 launch.run_id,
@@ -1401,6 +1402,8 @@ impl SqliteStore {
                 launch.wave,
                 launch.flow,
                 launch.skill,
+                launch.project,
+                launch.task,
                 launch.provider,
                 launch.model,
                 launch.surface,
@@ -1502,9 +1505,10 @@ impl SqliteStore {
         // append order when a fast flow starts several agents in one second.
         self.query_agent_launches(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, provider, model, surface, capture_status, incomplete_reason, outcome,
-                    artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                    provider_session_path, conversation_event_count, conversation_bytes
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes
              FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
@@ -1513,9 +1517,10 @@ impl SqliteStore {
     pub fn agent_launches_since(&self, since: i64) -> StoreResult<Vec<AgentLaunchRow>> {
         self.query_agent_launches(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, provider, model, surface, capture_status, incomplete_reason, outcome,
-                    artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                    provider_session_path, conversation_event_count, conversation_bytes
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes
              FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
@@ -1540,19 +1545,21 @@ impl SqliteStore {
                 wave: row.get(7)?,
                 flow: row.get(8)?,
                 skill: row.get(9)?,
-                provider: row.get(10)?,
-                model: row.get(11)?,
-                surface: row.get(12)?,
-                capture_status: row.get(13)?,
-                incomplete_reason: row.get(14)?,
-                outcome: row.get(15)?,
-                artifact_dir: row.get(16)?,
-                conversation_path: row.get(17)?,
-                provider_events_path: row.get(18)?,
-                provider_session_id: row.get(19)?,
-                provider_session_path: row.get(20)?,
-                conversation_event_count: row.get(21)?,
-                conversation_bytes: row.get(22)?,
+                project: row.get(10)?,
+                task: row.get(11)?,
+                provider: row.get(12)?,
+                model: row.get(13)?,
+                surface: row.get(14)?,
+                capture_status: row.get(15)?,
+                incomplete_reason: row.get(16)?,
+                outcome: row.get(17)?,
+                artifact_dir: row.get(18)?,
+                conversation_path: row.get(19)?,
+                provider_events_path: row.get(20)?,
+                provider_session_id: row.get(21)?,
+                provider_session_path: row.get(22)?,
+                conversation_event_count: row.get(23)?,
+                conversation_bytes: row.get(24)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()

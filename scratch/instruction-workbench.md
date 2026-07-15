@@ -161,6 +161,8 @@ struct SessionSetQuery: Codable, Hashable, Sendable {
     let startedAfter: Int64
     let startedBefore: Int64
     let waves: [String]
+    let projects: [String]
+    let tasks: [String]
     let flows: [String]
     let skills: [String]
     let providers: [String]
@@ -198,6 +200,8 @@ struct SessionLane: Decodable, Identifiable, Sendable {
     let startedAt: Int64
     let outcome: SessionOutcome
     let steeringTurns: UInt64?
+    let project: String?
+    let task: String?
     let turns: [TurnLane]
 }
 

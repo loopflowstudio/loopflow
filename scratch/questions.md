@@ -12,11 +12,13 @@
   `intelligence` Wave is not registered and no W2-71 Task Session exists. That
   prevents the continuous refinement demo from creating or selecting a real
   Task worktree without a separate Wave-registration decision.
-- Project/Task attribution is not present on the branch's launch ledger rows,
-  so the session-set query exposes the recorded wave/flow/skill dimensions but
-  cannot honestly offer Project or Task filters yet. Add those filters with the
-  ledger attribution rather than reconstructing them from worktree names in
-  Swift.
+- Migration `0.11.004_context_launch_work` records Project slug and Task
+  identifier from durable child-control identity on new launches. Context Lab
+  now filters those dimensions without worktree-name inference; historical rows
+  remain explicitly unattributed.
+- The refinement terminal carries its selected Task Session and Wave identity
+  into the fresh `refine` process. This makes the intervention itself appear in
+  later Project/Task-filtered research without resuming the historical trace.
 - The installed app logs repeated SwiftUI `AttributeGraph` cycles at startup.
   They predate opening Context Lab and have not yet been tied to a visible Lab
   failure, but the final installed-app pass should prove they are unrelated or

@@ -297,6 +297,7 @@ struct RegistryQueryTests {
             #expect(args == [
                 "context", "--json", "--started-after", "100", "--started-before", "200",
                 "--repo", "/src/loopflow", "--wave", "intelligence",
+                "--project", "context", "--task", "W2-71",
                 "--skill", "implement", "--provider", "codex", "--model", "gpt-5",
                 "--surface", "headless", "--outcome", "completed",
                 "--capture-state", "complete",
@@ -308,6 +309,8 @@ struct RegistryQueryTests {
             startedAfter: 100,
             startedBefore: 200,
             waves: ["intelligence"],
+            projects: ["context"],
+            tasks: ["W2-71"],
             flows: [],
             skills: ["implement"],
             providers: ["codex"],

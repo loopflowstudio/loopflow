@@ -71,6 +71,11 @@ after the explicit trace action.
 - Removed unmeasured provider-total-only assets from flames and lanes.
 - Made missing canonical-source refinement visibly disabled and made trace body
   backgrounds explicit for readable native rendering.
+- Added durable Project/Task launch attribution and corresponding Context Lab
+  facets. Historical launches remain unattributed instead of being guessed from
+  their worktree paths.
+- Carried the selected Task Session identity into the fresh refinement process,
+  so its trace and lifecycle commands stay attached to the chosen workspace.
 
 ## Risks and bottlenecks
 
@@ -82,8 +87,9 @@ after the explicit trace action.
    source-path capture and show “No canonical file source.” A normal run through
    this branch binary must prove that `LOOPFLOW.md` appears as an editable new
    revision with the correct effective hash.
-3. **Project and Task filters lack ledger attribution.** Reconstructing them from
-   filenames or worktree names would create a second, weaker identity system.
+3. **Historical Project and Task attribution stays missing.** Only launches
+   captured after migration `0.11.004_context_launch_work` can populate those
+   facets; no backfill guesses ownership from filenames or worktree names.
 4. **Task creation is omitted.** The current sheet selects only an inactive Task
    Session with a durable worktree; it cannot create a Linear Task and return a
    workspace receipt in one human-confirmed operation.
@@ -102,9 +108,9 @@ after the explicit trace action.
   a real Intelligence Task launch, diff, and backlink have not been experienced.
 - **Learning truth:** revision comparison is live for naturally observed hashes;
   the edit → ordinary run → new canonical hash journey remains undemonstrated.
-- **Shipping proof:** focused Rust/Swift tests and native builds pass. The final
-  full matrix, accessibility pass, installed-app journey, and independent demo
-  remain open.
+- **Shipping proof:** Rust, Python, Swift, website/accessibility, E2E smoke,
+  migration checks, clippy, and the signed native test build pass. The final
+  installed-app journey and independent demo remain open.
 
 ## What is intentionally not included
 

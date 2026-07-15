@@ -306,6 +306,12 @@ pub enum Commands {
         /// Filter by wave
         #[arg(long)]
         wave: Vec<String>,
+        /// Filter by attributed Linear Project slug
+        #[arg(long)]
+        project: Vec<String>,
+        /// Filter by attributed Linear Task identifier
+        #[arg(long)]
+        task: Vec<String>,
         /// Filter by absolute main-repo path
         #[arg(long)]
         repo: Vec<String>,
@@ -1906,6 +1912,10 @@ mod tests {
             "/src/a",
             "--repo",
             "/src/b",
+            "--project",
+            "context",
+            "--task",
+            "W2-71",
             "--outcome",
             "failed",
             "--capture-state",
@@ -1917,6 +1927,8 @@ mod tests {
             started_after,
             started_before,
             repo,
+            project,
+            task,
             outcome,
             capture_state,
             json,
@@ -1929,6 +1941,8 @@ mod tests {
         assert_eq!(started_after, Some(100));
         assert_eq!(started_before, Some(200));
         assert_eq!(repo, ["/src/a", "/src/b"]);
+        assert_eq!(project, ["context"]);
+        assert_eq!(task, ["W2-71"]);
         assert_eq!(outcome, ["failed"]);
         assert_eq!(capture_state, ["partial"]);
         assert!(json);

@@ -80,6 +80,8 @@ pub struct TraceCaptureContext {
     pub repo: PathBuf,
     pub worktree: PathBuf,
     pub wave: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
 }
@@ -714,6 +716,8 @@ pub struct AgentLaunchRow {
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
     pub provider: String,
     pub model: Option<String>,
     pub surface: String,
@@ -966,6 +970,8 @@ impl TraceCapture {
             wave: context.wave,
             flow: context.flow,
             skill: context.skill,
+            project: context.project,
+            task: context.task,
             provider: start.provider,
             model: start.model,
             surface: start.surface,
@@ -1637,6 +1643,8 @@ mod tests {
             repo: guard.home().to_path_buf(),
             worktree: guard.home().to_path_buf(),
             wave: Some("intelligence".to_string()),
+            project: Some("context".to_string()),
+            task: Some("W2-71".to_string()),
             flow: None,
             skill: Some("implement".to_string()),
         };
@@ -1661,6 +1669,8 @@ mod tests {
         let launches = store.agent_launches_matching(run_id.as_str()).unwrap();
         assert_eq!(launches.len(), 1);
         assert_eq!(launches[0].capture_status, "complete");
+        assert_eq!(launches[0].project.as_deref(), Some("context"));
+        assert_eq!(launches[0].task.as_deref(), Some("W2-71"));
         assert!(!std::path::Path::new(&launches[0].artifact_dir).is_absolute());
         let conversation = super::resolve_artifact(&launches[0].conversation_path).unwrap();
         assert!(conversation.is_file());

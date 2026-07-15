@@ -68,6 +68,8 @@ struct ContextLabView: View {
     @State private var repoPath: String
     @State private var repoDraft: String
     @State private var wave = ""
+    @State private var project = ""
+    @State private var task = ""
     @State private var flow = ""
     @State private var skill = ""
     @State private var provider = ""
@@ -95,6 +97,8 @@ struct ContextLabView: View {
                 Int((query.startedBefore - query.startedAfter) / (24 * 60 * 60))
             ))
             _wave = State(initialValue: query.waves.first ?? "")
+            _project = State(initialValue: query.projects.first ?? "")
+            _task = State(initialValue: query.tasks.first ?? "")
             _flow = State(initialValue: query.flows.first ?? "")
             _skill = State(initialValue: query.skills.first ?? "")
             _provider = State(initialValue: query.providers.first ?? "")
@@ -115,6 +119,8 @@ struct ContextLabView: View {
             startedAfter: windowEnd - Int64(windowDays * 24 * 60 * 60),
             startedBefore: windowEnd,
             waves: wave.isEmpty ? [] : [wave],
+            projects: project.isEmpty ? [] : [project],
+            tasks: task.isEmpty ? [] : [task],
             flows: flow.isEmpty ? [] : [flow],
             skills: skill.isEmpty ? [] : [skill],
             providers: provider.isEmpty ? [] : [provider],
@@ -269,6 +275,8 @@ struct ContextLabView: View {
                 .pickerStyle(.menu)
 
                 facetPicker("Wave", selection: $wave, values: facets(\.wave))
+                facetPicker("Project", selection: $project, values: facets(\.project))
+                facetPicker("Task", selection: $task, values: facets(\.task))
                 facetPicker("Flow", selection: $flow, values: facets(\.flow))
                 facetPicker("Skill", selection: $skill, values: facets(\.skill))
                 facetPicker("Provider", selection: $provider, values: facets { $0.provider })
@@ -897,6 +905,8 @@ struct ContextLabView: View {
         windowDays = 30
         windowEnd = Int64(Date().timeIntervalSince1970)
         wave = ""
+        project = ""
+        task = ""
         flow = ""
         skill = ""
         provider = ""
@@ -926,6 +936,8 @@ struct ContextLabView: View {
         windowEnd = saved.query.startedBefore
         windowDays = max(1, Int((saved.query.startedBefore - saved.query.startedAfter) / (24 * 60 * 60)))
         wave = saved.query.waves.first ?? ""
+        project = saved.query.projects.first ?? ""
+        task = saved.query.tasks.first ?? ""
         flow = saved.query.flows.first ?? ""
         skill = saved.query.skills.first ?? ""
         provider = saved.query.providers.first ?? ""
@@ -954,7 +966,8 @@ struct ContextLabView: View {
     }
 
     private var filtersAreEmpty: Bool {
-        repoPath == (initialRepoPath ?? "") && windowDays == 30 && wave.isEmpty && flow.isEmpty && skill.isEmpty
+        repoPath == (initialRepoPath ?? "") && windowDays == 30 && wave.isEmpty && project.isEmpty
+            && task.isEmpty && flow.isEmpty && skill.isEmpty
             && provider.isEmpty && model.isEmpty && surface.isEmpty && outcomes.isEmpty
             && captureStates.isEmpty
     }

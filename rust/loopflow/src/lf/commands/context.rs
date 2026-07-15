@@ -17,6 +17,8 @@ pub struct SessionSetQuery {
     pub started_after: i64,
     pub started_before: i64,
     pub waves: Vec<String>,
+    pub projects: Vec<String>,
+    pub tasks: Vec<String>,
     pub flows: Vec<String>,
     pub skills: Vec<String>,
     pub providers: Vec<String>,
@@ -103,6 +105,8 @@ pub struct SessionLane {
     pub model: Option<String>,
     pub surface: String,
     pub wave: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
     pub turns: Vec<TurnLane>,
@@ -187,6 +191,8 @@ pub struct ContextQueryOptions {
     pub started_before: Option<i64>,
     pub repo_paths: Vec<String>,
     pub waves: Vec<String>,
+    pub projects: Vec<String>,
+    pub tasks: Vec<String>,
     pub flows: Vec<String>,
     pub skills: Vec<String>,
     pub providers: Vec<String>,
@@ -211,6 +217,8 @@ pub fn run(options: ContextQueryOptions) -> Result<()> {
         started_after,
         started_before,
         waves: options.waves,
+        projects: options.projects,
+        tasks: options.tasks,
         flows: options.flows,
         skills: options.skills,
         providers: options.providers,
@@ -272,6 +280,8 @@ fn validate_values(label: &str, values: &[String], allowed: &[&str]) -> Result<(
 fn launch_matches(launch: &AgentLaunchRow, query: &SessionSetQuery) -> bool {
     matches_filter(&query.repo_paths, Some(&launch.repo))
         && matches_filter(&query.waves, launch.wave.as_ref())
+        && matches_filter(&query.projects, launch.project.as_ref())
+        && matches_filter(&query.tasks, launch.task.as_ref())
         && matches_filter(&query.flows, launch.flow.as_ref())
         && matches_filter(&query.skills, launch.skill.as_ref())
         && matches_filter(&query.providers, Some(&launch.provider))
@@ -451,6 +461,8 @@ fn build_session_lanes(
                 model: launch.model.clone(),
                 surface: launch.surface.clone(),
                 wave: launch.wave.clone(),
+                project: launch.project.clone(),
+                task: launch.task.clone(),
                 flow: launch.flow.clone(),
                 skill: launch.skill.clone(),
                 turns: launch_turns
@@ -1244,6 +1256,8 @@ mod tests {
             started_after: 0,
             started_before: 1_000,
             waves: Vec::new(),
+            projects: Vec::new(),
+            tasks: Vec::new(),
             flows: Vec::new(),
             skills: Vec::new(),
             providers: Vec::new(),
@@ -1252,6 +1266,19 @@ mod tests {
             outcomes: Vec::new(),
             capture_states: Vec::new(),
         }
+    }
+
+    #[test]
+    fn project_and_task_filters_require_durable_launch_attribution() {
+        let attributed = launch("launch-1", "run-1", "completed", "complete", 100);
+        let mut selection = query();
+        selection.projects = vec!["context".to_string()];
+        selection.tasks = vec!["W2-71".to_string()];
+        assert!(launch_matches(&attributed, &selection));
+
+        let mut unattributed = attributed;
+        unattributed.task = None;
+        assert!(!launch_matches(&unattributed, &selection));
     }
 
     fn launch(
@@ -1272,6 +1299,8 @@ mod tests {
             wave: Some("intelligence".to_string()),
             flow: Some("implement".to_string()),
             skill: Some("implement".to_string()),
+            project: Some("context".to_string()),
+            task: Some("W2-71".to_string()),
             provider: "codex".to_string(),
             model: Some("gpt-5".to_string()),
             surface: "headless".to_string(),

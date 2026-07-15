@@ -296,6 +296,7 @@ pub fn register_task(
         abandoned_at: None,
         created_at: now,
         updated_at: now,
+        ci_observation: None,
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");

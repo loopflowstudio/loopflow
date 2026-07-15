@@ -112,6 +112,49 @@ impl FromStr for TaskSessionStatus {
 pub struct GithubPr {
     pub number: u32,
     pub url: String,
+    /// The PR's current head commit, from `gh pr list --json headRefOid`. CI
+    /// evidence is authoritative only for this head. `None` on rows written
+    /// before head SHAs were recorded.
+    pub head_sha: Option<String>,
+}
+
+/// The state of a PR head's required checks, as last observed by a reconcile.
+/// Failure dominates: any failing required check makes the head `Failing`
+/// regardless of what else is still pending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CiState {
+    Pending,
+    Passing,
+    Failing,
+}
+
+impl CiState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Passing => "passing",
+            Self::Failing => "failing",
+        }
+    }
+}
+
+/// One required check that is not passing, named so the `ci-fix` skill can
+/// resolve the exact failure from its logs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CiCheck {
+    pub name: String,
+    pub url: Option<String>,
+}
+
+/// The required-check reading for one PR head. `head_sha` pins it: a reading is
+/// stale — and never wakes work — once the PR's head moves past it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CiObservation {
+    pub head_sha: String,
+    pub state: CiState,
+    pub failing_checks: Vec<CiCheck>,
+    pub observed_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,6 +237,10 @@ pub struct TaskPr {
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
     pub abandoned_at: Option<OffsetDateTime>,
+    /// The most recent required-check reading for this PR's open head. `None`
+    /// until the head has been observed; ignored once the head moves past
+    /// `CiObservation::head_sha`.
+    pub ci_observation: Option<CiObservation>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -221,6 +268,22 @@ impl TaskPr {
         self.publication
             .as_ref()
             .and_then(|publication| publication.github.as_ref())
+    }
+
+    /// The current head SHA of the open PR, when recorded.
+    pub fn head_sha(&self) -> Option<&str> {
+        self.github().and_then(|github| github.head_sha.as_deref())
+    }
+
+    /// The CI reading, but only while it still describes the PR's current head.
+    /// Once the head moves, the reading is stale and this returns `None` — the
+    /// same freshness rule that keeps stale failures from waking work.
+    pub fn fresh_ci(&self) -> Option<&CiObservation> {
+        let observation = self.ci_observation.as_ref()?;
+        match self.head_sha() {
+            Some(head) if head == observation.head_sha => Some(observation),
+            _ => None,
+        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -754,6 +817,7 @@ mod tests {
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         assert_eq!(pr.phase(), PrPhase::Working);
 
@@ -768,6 +832,7 @@ mod tests {
         pr.publication.as_mut().unwrap().github = Some(GithubPr {
             number: 872,
             url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
+            head_sha: None,
         });
         assert_eq!(pr.phase(), PrPhase::Open);
 
@@ -797,12 +862,14 @@ mod tests {
                 github: Some(GithubPr {
                     number: 872,
                     url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
+                    head_sha: None,
                 }),
             }),
             merge_commit: None,
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         assert!(pr.validate().is_err());
 
@@ -812,6 +879,56 @@ mod tests {
 
         pr.publication.as_mut().unwrap().after_merge = AfterMerge::CompleteTask;
         assert!(pr.validate().is_err());
+    }
+
+    fn open_pr(head_sha: &str, observation: Option<super::CiObservation>) -> TaskPr {
+        let now = time::OffsetDateTime::now_utc();
+        TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number: 900,
+                    url: "https://github.com/loopflow/loopflow/pull/900".to_string(),
+                    head_sha: Some(head_sha.to_string()),
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: observation,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn fresh_ci_ignores_a_reading_for_a_past_head() {
+        let now = time::OffsetDateTime::now_utc();
+        let observation = super::CiObservation {
+            head_sha: "old-head".to_string(),
+            state: super::CiState::Failing,
+            failing_checks: vec![super::CiCheck {
+                name: "build".to_string(),
+                url: None,
+            }],
+            observed_at: now,
+        };
+        // Reading matches the current head: fresh.
+        let current = open_pr("old-head", Some(observation.clone()));
+        assert_eq!(
+            current.fresh_ci().map(|ci| ci.state),
+            Some(super::CiState::Failing)
+        );
+        // Head has moved on: the stale reading never surfaces (and never wakes work).
+        let moved = open_pr("new-head", Some(observation));
+        assert!(moved.fresh_ci().is_none());
     }
 
     #[test]

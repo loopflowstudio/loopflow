@@ -705,6 +705,7 @@ mod tests {
             publication: None,
             merge_commit: None,
             abandoned_at: None,
+            ci_observation: None,
             created_at: session.created_at,
             updated_at: session.updated_at,
         }
@@ -1345,6 +1346,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_pr_persists_head_sha_and_ci_observation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let session = make_task_session(&wave, &project);
+        let mut pr = make_task_pr(&session);
+        store.create_task_session(&session, &pr).await.unwrap();
+
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 902,
+                url: "https://github.com/loopflow/loopflow/pull/902".to_string(),
+                head_sha: Some("sha-abc".to_string()),
+            }),
+        });
+        pr.ci_observation = Some(crate::task::CiObservation {
+            head_sha: "sha-abc".to_string(),
+            state: crate::task::CiState::Failing,
+            failing_checks: vec![crate::task::CiCheck {
+                name: "build".to_string(),
+                url: Some("https://ci/build".to_string()),
+            }],
+            observed_at: OffsetDateTime::now_utc(),
+        });
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&pr).await.unwrap();
+
+        let read = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        assert_eq!(read.head_sha(), Some("sha-abc"));
+        let ci = read.fresh_ci().expect("reading matches the current head");
+        assert_eq!(ci.state, crate::task::CiState::Failing);
+        assert_eq!(ci.failing_checks[0].name, "build");
+    }
+
+    #[tokio::test]
     async fn task_prs_are_ordered_and_rotation_is_atomic() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -1365,6 +1409,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 101,
                 url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+                head_sha: None,
             }),
         });
         first.merge_commit = Some("merge-101".to_string());
@@ -1382,6 +1427,7 @@ mod tests {
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
@@ -1417,6 +1463,7 @@ mod tests {
             abandoned_at: None,
             created_at: now,
             updated_at: now,
+            ci_observation: None,
         };
         assert!(store
             .settle_task_pr(&abandoned, Some(&conflicting))
@@ -1462,6 +1509,7 @@ mod tests {
         pr.publication.as_mut().unwrap().github = Some(GithubPr {
             number: 101,
             url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
+            head_sha: None,
         });
         store.update_task_pr(&pr).await.unwrap();
 

@@ -181,6 +181,7 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
+            head_sha: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");

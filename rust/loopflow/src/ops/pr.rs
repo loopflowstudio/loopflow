@@ -35,6 +35,8 @@ pub struct PrInfo {
     pub state: String,
     pub branch: String,
     pub merge_commit: Option<String>,
+    /// The PR's current head commit (`headRefOid`), when GitHub reports one.
+    pub head_sha: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +54,8 @@ struct GhPr {
     number: u64,
     #[serde(default, rename = "mergeCommit")]
     merge_commit: Option<GhCommit>,
+    #[serde(default, rename = "headRefOid")]
+    head_ref_oid: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +142,7 @@ pub fn create_or_update_pr(
                 state: "open".to_string(),
                 branch: branch.clone(),
                 merge_commit: None,
+                head_sha: None,
             }),
         };
         (
@@ -164,6 +169,7 @@ fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
         },
         branch: branch.to_string(),
         merge_commit: pr.merge_commit.map(|commit| commit.oid),
+        head_sha: pr.head_ref_oid,
     }
 }
 
@@ -303,6 +309,7 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
             state,
             branch,
             merge_commit: pr.merge_commit.map(|commit| commit.oid),
+            head_sha: pr.head_ref_oid,
         }));
     }
 
@@ -324,7 +331,7 @@ pub(crate) fn current_or_merged_pr_for_branch(
         .arg("--state")
         .arg("all")
         .arg("--json")
-        .arg("url,state,isDraft,number,mergeCommit")
+        .arg("url,state,isDraft,number,mergeCommit,headRefOid")
         .current_dir(repo)
         .output()?;
     if !output.status.success() {
@@ -346,6 +353,7 @@ pub(crate) fn current_or_merged_pr_for_branch(
         },
         branch: branch.to_string(),
         merge_commit: pr.merge_commit.map(|commit| commit.oid),
+        head_sha: pr.head_ref_oid,
     }))
 }
 
@@ -367,6 +375,90 @@ fn reconcile_rank(pr: &GhPr) -> u8 {
     }
 }
 
+/// Read the required-check state for `branch`'s open PR from GitHub.
+///
+/// Uses `gh pr checks --required --json` — the authoritative view of the
+/// branch-protection checks that gate the merge. `gh pr checks` exits non-zero
+/// while checks are pending or failing, so the exit status is ignored: what
+/// matters is whether stdout parses. Returns `None` when gh is unavailable, the
+/// PR has no required checks configured, or the output cannot be read — CI state
+/// is simply unknown, never a hard error on the reconcile path.
+pub(crate) fn required_check_state(repo: &Path, branch: &str) -> Option<RequiredChecks> {
+    if !gh_available() {
+        return None;
+    }
+    let output = Command::new("gh")
+        .arg("pr")
+        .arg("checks")
+        .arg(branch)
+        .arg("--required")
+        .arg("--json")
+        .arg("name,bucket,link")
+        .current_dir(repo)
+        .output()
+        .ok()?;
+    // Empty stdout with a failure exit means "no required checks" (or an error we
+    // treat as unknown), not "all green" — distinguish by whether JSON parses.
+    let checks: Vec<GhCheck> = serde_json::from_slice(&output.stdout).ok()?;
+    if checks.is_empty() {
+        return None;
+    }
+    Some(RequiredChecks::from_checks(checks))
+}
+
+/// The classified required-check reading for one head: overall state plus the
+/// checks that are not passing, named for the `ci-fix` skill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiredChecks {
+    pub failing: bool,
+    pub pending: bool,
+    pub failing_checks: Vec<GhFailingCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GhFailingCheck {
+    pub name: String,
+    pub url: Option<String>,
+}
+
+impl RequiredChecks {
+    fn from_checks(checks: Vec<GhCheck>) -> Self {
+        let mut failing = false;
+        let mut pending = false;
+        let mut failing_checks = Vec::new();
+        for check in checks {
+            match check.bucket.as_str() {
+                // `cancel` blocks the merge like a failure and needs a re-run or
+                // fix, so it counts as failing rather than green.
+                "fail" | "cancel" => {
+                    failing = true;
+                    failing_checks.push(GhFailingCheck {
+                        name: check.name,
+                        url: check.link.filter(|link| !link.is_empty()),
+                    });
+                }
+                "pending" => pending = true,
+                _ => {}
+            }
+        }
+        Self {
+            failing,
+            pending,
+            failing_checks,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCheck {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    bucket: String,
+    #[serde(default)]
+    link: Option<String>,
+}
+
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
@@ -376,7 +468,7 @@ fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
         .arg("--head")
         .arg(&branch)
         .arg("--json")
-        .arg("url,state,isDraft,number,mergeCommit")
+        .arg("url,state,isDraft,number,mergeCommit,headRefOid")
         .current_dir(repo)
         .output()?;
 
@@ -833,7 +925,10 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhPr, PrCopy};
+    use super::{
+        parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhCheck, GhPr, PrCopy,
+        RequiredChecks,
+    };
 
     fn gh_pr(number: u64, state: &str, is_draft: bool) -> GhPr {
         GhPr {
@@ -842,6 +937,15 @@ mod tests {
             is_draft,
             number,
             merge_commit: None,
+            head_ref_oid: None,
+        }
+    }
+
+    fn check(name: &str, bucket: &str) -> GhCheck {
+        GhCheck {
+            name: name.to_string(),
+            bucket: bucket.to_string(),
+            link: Some(format!("https://ci/{name}")),
         }
     }
 
@@ -870,6 +974,49 @@ mod tests {
             20
         );
         assert!(select_reconcile_pr(vec![]).is_none());
+    }
+
+    #[test]
+    fn required_checks_let_failure_dominate_pending() {
+        let checks = RequiredChecks::from_checks(vec![
+            check("build", "fail"),
+            check("test", "pending"),
+            check("lint", "pass"),
+        ]);
+        assert!(checks.failing);
+        assert!(checks.pending);
+        assert_eq!(
+            checks
+                .failing_checks
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["build"]
+        );
+    }
+
+    #[test]
+    fn required_checks_treat_cancel_as_failing() {
+        let checks = RequiredChecks::from_checks(vec![check("deploy", "cancel")]);
+        assert!(checks.failing);
+        assert_eq!(checks.failing_checks.len(), 1);
+    }
+
+    #[test]
+    fn required_checks_pending_only_when_nothing_failed() {
+        let checks =
+            RequiredChecks::from_checks(vec![check("build", "pending"), check("lint", "pass")]);
+        assert!(!checks.failing);
+        assert!(checks.pending);
+        assert!(checks.failing_checks.is_empty());
+    }
+
+    #[test]
+    fn required_checks_pass_when_all_green() {
+        let checks =
+            RequiredChecks::from_checks(vec![check("build", "pass"), check("lint", "skipping")]);
+        assert!(!checks.failing);
+        assert!(!checks.pending);
     }
 
     #[test]

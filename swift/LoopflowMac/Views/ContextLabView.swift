@@ -62,6 +62,32 @@ struct ContextLabRoute: Codable, Hashable {
     let selectedNodeId: String
     let focusNodeId: String
     let mode: ContextLabMode
+
+    static func initial(repoPath: String?, now: Int64 = Int64(Date().timeIntervalSince1970)) -> Self {
+        let resolvedRepoPath = repoPath.map(WaveOrigin.resolve)
+        return Self(
+            query: SessionSetQuery(
+                repoPaths: resolvedRepoPath.map { [$0] } ?? [],
+                startedAfter: now - 30 * 24 * 60 * 60,
+                startedBefore: now,
+                waves: [],
+                projects: [],
+                tasks: [],
+                flows: [],
+                skills: [],
+                providers: [],
+                models: [],
+                surfaces: [],
+                outcomes: [],
+                captureStates: [],
+                steeredOnly: false,
+                currentRevisionOnly: false
+            ),
+            selectedNodeId: "session-set",
+            focusNodeId: "session-set",
+            mode: .aggregate
+        )
+    }
 }
 
 struct ContextLabView: View {
@@ -85,25 +111,7 @@ struct ContextLabView: View {
     @State private var savedViews: [ContextLabSavedView]
 
     init(initialRepoPath: String?, route: ContextLabRoute? = nil) {
-        let resolvedInitialPath = initialRepoPath.map(WaveOrigin.resolve)
-        let now = Int64(Date().timeIntervalSince1970)
-        let defaultQuery = SessionSetQuery(
-            repoPaths: resolvedInitialPath.map { [$0] } ?? [],
-            startedAfter: now - 30 * 24 * 60 * 60,
-            startedBefore: now,
-            waves: [],
-            projects: [],
-            tasks: [],
-            flows: [],
-            skills: [],
-            providers: [],
-            models: [],
-            surfaces: [],
-            outcomes: [],
-            captureStates: [],
-            steeredOnly: false,
-            currentRevisionOnly: false
-        )
+        let defaultQuery = ContextLabRoute.initial(repoPath: initialRepoPath).query
         self.defaultQuery = defaultQuery
         var initialQuery = route?.query ?? defaultQuery
         initialQuery.repoPaths = initialQuery.repoPaths.map(WaveOrigin.resolve)

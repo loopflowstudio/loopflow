@@ -6,6 +6,18 @@ import Testing
 
 @Suite("Context Lab")
 struct ContextLabTests {
+    @Test("Context Lab menu routes open the current repo over 30 days")
+    func initialContextLabRouteIsExplicit() {
+        let route = ContextLabRoute.initial(repoPath: "/src/loopflow", now: 3_000_000)
+
+        #expect(route.query.repoPaths == ["/src/loopflow"])
+        #expect(route.query.startedAfter == 408_000)
+        #expect(route.query.startedBefore == 3_000_000)
+        #expect(route.selectedNodeId == "session-set")
+        #expect(route.focusNodeId == "session-set")
+        #expect(route.mode == .aggregate)
+    }
+
     @Test("Saved visualization modes use semantic values")
     func contextLabModesPersistIndependentlyFromLabels() {
         #expect(ContextLabMode.allCases.map(\.rawValue) == ["aggregate", "lanes", "table"])

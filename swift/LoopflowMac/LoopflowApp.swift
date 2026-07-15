@@ -60,6 +60,62 @@ struct LoopflowApp: App {
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
+        .commands {
+            CommandGroup(after: .appSettings) {
+                Picker("Appearance", selection: Binding(
+                    get: { appearanceMode },
+                    set: { appearanceMode = $0 }
+                )) {
+                    ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.menuTitle).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+            }
+
+            CommandGroup(after: .saveItem) {
+                Button("Snapshot for Review") {
+                    snapshotCurrentWindow()
+                }
+                .keyboardShortcut("4", modifiers: [.command])
+            }
+
+            CommandMenu("Go") {
+                Button("Portfolio") {
+                    openWindow(id: "portfolio")
+                }
+                .keyboardShortcut("0", modifiers: .command)
+
+                Button("Telemetry") {
+                    openWindow(id: "telemetry")
+                }
+                .keyboardShortcut("1", modifiers: .command)
+
+                Button("Context Lab") {
+                    openWindow(
+                        id: "context-lab",
+                        value: ContextLabRoute.initial(repoPath: portfolioService.repos.first?.path)
+                    )
+                }
+                .keyboardShortcut("2", modifiers: .command)
+
+                if !portfolioService.repos.isEmpty {
+                    Menu("Move to Repo") {
+                        ForEach(portfolioService.repos) { repo in
+                            Button(repo.displayName) {
+                                portfolioService.addRepo(repo.url)
+                                openWindow(id: "repo", value: repo.url)
+                            }
+                        }
+                    }
+                }
+
+                Button("Open Repo…") {
+                    openRepoPanel()
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+        }
 
         WindowGroup(id: "repo", for: URL.self) { $repoURL in
             WavesView(
@@ -109,60 +165,6 @@ struct LoopflowApp: App {
             }
         }
         .defaultSize(width: 1180, height: 820)
-
-        .commands {
-            CommandGroup(after: .appSettings) {
-                Picker("Appearance", selection: Binding(
-                    get: { appearanceMode },
-                    set: { appearanceMode = $0 }
-                )) {
-                    ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.menuTitle).tag(mode.rawValue)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-            }
-
-            CommandGroup(after: .saveItem) {
-                Button("Snapshot for Review") {
-                    snapshotCurrentWindow()
-                }
-                .keyboardShortcut("4", modifiers: [.command])
-            }
-
-            CommandMenu("Go") {
-                Button("Portfolio") {
-                    openWindow(id: "portfolio")
-                }
-                .keyboardShortcut("0", modifiers: .command)
-
-                Button("Telemetry") {
-                    openWindow(id: "telemetry")
-                }
-                .keyboardShortcut("1", modifiers: .command)
-
-                Button("Context Lab") {
-                    openWindow(id: "context-lab")
-                }
-                .keyboardShortcut("2", modifiers: .command)
-
-                if !portfolioService.repos.isEmpty {
-                    Menu("Move to Repo") {
-                        ForEach(portfolioService.repos) { repo in
-                            Button(repo.displayName) {
-                                portfolioService.addRepo(repo.url)
-                                openWindow(id: "repo", value: repo.url)
-                            }
-                        }
-                    }
-                }
-
-                Button("Open Repo…") {
-                    openRepoPanel()
-                }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
-            }
-        }
     }
 
     @MainActor

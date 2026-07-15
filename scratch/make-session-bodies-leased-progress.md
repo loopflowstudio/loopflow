@@ -220,18 +220,40 @@ against `LF_HOME=~/.lf-dev` so in-flight schema can't corrupt the real ledger.
 - **DTO parity**: Rust + Swift decode one fixture with identical observation,
   evidence, category, reason, next owner, controls.
 
+## Coordination with W2-134 (live-turn contract) — dependency/order
+
+W2-134 **exclusively owns** the delta-granular live-turn contract: Rust
+`ChatTurn`/`TurnDelta`/`TurnFrame` broadcast, the SSE `turn`/`turn-delta`/`resync`
+wire, CLI chat reconstruction, Swift `ChatTurn`/`WaveChatClient` decoding, and
+their DTO fixtures/tests. W2-135 stays **additive and orthogonal**:
+
+- Do **not** create any live-turn/session-turn DTO, decoder, SSE event, or
+  alternate reconstruction path, and do not modify W2-134-owned files.
+- Supervision wire is additive: keep existing fields (`process_alive`) and **add**
+  `observation` alongside — do not replace or reshape the live-turn contract.
+- Before integrating any **shared DTO fixture registry, Swift decoder/test
+  aggregator, or other overlapping file**, wait for W2-134 to land, then
+  `lf rebase` onto that landed contract and adapt W2-135 additively.
+- Non-overlapping supervision work proceeds now: `BodyLease`/`BodyObservation`,
+  child Session persistence, `waves.rs` runtime projection, `WaveWorkMap`.
+
+This shifts PR1 from "replace `{status, process_alive}`" to "**add `observation`
+next to `process_alive`**"; `process_alive` retires in PR4 once consumers migrate.
+
 ## Serial PR sequence (one worktree, ordered branches)
 
-**PR1 — Shared supervision + wire model.** Land `BodyLease` (extending
-`ChildProcessGeneration`) + `BodyObservation` projection + the state-transition
-table in code, with bodies writing `heartbeat_at`/`activity_at`/`progress_at` on
-step/provider boundaries. Derive the observation in the work-map producer
-(`lf/commands/waves.rs`), replace `{status, process_alive}` on the runtime
-snapshots, mirror in `WaveWorkMap.swift`, add the DTO fixture. Both the wave
-`Supervisor` and `ops/child.rs` express the shared types.
-*Demo:* `lf status --json` shows `observation` + progress age; a running task
-reads Working with a live progress age, a wedged one reads Stalled. Migration
-`0.11.003`. **This is the decisive first vertical slice.** Absorbs W2-139.
+**PR1 — Shared supervision + wire model (additive).** Land `BodyObservation` (the
+shared observed-body state model) + its projection derived from evidence already
+in the registry (durable `status`, tmux liveness, and the last durable
+mutation/event age), and **add** an `observation` field next to `process_alive`
+on the runtime snapshots in the work-map producer (`lf/commands/waves.rs`), mirror
+it in `WaveWorkMap.swift`, and update the `wave_detail` fixture + its Rust/Swift
+round-trip decoders (an existing W2-135 fixture, not a shared registry addition).
+No schema change yet — Working/Stalled/Stopped/Terminal/Unobservable/Failed derive
+from current evidence; `progress_at` precision and the atomic lease columns come
+in PR2/PR3. *Demo:* `lf status --json` shows `observation` + progress age; a task
+with a stale last-event reads Stalled, a live one reads Working. **Decisive first
+vertical slice.** Absorbs W2-139.
 
 **PR2 — Atomic write-lease + process-group ownership.** Replace the status-CAS
 with an explicit `(generation, lease_token)` lease; capture `pgid` via `setsid`
@@ -258,11 +280,25 @@ from wall-clock time. Full Rust + Swift + migration + smoke gates.
 Adjust boundaries if the code proves a simpler sequence; preserve the single
 product model across Wave/Project/Task.
 
-## Pursue target (this phase leaves)
+## Pursue target (additive PR1 core — gated on W2-134)
 
-Build **PR1**: introduce `BodyLease` + `BodyObservation`, have the launch/step
-paths stamp heartbeat/activity/progress, derive the observation in
-`lf/commands/waves.rs`, reshape the runtime-snapshot wire + Swift mirror + DTO
-fixture, add migration `0.11.003`. Verify with `cargo test -p loopflow`, the DTO
-fixture test, the Swift model test, and `lf status --json` on a live task showing
-`observation` with a progress age.
+Build the **non-overlapping additive supervision core** only:
+
+1. Introduce the shared `BodyObservation` state model (`category`, `reason`,
+   `owner`, `controls`, progress/deadline evidence) as domain types.
+2. A pure `observe(...)` projection deriving the observation from evidence already
+   in the registry — durable `status`, tmux liveness (Observable/Unknowable),
+   `process_alive`, and last-durable-mutation age (latest event `created_at`,
+   fallback `status_at`) — with a `Clock`-injected stall threshold.
+3. Rust unit tests covering every category + the stall boundary under a fake clock.
+
+**Deferred until W2-134 lands and this worktree runs `lf rebase` onto it** (do NOT
+do these in the core commit): wiring `observation` onto the serialized
+`TaskRuntimeSnapshot`/`ProjectRuntimeSnapshot`, the `WaveWorkMap.swift` mirror, the
+`wave_detail` fixture, the shared DTO fixture registry, `DTOFixtureTests.swift`,
+and any decoder integration. Those are additive edits layered on the landed
+live-turn contract, not before it.
+
+No migration in PR1 — schema (`0.11.003` lease columns) is PR2. Verify the core
+with `cargo test -p loopflow` (the new projection unit tests) and
+`cargo clippy -p loopflow -- -D warnings`.

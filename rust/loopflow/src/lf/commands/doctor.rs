@@ -5,7 +5,8 @@
 //! These checks exist because each one failed silently at least once: a schema
 //! drift dropped 29 hours of writes while `debug!` swallowed the error, a
 //! column rename left `node='step'` and `node='skill'` meaning the same thing,
-//! and `lf runs` still splices one process's label onto another's cost.
+//! and the old process-grained run view once spliced one process's label onto
+//! another's cost.
 //!
 //! Checks are pure functions of the rows, so they are tested without a store.
 

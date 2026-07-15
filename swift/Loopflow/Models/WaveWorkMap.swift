@@ -328,13 +328,13 @@ public struct WaveAttentionItem: Decodable, Sendable, Hashable, Identifiable {
 public struct WaveStatusResult: Sendable {
     public let workMap: WaveWorkMap
     public let loopState: String?
-    public let runs: WorkEvidence<RunLedgerEntry>
+    public let runs: WorkEvidence<SkillRunEntry>
     public let attention: WorkEvidence<WaveAttentionItem>
 
     public init(
         workMap: WaveWorkMap,
         loopState: String?,
-        runs: WorkEvidence<RunLedgerEntry>,
+        runs: WorkEvidence<SkillRunEntry>,
         attention: WorkEvidence<WaveAttentionItem>
     ) {
         self.workMap = workMap

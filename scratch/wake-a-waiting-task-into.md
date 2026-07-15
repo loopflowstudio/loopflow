@@ -121,14 +121,21 @@ wake.
   (shared child-launch entry past the bar) + the supervisor trigger — project
   `inspect_outcome` wakes a sleeping open-PR Task when its fresh reading is
   `wake_warranted()`. Tested (a green open PR refuses the wake).
-- **Next — slice 2c (the runner ci-fix turn):** `wake_task_ci_fix` launches via
-  `relaunch_inactive_process`, which loads the normal `task` flow. The runner
-  (`task/runner.rs`) must, when the active PR's observation is `wake_warranted()`
-  at startup, load a single-step `engine/builtins/build/flow/ci-fix.yaml` seeded
-  from the observation instead of `task.yaml`, then `mark_woken()` + persist and
-  settle to `Waiting` (rearm). Then slice 3 (W2-144 `reconcile_process_liveness`
-  queue bridge, `lf status` "fixing CI" owner, integration harness). Rebase onto
-  main before landing (branch is several commits behind).
+- **Slice 2c shipped** (`de49527d5`): the wake is now functional end to end. At
+  generation startup `arm_ci_fix_wake` detects a `wake_warranted()` failure on the
+  active PR's head, marks the observation woken + persists (idempotent), and the
+  runner loads the single-step builtin `ci-fix.yaml` (registered) instead of
+  `task.yaml`; `prepare_task_flow_step` seeds the ci-fix step with the PR + failing
+  leaf checks + log URLs. After the push, the existing settle path returns the Task
+  to `Waiting` and reconcile rearms on the new head. Tested.
+- **Next — pursue starts with a rebase**, then slice 3. Branch is ~7 behind main
+  and touches hot files (`task/runner.rs`, `ops/task.rs`, `ops/child.rs`,
+  `project_session/runner.rs`) that active waves also edit — `lf rebase` first to
+  shrink the conflict surface. Slice 3: the `reconcile_process_liveness` queue
+  bridge (W2-144 gen 7 — consume a queued manual `lf task resume` before the
+  open-PR `Waiting` settle); the `lf status` "fixing CI" owner (open PR + failing +
+  live ci-fix generation → owner `Task`); and the deterministic integration harness
+  proving the full contract. That completes PR2.
 - **Recurring control-plane blocker (not W2-156's to fix):** a Context Lab worker
   keeps migrating the shared `~/.lf/loopflow.db` with its *unmerged* migration
   (first `0.11.004_context_launch_work`, now renumbered to `0.11.006`), bricking

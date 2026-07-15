@@ -754,9 +754,10 @@ struct ContextLabView: View {
             get: { query[keyPath: keyPath].first ?? "" },
             set: { query[keyPath: keyPath] = $0.isEmpty ? [] : [$0] }
         )
+        let options = Array(Set(values + query[keyPath: keyPath])).sorted()
         return Picker(title, selection: selection) {
             Text("Any").tag("")
-            ForEach(values, id: \.self) { Text($0).tag($0) }
+            ForEach(options, id: \.self) { Text($0).tag($0) }
         }
         .pickerStyle(.menu)
     }

@@ -109,7 +109,8 @@ struct TraceEvidenceView: View {
 }
 
 private struct RefinementTaskChoice: Identifiable, Hashable {
-    let wave: String
+    let waveId: String
+    let waveName: String
     let repoPath: String
     let task: RoadmapTask
 
@@ -217,7 +218,8 @@ struct RefinementTaskSheet: View {
                                   task.reference.workspace != nil
                             else { return nil }
                             return RefinementTaskChoice(
-                                wave: wave.wave.name,
+                                waveId: wave.wave.id,
+                                waveName: wave.wave.name,
                                 repoPath: wave.wave.repo,
                                 task: task
                             )
@@ -290,7 +292,7 @@ struct RefinementTaskSheet: View {
             let lfPath = try LocalWaveAgentLauncher.resolveWaveCapableLf(originRepo: choice.repoPath)
             let encoded = Data(body.utf8).base64EncodedString()
             let command = "env \(shellQuote("LF_TASK_SESSION_ID=\(runtime.sessionId)")) "
-                + "\(shellQuote("LF_WAVE_ID=\(choice.wave)")) \(shellQuote(lfPath)) --tui refine "
+                + "\(shellQuote("LF_WAVE_ID=\(choice.waveId)")) \(shellQuote(lfPath)) --tui refine "
                 + "\"$(printf '%s' '\(encoded)' | /usr/bin/base64 -D)\""
             try await TmuxSession(
                 sessionName: terminal.tmuxName,
@@ -298,7 +300,7 @@ struct RefinementTaskSheet: View {
             ).sendCommand(command)
             errorMessage = nil
             onLaunch(TaskWorkspaceRoute(
-                wave: choice.wave,
+                wave: choice.waveName,
                 issue: choice.task.task.identifier,
                 repoPath: choice.repoPath,
                 context: backlink

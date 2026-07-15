@@ -238,6 +238,29 @@ impl Playhead {
         )
     }
 
+    pub fn resume_root(
+        root: QueuedInvocation,
+        cursor: u32,
+        iteration: u32,
+    ) -> Result<(Self, PlayheadEvent)> {
+        if cursor as usize >= root.steps.len() {
+            return Err(anyhow!(
+                "flow '{}' cannot resume at step {} of {}",
+                root.flow,
+                cursor + 1,
+                root.steps.len()
+            ));
+        }
+        let (mut playhead, event) = Self::new(root);
+        let frame = playhead
+            .stack
+            .first_mut()
+            .expect("a new playhead always has its root invocation");
+        frame.cursor = cursor;
+        frame.iteration = iteration;
+        Ok((playhead, event))
+    }
+
     pub fn current(&self) -> Option<StepRef> {
         step_ref(self.stack.last()?)
     }
@@ -489,6 +512,21 @@ mod tests {
         let current = playhead.current().unwrap();
         assert_eq!(current.step, "clarify");
         assert_eq!(current.iteration, 1);
+    }
+
+    #[test]
+    fn root_resumes_at_the_persisted_position() {
+        let (playhead, _) =
+            Playhead::resume_root(invocation("task", &["clarify", "pursue"]), 1, 3).unwrap();
+        let current = playhead.current().unwrap();
+        assert_eq!(current.step, "pursue");
+        assert_eq!(current.iteration, 3);
+    }
+
+    #[test]
+    fn root_rejects_a_cursor_past_its_current_definition() {
+        let error = Playhead::resume_root(invocation("task", &["clarify"]), 1, 0).unwrap_err();
+        assert!(error.to_string().contains("cannot resume at step 2 of 1"));
     }
 
     #[test]

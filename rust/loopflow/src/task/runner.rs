@@ -94,7 +94,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         .await?;
     reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id, lease)).await?;
 
-    let (mut flow, _) = Playhead::new(QueuedInvocation::load(&session.worktree, "task")?);
+    let (mut flow, _) = Playhead::resume_root(
+        QueuedInvocation::load(&session.worktree, &session.resolved_flow)?,
+        session.flow_cursor,
+        session.flow_iteration,
+    )?;
     let prepared = prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -251,6 +255,10 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                         } else {
                             false
                         };
+                        if flow_turn_active {
+                            record_task_flow_position(&mut session, &flow)?;
+                            store.update_task_session_for_lease(&session, lease).await?;
+                        }
                         flow_turn_active = false;
                         loop {
                             while let Some(input) = pending.pop_front() {
@@ -680,6 +688,25 @@ fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool>
     Ok(events
         .iter()
         .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
+}
+
+fn record_task_flow_position(session: &mut TaskSession, flow: &Playhead) -> Result<()> {
+    let root = flow
+        .stack
+        .first()
+        .ok_or_else(|| anyhow!("Task flow has no root invocation"))?;
+    if root.flow != session.resolved_flow {
+        anyhow::bail!(
+            "Task Session {} resolved flow {:?}, but its playhead is {:?}",
+            session.id,
+            session.resolved_flow,
+            root.flow
+        );
+    }
+    session.flow_cursor = root.cursor;
+    session.flow_iteration = root.iteration;
+    session.updated_at = time::OffsetDateTime::now_utc();
+    Ok(())
 }
 
 fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
@@ -1255,6 +1282,10 @@ mod tests {
             status_at: now,
             worktree: PathBuf::from(format!("/repo.{provider}")),
             workspace_slug: format!("test-{provider}"),
+            resolved_flow: "task".to_string(),
+            interaction_policy: crate::engine::InteractionPolicy::Require,
+            flow_cursor: 0,
+            flow_iteration: 0,
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),

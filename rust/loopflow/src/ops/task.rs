@@ -19,6 +19,7 @@ use crate::engine::process::{start_lf_session_with_env, tmux_session_exists, tmu
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
+use crate::engine::{expand_flow, load_flow, ConcreteStep, InteractionPolicy};
 use crate::id::WaveId;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
@@ -38,6 +39,14 @@ use super::ChildReceiptUntil;
 pub enum TaskWaitUntil {
     Open,
     Terminal,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskLaunchOptions {
+    pub name: Option<String>,
+    pub flow: Option<String>,
+    pub stack_on: Option<String>,
+    pub directive: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -108,6 +117,10 @@ pub struct TaskSessionSnapshot {
     pub status_at: time::OffsetDateTime,
     pub worktree: String,
     pub workspace_slug: String,
+    pub resolved_flow: String,
+    pub interaction_policy: InteractionPolicy,
+    pub flow_cursor: u32,
+    pub flow_iteration: u32,
     pub prs: Vec<TaskPr>,
     pub active_pr: Option<TaskPrId>,
     pub agent: String,
@@ -364,13 +377,13 @@ fn command_source_for_wave(
     }
 }
 
-pub fn task_run(
-    repo: &Path,
-    issue: &str,
-    name: Option<String>,
-    stack_on: Option<String>,
-    directive: Option<String>,
-) -> OpsResult<TaskSession> {
+pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSession> {
+    let TaskLaunchOptions {
+        name,
+        flow,
+        stack_on,
+        directive,
+    } = options;
     let directive = directive
         .map(|directive| {
             let directive = directive.trim().to_string();
@@ -394,6 +407,15 @@ pub fn task_run(
                     return Err(task_error(format!(
                         "Task {} already uses workspace name {:?}",
                         session.launch.issue.identifier, session.workspace_slug
+                    )));
+                }
+            }
+            if let Some(requested) = flow.as_deref() {
+                let requested = resolve_task_flow(&session.worktree, Some(requested))?;
+                if requested != session.resolved_flow {
+                    return Err(task_error(format!(
+                        "Task {} already uses flow {:?}",
+                        session.launch.issue.identifier, session.resolved_flow
                     )));
                 }
             }
@@ -452,6 +474,8 @@ pub fn task_run(
     }
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
+    let resolved_flow = resolve_task_flow(&main_repo, flow.as_deref())?;
+    let interaction_policy = InteractionPolicy::Require;
     let resolved =
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
     let segment = match name.as_deref() {
@@ -580,6 +604,10 @@ pub fn task_run(
             status_at: now,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
+            resolved_flow,
+            interaction_policy,
+            flow_cursor: 0,
+            flow_iteration: 0,
             agent,
             provider,
             provider_session_id: None,
@@ -718,9 +746,7 @@ pub fn task_start(
     repo: &Path,
     title: String,
     project_id: &str,
-    name: Option<String>,
-    stack_on: Option<String>,
-    directive: Option<String>,
+    options: TaskLaunchOptions,
 ) -> OpsResult<TaskSession> {
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
@@ -741,7 +767,28 @@ pub fn task_start(
         &title,
         &marker,
     )?;
-    task_run(&main, &created.item.id, name, stack_on, directive)
+    task_run(&main, &created.item.id, options)
+}
+
+fn resolve_task_flow(repo: &Path, requested: Option<&str>) -> OpsResult<String> {
+    let requested = requested.unwrap_or("task");
+    let definition = load_flow(requested, repo)
+        .map_err(|error| task_error(format!("failed to load Task flow {requested:?}: {error}")))?;
+    let steps = expand_flow(&definition, repo).map_err(|error| {
+        task_error(format!("failed to expand Task flow {requested:?}: {error}"))
+    })?;
+    if steps.is_empty() {
+        return Err(task_error(format!("Task flow {requested:?} has no steps")));
+    }
+    if let Some(step) = steps
+        .iter()
+        .find(|step| !matches!(step, ConcreteStep::Skill(_)))
+    {
+        return Err(task_error(format!(
+            "Task flow {requested:?} contains {step:?}; durable Task flows currently require skills"
+        )));
+    }
+    Ok(definition.name)
 }
 
 fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
@@ -2189,6 +2236,10 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             status_at: session.status_at,
             worktree: session.worktree.display().to_string(),
             workspace_slug: session.workspace_slug,
+            resolved_flow: session.resolved_flow,
+            interaction_policy: session.interaction_policy,
+            flow_cursor: session.flow_cursor,
+            flow_iteration: session.flow_iteration,
             prs,
             active_pr,
             agent: session.agent,
@@ -2805,7 +2856,8 @@ mod tests {
     use super::{
         changes_snapshot, command_source_for_wave, derive_workspace_slug, diff_snapshot,
         ensure_working_pr, ensure_working_pr_with_authority, file_snapshot, parse_pr_slug,
-        parse_workspace_slug, project_context, RotateOptions, TaskControlResult, TaskWorkspace,
+        parse_workspace_slug, project_context, resolve_task_flow, RotateOptions, TaskControlResult,
+        TaskWorkspace,
     };
     use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
     use crate::id::WaveId;
@@ -2837,6 +2889,19 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn task_flow_selection_accepts_skill_flows_and_rejects_ops() {
+        let repo = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_task_flow(repo.path(), Some("code")).unwrap(),
+            "code"
+        );
+        let error = resolve_task_flow(repo.path(), Some("deploy")).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("durable Task flows currently require skills"));
     }
 
     fn changed_workspace() -> (tempfile::TempDir, String, TaskSessionId) {
@@ -2950,6 +3015,10 @@ mod tests {
             status_at: now,
             worktree: repo.path().to_path_buf(),
             workspace_slug: "task-pr-proof".to_string(),
+            resolved_flow: "task".to_string(),
+            interaction_policy: crate::engine::InteractionPolicy::Require,
+            flow_cursor: 0,
+            flow_iteration: 0,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,

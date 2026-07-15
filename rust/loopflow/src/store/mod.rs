@@ -1032,6 +1032,10 @@ mod tests {
             status_at: now,
             worktree: PathBuf::from("/repo.inf-123"),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
+            resolved_flow: "task".to_string(),
+            interaction_policy: crate::engine::InteractionPolicy::Require,
+            flow_cursor: 0,
+            flow_iteration: 0,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
@@ -1104,6 +1108,45 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[tokio::test]
+    async fn task_review_state_round_trips_and_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        task.resolved_flow = "code".to_string();
+        task.interaction_policy = crate::engine::InteractionPolicy::Defer;
+        task.flow_cursor = 2;
+        task.flow_iteration = 4;
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.resolved_flow, "code");
+        assert_eq!(
+            persisted.interaction_policy,
+            crate::engine::InteractionPolicy::Defer
+        );
+        assert_eq!(persisted.flow_cursor, 2);
+        assert_eq!(persisted.flow_iteration, 4);
+
+        task.flow_cursor = 3;
+        task.flow_iteration = 5;
+        store.update_task_session(&task).await.unwrap();
+        task.flow_cursor = 2;
+        task.flow_iteration = 4;
+        store.update_task_session(&task).await.unwrap();
+        let resumed = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!((resumed.flow_cursor, resumed.flow_iteration), (3, 5));
     }
 
     #[tokio::test]

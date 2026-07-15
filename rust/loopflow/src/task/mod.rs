@@ -15,6 +15,7 @@ use crate::child_session::{
     ChildDecisionId, ChildDirectiveId, ChildExecutionContext, ChildLeaseState,
     ChildProcessGeneration, DirectiveKind,
 };
+use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
 use crate::session_context::TaskLaunchReceipt;
@@ -390,6 +391,16 @@ pub struct TaskSession {
     pub status_at: OffsetDateTime,
     pub worktree: PathBuf,
     pub workspace_slug: String,
+    /// Flow selected when the Task Session was created. Relaunches resume this
+    /// flow rather than consulting the caller's current default.
+    pub resolved_flow: String,
+    /// Human-review behavior resolved at launch. Inheritance belongs to the
+    /// authored Project/Task layer; the running Session carries one decision.
+    pub interaction_policy: InteractionPolicy,
+    /// Position of the next flow step. Persisted after each completed or
+    /// deferred step so a new process generation does not replay old work.
+    pub flow_cursor: u32,
+    pub flow_iteration: u32,
     /// Provider/model selection for the next body generation. This is mutable
     /// lease state, not Task Session identity.
     pub agent: String,
@@ -479,6 +490,12 @@ impl TaskSession {
         if self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
                 "Task Session {} requires a workspace slug",
+                self.id
+            )));
+        }
+        if self.resolved_flow.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(format!(
+                "Task Session {} requires a resolved flow",
                 self.id
             )));
         }
@@ -703,6 +720,10 @@ mod tests {
             status_at: now,
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
+            resolved_flow: "task".to_string(),
+            interaction_policy: crate::engine::InteractionPolicy::Require,
+            flow_cursor: 0,
+            flow_iteration: 0,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
@@ -953,5 +974,8 @@ mod tests {
 
         session.status = TaskSessionStatus::Completed;
         assert!(session.validate().is_ok());
+
+        session.resolved_flow.clear();
+        assert!(session.validate().is_err());
     }
 }

@@ -117,14 +117,18 @@ wake.
 - **Slice 2a shipped** (`eb8a20a27`): `TaskSession::ci_fix_restart_bar` — the
   launch gate that permits an open-PR restart only on a `wake_warranted()`
   current-head failure, leaving the W2-129 supervisor bar intact elsewhere.
-  Tested. Shared prelude factored.
-- **Next — slice 2b:** wire `LaunchIntent::CiFix` in `ops/child.rs`
-  (`launch()` → a `ChildSession::ci_fix_restart_bar` dispatcher → the TaskSession
-  gate) and the supervisor trigger (project `inspect_outcome` launches a
-  Waiting-on-open-PR task with `LaunchIntent::CiFix` when its fresh reading is
-  `wake_warranted()`). Then slice 2c (runner `ci-fix.yaml` turn + `mark_woken` +
-  rearm) and slice 3 (W2-144 queue bridge, `lf status` "fixing CI" owner,
-  integration harness).
+- **Slice 2b shipped** (`7605bdbb5`): `LaunchIntent::CiFix` + `wake_task_ci_fix`
+  (shared child-launch entry past the bar) + the supervisor trigger — project
+  `inspect_outcome` wakes a sleeping open-PR Task when its fresh reading is
+  `wake_warranted()`. Tested (a green open PR refuses the wake).
+- **Next — slice 2c (the runner ci-fix turn):** `wake_task_ci_fix` launches via
+  `relaunch_inactive_process`, which loads the normal `task` flow. The runner
+  (`task/runner.rs`) must, when the active PR's observation is `wake_warranted()`
+  at startup, load a single-step `engine/builtins/build/flow/ci-fix.yaml` seeded
+  from the observation instead of `task.yaml`, then `mark_woken()` + persist and
+  settle to `Waiting` (rearm). Then slice 3 (W2-144 `reconcile_process_liveness`
+  queue bridge, `lf status` "fixing CI" owner, integration harness). Rebase onto
+  main before landing (branch is several commits behind).
 - **Recurring control-plane blocker (not W2-156's to fix):** a Context Lab worker
   keeps migrating the shared `~/.lf/loopflow.db` with its *unmerged* migration
   (first `0.11.004_context_launch_work`, now renumbered to `0.11.006`), bricking

@@ -1074,7 +1074,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
-        WtCommand::List { format, .. } => wt_list(format.as_deref()),
+        WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune {
             dry_run,
@@ -1224,11 +1224,18 @@ fn cd_directive(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn wt_list(format: Option<&str>) -> Result<()> {
+fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let default_branch = get_default_branch(&main_repo)?;
-    let _ = sync_main(&main_repo, &default_branch);
+    // `wt list` is an inspection surface and stays side-effect free by default:
+    // merge/fresh flags reflect the last-synced main. `--sync` is the explicit,
+    // self-owned mutation that fetches origin and fast-forwards main first — a
+    // read never fetches, resets, or stashes the canonical checkout behind the
+    // user's back.
+    if sync {
+        let _ = sync_main(&main_repo, &default_branch);
+    }
     let worktrees = list_worktrees(&main_repo)?;
 
     if matches!(format, Some("json")) {

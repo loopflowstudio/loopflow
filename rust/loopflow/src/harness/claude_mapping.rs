@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
 use crate::harness::lf_tag::LfTagParser;
+use crate::provider_account::RateLimitSignal;
 
 /// Reader-local state for tracking in-flight content blocks.
 #[derive(Debug, Default)]
@@ -97,6 +98,79 @@ impl ReaderState {
     pub(super) fn take_provider_session_id(&mut self) -> Option<String> {
         self.provider_session_id.take()
     }
+}
+
+pub(super) fn rate_limit_signal(line: &str) -> Option<RateLimitSignal> {
+    let value = serde_json::from_str::<Value>(line).ok()?;
+    let event = value
+        .get("stream_event")
+        .and_then(|stream| stream.get("event"))
+        .unwrap_or(&value);
+    if event.get("type").and_then(Value::as_str)? != "rate_limit_event" {
+        return None;
+    }
+    let info = event
+        .get("rate_limit_info")
+        .or_else(|| event.get("rateLimitInfo"))
+        .or_else(|| event.get("rate_limit"))
+        .unwrap_or(event);
+    let status = info
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("rate_limit_event");
+    let limited = matches!(
+        status.to_ascii_lowercase().as_str(),
+        "rejected" | "blocked" | "limited" | "rate_limit_reached"
+    );
+    let utilization_percent = info
+        .get("utilization")
+        .or_else(|| info.get("used_percent"))
+        .or_else(|| info.get("usedPercent"))
+        .and_then(Value::as_f64)
+        .map(|value| {
+            let percent = if value <= 1.0 { value * 100.0 } else { value };
+            percent.round().clamp(0.0, 100.0) as u8
+        });
+    let resets_at = info
+        .get("resets_at")
+        .or_else(|| info.get("resetsAt"))
+        .or_else(|| info.get("reset_at"))
+        .or_else(|| info.get("reset_timestamp"))
+        .and_then(parse_reset_timestamp);
+    let rate_type = info
+        .get("rate_limit_type")
+        .or_else(|| info.get("rateLimitType"))
+        .and_then(Value::as_str);
+    let reason = rate_type
+        .map(|rate_type| format!("{status}: {rate_type}"))
+        .unwrap_or_else(|| status.to_string());
+    Some(RateLimitSignal {
+        utilization_percent,
+        resets_at,
+        limited,
+        reason,
+    })
+}
+
+fn parse_reset_timestamp(value: &Value) -> Option<i64> {
+    if let Some(value) = value.as_i64() {
+        return Some(if value > 100_000_000_000 {
+            value / 1000
+        } else {
+            value
+        });
+    }
+    let value = value.as_str()?;
+    if let Ok(timestamp) = value.parse::<i64>() {
+        return Some(if timestamp > 100_000_000_000 {
+            timestamp / 1000
+        } else {
+            timestamp
+        });
+    }
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+        .ok()
+        .map(|timestamp| timestamp.unix_timestamp())
 }
 
 /// Parse a single NDJSON line and emit conversation events.
@@ -617,6 +691,30 @@ mod tests {
             state.take_provider_session_id().as_deref(),
             Some("sess_wrapped")
         );
+    }
+
+    #[test]
+    fn rejected_rate_limit_event_marks_a_hard_limit() {
+        let signal = rate_limit_signal(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rate_limit_type":"five_hour","utilization":1.0,"resets_at":1900000000}}"#,
+        )
+        .unwrap();
+
+        assert!(signal.limited);
+        assert_eq!(signal.utilization_percent, Some(100));
+        assert_eq!(signal.resets_at, Some(1_900_000_000));
+        assert!(signal.reason.contains("five_hour"));
+    }
+
+    #[test]
+    fn rate_limit_warning_updates_utilization_without_limiting() {
+        let signal = rate_limit_signal(
+            r#"{"stream_event":{"event":{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.72}}}}"#,
+        )
+        .unwrap();
+
+        assert!(!signal.limited);
+        assert_eq!(signal.utilization_percent, Some(72));
     }
 
     #[test]

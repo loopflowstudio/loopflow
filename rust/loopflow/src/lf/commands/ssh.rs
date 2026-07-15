@@ -6,9 +6,9 @@
 //! (never in argv, `ps`, or logs), and are NOT persisted on the remote — they
 //! die with the process. The remote host stays a stateless compute surface.
 //!
-//! Forwarded bundle: GitHub (`gh`), Claude/agent OAuth, and — the capability
-//! beyond the shell prototype — the PM/Linear token, which lives in store rather
-//! than the environment. The remote `resolve_pm_token` reads
+//! Forwarded bundle: GitHub (`gh`), Claude/Codex agent OAuth, and — the
+//! capability beyond the shell prototype — the PM/Linear token, which lives in
+//! store rather than the environment. The remote `resolve_pm_token` reads
 //! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf pm` works.
 //!
 //! Secrets policy: `lf ssh` forwards specific resolved secrets, never the
@@ -26,7 +26,11 @@ use std::process::{Command, Stdio};
 use anyhow::{anyhow, Context};
 
 use crate::pm::PmProviderKind;
-use crate::provider_auth::extract_claude_token;
+use crate::provider_account::{
+    encode_forwarded_credentials, local_forwarded_credentials, ForwardedProviderCredential,
+    FORWARDED_PROVIDER_ACCOUNTS_ENV,
+};
+use crate::provider_auth::{extract_claude_token, extract_codex_access_token};
 
 /// Default repository path (relative to `$HOME`) the remote command runs in.
 pub const DEFAULT_REPO: &str = "src/loopflow";
@@ -37,6 +41,8 @@ pub const DEFAULT_REPO: &str = "src/loopflow";
 pub struct Credentials {
     pub gh_token: Option<String>,
     pub claude_token: Option<String>,
+    pub codex_token: Option<String>,
+    pub provider_accounts: Vec<ForwardedProviderCredential>,
     pub pm_token: Option<String>,
     /// PM provider the token belongs to (e.g. `linear`).
     pub pm_provider: Option<String>,
@@ -153,9 +159,15 @@ async fn resolve_credentials(secret_names: &[String]) -> anyhow::Result<Credenti
     for name in secret_names {
         secrets.push((name.clone(), resolve_doppler_secret(name)?));
     }
+    let provider_accounts = match crate::store::open_existing_store().await {
+        Some(store) => local_forwarded_credentials(&std::sync::Arc::new(store)).await?,
+        None => Vec::new(),
+    };
     Ok(Credentials {
         gh_token: resolve_gh_token(),
         claude_token: extract_claude_token(&home).map(|token| token.access_token),
+        codex_token: extract_codex_access_token(&home),
+        provider_accounts,
         pm_token: resolve_pm_token().await,
         pm_provider: Some(PmProviderKind::Linear.as_str().to_string()),
         secrets,
@@ -281,6 +293,21 @@ fn build_preamble(
             "export CLAUDE_CODE_OAUTH_TOKEN={}",
             sh_quote(token)
         ));
+    }
+    if let Some(token) = nonempty(&credentials.codex_token) {
+        lines.push(format!("export CODEX_ACCESS_TOKEN={}", sh_quote(token)));
+    }
+    if !credentials.provider_accounts.is_empty() {
+        match encode_forwarded_credentials(&credentials.provider_accounts) {
+            Ok(bundle) => lines.push(format!(
+                "export {FORWARDED_PROVIDER_ACCOUNTS_ENV}={}",
+                sh_quote(&bundle)
+            )),
+            Err(error) => lines.push(format!(
+                "echo {} >&2; exit 1",
+                sh_quote(&format!("could not encode provider accounts: {error}"))
+            )),
+        }
     }
     if let Some(token) = nonempty(&credentials.pm_token) {
         lines.push(format!("export LF_FORWARDED_PM_TOKEN={}", sh_quote(token)));
@@ -482,6 +509,19 @@ mod tests {
         Credentials {
             gh_token: Some("gh-secret".to_string()),
             claude_token: Some("claude-secret".to_string()),
+            codex_token: Some("codex-secret".to_string()),
+            provider_accounts: vec![
+                ForwardedProviderCredential::new(
+                    crate::provider_auth::Provider::Claude,
+                    crate::provider_account::parse_account_id("primary").unwrap(),
+                    "claude-primary".to_string(),
+                ),
+                ForwardedProviderCredential::new(
+                    crate::provider_auth::Provider::Codex,
+                    crate::provider_account::parse_account_id("reserve").unwrap(),
+                    "codex-reserve".to_string(),
+                ),
+            ],
             pm_token: Some("linear-secret".to_string()),
             pm_provider: Some("linear".to_string()),
             secrets: vec![("STRIPE_KEY".to_string(), "sk-live-123".to_string())],
@@ -495,6 +535,16 @@ mod tests {
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
         assert!(preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN='claude-secret'"));
+        assert!(preamble.contains("export CODEX_ACCESS_TOKEN='codex-secret'"));
+        let encoded = encode_forwarded_credentials(&full_bundle().provider_accounts).unwrap();
+        assert!(preamble.contains(&format!(
+            "export {FORWARDED_PROVIDER_ACCOUNTS_ENV}='{}'",
+            encoded
+        )));
+        assert!(!preamble.contains("claude-primary"));
+        assert!(!preamble.contains("codex-reserve"));
+        assert!(!preamble.contains("refresh_token"));
+        assert!(!preamble.contains("/accounts/"));
         assert!(preamble.contains("export LF_FORWARDED_PM_TOKEN='linear-secret'"));
         assert!(preamble.contains("export LF_FORWARDED_PM_PROVIDER='linear'"));
         // Locally-resolved Doppler secret, forwarded by value; no Doppler token.

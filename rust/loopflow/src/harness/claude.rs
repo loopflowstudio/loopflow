@@ -14,6 +14,8 @@ use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{claude_mapping, Capabilities, Harness, HarnessError, RawProviderEvent};
+use crate::provider_account::{resolve_provider_account, ProviderAccountRoute};
+use crate::provider_auth::Provider;
 
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
@@ -23,6 +25,7 @@ pub struct ClaudeHarness {
     /// Vendor session id captured from the first turn's `system` event;
     /// subsequent turns resume it via `--resume`.
     provider_session_id: Arc<Mutex<Option<String>>>,
+    account_route: Option<ProviderAccountRoute>,
     turn_in_progress: Arc<AtomicBool>,
     child: Option<Child>,
     reader_task: Option<JoinHandle<()>>,
@@ -45,6 +48,7 @@ impl ClaudeHarness {
             config: None,
             should_seed_task_prompt: true,
             provider_session_id: Arc::new(Mutex::new(None)),
+            account_route: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             child: None,
             reader_task: None,
@@ -89,8 +93,31 @@ impl Harness for ClaudeHarness {
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
+        let requested_session = self
+            .provider_session_id
+            .lock()
+            .expect("claude provider session id lock poisoned")
+            .clone();
+        let account_route =
+            resolve_provider_account(Provider::Claude, requested_session.as_deref()).await?;
+        if account_route
+            .as_ref()
+            .is_some_and(|route| !route.resume_requested_session())
+        {
+            *self
+                .provider_session_id
+                .lock()
+                .expect("claude provider session id lock poisoned") = None;
+        }
+        self.account_route = account_route;
+
         // Validate claude binary on PATH.
-        let output = Command::new("claude").arg("--version").output().await;
+        let mut version_command = Command::new("claude");
+        version_command.arg("--version");
+        if let Some(route) = &self.account_route {
+            route.apply_tokio(&mut version_command);
+        }
+        let output = version_command.output().await;
         match output {
             Ok(out) if out.status.success() => {
                 let version = String::from_utf8_lossy(&out.stdout);
@@ -151,6 +178,9 @@ impl Harness for ClaudeHarness {
         let args = build_claude_session_turn_args(&turn_content, config, resume_id.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
+        if let Some(route) = &self.account_route {
+            route.apply_tokio(&mut cmd);
+        }
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         cmd.stdin(std::process::Stdio::null());
@@ -193,6 +223,7 @@ impl Harness for ClaudeHarness {
         let shutdown = self.shutdown_requested.clone();
         let interrupted = self.interrupt_requested.clone();
         let session_slot = self.provider_session_id.clone();
+        let account_route = self.account_route.clone();
         let reader_turn_id = turn_id.clone();
         self.reader_task = Some(tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -214,12 +245,35 @@ impl Harness for ClaudeHarness {
                     continue;
                 }
 
+                if let (Some(route), Some(signal)) = (
+                    account_route.as_ref(),
+                    claude_mapping::rate_limit_signal(&line),
+                ) {
+                    if let Err(error) = route.record_rate_limit(&signal).await {
+                        tracing::warn!(%error, "failed to record Claude account rate limit");
+                    }
+                    if signal.limited {
+                        let _ = events.send(ConversationEvent::Error {
+                            code: "provider_rate_limited".to_string(),
+                            message: signal.reason,
+                        });
+                        saw_turn_completed = true;
+                        break;
+                    }
+                }
+
                 let done =
                     claude_mapping::process_line(&line, &reader_turn_id, &events, &mut state);
                 if let Some(session_id) = state.take_provider_session_id() {
                     *session_slot
                         .lock()
-                        .expect("claude provider session id lock poisoned") = Some(session_id);
+                        .expect("claude provider session id lock poisoned") =
+                        Some(session_id.clone());
+                    if let Some(route) = &account_route {
+                        if let Err(error) = route.pin_session(&session_id).await {
+                            tracing::warn!(%error, "failed to pin Claude provider session account");
+                        }
+                    }
                 }
                 if done {
                     saw_turn_completed = true;

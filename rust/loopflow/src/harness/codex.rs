@@ -34,6 +34,8 @@ use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
 use crate::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness, RawProviderEvent};
+use crate::provider_account::{resolve_provider_account, ProviderAccountRoute};
+use crate::provider_auth::Provider;
 
 /// SIGKILL an entire process group. Killing only the direct child orphans
 /// the real app-server when `codex` on PATH is an npm shim that spawns it as
@@ -48,6 +50,23 @@ fn kill_process_group(pid: u32) {
     };
     #[cfg(not(unix))]
     let _ = pid;
+}
+
+fn build_thread_request(
+    launch: &AgentConfig,
+    resume_provider_session_id: Option<&str>,
+) -> (&'static str, serde_json::Map<String, Value>) {
+    let mut params = build_codex_thread_start_params(launch);
+    match resume_provider_session_id {
+        Some(session_id) => {
+            params.insert(
+                "threadId".to_string(),
+                Value::String(session_id.to_string()),
+            );
+            ("thread/resume", params)
+        }
+        None => ("thread/start", params),
+    }
 }
 
 #[derive(Debug)]
@@ -327,6 +346,8 @@ pub struct CodexHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     provider_session_id: Arc<Mutex<Option<String>>>,
+    resume_provider_session_id: Option<String>,
+    account_route: Option<ProviderAccountRoute>,
     /// Live turn id (from turn/started, cleared at turn/completed); steer and
     /// interrupt address the turn with it.
     current_turn_id: Arc<Mutex<Option<String>>>,
@@ -368,6 +389,8 @@ impl CodexHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             provider_session_id: Arc::new(Mutex::new(None)),
+            resume_provider_session_id: None,
+            account_route: None,
             current_turn_id: Arc::new(Mutex::new(None)),
             initialize_request_id: Arc::new(AtomicI64::new(0)),
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
@@ -464,6 +487,15 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(false, Ordering::Relaxed);
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
+        let requested_session = self.resume_provider_session_id.clone();
+        let account_route =
+            resolve_provider_account(Provider::Codex, requested_session.as_deref()).await?;
+        self.resume_provider_session_id = match &account_route {
+            Some(route) if route.resume_requested_session() => requested_session,
+            Some(_) => None,
+            None => requested_session,
+        };
+        self.account_route = account_route;
         *self
             .provider_session_id
             .lock()
@@ -591,11 +623,22 @@ impl Harness for CodexHarness {
     fn provider_session_id(&self) -> Option<String> {
         self.thread_id()
     }
+
+    fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
+        self.resume_provider_session_id = provider_session_id;
+    }
 }
 
 impl CodexHarness {
     async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
         let mut command = Command::new("codex");
+        if self
+            .account_route
+            .as_ref()
+            .is_some_and(ProviderAccountRoute::uses_native_home)
+        {
+            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
+        }
         command
             // Subcommand, not flag: codex-cli >= 0.142 renamed `--app-server`
             // to `codex app-server` (verified against 0.142.5).
@@ -606,6 +649,9 @@ impl CodexHarness {
             // Dropping the harness (e.g. a run task is aborted)
             // must not leak a live app-server.
             .kill_on_drop(true);
+        if let Some(route) = &self.account_route {
+            route.apply_tokio(&mut command);
+        }
         // Own process group so stop() can kill everything under the `codex`
         // entry point, including the real app-server binary that npm shims
         // spawn as a grandchild.
@@ -691,6 +737,7 @@ impl CodexHarness {
         let current_turn_id = self.current_turn_id.clone();
         let initialize_request_id = self.initialize_request_id.clone();
         let thread_start_request_id = self.thread_start_request_id.clone();
+        let account_route = self.account_route.clone();
         let reader_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             let mut initialized_tx = Some(initialized_tx);
@@ -742,7 +789,12 @@ impl CodexHarness {
                             .get("result")
                             .and_then(codex_mapping::extract_thread_id)
                         {
-                            state.record_thread_id(thread_id);
+                            state.record_thread_id(thread_id.clone());
+                            if let Some(route) = &account_route {
+                                if let Err(error) = route.pin_session(&thread_id).await {
+                                    tracing::warn!(%error, "failed to pin Codex provider session account");
+                                }
+                            }
                         }
                     }
                     continue;
@@ -765,7 +817,44 @@ impl CodexHarness {
                     continue;
                 }
 
+                if method == "account/rateLimits/updated" {
+                    if let (Some(route), Some(signal)) = (
+                        account_route.as_ref(),
+                        codex_mapping::rate_limit_signal(&params),
+                    ) {
+                        if let Err(error) = route.record_rate_limit(&signal).await {
+                            tracing::warn!(%error, "failed to record Codex account rate limit");
+                        }
+                        if signal.limited {
+                            let _ = event_tx.send(ConversationEvent::Error {
+                                code: "provider_rate_limited".to_string(),
+                                message: signal.reason,
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                let previous_session = state
+                    .provider_session_id
+                    .lock()
+                    .expect("codex provider session id lock poisoned")
+                    .clone();
                 process_notification(method, &params, &mut state, &event_tx);
+                let current_session = state
+                    .provider_session_id
+                    .lock()
+                    .expect("codex provider session id lock poisoned")
+                    .clone();
+                if current_session != previous_session {
+                    if let (Some(route), Some(session_id)) =
+                        (account_route.as_ref(), current_session.as_deref())
+                    {
+                        if let Err(error) = route.pin_session(session_id).await {
+                            tracing::warn!(%error, "failed to pin Codex provider session account");
+                        }
+                    }
+                }
             }
 
             turn_in_progress.store(false, Ordering::Relaxed);
@@ -805,7 +894,8 @@ impl CodexHarness {
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
 
-        let thread_params = build_codex_thread_start_params(launch);
+        let (thread_method, thread_params) =
+            build_thread_request(launch, self.resume_provider_session_id.as_deref());
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.
@@ -814,7 +904,7 @@ impl CodexHarness {
         let request_id = self.next_request_id;
         self.thread_start_request_id
             .store(request_id, Ordering::Relaxed);
-        self.send_request("thread/start", Value::Object(thread_params))
+        self.send_request(thread_method, Value::Object(thread_params))
             .await?;
 
         // The vendor thread id arrives either in the thread/start response or
@@ -852,6 +942,32 @@ mod tests {
             None,
         );
         (state, slot)
+    }
+
+    #[test]
+    fn pinned_codex_session_uses_thread_resume() {
+        let launch = AgentConfig {
+            cwd: Some("/tmp/project".into()),
+            ..AgentConfig::default()
+        };
+        let (method, params) = build_thread_request(&launch, Some("thread_abc"));
+
+        assert_eq!(method, "thread/resume");
+        assert_eq!(
+            params.get("threadId").and_then(Value::as_str),
+            Some("thread_abc")
+        );
+        assert_eq!(
+            params.get("cwd").and_then(Value::as_str),
+            Some("/tmp/project")
+        );
+    }
+
+    #[test]
+    fn new_codex_session_uses_thread_start() {
+        let (method, params) = build_thread_request(&AgentConfig::default(), None);
+        assert_eq!(method, "thread/start");
+        assert!(!params.contains_key("threadId"));
     }
 
     #[cfg(unix)]

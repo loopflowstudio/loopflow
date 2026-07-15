@@ -5,6 +5,7 @@
 use serde_json::Value;
 
 use crate::chat::types::{ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage};
+use crate::provider_account::RateLimitSignal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ItemPhase {
@@ -70,6 +71,49 @@ pub(super) fn map_token_usage(params: &Value) -> TurnUsage {
         model: None,
         cost_usd: None,
     }
+}
+
+pub(super) fn rate_limit_signal(params: &Value) -> Option<RateLimitSignal> {
+    let snapshot = params.get("rateLimits").unwrap_or(params);
+    let reached = snapshot.get("rateLimitReachedType").and_then(Value::as_str);
+    let primary = snapshot.get("primary").filter(|value| !value.is_null());
+    let secondary = snapshot.get("secondary").filter(|value| !value.is_null());
+    let individual = snapshot
+        .get("individualLimit")
+        .filter(|value| !value.is_null());
+    let utilization_percent = [primary, secondary]
+        .into_iter()
+        .flatten()
+        .filter_map(|window| window.get("usedPercent").and_then(Value::as_u64))
+        .chain(
+            individual
+                .and_then(|limit| limit.get("remainingPercent"))
+                .and_then(Value::as_u64)
+                .map(|remaining| 100_u64.saturating_sub(remaining)),
+        )
+        .max()
+        .map(|percent| percent.min(100) as u8);
+    let resets_at = [primary, secondary, individual]
+        .into_iter()
+        .flatten()
+        .filter_map(|window| window.get("resetsAt").and_then(Value::as_i64))
+        .map(|timestamp| {
+            if timestamp > 100_000_000_000 {
+                timestamp / 1000
+            } else {
+                timestamp
+            }
+        })
+        .max();
+    if reached.is_none() && utilization_percent.is_none() && resets_at.is_none() {
+        return None;
+    }
+    Some(RateLimitSignal {
+        utilization_percent,
+        resets_at,
+        limited: reached.is_some(),
+        reason: reached.unwrap_or("rate limit update").to_string(),
+    })
 }
 
 pub(super) fn map_item_id(params: &Value) -> String {
@@ -450,5 +494,27 @@ mod tests {
         assert_eq!(usage.output_tokens, 5);
         assert_eq!(usage.reasoning_tokens, Some(0));
         assert_eq!(usage.cache_read_tokens, Some(9600));
+    }
+
+    #[test]
+    fn rate_limit_snapshot_maps_reached_type_and_latest_reset() {
+        let signal = rate_limit_signal(&json!({
+            "rateLimits": {
+                "primary": {"usedPercent": 40, "resetsAt": 1900000000},
+                "secondary": {"usedPercent": 80, "resetsAt": 1900000300},
+                "rateLimitReachedType": "rate_limit_reached"
+            }
+        }))
+        .unwrap();
+
+        assert!(signal.limited);
+        assert_eq!(signal.utilization_percent, Some(80));
+        assert_eq!(signal.resets_at, Some(1_900_000_300));
+        assert_eq!(signal.reason, "rate_limit_reached");
+    }
+
+    #[test]
+    fn sparse_rate_limit_snapshot_is_ignored() {
+        assert!(rate_limit_signal(&json!({"rateLimits": {}})).is_none());
     }
 }

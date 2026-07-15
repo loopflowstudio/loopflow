@@ -19,6 +19,8 @@ use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamEvent, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
+use crate::provider_account::resolve_provider_account_blocking;
+use crate::provider_auth::Provider;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
 /// to this process before exiting so the agent doesn't survive as an orphan.
@@ -921,6 +923,28 @@ pub fn launch_agent(
     // Harness-specific environment setup.
     let agent = launch.agent.as_deref().unwrap_or("claude");
     let (harness, model) = parse_agent(agent);
+    let managed_provider = match harness.as_str() {
+        "claude" => Some(Provider::Claude),
+        "codex" => Some(Provider::Codex),
+        _ => None,
+    };
+    let account_route = managed_provider
+        .map(|provider| resolve_provider_account_blocking(provider, None))
+        .transpose()
+        .map_err(|error| {
+            CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))
+        })?
+        .flatten();
+    if account_route
+        .as_ref()
+        .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)
+        && managed_provider == Some(Provider::Codex)
+    {
+        cmd.args(["-c", "cli_auth_credentials_store=\"file\""]);
+    }
+    if let Some(route) = &account_route {
+        route.apply(&mut cmd);
+    }
     apply_harness_env(&harness, &mut cmd, process);
     // Name this launch's agent. Set both fields even when one is absent so a
     // later launch cannot inherit the previous launch's attribution.

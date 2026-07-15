@@ -429,6 +429,37 @@ lf auth disconnect github
 Linear refreshes OAuth automatically before expiry. Connections created before
 this release may need one `lf auth linear` reconnect to record their PKCE client ID.
 
+Route new Claude or Codex sessions across several OAuth accounts:
+
+```bash
+lf auth connect claude --account primary
+lf auth connect claude --account reserve
+lf auth use claude primary
+lf auth accounts claude
+
+lf auth disable claude reserve
+lf auth enable claude reserve
+lf auth reset claude primary
+lf auth disconnect claude --account reserve
+```
+
+Each account keeps independent provider auth and session state under
+`~/.lf/accounts/`. Shared Claude/Codex configuration and compiled skills stay in
+their canonical host-level trees. A provider session remains pinned to its
+account; after a hard rate limit, the next launch chooses a healthy account and
+starts a new provider session.
+
+```bash
+lf ssh mini -- lf wave product
+```
+
+`lf ssh` forwards every enabled, connected Claude and Codex account for that
+remote process tree without writing credential files on the remote host. Child
+restarts inherit the lease. Before connecting, the local provider CLIs validate
+or refresh each enabled login; `lf ssh` fails instead of sending an incomplete
+account pool. After the Wave, tmux session, or host restarts, start or reconnect
+from the local machine to resolve and forward fresh credentials.
+
 ```bash
 lf status product          # inspect live execution and attention in one Wave
 lf roadmap                 # read planned work across every Wave on this machine

@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -260,6 +260,15 @@ impl std::fmt::Debug for AuthFlowHandle {
 impl AuthFlowHandle {
     fn new(response: AuthFlowResponse, monitor: JoinHandle<Result<(), AuthError>>) -> Self {
         Self { response, monitor }
+    }
+
+    pub async fn wait(self) -> Result<(), AuthError> {
+        self.monitor
+            .await
+            .map_err(|error| AuthError::CommandFailed {
+                provider: self.response.provider,
+                message: format!("auth monitor task failed: {error}"),
+            })?
     }
 }
 
@@ -1126,14 +1135,31 @@ impl AuthBroker for GhAuthBroker {
 
 #[derive(Debug, Clone)]
 pub struct ClaudeAuthBroker {
-    home_dir: PathBuf,
+    config_dir: PathBuf,
+    keychain_fallback: bool,
 }
 
 impl Default for ClaudeAuthBroker {
     fn default() -> Self {
         Self {
-            home_dir: home_dir_or_cwd(),
+            config_dir: home_dir_or_cwd().join(".claude"),
+            keychain_fallback: true,
         }
+    }
+}
+
+impl ClaudeAuthBroker {
+    fn for_profile(config_dir: PathBuf) -> Self {
+        Self {
+            config_dir,
+            keychain_fallback: false,
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new("claude");
+        command.env("CLAUDE_CONFIG_DIR", &self.config_dir);
+        command
     }
 }
 
@@ -1144,7 +1170,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = Command::new("claude");
+        let mut command = self.command();
         command.args(["auth", "login"]);
         command.env("BROWSER", "echo");
         command.env("CLAUDE_BROWSER", "echo");
@@ -1153,7 +1179,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let mut command = Command::new("claude");
+        let mut command = self.command();
         command.args(["auth", "status"]);
 
         match command.output().await {
@@ -1172,7 +1198,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = Command::new("claude");
+        let mut command = self.command();
         command.args(["auth", "logout"]);
 
         // Best-effort CLI logout; always clean up auth files regardless
@@ -1181,18 +1207,23 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
-        extract_claude_token(&self.home_dir)
+        extract_claude_token_from_config_dir(&self.config_dir).or_else(|| {
+            if self.keychain_fallback {
+                read_claude_keychain_token()
+            } else {
+                None
+            }
+        })
     }
 }
 
 impl ClaudeAuthBroker {
     fn remove_claude_auth_files(&self) -> Result<(), AuthError> {
-        let claude_dir = self.home_dir.join(".claude");
-        if !claude_dir.exists() {
+        if !self.config_dir.exists() {
             return Ok(());
         }
-        for name in &["auth.json", "session-cache"] {
-            let path = claude_dir.join(name);
+        for name in &[".credentials.json", "auth.json", "session-cache"] {
+            let path = self.config_dir.join(name);
             if path.exists() {
                 remove_path(&path)?;
             }
@@ -1203,14 +1234,44 @@ impl ClaudeAuthBroker {
 
 #[derive(Debug, Clone)]
 pub struct CodexAuthBroker {
-    home_dir: PathBuf,
+    codex_home: PathBuf,
+    force_file_store: bool,
 }
 
 impl Default for CodexAuthBroker {
     fn default() -> Self {
         Self {
-            home_dir: home_dir_or_cwd(),
+            codex_home: home_dir_or_cwd().join(".codex"),
+            force_file_store: false,
         }
+    }
+}
+
+impl CodexAuthBroker {
+    fn for_profile(codex_home: PathBuf) -> Self {
+        Self {
+            codex_home,
+            force_file_store: true,
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new("codex");
+        command.env("CODEX_HOME", &self.codex_home);
+        command
+    }
+
+    fn add_file_store_override(&self, command: &mut Command) {
+        if self.force_file_store {
+            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
+        }
+    }
+
+    async fn refresh_access_token(&self) -> Result<(), AuthError> {
+        let mut command = self.command();
+        self.add_file_store_override(&mut command);
+        command.arg("app-server");
+        refresh_codex_access_token_with_command(&mut command).await
     }
 }
 
@@ -1221,30 +1282,34 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = Command::new("codex");
+        let mut command = self.command();
+        self.add_file_store_override(&mut command);
         command.args(["login", "--device-auth"]);
 
         start_auth_command(Provider::Codex, "codex", command, parse_generic_auth_line).await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        Ok(if extract_codex_token(&self.home_dir).is_some() {
-            AuthStatus::Active { login: None }
-        } else {
-            AuthStatus::None
-        })
+        Ok(
+            if extract_codex_token_from_home(&self.codex_home).is_some() {
+                AuthStatus::Active { login: None }
+            } else {
+                AuthStatus::None
+            },
+        )
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = Command::new("codex");
+        let mut command = self.command();
+        self.add_file_store_override(&mut command);
         command.arg("logout");
 
         match command.output().await {
             Ok(output) if output.status.success() => Ok(()),
             Ok(_) | Err(_) => {
-                let codex_dir = self.home_dir.join(".codex");
-                if codex_dir.exists() {
-                    remove_path(&codex_dir)?;
+                let auth_path = self.codex_home.join("auth.json");
+                if auth_path.exists() {
+                    remove_path(&auth_path)?;
                 }
                 Ok(())
             }
@@ -1252,8 +1317,78 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
-        extract_codex_token(&self.home_dir)
+        extract_codex_token_from_home(&self.codex_home)
     }
+}
+
+fn provider_account_broker(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<Arc<dyn AuthBroker>, AuthError> {
+    match provider {
+        Provider::Claude => Ok(Arc::new(ClaudeAuthBroker::for_profile(provider_home))),
+        Provider::Codex => Ok(Arc::new(CodexAuthBroker::for_profile(provider_home))),
+        _ => Err(AuthError::UnsupportedProvider(provider.to_string())),
+    }
+}
+
+pub async fn start_provider_account_auth(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<AuthFlowHandle, AuthError> {
+    provider_account_broker(provider, provider_home)?
+        .start_auth()
+        .await
+}
+
+pub async fn provider_account_auth_status(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<AuthStatus, AuthError> {
+    provider_account_broker(provider, provider_home)?
+        .check_status()
+        .await
+}
+
+pub async fn disconnect_provider_account_auth(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<(), AuthError> {
+    provider_account_broker(provider, provider_home)?
+        .disconnect()
+        .await
+}
+
+pub(crate) async fn prepare_provider_account_access_token(
+    provider: Provider,
+    provider_home: &Path,
+) -> Result<Option<String>, AuthError> {
+    let token = match provider {
+        Provider::Claude => {
+            let broker = ClaudeAuthBroker::for_profile(provider_home.to_path_buf());
+            if !matches!(broker.check_status().await?, AuthStatus::Active { .. }) {
+                return Ok(None);
+            }
+            broker.extract_token().await
+        }
+        Provider::Codex => {
+            let broker = CodexAuthBroker::for_profile(provider_home.to_path_buf());
+            broker.refresh_access_token().await?;
+            broker.extract_token().await
+        }
+        _ => return Err(AuthError::UnsupportedProvider(provider.to_string())),
+    };
+    let Some(token) = token else {
+        return Ok(None);
+    };
+    if provider_token_refresh_due(&token, now_unix()) {
+        return Err(AuthError::CommandFailed {
+            provider,
+            message: "provider CLI did not produce an access token valid for the forwarding lease"
+                .to_string(),
+        });
+    }
+    Ok(Some(token.access_token))
 }
 
 #[derive(Debug, Clone)]
@@ -1754,16 +1889,24 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
 }
 
 pub(crate) fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
-    let cred_path = home_dir.join(".claude/.credentials.json");
-    if let Ok(content) = fs::read_to_string(cred_path) {
-        if let Some(token) = claude_token_from_credentials_json(&content) {
-            return Some(token);
-        }
+    let config_dir = home_dir.join(".claude");
+    if let Some(token) = extract_claude_token_from_config_dir(&config_dir) {
+        return Some(token);
     }
     // The file is absent on machines where Claude Code stashed its OAuth blob in
     // the macOS keychain (service "Claude Code-credentials", JSON under
     // `.claudeAiOauth`). Fall back to reading it there.
     read_claude_keychain_token()
+}
+
+fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderToken> {
+    let cred_path = config_dir.join(".credentials.json");
+    if let Ok(content) = fs::read_to_string(cred_path) {
+        if let Some(token) = claude_token_from_credentials_json(&content) {
+            return Some(token);
+        }
+    }
+    None
 }
 
 /// Parse a `.claude/.credentials.json` payload. The access token sits at the top
@@ -1818,7 +1961,11 @@ fn read_claude_keychain_token() -> Option<ProviderToken> {
 }
 
 fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
-    let auth_path = home_dir.join(".codex/auth.json");
+    extract_codex_token_from_home(&home_dir.join(".codex"))
+}
+
+fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
+    let auth_path = codex_home.join("auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     // Store OAuth access tokens only.
@@ -1850,6 +1997,168 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
         updated_at: now_unix(),
         credential_type: CredentialType::OAuth,
     })
+}
+
+async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> {
+    let broker = CodexAuthBroker::for_profile(codex_home.to_path_buf());
+    broker.refresh_access_token().await
+}
+
+async fn refresh_codex_access_token_with_command(command: &mut Command) -> Result<(), AuthError> {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
+
+    let mut child = command.spawn().map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            AuthError::CommandUnavailable {
+                provider: Provider::Codex,
+                command: "codex".to_string(),
+            }
+        } else {
+            AuthError::CommandSpawn {
+                provider: Provider::Codex,
+                source,
+            }
+        }
+    })?;
+    let _process_group = CodexRefreshProcessGroup::new(child.id());
+    let mut stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
+        provider: Provider::Codex,
+        message: "app-server did not expose stdin".to_string(),
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AuthError::CommandFailed {
+            provider: Provider::Codex,
+            message: "app-server did not expose stdout".to_string(),
+        })?;
+    let mut stdout = BufReader::new(stdout);
+
+    write_codex_auth_request(
+        &mut stdin,
+        &serde_json::json!({
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {
+                    "name": "loopflow",
+                    "title": "loopflow",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }
+            }
+        }),
+    )
+    .await?;
+    read_codex_auth_response(&mut stdout, 1).await?;
+    write_codex_auth_request(&mut stdin, &serde_json::json!({"method": "initialized"})).await?;
+    write_codex_auth_request(
+        &mut stdin,
+        &serde_json::json!({
+            "id": 2,
+            "method": "account/read",
+            "params": {"refreshToken": true},
+        }),
+    )
+    .await?;
+    read_codex_auth_response(&mut stdout, 2).await
+}
+
+async fn write_codex_auth_request(
+    stdin: &mut tokio::process::ChildStdin,
+    request: &serde_json::Value,
+) -> Result<(), AuthError> {
+    let mut line = serde_json::to_vec(request).map_err(|error| AuthError::CommandFailed {
+        provider: Provider::Codex,
+        message: format!("failed to encode app-server request: {error}"),
+    })?;
+    line.push(b'\n');
+    stdin
+        .write_all(&line)
+        .await
+        .map_err(|source| AuthError::CommandIo {
+            provider: Provider::Codex,
+            source,
+        })?;
+    stdin.flush().await.map_err(|source| AuthError::CommandIo {
+        provider: Provider::Codex,
+        source,
+    })
+}
+
+async fn read_codex_auth_response(
+    stdout: &mut BufReader<tokio::process::ChildStdout>,
+    request_id: i64,
+) -> Result<(), AuthError> {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let mut line = String::new();
+            let bytes =
+                stdout
+                    .read_line(&mut line)
+                    .await
+                    .map_err(|source| AuthError::CommandIo {
+                        provider: Provider::Codex,
+                        source,
+                    })?;
+            if bytes == 0 {
+                return Err(AuthError::CommandFailed {
+                    provider: Provider::Codex,
+                    message: "app-server disconnected before refreshing auth".to_string(),
+                });
+            }
+            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if message.get("id").and_then(serde_json::Value::as_i64) != Some(request_id) {
+                continue;
+            }
+            if message.get("error").is_some() {
+                return Err(AuthError::CommandFailed {
+                    provider: Provider::Codex,
+                    message: "app-server rejected the proactive token refresh".to_string(),
+                });
+            }
+            return Ok(());
+        }
+    })
+    .await
+    .map_err(|_| AuthError::CommandFailed {
+        provider: Provider::Codex,
+        message: "timed out waiting for app-server auth refresh".to_string(),
+    })?
+}
+
+struct CodexRefreshProcessGroup {
+    pid: Option<u32>,
+}
+
+impl CodexRefreshProcessGroup {
+    fn new(pid: Option<u32>) -> Self {
+        Self { pid }
+    }
+}
+
+impl Drop for CodexRefreshProcessGroup {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.pid {
+            // SAFETY: the child was spawned into a fresh process group whose
+            // id is its pid; killing the group also reaps npm-shim descendants.
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
+    }
+}
+
+pub(crate) fn extract_codex_access_token(home_dir: &Path) -> Option<String> {
+    extract_codex_token(home_dir).map(|token| token.access_token)
 }
 
 /// Canonical key under which OpenCode stores credentials in auth.json.
@@ -2183,7 +2492,7 @@ async fn refresh_provider_token_with_runner(
     match provider {
         Provider::GitHub => refresh_github_token(home_dir, runner).await,
         Provider::Claude => refresh_claude_token(home_dir),
-        Provider::Codex => refresh_codex_token(home_dir, runner).await,
+        Provider::Codex => refresh_codex_token(home_dir).await,
         Provider::OpenCodeZen => {
             extract_opencode_zen_token(home_dir).ok_or(TokenRefreshError::MissingToken {
                 provider: Provider::OpenCodeZen,
@@ -2461,19 +2770,28 @@ fn refresh_claude_token(home_dir: &Path) -> Result<ProviderToken, TokenRefreshEr
     })
 }
 
-async fn refresh_codex_token(
-    home_dir: &Path,
-    runner: &dyn RefreshCommandRunner,
-) -> Result<ProviderToken, TokenRefreshError> {
-    let _ = run_refresh_command(
-        Provider::Codex,
-        "codex",
-        &["login", "--refresh"],
-        runner,
-        false,
-    )
-    .await;
-
+async fn refresh_codex_token(home_dir: &Path) -> Result<ProviderToken, TokenRefreshError> {
+    let codex_home = home_dir.join(".codex");
+    refresh_codex_access_token(&codex_home)
+        .await
+        .map_err(|error| match error {
+            AuthError::CommandUnavailable { command, .. } => {
+                TokenRefreshError::CommandUnavailable {
+                    provider: Provider::Codex,
+                    command,
+                }
+            }
+            AuthError::CommandIo { source, .. } | AuthError::CommandSpawn { source, .. } => {
+                TokenRefreshError::CommandIo {
+                    provider: Provider::Codex,
+                    source,
+                }
+            }
+            error => TokenRefreshError::CommandFailed {
+                provider: Provider::Codex,
+                message: error.to_string(),
+            },
+        })?;
     extract_codex_token(home_dir).ok_or(TokenRefreshError::MissingToken {
         provider: Provider::Codex,
     })
@@ -2536,6 +2854,7 @@ pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     match env_name {
         "GH_TOKEN" => true,
         "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
+        "CODEX_ACCESS_TOKEN" => normalize_program_name(program) == "codex",
         "ANTHROPIC_API_KEY" => normalize_program_name(program) == "claude",
         "OPENAI_API_KEY" => normalize_program_name(program) == "codex",
         "OPENCODE_API_KEY" => normalize_program_name(program) == "opencode",
@@ -2584,7 +2903,9 @@ pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
         ("claude", CredentialType::ApiKey) => {
             Some(("ANTHROPIC_API_KEY".to_string(), token.access_token.clone()))
         }
-        ("codex", CredentialType::OAuth) => None, // Codex OAuth env injection unsupported
+        ("codex", CredentialType::OAuth) => {
+            Some(("CODEX_ACCESS_TOKEN".to_string(), token.access_token.clone()))
+        }
         ("codex", CredentialType::ApiKey) => {
             Some(("OPENAI_API_KEY".to_string(), token.access_token.clone()))
         }
@@ -2614,6 +2935,7 @@ pub async fn provider_env_vars(store: &crate::store::Store) -> Vec<(String, Stri
 mod tests {
     use std::collections::VecDeque;
     use std::io::{Read, Write};
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::os::unix::process::ExitStatusExt;
     use std::sync::{Mutex as StdMutex, OnceLock};
@@ -2887,9 +3209,7 @@ mod tests {
         fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
         fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
 
-        let broker = ClaudeAuthBroker {
-            home_dir: temp.path().to_path_buf(),
-        };
+        let broker = ClaudeAuthBroker::for_profile(temp.path().join(".claude"));
         broker.disconnect().await.expect("disconnect");
 
         assert!(claude_dir.join("settings.json").exists());
@@ -3170,6 +3490,10 @@ mod tests {
         assert!(provider_env_allowed_for_program(
             "claude",
             "CLAUDE_CODE_OAUTH_TOKEN"
+        ));
+        assert!(provider_env_allowed_for_program(
+            "codex",
+            "CODEX_ACCESS_TOKEN"
         ));
         assert!(provider_env_allowed_for_program(
             "opencode",
@@ -3606,24 +3930,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_codex_token_falls_back_to_file_when_command_missing() {
+    async fn codex_refresh_uses_app_server_managed_auth_flow() {
         let tmp = tempdir().expect("tempdir");
-        let codex_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        let script = tmp.path().join("codex-app-server");
+        let trace = tmp.path().join("requests.jsonl");
         fs::write(
-            codex_dir.join("auth.json"),
-            r#"{"access_token":"oauth-token"}"#,
+            &script,
+            r#"#!/bin/sh
+trace="$1"
+IFS= read -r line
+printf '%s\n' "$line" >> "$trace"
+printf '{"id":1,"result":{}}\n'
+IFS= read -r line
+printf '%s\n' "$line" >> "$trace"
+IFS= read -r line
+printf '%s\n' "$line" >> "$trace"
+printf '{"id":2,"result":{"account":null}}\n'
+"#,
         )
-        .expect("write auth json");
-        let runner = FakeRefreshRunner::new(vec![Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "codex not installed",
-        ))]);
+        .expect("write fake app-server");
+        let mut permissions = fs::metadata(&script)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&script, permissions).expect("make script executable");
 
-        let token = refresh_provider_token_with_runner(Provider::Codex, tmp.path(), &runner).await;
-        let token = token.expect("fallback file refresh should succeed");
-        assert_eq!(token.provider, "codex");
-        assert_eq!(token.access_token, "oauth-token");
+        let mut command = Command::new(&script);
+        command.arg(&trace);
+        refresh_codex_access_token_with_command(&mut command)
+            .await
+            .expect("refresh through fake app-server");
+
+        let requests = fs::read_to_string(trace).expect("read request trace");
+        let requests = requests
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("request json"))
+            .collect::<Vec<_>>();
+        assert_eq!(requests[0]["method"], "initialize");
+        assert_eq!(requests[1]["method"], "initialized");
+        assert_eq!(requests[2]["method"], "account/read");
+        assert_eq!(requests[2]["params"]["refreshToken"], true);
+    }
+
+    #[tokio::test]
+    async fn codex_refresh_reports_missing_cli() {
+        let tmp = tempdir().expect("tempdir");
+        let mut command = Command::new(tmp.path().join("missing-codex"));
+        let error = refresh_codex_access_token_with_command(&mut command)
+            .await
+            .expect_err("missing app-server should fail");
+        assert!(matches!(error, AuthError::CommandUnavailable { .. }));
     }
 
     #[tokio::test]
@@ -3711,9 +4067,10 @@ mod tests {
     }
 
     #[test]
-    fn env_var_for_token_codex_oauth_returns_none() {
+    fn env_var_for_token_codex_oauth_returns_access_token() {
         let token = make_token("codex", CredentialType::OAuth);
-        assert!(env_var_for_token(&token).is_none());
+        let (name, _) = env_var_for_token(&token).expect("should produce env var");
+        assert_eq!(name, "CODEX_ACCESS_TOKEN");
     }
 
     #[test]
@@ -3762,7 +4119,7 @@ mod tests {
             .await
             .expect("upsert github oauth");
 
-        // Codex with OAuth (should produce no env var)
+        // Codex with OAuth uses the supported process-lifetime access token.
         store
             .upsert_provider_token(&make_token("codex", CredentialType::OAuth))
             .await
@@ -3773,6 +4130,7 @@ mod tests {
         assert!(vars.iter().any(|(n, _)| n == "ANTHROPIC_API_KEY"));
         assert!(vars.iter().any(|(n, _)| n == "GH_TOKEN"));
         assert!(!vars.iter().any(|(n, _)| n == "CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(vars.iter().any(|(n, _)| n == "CODEX_ACCESS_TOKEN"));
         assert!(!vars.iter().any(|(n, _)| n == "OPENAI_API_KEY"));
     }
 }

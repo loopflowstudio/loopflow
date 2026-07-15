@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -8,11 +5,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
+use crate::profile::{HostId, LocalChromeProfile, ProfileId};
 use crate::provider_account::{
     account_profile_path, ensure_account_profile, new_account, open_account_store,
     parse_account_id, remove_account_profile,
@@ -30,30 +28,6 @@ use crate::store::{
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const CLAUDE_CHROME_PROFILE_FILE: &str = ".loopflow-chrome-profile.json";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct ClaudeChromeProfile {
-    directory: String,
-    label: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChromeLocalState {
-    profile: ChromeProfileCatalog,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChromeProfileCatalog {
-    info_cache: HashMap<String, ChromeProfileInfo>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChromeProfileInfo {
-    name: String,
-    user_name: Option<String>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaudeAuthStatusOutput {
@@ -78,20 +52,33 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             provider,
             account,
             chrome_profile,
+            profile,
         } => match account {
-            Some(account) => connect_account(provider, account, chrome_profile.as_deref()).await,
+            Some(account) => {
+                connect_account(
+                    provider,
+                    account,
+                    profile.as_deref(),
+                    chrome_profile.as_deref(),
+                )
+                .await
+            }
             None => connect(provider).await,
         },
-        AuthCommand::Pair {
-            provider,
-            account,
-            chrome_profile,
-        } => pair_chrome_profile(provider, account, chrome_profile),
         AuthCommand::Import {
             provider,
             account,
             chrome_profile,
-        } => import_account(provider, account, chrome_profile.as_deref()).await,
+            profile,
+        } => {
+            import_account(
+                provider,
+                account,
+                profile.as_deref(),
+                chrome_profile.as_deref(),
+            )
+            .await
+        }
         AuthCommand::Accounts { provider } => accounts(provider.as_deref()).await,
         AuthCommand::Enable { provider, account } => {
             set_account_enabled(provider, account, true).await
@@ -153,16 +140,19 @@ async fn connect(raw_provider: &str) -> Result<()> {
 async fn connect_account(
     raw_provider: &str,
     raw_account: &str,
+    raw_profile: Option<&str>,
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let account_id = parse_account_id(raw_account)?;
     let profile = ensure_account_profile(provider, &account_id)?;
-    if raw_chrome_profile.is_some() && provider != Provider::Claude {
-        return Err(anyhow!("--chrome-profile is supported for Claude only"));
+    if (raw_chrome_profile.is_some() || raw_profile.is_some()) && provider != Provider::Claude {
+        return Err(anyhow!(
+            "--profile and --chrome-profile are supported for Claude only"
+        ));
     }
     let chrome_profile = if provider == Provider::Claude {
-        resolve_claude_chrome_profile(&profile, raw_chrome_profile)?
+        resolve_auth_chrome_profile(raw_profile, raw_chrome_profile).await?
     } else {
         None
     };
@@ -301,32 +291,10 @@ async fn register_managed_account(
     Ok(())
 }
 
-fn pair_chrome_profile(
-    raw_provider: &str,
-    raw_account: &str,
-    raw_chrome_profile: &str,
-) -> Result<()> {
-    let provider = parse_managed_provider(raw_provider)?;
-    if provider != Provider::Claude {
-        return Err(anyhow!(
-            "Chrome profile pairing is supported for Claude only"
-        ));
-    }
-    let account_id = parse_account_id(raw_account)?;
-    let provider_profile = ensure_account_profile(provider, &account_id)?;
-    let chrome_profile =
-        resolve_claude_chrome_profile(&provider_profile, Some(raw_chrome_profile))?
-            .expect("requested Chrome profile should produce a pairing");
-    println!(
-        "Paired Claude account '{}' with Chrome profile '{}'",
-        account_id, chrome_profile.label
-    );
-    Ok(())
-}
-
 async fn import_account(
     raw_provider: &str,
     raw_account: &str,
+    raw_profile: Option<&str>,
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
@@ -337,7 +305,7 @@ async fn import_account(
     }
     let account_id = parse_account_id(raw_account)?;
     let provider_profile = ensure_account_profile(provider, &account_id)?;
-    let chrome_profile = resolve_claude_chrome_profile(&provider_profile, raw_chrome_profile)?;
+    let chrome_profile = resolve_auth_chrome_profile(raw_profile, raw_chrome_profile).await?;
     let paired_login = chrome_profile
         .as_ref()
         .map(|profile| profile.label.as_str())
@@ -401,121 +369,38 @@ fn read_ambient_claude_status() -> Result<ClaudeAuthStatusOutput> {
     serde_json::from_slice(&output.stdout).context("parse ambient Claude login status")
 }
 
-fn resolve_claude_chrome_profile(
-    provider_profile: &Path,
-    requested: Option<&str>,
-) -> Result<Option<ClaudeChromeProfile>> {
-    let selection_path = provider_profile.join(CLAUDE_CHROME_PROFILE_FILE);
-    let Some(requested) = requested else {
-        if !selection_path.exists() {
-            return Ok(None);
-        }
-        let selection = serde_json::from_slice::<ClaudeChromeProfile>(
-            &fs::read(&selection_path)
-                .with_context(|| format!("read {}", selection_path.display()))?,
-        )
-        .with_context(|| format!("parse {}", selection_path.display()))?;
-        return Ok(Some(selection));
-    };
-
-    let requested = requested.trim();
-    if requested.is_empty() {
-        return Err(anyhow!("Chrome profile cannot be empty"));
+async fn resolve_auth_chrome_profile(
+    raw_profile: Option<&str>,
+    raw_chrome_profile: Option<&str>,
+) -> Result<Option<LocalChromeProfile>> {
+    if let Some(raw_profile) = raw_profile {
+        let profile_id = ProfileId::parse(raw_profile).map_err(|error| anyhow!(error))?;
+        let host_id = HostId::local().map_err(|error| anyhow!(error))?;
+        let store = open_account_store().await?;
+        let binding = store
+            .chrome_profile_binding(&profile_id, &host_id)
+            .await?
+            .ok_or_else(|| {
+                anyhow!(
+                    "profile '{}' has no Chrome binding on {}; run 'lf profile create {} --chrome-profile <email>'",
+                    profile_id,
+                    host_id,
+                    profile_id
+                )
+            })?;
+        return Ok(Some(LocalChromeProfile {
+            directory: binding.chrome_directory,
+            label: binding.google_email.to_string(),
+        }));
     }
-    let local_state_path = chrome_local_state_path()?;
-    let local_state = serde_json::from_slice::<ChromeLocalState>(
-        &fs::read(&local_state_path)
-            .with_context(|| format!("read {}", local_state_path.display()))?,
-    )
-    .with_context(|| format!("parse {}", local_state_path.display()))?;
-    let selection = select_chrome_profile(local_state.profile.info_cache, requested)?;
-    write_claude_chrome_profile(&selection_path, &selection)?;
-    Ok(Some(selection))
-}
-
-fn select_chrome_profile(
-    profiles: HashMap<String, ChromeProfileInfo>,
-    requested: &str,
-) -> Result<ClaudeChromeProfile> {
-    let mut matches = profiles
-        .into_iter()
-        .filter(|(directory, profile)| {
-            directory.eq_ignore_ascii_case(requested)
-                || profile.name.eq_ignore_ascii_case(requested)
-                || profile
-                    .user_name
-                    .as_deref()
-                    .is_some_and(|login| login.eq_ignore_ascii_case(requested))
-        })
-        .collect::<Vec<_>>();
-    if matches.len() != 1 {
-        return Err(anyhow!(
-            "Chrome profile '{}' matched {} profiles",
-            requested,
-            matches.len()
-        ));
-    }
-    let (directory, profile) = matches
-        .pop()
-        .expect("one matched Chrome profile should exist");
-    let label = profile
-        .user_name
-        .filter(|login| !login.trim().is_empty())
-        .unwrap_or(profile.name);
-    validate_chrome_profile_identifier(&directory)?;
-    validate_chrome_profile_identifier(&label)?;
-    Ok(ClaudeChromeProfile { directory, label })
-}
-
-fn validate_chrome_profile_identifier(value: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value.chars().all(|character| {
-            character.is_ascii_alphanumeric()
-                || matches!(character, '@' | '.' | '_' | '+' | '-' | ' ')
-        })
-    {
-        return Err(anyhow!("unsupported Chrome profile identifier"));
-    }
-    Ok(())
-}
-
-fn write_claude_chrome_profile(path: &Path, profile: &ClaudeChromeProfile) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("Chrome profile selection path has no parent"))?;
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).context("create Chrome profile selection")?;
-    serde_json::to_writer(&mut temporary, profile).context("write Chrome profile selection")?;
-    temporary.write_all(b"\n")?;
-    temporary.as_file().sync_all()?;
-    temporary
-        .persist(path)
-        .map_err(|error| anyhow!("install {}: {}", path.display(), error.error))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
+    raw_chrome_profile
+        .map(crate::profile::resolve_local_chrome_profile)
+        .transpose()
+        .map_err(|error| anyhow!(error))
 }
 
 #[cfg(target_os = "macos")]
-fn chrome_local_state_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow!("cannot resolve home directory"))?;
-    Ok(home.join("Library/Application Support/Google/Chrome/Local State"))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn chrome_local_state_path() -> Result<PathBuf> {
-    Err(anyhow!(
-        "Chrome profile discovery is currently supported on macOS only"
-    ))
-}
-
-#[cfg(target_os = "macos")]
-fn open_claude_chrome_profile(profile: &ClaudeChromeProfile, url: &str) -> Result<()> {
+fn open_claude_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
     let chrome = Path::new("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
     if !chrome.is_file() {
         return Err(anyhow!("Google Chrome is not installed in /Applications"));
@@ -536,7 +421,7 @@ fn open_claude_chrome_profile(profile: &ClaudeChromeProfile, url: &str) -> Resul
 }
 
 #[cfg(not(target_os = "macos"))]
-fn open_claude_chrome_profile(_profile: &ClaudeChromeProfile, _url: &str) -> Result<()> {
+fn open_claude_chrome_profile(_profile: &LocalChromeProfile, _url: &str) -> Result<()> {
     Err(anyhow!(
         "opening a selected Chrome profile is currently supported on macOS only"
     ))
@@ -864,56 +749,12 @@ fn format_relative_delta(seconds: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use tempfile::tempdir;
     use time::OffsetDateTime;
 
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
     use crate::store::{CredentialType, ProviderAccount, ProviderAccountId};
 
-    use super::{
-        format_account, format_relative_delta, format_snapshot, resolve_claude_chrome_profile,
-        select_chrome_profile, write_claude_chrome_profile, ChromeProfileInfo, ClaudeChromeProfile,
-    };
-
-    #[test]
-    fn chrome_profile_pairing_resolves_email_and_persists() {
-        let profiles = HashMap::from([
-            (
-                "Profile 3".to_string(),
-                ChromeProfileInfo {
-                    name: "jackstah".to_string(),
-                    user_name: Some("jackstah@example.com".to_string()),
-                },
-            ),
-            (
-                "Profile 7".to_string(),
-                ChromeProfileInfo {
-                    name: "Loopflow".to_string(),
-                    user_name: Some("jack@example.com".to_string()),
-                },
-            ),
-        ]);
-
-        let selection = select_chrome_profile(profiles, "jack@example.com")
-            .expect("resolve signed-in Chrome email");
-        assert_eq!(
-            selection,
-            ClaudeChromeProfile {
-                directory: "Profile 7".to_string(),
-                label: "jack@example.com".to_string(),
-            }
-        );
-
-        let temp = tempdir().expect("tempdir");
-        let selection_path = temp.path().join(".loopflow-chrome-profile.json");
-        write_claude_chrome_profile(&selection_path, &selection).expect("persist pairing");
-        assert_eq!(
-            resolve_claude_chrome_profile(temp.path(), None).expect("load pairing"),
-            Some(selection)
-        );
-    }
+    use super::{format_account, format_relative_delta, format_snapshot};
 
     #[test]
     fn format_account_shows_routing_state() {

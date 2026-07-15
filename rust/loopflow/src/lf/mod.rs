@@ -1294,16 +1294,11 @@ pub enum AuthCommand {
         #[arg(long)]
         account: Option<String>,
         /// Chrome profile directory, name, or signed-in email for Claude OAuth
-        #[arg(long, requires = "account")]
+        #[arg(long, requires = "account", conflicts_with = "profile")]
         chrome_profile: Option<String>,
-    },
-    /// Pair a managed Claude account with its Chrome profile
-    Pair {
-        provider: String,
-        account: String,
-        /// Chrome profile directory, name, or signed-in email
-        #[arg(long)]
-        chrome_profile: String,
+        /// Use this Loopflow profile's host-local Chrome binding
+        #[arg(long, requires = "account")]
+        profile: Option<String>,
     },
     /// Adopt an existing Claude login into a managed account
     Import {
@@ -1312,8 +1307,11 @@ pub enum AuthCommand {
         #[arg(long)]
         account: String,
         /// Chrome profile directory, name, or signed-in email
-        #[arg(long)]
+        #[arg(long, conflicts_with = "profile")]
         chrome_profile: Option<String>,
+        /// Use this Loopflow profile's host-local Chrome binding
+        #[arg(long)]
+        profile: Option<String>,
     },
     /// List managed Claude and Codex OAuth accounts
     Accounts {
@@ -1334,7 +1332,12 @@ pub enum AuthCommand {
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
     /// Create a personal routing profile
-    Create { profile: String },
+    Create {
+        profile: String,
+        /// Chrome profile directory, name, or signed-in email on this host
+        #[arg(long)]
+        chrome_profile: Option<String>,
+    },
     /// List personal routing profiles and their provider accounts
     List,
     /// Bind provider accounts to profiles
@@ -1489,7 +1492,6 @@ mod tests {
 
         for flow in [
             "connect",
-            "pair",
             "import",
             "accounts",
             "enable",
@@ -1542,6 +1544,30 @@ mod tests {
     }
 
     #[test]
+    fn profile_create_accepts_a_host_local_chrome_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "profile",
+            "create",
+            "loopflow-eng",
+            "--chrome-profile",
+            "loopflow-eng@loopflow.studio",
+        ])
+        .expect("parse profile Chrome binding");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Profile {
+                cmd: ProfileCommand::Create {
+                    profile,
+                    chrome_profile: Some(chrome_profile),
+                }
+            }) if profile == "loopflow-eng"
+                && chrome_profile == "loopflow-eng@loopflow.studio"
+        ));
+    }
+
+    #[test]
     fn profile_account_set_accepts_a_login_email() {
         let cli = Cli::try_parse_from([
             "lf",
@@ -1582,6 +1608,7 @@ mod tests {
                     provider,
                     account,
                     chrome_profile: None,
+                    profile: None,
                 }
             }) if provider == "claude" && account.as_deref() == Some("primary")
         ));
@@ -1608,6 +1635,7 @@ mod tests {
                     provider,
                     account,
                     chrome_profile: Some(chrome_profile),
+                    profile: None,
                 }
             }) if provider == "claude"
                 && account.as_deref() == Some("loopflow")
@@ -1616,29 +1644,31 @@ mod tests {
     }
 
     #[test]
-    fn auth_pair_accepts_matching_chrome_profile() {
+    fn auth_connect_accepts_a_loopflow_profile() {
         let cli = Cli::try_parse_from([
             "lf",
             "auth",
-            "pair",
+            "connect",
             "claude",
+            "--account",
             "primary",
-            "--chrome-profile",
-            "jackstah@example.com",
+            "--profile",
+            "jackstah",
         ])
-        .expect("parse Chrome profile pairing");
+        .expect("parse Loopflow profile binding");
 
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
-                cmd: AuthCommand::Pair {
+                cmd: AuthCommand::Connect {
                     provider,
                     account,
-                    chrome_profile,
+                    chrome_profile: None,
+                    profile: Some(profile),
                 }
             }) if provider == "claude"
-                && account == "primary"
-                && chrome_profile == "jackstah@example.com"
+                && account.as_deref() == Some("primary")
+                && profile == "jackstah"
         ));
     }
 
@@ -1663,6 +1693,7 @@ mod tests {
                     provider,
                     account,
                     chrome_profile: Some(chrome_profile),
+                    profile: None,
                 }
             }) if provider == "claude"
                 && account == "loopflow"

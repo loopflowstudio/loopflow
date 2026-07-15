@@ -5,7 +5,10 @@ use anyhow::{anyhow, Context, Result};
 use time::OffsetDateTime;
 
 use crate::lf::{ProfileAccountCommand, ProfileCommand, ProfileRouteCommand};
-use crate::profile::{Profile, ProfileId, ProfileProviderAccount, RepoProfileRoute};
+use crate::profile::{
+    resolve_local_chrome_profile, ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId,
+    ProfileProviderAccount, RepoProfileRoute,
+};
 use crate::provider_account::open_account_store;
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
@@ -19,7 +22,10 @@ pub fn run(cmd: &ProfileCommand, repo_root: &Path) -> Result<()> {
 async fn run_async(cmd: &ProfileCommand, repo_root: &Path) -> Result<()> {
     let store = open_account_store().await?;
     match cmd {
-        ProfileCommand::Create { profile } => create_profile(&store, profile).await,
+        ProfileCommand::Create {
+            profile,
+            chrome_profile,
+        } => create_profile(&store, profile, chrome_profile.as_deref()).await,
         ProfileCommand::List => list_profiles(&store).await,
         ProfileCommand::Account { cmd } => match cmd {
             ProfileAccountCommand::Set {
@@ -41,7 +47,11 @@ async fn run_async(cmd: &ProfileCommand, repo_root: &Path) -> Result<()> {
     }
 }
 
-async fn create_profile(store: &SharedStore, raw_profile: &str) -> Result<()> {
+async fn create_profile(
+    store: &SharedStore,
+    raw_profile: &str,
+    raw_chrome_profile: Option<&str>,
+) -> Result<()> {
     let profile_id = parse_profile_id(raw_profile)?;
     let now = now_unix();
     let existed = store.get_profile(&profile_id).await?.is_some();
@@ -52,6 +62,26 @@ async fn create_profile(store: &SharedStore, raw_profile: &str) -> Result<()> {
             updated_at: now,
         })
         .await?;
+    if let Some(raw_chrome_profile) = raw_chrome_profile {
+        let chrome_profile =
+            resolve_local_chrome_profile(raw_chrome_profile).map_err(|error| anyhow!(error))?;
+        let google_email = EmailAddress::parse(&chrome_profile.label).map_err(|_| {
+            anyhow!(
+                "Chrome profile '{}' is not signed into a Google email identity",
+                chrome_profile.label
+            )
+        })?;
+        store
+            .upsert_chrome_profile_binding(&ChromeProfileBinding {
+                profile_id: profile_id.clone(),
+                host_id: HostId::local().map_err(|error| anyhow!(error))?,
+                chrome_directory: chrome_profile.directory,
+                google_email,
+                created_at: now,
+                updated_at: now,
+            })
+            .await?;
+    }
     println!(
         "{} profile '{}'",
         if existed { "Updated" } else { "Created" },
@@ -62,6 +92,7 @@ async fn create_profile(store: &SharedStore, raw_profile: &str) -> Result<()> {
 
 async fn list_profiles(store: &SharedStore) -> Result<()> {
     let profiles = store.list_profiles().await?;
+    let host_id = HostId::local().map_err(|error| anyhow!(error))?;
     let mappings = store.list_profile_provider_accounts(None).await?;
     let accounts = store.list_provider_accounts(None).await?;
     let accounts = accounts
@@ -75,6 +106,12 @@ async fn list_profiles(store: &SharedStore) -> Result<()> {
         .collect::<HashMap<_, _>>();
     for profile in profiles {
         println!("{}", profile.id);
+        if let Some(binding) = store.chrome_profile_binding(&profile.id, &host_id).await? {
+            println!(
+                "  chrome  {} ({})",
+                binding.google_email, binding.chrome_directory
+            );
+        }
         for mapping in mappings
             .iter()
             .filter(|mapping| mapping.profile_id == profile.id)

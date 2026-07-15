@@ -12,7 +12,10 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::profile::{Profile, ProfileId, ProfileProviderAccount, ProviderProfileCandidate};
+use crate::profile::{
+    ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
+    ProviderProfileCandidate,
+};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{open_store, ProviderAccount, ProviderAccountId, SharedStore, StoreError};
@@ -21,6 +24,13 @@ pub const FORWARDED_PROVIDER_ACCOUNTS_ENV: &str = "LF_FORWARDED_PROVIDER_ACCOUNT
 pub const PROFILE_REPO_ID_ENV: &str = "LF_PROFILE_REPO_ID";
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
+const LEGACY_CHROME_PROFILE_FILE: &str = ".loopflow-chrome-profile.json";
+
+#[derive(Debug, Deserialize)]
+struct LegacyChromeProfileBinding {
+    directory: String,
+    label: String,
+}
 
 #[derive(Debug, Error)]
 pub enum ProviderAccountError {
@@ -596,7 +606,73 @@ pub async fn open_account_store() -> Result<SharedStore, ProviderAccountError> {
     let config = crate::store::storage_config_from_env().map_err(|error| {
         ProviderAccountError::Filesystem(format!("resolve provider account store: {error}"))
     })?;
-    Ok(Arc::new(open_store(&config).await?))
+    let store = Arc::new(open_store(&config).await?);
+    migrate_legacy_chrome_bindings(&store).await?;
+    Ok(store)
+}
+
+async fn migrate_legacy_chrome_bindings(store: &SharedStore) -> Result<(), ProviderAccountError> {
+    let host_id = HostId::local().map_err(ProviderAccountError::Filesystem)?;
+    let mappings = store.list_profile_provider_accounts(None).await?;
+    for mapping in mappings
+        .into_iter()
+        .filter(|mapping| mapping.provider == Provider::Claude)
+    {
+        if store
+            .chrome_profile_binding(&mapping.profile_id, &host_id)
+            .await?
+            .is_some()
+        {
+            continue;
+        }
+        let Some(account) = store
+            .get_provider_account(Provider::Claude.as_str(), &mapping.account_id)
+            .await?
+        else {
+            continue;
+        };
+        let Some(home) = account.home else {
+            continue;
+        };
+        let legacy_path = home.join(LEGACY_CHROME_PROFILE_FILE);
+        if !legacy_path.is_file() {
+            continue;
+        }
+        let bytes = fs::read(&legacy_path).map_err(|error| {
+            ProviderAccountError::Filesystem(format!(
+                "read legacy Chrome binding {}: {error}",
+                legacy_path.display()
+            ))
+        })?;
+        let legacy =
+            serde_json::from_slice::<LegacyChromeProfileBinding>(&bytes).map_err(|error| {
+                ProviderAccountError::Filesystem(format!(
+                    "parse legacy Chrome binding {}: {error}",
+                    legacy_path.display()
+                ))
+            })?;
+        let Ok(google_email) = EmailAddress::parse(&legacy.label) else {
+            continue;
+        };
+        let now = now_unix();
+        store
+            .upsert_chrome_profile_binding(&ChromeProfileBinding {
+                profile_id: mapping.profile_id,
+                host_id: host_id.clone(),
+                chrome_directory: legacy.directory,
+                google_email,
+                created_at: now,
+                updated_at: now,
+            })
+            .await?;
+        fs::remove_file(&legacy_path).map_err(|error| {
+            ProviderAccountError::Filesystem(format!(
+                "remove migrated Chrome binding {}: {error}",
+                legacy_path.display()
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 pub fn new_account(
@@ -886,6 +962,66 @@ mod tests {
             .cooldown_until
             .is_some_and(|until| until > now_unix()));
         assert_eq!(account.cooldown_reason.as_deref(), Some("five_hour"));
+    }
+
+    #[tokio::test]
+    async fn legacy_account_chrome_pairing_moves_to_the_profile_binding() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&crate::store::StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let account_id = parse_account_id("primary").unwrap();
+        let account_home = temp.path().join("accounts/claude/primary");
+        fs::create_dir_all(&account_home).unwrap();
+        let legacy_path = account_home.join(LEGACY_CHROME_PROFILE_FILE);
+        fs::write(
+            &legacy_path,
+            r#"{"directory":"Profile 3","label":"jack@example.com"}"#,
+        )
+        .unwrap();
+        store
+            .upsert_provider_account(&new_account(
+                Provider::Claude,
+                account_id.clone(),
+                account_home,
+                Some("jack@example.com".to_string()),
+            ))
+            .await
+            .unwrap();
+        let profile_id = ProfileId::parse("primary").unwrap();
+        store
+            .upsert_profile(&Profile {
+                id: profile_id.clone(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        store
+            .set_profile_provider_account(&ProfileProviderAccount {
+                profile_id: profile_id.clone(),
+                provider: Provider::Claude,
+                account_id,
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+
+        migrate_legacy_chrome_bindings(&store).await.unwrap();
+
+        let binding = store
+            .chrome_profile_binding(&profile_id, &HostId::local().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.chrome_directory, "Profile 3");
+        assert_eq!(binding.google_email.as_str(), "jack@example.com");
+        assert!(!legacy_path.exists());
     }
 
     #[test]

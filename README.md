@@ -471,15 +471,14 @@ Register provider accounts, then route each repository through personal
 profiles:
 
 ```bash
-lf auth pair claude primary --chrome-profile jackstah@example.com
-lf auth import claude --account primary
-lf auth connect claude --account reserve --chrome-profile reserve@example.com
+lf profile create jack --chrome-profile jackstah@example.com
+lf auth import claude --account primary --profile jack
+lf profile create reserve --chrome-profile reserve@example.com
+lf auth connect claude --account reserve --profile reserve
 lf auth accounts claude
 
-lf profile create jack
 lf profile account set jack claude jackstah@example.com
 lf profile account set jack codex jackstah@example.com
-lf profile create reserve
 lf profile account set reserve claude reserve@example.com
 
 lf profile route set --default jack --backup reserve
@@ -493,11 +492,11 @@ lf auth disconnect claude --account reserve
 
 Claude authorization runs through Claude in Chrome when its browser extension
 is connected. If the controller is unavailable, Loopflow falls back to a hidden
-terminal prompt for the one-time handoff code. `--chrome-profile` accepts the
-Chrome profile directory, name, or signed-in email and remembers the pairing
-for reconnects. `auth import` adopts an existing isolated Claude credential—or
-the current macOS Keychain login when the profile is empty—without another OAuth
-flow.
+terminal prompt for the one-time handoff code. `profile create
+--chrome-profile` binds the profile directory, name, or signed-in email on this
+host; `auth connect --profile` reuses that binding. `auth import` adopts an
+existing isolated Claude credential—or the current macOS Keychain login when
+the account home is empty—without another OAuth flow.
 
 Each provider account keeps independent auth and session state under
 `~/.lf/accounts/`. Profiles reuse those accounts and give each repository a

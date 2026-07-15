@@ -255,14 +255,23 @@ fn prepare_land(
 
 fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {
     let main_branch = get_default_branch(main_repo)?;
+    let onto = format!("origin/{main_branch}");
+    // A stacked child collapses onto trunk deterministically: replay only
+    // `base..HEAD`, dropping the (squash-)merged parent commits.
+    let stacked = crate::ops::task::stacked_collapse(repo_root)?;
     crate::ops::rebase::rebase_with_recovery(
         repo_root,
         &crate::ops::rebase::RebaseOptions {
-            onto: format!("origin/{main_branch}"),
+            onto: onto.clone(),
             push: true,
+            fork_base: stacked.as_ref().map(|stacked| stacked.fork_base.clone()),
         },
         progress,
     )?;
+    if let Some(stacked) = stacked {
+        let new_base = crate::engine::git::rev_parse(repo_root, &onto)?;
+        crate::ops::task::collapse_stack(&stacked, &new_base)?;
+    }
     Ok(main_branch)
 }
 

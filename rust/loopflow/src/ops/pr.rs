@@ -95,6 +95,7 @@ pub fn create_or_update_pr(
             &crate::ops::rebase::RebaseOptions {
                 onto: format!("origin/{base_branch}"),
                 push: true,
+                fork_base: None,
             },
             progress,
         )?;

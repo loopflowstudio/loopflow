@@ -1265,6 +1265,7 @@ mod tests {
             slug: session.workspace_slug.clone(),
             branch: format!("test/{provider}"),
             base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,

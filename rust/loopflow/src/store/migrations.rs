@@ -133,6 +133,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "provider_accounts",
         sql: include_str!("migrations/0.11.005_provider_accounts.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 6,
+        },
+        name: "task_pr_stack",
+        sql: include_str!("migrations/0.11.006_task_pr_stack.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this

@@ -492,6 +492,14 @@ impl SqliteStore {
         }
     }
 
+    pub fn task_session_by_worktree(&self, worktree: &str) -> StoreResult<Option<TaskSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = format!("{TASK_SESSION_COLUMNS} WHERE worktree = ?1");
+        conn.query_row(&query, params![worktree], map_task_session_row)
+            .optional()
+            .map_err(StoreError::from)
+    }
+
     pub fn list_task_sessions(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<TaskSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (query, parameter): (String, Option<&dyn ToSql>) = match wave_id {
@@ -561,9 +569,13 @@ impl SqliteStore {
 
     pub fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // A Task can hold several open PRs at once when a child is stacked on an
+        // unmerged parent; the active PR is the stack tip — the highest-sequence
+        // PR that has neither merged nor been abandoned.
         let query = format!(
             "{TASK_PR_COLUMNS}
-             WHERE task_session_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL"
+             WHERE task_session_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL
+             ORDER BY sequence DESC LIMIT 1"
         );
         conn.query_row(&query, params![session_id.as_str()], map_task_pr_row)
             .optional()
@@ -576,6 +588,51 @@ impl SqliteStore {
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         settle_task_pr_in(&transaction, settled, next)?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    /// Record a child PR stacked on an unmerged parent, leaving the parent open.
+    /// Unlike `settle_task_pr`, this does not settle the parent — a Task holds
+    /// several open PRs while a stack is in flight. The child must be the next
+    /// sequence and point at an open PR of the same Task.
+    pub fn stack_task_pr(&self, child: &TaskPr) -> StoreResult<()> {
+        validate_task_pr(child)?;
+        let parent_id = child.parent_pr_id.as_ref().ok_or_else(|| {
+            StoreError::InvalidData("a stacked Task PR must name its parent".to_string())
+        })?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let parent = task_pr_on(&conn, parent_id)?.ok_or(StoreError::NotFound)?;
+        if parent.task_session_id != child.task_session_id
+            || child.sequence != parent.sequence + 1
+            || parent.is_settled()
+            || child.phase() != PrPhase::Working
+        {
+            return Err(StoreError::InvalidData(
+                "a stacked child must be the next Working PR on the same Task's open parent"
+                    .to_string(),
+            ));
+        }
+        insert_task_pr(&conn, child)
+    }
+
+    /// Collapse a stacked child onto the default branch after it rebased cleanly:
+    /// repoint its base to the new trunk tip and clear the parent link. This is a
+    /// deliberate transition, so it moves `base_commit` — which the ordinary
+    /// update pins as immutable identity — through its own statement.
+    pub fn collapse_task_pr(
+        &self,
+        pr_id: &TaskPrId,
+        new_base: &str,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE task_prs SET base_commit=?2, parent_pr_id=NULL, updated_at=?3 WHERE id=?1",
+            params![pr_id.as_str(), new_base, updated_at.unix_timestamp()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
         Ok(())
     }
 
@@ -2422,12 +2479,14 @@ const TASK_SESSION_LEASE_UPDATE: &str = "UPDATE task_sessions SET
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
-    merge_commit, abandoned_at, created_at, updated_at, github_head_sha, ci_observation
+    merge_commit, abandoned_at, created_at, updated_at,
+    github_head_sha, ci_observation, parent_pr_id
     FROM task_prs";
 const TASK_PR_SELECT: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
-    merge_commit, abandoned_at, created_at, updated_at, github_head_sha, ci_observation
+    merge_commit, abandoned_at, created_at, updated_at,
+    github_head_sha, ci_observation, parent_pr_id
     FROM task_prs WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
@@ -2817,8 +2876,8 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             id, task_session_id, sequence, slug, branch, base_commit,
             publication_requested_at, after_merge, next_slug,
             github_number, github_url, merge_commit, abandoned_at,
-            created_at, updated_at, github_head_sha, ci_observation
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            created_at, updated_at, github_head_sha, ci_observation, parent_pr_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             pr.id.as_str(),
             pr.task_session_id.as_str(),
@@ -2837,6 +2896,7 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             pr.updated_at.unix_timestamp(),
             github.and_then(|github| github.head_sha.as_deref()),
             task_pr_ci_json(pr)?,
+            pr.parent_pr_id.as_ref().map(TaskPrId::as_str),
         ],
     )?;
     Ok(())
@@ -2850,7 +2910,8 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
         "UPDATE task_prs SET
             publication_requested_at=?7, after_merge=?8, next_slug=?9,
             github_number=?10, github_url=?11, merge_commit=?12,
-            abandoned_at=?13, updated_at=?15, github_head_sha=?16, ci_observation=?17
+            abandoned_at=?13, updated_at=?15, github_head_sha=?16,
+            ci_observation=?17, parent_pr_id=?18
          WHERE id=?1 AND task_session_id=?2 AND sequence=?3 AND slug=?4
            AND branch=?5 AND base_commit=?6 AND created_at=?14",
         params![
@@ -2871,6 +2932,7 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             pr.updated_at.unix_timestamp(),
             github.and_then(|github| github.head_sha.as_deref()),
             task_pr_ci_json(pr)?,
+            pr.parent_pr_id.as_ref().map(TaskPrId::as_str),
         ],
     )
     .map_err(StoreError::from)
@@ -3115,6 +3177,7 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
         slug: row.get(3)?,
         branch: row.get(4)?,
         base_commit: row.get(5)?,
+        parent_pr_id: row.get::<_, Option<String>>(17)?.map(TaskPrId::from_raw),
         publication,
         merge_commit: row.get(11)?,
         abandoned_at: row

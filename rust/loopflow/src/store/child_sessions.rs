@@ -12,8 +12,9 @@ use crate::project_session::{
     ProjectSessionStatus,
 };
 use crate::task::{
-    TaskEvent, TaskEventKind, TaskPr, TaskSession, TaskSessionId, TaskSessionStatus,
+    TaskEvent, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
 };
+use time::OffsetDateTime;
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -183,6 +184,17 @@ impl Store {
         .await
     }
 
+    pub async fn get_task_session_by_worktree(
+        &self,
+        worktree: &str,
+    ) -> StoreResult<Option<TaskSession>> {
+        let worktree = worktree.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_session_by_worktree(&worktree)
+        })
+        .await
+    }
+
     pub async fn list_task_sessions(
         &self,
         wave_id: Option<&WaveId>,
@@ -220,6 +232,25 @@ impl Store {
     pub async fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| store.active_task_pr(&session_id)).await
+    }
+
+    pub async fn stack_task_pr(&self, child: &TaskPr) -> StoreResult<()> {
+        let child = child.clone();
+        run_sqlite(&self.sqlite, move |store| store.stack_task_pr(&child)).await
+    }
+
+    pub async fn collapse_task_pr(
+        &self,
+        pr_id: &TaskPrId,
+        new_base: &str,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let pr_id = pr_id.clone();
+        let new_base = new_base.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.collapse_task_pr(&pr_id, &new_base, updated_at)
+        })
+        .await
     }
 
     pub async fn settle_task_pr(&self, settled: &TaskPr, next: Option<&TaskPr>) -> StoreResult<()> {

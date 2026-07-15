@@ -138,18 +138,27 @@ rebase-efficiency KR). No new network calls beyond the existing `fetch`.
 
 ## Ordered serial PRs
 
-1. **`persist-base`** — add `parent_pr_id` + migration; set `base_commit` to the
-   true fork point; make `lf rebase` for a Task PR use the persisted base as the
-   `--onto` boundary; ancestry guard. Integration test: squash-merged parent →
-   child diff only. Absorbs the earlier narrow "persist child base commit"
-   diagnosis. Ships the squash-proof core.
-2. **`stack-placement`** — `lf pr stack --next <slug>`; persist parent link +
-   parent-tip base; reconcile clears parent metadata on collapse (audit events
-   preserved); parent-abandon guard.
-3. **`safe-ancestry`** — pruned + divergent + unsafe-ancestry paths (stop-with-
-   named-commits); make `rebase --plan`, execution, Task status, and PR
-   range/gh base all read the persisted base; full merged/squash/pruned/divergent
-   integration suite + the 3-PR dogfood.
+Persistence, the stack-placement command, and the deterministic land are
+mutually dependent for *observable* behavior — the CLI `lf rebase`/`lf pr land`
+paths are keyed on the worktree, not Task-aware, so a persisted base has no
+effect until something both writes a stacked base and reads it back. So the
+first landable slice folds them together; prune/divergence/full-surface
+agreement follow.
+
+1. **`stacked-land`** (this PR) — add `parent_pr_id` + migration and
+   `TaskPr.parent_pr_id`; `lf pr stack --next <slug>` creates a child stacked on
+   the open parent (base = parent tip, `parent_pr_id` set); `lf pr land` /
+   `lf rebase` in a Task worktree resolve the active PR's persisted base
+   (worktree → session → active PR) and rebase the child onto `origin/<default>`
+   via `--onto <base>`, squash/merge-safe, with an ancestry guard that stops and
+   names commits on unsafe history; reconcile clears `parent_pr_id` on
+   parent-merge collapse (audit events preserved). Integration tests: merged and
+   squash-merged parents → child diff only. Absorbs the earlier narrow "persist
+   child base commit" diagnosis; ships the squash-proof core.
+2. **`prune-divergence`** — pruned + divergent parent paths; parent-abandon
+   guard; make `rebase --plan`, Task status, and PR range/gh base all surface
+   the persisted base (full agreement + DTO/fixture); full
+   merged/squash/pruned/divergent suite + the 3-PR dogfood.
 
 ## Exclusions
 

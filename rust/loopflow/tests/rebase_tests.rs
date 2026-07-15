@@ -39,6 +39,7 @@ fn rebase_onto_main_succeeds() {
         &RebaseOptions {
             onto: "origin/main".to_string(),
             push: false,
+            fork_base: None,
         },
         &NullProgress,
     )
@@ -65,6 +66,7 @@ fn rebase_conflict_returns_error() {
         &RebaseOptions {
             onto: "origin/main".to_string(),
             push: false,
+            fork_base: None,
         },
         &NullProgress,
     );
@@ -102,6 +104,7 @@ fn rebase_after_squash_merge_replays_only_unique_work() {
         &RebaseOptions {
             onto: "origin/main".to_string(),
             push: false,
+            fork_base: None,
         },
         &NullProgress,
     )
@@ -115,6 +118,89 @@ fn rebase_after_squash_merge_replays_only_unique_work() {
 }
 
 #[test]
+fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
+    // A child stacked on a parent whose two commits both edit the same file:
+    // once squash-merged, `git cherry` cannot match the combined patch, so the
+    // durable fork base is the only signal that drops the parent's work cleanly.
+    let repo = TestRepo::new();
+    repo.create_branch("parent");
+    repo.create_file("shared.txt", "one\n");
+    repo.stage_all();
+    repo.commit("parent one");
+    repo.create_file("shared.txt", "one\ntwo\n");
+    repo.stage_all();
+    repo.commit("parent two");
+    let parent_tip = git(repo.path(), &["rev-parse", "HEAD"]);
+
+    repo.create_branch("child");
+    repo.create_file("child.txt", "child");
+    repo.stage_all();
+    repo.commit("child work");
+
+    repo.checkout("main");
+    git(repo.path(), &["merge", "--squash", "parent"]);
+    git(repo.path(), &["commit", "-m", "squash parent"]);
+    repo.push();
+
+    repo.checkout("child");
+    rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: Some(parent_tip),
+        },
+        &NullProgress,
+    )
+    .expect("stacked child collapses onto main");
+
+    assert!(repo.path().join("child.txt").exists());
+    assert_eq!(
+        git(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]),
+        "child.txt",
+        "only the child's own file should remain over main"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("shared.txt")).unwrap(),
+        "one\ntwo\n",
+        "the squashed parent content must not be reintroduced or conflicted"
+    );
+}
+
+#[test]
+fn stacked_rebase_refuses_when_base_is_not_an_ancestor() {
+    // A fork base that is not an ancestor of HEAD means the child's own history
+    // was rewritten; replaying would rewrite history blindly, so refuse.
+    let repo = TestRepo::new();
+    repo.create_branch("sibling");
+    repo.create_file("sibling.txt", "sibling");
+    repo.stage_all();
+    repo.commit("sibling work");
+    let unrelated = git(repo.path(), &["rev-parse", "HEAD"]);
+
+    repo.checkout("main");
+    repo.create_branch("child");
+    repo.create_file("child.txt", "child");
+    repo.stage_all();
+    repo.commit("child work");
+
+    let result = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: Some(unrelated.clone()),
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::UnsafeRebaseBase { ref base, .. }) if *base == unrelated),
+        "expected an unsafe-base refusal, got {result:?}"
+    );
+}
+
+#[test]
 fn dotted_branch_names_do_not_imply_a_parent() {
     let repo = TestRepo::new();
     repo.create_branch("jack/a.b");
@@ -122,7 +208,7 @@ fn dotted_branch_names_do_not_imply_a_parent() {
     repo.stage_all();
     repo.commit("feature work");
 
-    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
     assert_eq!(plan.base_ref, "origin/main");
     assert_eq!(plan.class, RebaseClass::CleanAuthored);
     assert_eq!(plan.strategy, RebaseStrategy::DirectRebase);
@@ -137,7 +223,7 @@ fn explicit_onto_is_the_only_alternate_base() {
     repo.commit("alternate work");
     repo.create_branch("feature");
 
-    let plan = plan_rebase(repo.path(), Some("alternate")).expect("plan rebase");
+    let plan = plan_rebase(repo.path(), Some("alternate"), None).expect("plan rebase");
     assert_eq!(plan.base_ref, "alternate");
 }
 
@@ -147,7 +233,7 @@ fn dirty_scratch_only_branch_resets_to_base() {
     repo.create_branch("feature");
     repo.create_file("scratch/design.md", "notes");
 
-    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
     assert_eq!(plan.class, RebaseClass::ScratchOnly);
     assert_eq!(plan.strategy, RebaseStrategy::ResetToBase);
     assert_eq!(plan.unique_commits, 0);
@@ -164,7 +250,7 @@ fn modified_scratch_file_keeps_its_leading_path_character() {
     repo.create_branch("feature");
     repo.create_file("scratch/notes.md", "evolved\n");
 
-    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
     assert_eq!(plan.class, RebaseClass::ScratchOnly);
     assert!(plan
         .changed_files
@@ -180,7 +266,7 @@ fn wave_changes_are_protected() {
     repo.stage_all();
     repo.commit("update wave memory");
 
-    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
     assert_eq!(plan.class, RebaseClass::Protected);
     assert_eq!(plan.strategy, RebaseStrategy::DirectRebase);
     assert!(plan.protected);

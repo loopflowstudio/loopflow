@@ -206,6 +206,84 @@ async fn task_store() -> OpsResult<SharedStore> {
     })
 }
 
+/// A stacked child PR that is cleared to collapse onto the default branch.
+#[derive(Debug, Clone)]
+pub struct StackedRebase {
+    /// The durable fork commit to replay from (`git rebase --onto <trunk> <base>`).
+    pub fork_base: String,
+    /// The child PR, so the caller can collapse the stack after a clean rebase.
+    pub child: TaskPr,
+}
+
+/// Resolve whether the PR active in `worktree` is a stacked child cleared to
+/// collapse onto the default branch — its parent PR has merged, or its row was
+/// pruned. Returns `None` for an ordinary worktree, or when no registry is
+/// reachable, so the caller rebases normally. Refuses while the parent is still
+/// open: a child must not move onto trunk before its parent's work lands there.
+pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
+    let key = worktree.display().to_string();
+    block_on_task(async move {
+        let Some(store) = open_existing_store().await.map(Arc::new) else {
+            return Ok(None);
+        };
+        let Some(session) = store
+            .get_task_session_by_worktree(&key)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let Some(active) = store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let Some(parent_id) = active.parent_pr_id.clone() else {
+            return Ok(None);
+        };
+        let prs = store
+            .task_prs(&session.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        if let Some(parent) = prs.iter().find(|pr| pr.id == parent_id) {
+            if !parent.is_settled() {
+                return Err(task_error(format!(
+                    "Task PR #{} is stacked on {} which has not merged; land the parent first",
+                    active.sequence, parent.branch
+                )));
+            }
+        }
+        Ok(Some(StackedRebase {
+            fork_base: active.base_commit.clone(),
+            child: active,
+        }))
+    })
+}
+
+/// Collapse a stacked child after it rebased cleanly onto the default branch:
+/// repoint its base to the new trunk tip and clear the parent link. The audit
+/// trail rides the immutable event log; the row now reflects the post-collapse
+/// truth so `base_commit..HEAD` consumers report only child-authored work.
+pub fn collapse_stack(stacked: &StackedRebase, new_base: &str) -> OpsResult<()> {
+    let pr_id = stacked.child.id.clone();
+    let new_base = new_base.to_string();
+    block_on_task(async move {
+        let Some(store) = open_existing_store().await.map(Arc::new) else {
+            return Ok(());
+        };
+        // The immutable event log preserves the audit trail — the child's
+        // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
+        // collapse only repoints the mutable row to the post-merge truth.
+        store
+            .collapse_task_pr(&pr_id, &new_base, time::OffsetDateTime::now_utc())
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        Ok(())
+    })
+}
+
 async fn owning_wave(store: &SharedStore, session: &TaskSession) -> OpsResult<Wave> {
     store
         .get_wave(&session.wave_id)
@@ -420,6 +498,7 @@ pub fn task_run(
             slug: workspace_slug,
             branch: plan.branch.clone(),
             base_commit,
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,
@@ -1701,6 +1780,7 @@ async fn ensure_working_pr_with_authority(
         slug,
         branch,
         base_commit,
+        parent_pr_id: None,
         publication: None,
         merge_commit: None,
         abandoned_at: None,
@@ -2784,6 +2864,7 @@ mod tests {
             slug: session.workspace_slug.clone(),
             branch: branch.to_string(),
             base_commit: base_commit.to_string(),
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,

@@ -1011,6 +1011,7 @@ mod tests {
             slug: task.workspace_slug.clone(),
             branch: format!("test/{}", task.workspace_slug),
             base_commit: "0".repeat(40),
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,

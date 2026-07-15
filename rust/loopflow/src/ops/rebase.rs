@@ -14,6 +14,12 @@ use crate::ops::progress::Progress;
 pub struct RebaseOptions {
     pub onto: String,
     pub push: bool,
+    /// The durable fork commit a stacked child was placed on. When set, the
+    /// rebase replays exactly `fork_base..HEAD` onto `onto` via `git rebase
+    /// --onto`, dropping the parent commits deterministically — squash-proof,
+    /// because it never depends on patch-id matching. `None` keeps the
+    /// runtime fork-point heuristic used for ordinary branches.
+    pub fork_base: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +43,10 @@ pub enum RebaseStrategy {
 pub struct RebasePlan {
     pub branch: String,
     pub base_ref: String,
+    /// The durable stacked fork base, when this branch is a stacked child. The
+    /// rebase replays `fork_base..HEAD` onto `base_ref`; `--plan`, execution,
+    /// and the PR range all read this one value.
+    pub fork_base: Option<String>,
     pub class: RebaseClass,
     pub strategy: RebaseStrategy,
     pub unique_commits: usize,
@@ -45,7 +55,11 @@ pub struct RebasePlan {
     pub scratch_stashed: bool,
 }
 
-pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
+pub fn plan_rebase(
+    repo: &Path,
+    onto: Option<&str>,
+    fork_base: Option<String>,
+) -> OpsResult<RebasePlan> {
     let default_branch = get_default_branch(repo)?;
     let branch = current_branch(repo)?.unwrap_or_else(|| "HEAD".to_string());
     let base_ref = if let Some(onto) = onto {
@@ -96,6 +110,7 @@ pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
     Ok(RebasePlan {
         branch,
         base_ref,
+        fork_base,
         class,
         strategy,
         unique_commits,
@@ -110,7 +125,7 @@ pub fn rebase_with_recovery(
     options: &RebaseOptions,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let plan = plan_rebase(repo, Some(&options.onto))?;
+    let plan = plan_rebase(repo, Some(&options.onto), options.fork_base.clone())?;
     if matches!(plan.strategy, RebaseStrategy::ResetToBase) && !plan.protected {
         return reset_to_base(repo, &plan, options.push, progress);
     }
@@ -121,7 +136,10 @@ pub fn rebase_with_recovery(
         let _ = sync_main(repo, branch);
     }
 
-    let fork_point = squash_merge_fork_point(repo, &options.onto).unwrap_or(None);
+    let fork_point = match resolve_fork_point(repo, options)? {
+        Some(base) => Some(base),
+        None => squash_merge_fork_point(repo, &options.onto).unwrap_or(None),
+    };
 
     progress.status(&format!("Rebasing onto {}...", options.onto));
     let result = rebase(repo, &options.onto, fork_point.as_deref())?;
@@ -147,7 +165,7 @@ pub fn start_rebase_for_resolution(
     options: &RebaseOptions,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let plan = plan_rebase(repo, Some(&options.onto))?;
+    let plan = plan_rebase(repo, Some(&options.onto), options.fork_base.clone())?;
     if matches!(plan.strategy, RebaseStrategy::ResetToBase) && !plan.protected {
         return reset_to_base(repo, &plan, false, progress);
     }
@@ -157,7 +175,10 @@ pub fn start_rebase_for_resolution(
         let _ = sync_main(repo, branch);
     }
 
-    let fork_point = squash_merge_fork_point(repo, &options.onto).unwrap_or(None);
+    let fork_point = match resolve_fork_point(repo, options)? {
+        Some(base) => Some(base),
+        None => squash_merge_fork_point(repo, &options.onto).unwrap_or(None),
+    };
     progress.status(&format!("Rebasing onto {}...", options.onto));
     let result = start_git_rebase_for_resolution(repo, &options.onto, fork_point.as_deref())?;
     if result.success {
@@ -187,6 +208,30 @@ pub fn continue_rebase_for_resolution(repo: &Path) -> OpsResult<()> {
 pub fn abort_rebase_for_resolution(repo: &Path) -> OpsResult<()> {
     abort_git_rebase(repo)?;
     Ok(())
+}
+
+/// Validate a durable stacked fork base before it drives a `git rebase --onto`.
+///
+/// The base must be an ancestor of HEAD; only then does replaying
+/// `fork_base..HEAD` preserve exactly the child-authored commits. If the base
+/// diverged from HEAD (the child was itself rewritten, or the base is
+/// unreachable), refuse rather than silently rewrite history, and name the
+/// commits since the common ancestor so a human can reconcile.
+fn resolve_fork_point(repo: &Path, options: &RebaseOptions) -> OpsResult<Option<String>> {
+    let Some(base) = options.fork_base.as_deref() else {
+        return Ok(None);
+    };
+    if crate::engine::git::is_ancestor(repo, base, "HEAD")? {
+        return Ok(Some(base.to_string()));
+    }
+    let merge_base =
+        crate::engine::git::merge_base(repo, base, "HEAD").unwrap_or_else(|_| base.to_string());
+    let commits =
+        git(repo, &["log", "--oneline", &format!("{merge_base}..HEAD")]).unwrap_or_default();
+    Err(OpsError::UnsafeRebaseBase {
+        base: base.to_string(),
+        commits,
+    })
 }
 
 fn conflict_detail(conflicts: Option<Vec<PathBuf>>) -> String {

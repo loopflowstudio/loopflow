@@ -22,4 +22,10 @@ pub enum OpsError {
     Message(String),
     #[error("rebase onto {onto} failed ({detail})")]
     RebaseConflict { onto: String, detail: String },
+    #[error(
+        "refusing to rebase: recorded base {base} is not an ancestor of HEAD, so \
+         its history diverged. Reconcile by hand; the commits since the common \
+         ancestor are:\n{commits}"
+    )]
+    UnsafeRebaseBase { base: String, commits: String },
 }

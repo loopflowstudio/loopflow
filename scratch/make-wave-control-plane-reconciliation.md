@@ -100,21 +100,29 @@ dogfooding of R1–R4 (today you cannot even inspect without perturbing main).
 
 Boundaries may shift when the code proves a simpler sequence.
 
-### Slice 1 — side-effect-free inspection + explicit sync API (R5)
-Smallest, unblocks everything. Split `sync_main`'s two jobs:
-- Introduce an explicit **synchronizing** entry the mutating callers keep
-  (`wt create`, `wt prune`, `rebase`, `pr open`, release worktree creation).
-- Make `wt_list` (`lf/commands/ops/mod.rs:1200`) read worktrees without
-  `sync_main`. Listing needs `list_worktrees`, not a fetch+reset.
-- Add a **mechanical read-only classification** so a future transitive
-  `sync_main` under an inspection command fails review and CI. Candidate: a
-  `CommandEffect { ReadOnly, Synchronizing, Mutating }` marker on the command
-  dispatch (near `is_routable`, `home.rs:121`) plus a test that asserts the
-  read-only set (`status`, `roadmap`, `ls`, `doctor`, `wt list`, `project/task
-  status`, `diff`) does not reach any git-mutation helper. Prefer a compile-or-
-  test-time guard over a runtime check (structural over enforcement).
-- Verify: R5 test green; manual `lf wt list` with a dirty main leaves the tree
-  untouched.
+### Slice 1 — side-effect-free inspection + explicit sync API (R5) — LANDED (PR 1)
+Smallest, unblocks everything. What shipped:
+- `wt list` is read-only by default. `WtCommand::List` already carried a `sync:
+  bool` flag that `run_wt` dropped (`{ format, .. }`) and `wt_list` ignored,
+  calling `sync_main` unconditionally. Now `run_wt` threads it and `wt_list`
+  only calls `sync_main` when `--sync` is passed — the explicit, self-owned
+  mutation ("the command names and owns that mutation explicitly"). Default
+  reads reflect the last-synced main; merge/fresh labels tolerate that.
+- **Mechanical guard = behavioral boundary test, not a classifier enum.** A
+  `CommandEffect`/`is_read_only` marker consumed only by a test is exactly the
+  maintained-list ceremony the repo rejects (structural over enforcement; gates
+  rejected 3× in one day). Instead `wt_list_leaves_canonical_main_byte_for_byte_
+  unchanged` drives the real `lf` binary against a repo with origin ahead of
+  local + a dirty edit and asserts HEAD/porcelain/stash/refs are identical —
+  verified to fail on the unconditional-sync behavior. `wt_list_sync_flag_owns_
+  the_fast_forward` pins that `--sync` still fetches+fast-forwards. If a future
+  inspection command regains a transitive `sync_main`, the analogous test bites.
+- **Deferred within this slice:** a broader boundary test over `status`,
+  `roadmap`, `doctor`, `project/task status`, `diff`. Exploration confirmed none
+  call `sync_main` today (only routing-oriented `is_routable`, `home.rs:121`,
+  exists — and it excludes `Wt`), so `wt list` was the sole live bug. Add the
+  cross-command test if a cheap harness for those commands appears; noted in
+  `scratch/questions.md`.
 
 ### Slice 2 — reconciliation source-of-truth model
 Wire the latent projection to consumers so status stops re-deriving.

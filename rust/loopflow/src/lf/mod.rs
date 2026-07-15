@@ -1269,12 +1269,14 @@ pub enum WtCommand {
         /// Worktree name or full branch name to switch to
         name: String,
     },
-    /// List worktrees
+    /// List worktrees (read-only; reflects the last-synced main)
     List {
         #[arg(long)]
         format: Option<String>,
         #[arg(long)]
         full: bool,
+        /// Fetch origin and fast-forward main before listing (mutates the
+        /// canonical checkout). Off by default so a list never touches it.
         #[arg(long)]
         sync: bool,
     },

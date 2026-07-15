@@ -448,3 +448,101 @@ fn branch_from_squash_merged_parent_stays_fresh() {
         "fresh branch must not be pruned immediately after rotation"
     );
 }
+
+// --- Inspection surface is side-effect free (W2-169, R5) ---------------------
+//
+// `lf wt list` used to call `sync_main`, which fetches origin and hard-resets
+// (auto-stashing) whichever worktree has main checked out. An inspection command
+// must never rewrite the canonical checkout the Wave/Project control-plane turns
+// depend on being clean. These pin the boundary: reads leave main untouched, and
+// the fast-forward moves only under the explicit `--sync` opt-in.
+
+/// Read-only snapshot of the mutable git state `wt list` must never touch:
+/// HEAD, working tree/index, the stash, and every ref.
+fn repo_state(path: &std::path::Path) -> Vec<String> {
+    vec![
+        git_stdout(path, &["rev-parse", "HEAD"]),
+        git_stdout(path, &["status", "--porcelain"]),
+        git_stdout(path, &["stash", "list"]),
+        git_stdout(path, &["show-ref"]),
+    ]
+}
+
+fn run_wt_list(repo: &TestRepo, extra: &[&str]) -> std::process::Output {
+    let mut args = vec!["wt", "list"];
+    args.extend_from_slice(extra);
+    Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(&args)
+        .current_dir(repo.path())
+        .env("LOOPFLOW_DIRECTIVE_FILE", repo.path().join("directive.txt"))
+        .output()
+        .expect("run lf wt list")
+}
+
+/// Put origin/main one commit ahead of local main, so a stray `sync_main` would
+/// visibly fast-forward HEAD. Returns the upstream sha now only on origin.
+fn advance_origin_ahead_of_local(repo: &TestRepo) -> String {
+    repo.create_file("upstream.txt", "upstream change");
+    repo.stage_all();
+    repo.commit("upstream commit");
+    let upstream = repo.head_sha();
+    repo.push();
+    git_stdout(repo.path(), &["reset", "--hard", "HEAD~1"]);
+    upstream
+}
+
+#[test]
+fn wt_list_leaves_canonical_main_byte_for_byte_unchanged() {
+    let repo = TestRepo::new();
+    // Something to enumerate.
+    let _sibling = repo.create_named_worktree("feature");
+
+    // The two states sync_main would rewrite: origin/main ahead of local (reset
+    // --hard would fast-forward) plus a named uncommitted edit (auto-stash).
+    let upstream = advance_origin_ahead_of_local(&repo);
+    repo.create_file("local-edit.txt", "uncommitted work");
+
+    let before = repo_state(repo.path());
+    let out = run_wt_list(&repo, &[]);
+    assert!(
+        out.status.success(),
+        "lf wt list should succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let after = repo_state(repo.path());
+
+    assert_eq!(
+        before, after,
+        "lf wt list must not fetch, reset, or stash canonical main"
+    );
+    assert_ne!(
+        repo.head_sha(),
+        upstream,
+        "lf wt list must not advance main to origin/main"
+    );
+}
+
+#[test]
+fn wt_list_sync_flag_owns_the_fast_forward() {
+    let repo = TestRepo::new();
+    let _sibling = repo.create_named_worktree("feature");
+    let upstream = advance_origin_ahead_of_local(&repo);
+    assert_ne!(
+        repo.head_sha(),
+        upstream,
+        "precondition: local main is behind origin"
+    );
+
+    let out = run_wt_list(&repo, &["--sync"]);
+    assert!(
+        out.status.success(),
+        "lf wt list --sync should succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert_eq!(
+        repo.head_sha(),
+        upstream,
+        "--sync explicitly fetches and fast-forwards main to origin/main"
+    );
+}

@@ -34,6 +34,8 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
     public var surfaces: [String]
     public var outcomes: [SessionOutcome]
     public var captureStates: [CaptureState]
+    public var steeredOnly: Bool
+    public var currentRevisionOnly: Bool
 
     public init(
         repoPaths: [String],
@@ -48,7 +50,9 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
         models: [String],
         surfaces: [String],
         outcomes: [SessionOutcome],
-        captureStates: [CaptureState]
+        captureStates: [CaptureState],
+        steeredOnly: Bool,
+        currentRevisionOnly: Bool
     ) {
         self.repoPaths = repoPaths
         self.startedAfter = startedAfter
@@ -63,6 +67,8 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
         self.surfaces = surfaces
         self.outcomes = outcomes
         self.captureStates = captureStates
+        self.steeredOnly = steeredOnly
+        self.currentRevisionOnly = currentRevisionOnly
     }
 
     enum CodingKeys: String, CodingKey {
@@ -71,6 +77,8 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
         case startedAfter = "started_after"
         case startedBefore = "started_before"
         case captureStates = "capture_states"
+        case steeredOnly = "steered_only"
+        case currentRevisionOnly = "current_revision_only"
     }
 }
 
@@ -275,10 +283,12 @@ public struct SourceMeasurements: Codable, Sendable {
     public let medianTokensPerExposedTurn: UInt64?
     public let p95TokensPerExposedTurn: UInt64?
     public let firstSeen: Int64?
+    public let lastSeen: Int64?
     public let completedLaunches: UInt64
     public let failedLaunches: UInt64
     public let steeringTurns: UInt64?
     public let completeCaptureLaunches: UInt64
+    public let providerModels: [ProviderModelExposure]
 
     enum CodingKeys: String, CodingKey {
         case exposedSessions = "exposed_sessions"
@@ -288,10 +298,29 @@ public struct SourceMeasurements: Codable, Sendable {
         case medianTokensPerExposedTurn = "median_tokens_per_exposed_turn"
         case p95TokensPerExposedTurn = "p95_tokens_per_exposed_turn"
         case firstSeen = "first_seen"
+        case lastSeen = "last_seen"
         case completedLaunches = "completed_launches"
         case failedLaunches = "failed_launches"
         case steeringTurns = "steering_turns"
         case completeCaptureLaunches = "complete_capture_launches"
+        case providerModels = "provider_models"
+    }
+}
+
+public struct ProviderModelExposure: Codable, Hashable, Sendable {
+    public let provider: String
+    public let model: String?
+    public let exposedLaunches: UInt64
+
+    public init(provider: String, model: String?, exposedLaunches: UInt64) {
+        self.provider = provider
+        self.model = model
+        self.exposedLaunches = exposedLaunches
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider, model
+        case exposedLaunches = "exposed_launches"
     }
 }
 

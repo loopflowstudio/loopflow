@@ -21,6 +21,11 @@ cargo run -q -p loopflow --bin lf -- \
 
 jq '{totals, coverage, root_tokens: .aggregate_root.attributed_tokens}' \
   /tmp/context-lab.json
+
+cargo run -q -p loopflow --bin lf -- \
+  context --days 30 --repo "$PWD" --steered-only --json
+cargo run -q -p loopflow --bin lf -- \
+  context --days 30 --repo "$PWD" --current-revision-only --json
 ```
 
 On the July 15 live Loopflow ledger, 54 sessions, 127 launches, and 135 turns
@@ -68,8 +73,6 @@ historical trace.
 - Creating a Linear Task from the refinement sheet.
 - A second editor, agent host, git path, remote telemetry store, or LLM-authored
   quality score.
-- Steered-only and current-revision filter controls, or provider/model-balanced
-  revision comparison.
 - Proof of the continuous real Intelligence Task journey. The available local
   PM state has no registered Intelligence Wave or selectable W2-71 Task Session,
   so this review did not claim a refinement launch, source diff, backlink, or

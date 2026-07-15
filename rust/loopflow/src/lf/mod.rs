@@ -336,6 +336,12 @@ pub enum Commands {
         /// Filter by capture state
         #[arg(long)]
         capture_state: Vec<String>,
+        /// Include only launches with observed steering turns
+        #[arg(long)]
+        steered_only: bool,
+        /// Include only launches containing a current file instruction revision
+        #[arg(long)]
+        current_revision_only: bool,
         /// Emit the Context Lab snapshot as JSON
         #[arg(long)]
         json: bool,
@@ -1920,6 +1926,8 @@ mod tests {
             "failed",
             "--capture-state",
             "partial",
+            "--steered-only",
+            "--current-revision-only",
             "--json",
         ])
         .expect("parse context query");
@@ -1931,6 +1939,8 @@ mod tests {
             task,
             outcome,
             capture_state,
+            steered_only,
+            current_revision_only,
             json,
             ..
         }) = cli.command
@@ -1945,6 +1955,8 @@ mod tests {
         assert_eq!(task, ["W2-71"]);
         assert_eq!(outcome, ["failed"]);
         assert_eq!(capture_state, ["partial"]);
+        assert!(steered_only);
+        assert!(current_revision_only);
         assert!(json);
     }
 

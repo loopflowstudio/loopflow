@@ -291,6 +291,7 @@ lf trace 66863649               # select an exec or trace; render its process tr
 lf trace 66863649 --json        # inspect the same tree and its skill launches
 lf trace 66863649 --json --content --launch <launch> --turn <turn>
 lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
+lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
 lf top                          # last-hour output throughput + live lf processes
@@ -303,7 +304,10 @@ cost, and outcome evidence. An exec is one `lf` process; nested execs share a
 trace. `lf trace` accepts an exec or trace id and leaves killed processes open instead
 of hiding them. `lf context` aggregates one filtered session set without opening
 bodies. Its Project and Task filters use captured control identity rather than
-inferring ownership from a worktree path. `lf trace --content` is the explicit
+inferring ownership from a worktree path. The research-state flags require an
+observed steer or a launch containing a current resolvable file-backed instruction
+revision; missing revision identity does not match the current-only filter.
+`lf trace --content` is the explicit
 reader for the exact prompt and normalized conversation at one immutable
 run/launch/turn address.
 

@@ -100,7 +100,9 @@ struct ContextLabView: View {
             models: [],
             surfaces: [],
             outcomes: [],
-            captureStates: []
+            captureStates: [],
+            steeredOnly: false,
+            currentRevisionOnly: false
         )
         self.defaultQuery = defaultQuery
         var initialQuery = route?.query ?? defaultQuery
@@ -292,6 +294,13 @@ struct ContextLabView: View {
                         toggle(value, in: &query.captureStates)
                         query.captureStates.sort { $0.rawValue < $1.rawValue }
                     }
+                }
+                railTitle("Research state")
+                filterToggle("Observed steering only", selected: query.steeredOnly) {
+                    query.steeredOnly.toggle()
+                }
+                filterToggle("Contains current file instruction", selected: query.currentRevisionOnly) {
+                    query.currentRevisionOnly.toggle()
                 }
 
                 Button("Clear filters") { clearFilters() }
@@ -566,11 +575,15 @@ struct ContextLabView: View {
                 evidenceMetric("Attributed", "\(evidence.measurements.attributedTokens.formatted()) tokens")
                 evidenceMetric("Median / p95", "\(optionalTokens(evidence.measurements.medianTokensPerExposedTurn)) / \(optionalTokens(evidence.measurements.p95TokensPerExposedTurn))")
                 evidenceMetric(
-                    "First observed",
-                    evidence.measurements.firstSeen.map {
-                        Date(timeIntervalSince1970: TimeInterval($0))
-                            .formatted(date: .abbreviated, time: .shortened)
-                    } ?? "Missing"
+                    "Observed",
+                    observationRange(
+                        first: evidence.measurements.firstSeen,
+                        last: evidence.measurements.lastSeen
+                    )
+                )
+                evidenceMetric(
+                    "Provider / model",
+                    providerModelSummary(evidence.measurements.providerModels)
                 )
                 evidenceMetric("Precedence", evidence.precedenceLayers.joined(separator: " · "))
             }
@@ -659,7 +672,12 @@ struct ContextLabView: View {
                     percent(earlier.measurements.completeCaptureLaunches, of: earlier.measurements.exposedLaunches),
                     percent(later.measurements.completeCaptureLaunches, of: later.measurements.exposedLaunches)
                 )
-                Text("Measured populations share the active session-set query. No quality score is inferred.")
+                comparisonMetric(
+                    "Observation span",
+                    observationSpan(first: earlier.measurements.firstSeen, last: earlier.measurements.lastSeen),
+                    observationSpan(first: later.measurements.firstSeen, last: later.measurements.lastSeen)
+                )
+                Text("Capture, provider/model mix, and observation spans are comparable. No quality score is inferred.")
                     .font(Typography.caption(8))
                     .foregroundStyle(palette.textSecondary)
             }
@@ -673,7 +691,13 @@ struct ContextLabView: View {
             earlierLaunches: earlier.measurements.exposedLaunches,
             earlierCompleteCaptures: earlier.measurements.completeCaptureLaunches,
             laterLaunches: later.measurements.exposedLaunches,
-            laterCompleteCaptures: later.measurements.completeCaptureLaunches
+            laterCompleteCaptures: later.measurements.completeCaptureLaunches,
+            earlierProviderModels: earlier.measurements.providerModels,
+            laterProviderModels: later.measurements.providerModels,
+            earlierFirstSeen: earlier.measurements.firstSeen,
+            earlierLastSeen: earlier.measurements.lastSeen,
+            laterFirstSeen: later.measurements.firstSeen,
+            laterLastSeen: later.measurements.lastSeen
         )
     }
 
@@ -1242,7 +1266,13 @@ func contextRevisionComparisonBlocker(
     earlierLaunches: UInt64,
     earlierCompleteCaptures: UInt64,
     laterLaunches: UInt64,
-    laterCompleteCaptures: UInt64
+    laterCompleteCaptures: UInt64,
+    earlierProviderModels: [ProviderModelExposure],
+    laterProviderModels: [ProviderModelExposure],
+    earlierFirstSeen: Int64?,
+    earlierLastSeen: Int64?,
+    laterFirstSeen: Int64?,
+    laterLastSeen: Int64?
 ) -> String? {
     let minimumLaunches: UInt64 = 3
     guard earlierLaunches >= minimumLaunches, laterLaunches >= minimumLaunches else {
@@ -1257,7 +1287,106 @@ func contextRevisionComparisonBlocker(
         return "Unavailable because complete-capture coverage differs by more than 10 percentage points "
             + "(\(earlierPercent) vs \(laterPercent))."
     }
+    guard let earlierMix = providerModelDistribution(
+        earlierProviderModels,
+        exposedLaunches: earlierLaunches
+    ), let laterMix = providerModelDistribution(
+        laterProviderModels,
+        exposedLaunches: laterLaunches
+    ) else {
+        return "Unavailable because provider/model exposure is missing for one or both revisions."
+    }
+    let providerModels = Set(earlierMix.keys).union(laterMix.keys)
+    let mixDistance = providerModels.reduce(0.0) { distance, providerModel in
+        distance + abs(
+            earlierMix[providerModel, default: 0]
+                - laterMix[providerModel, default: 0]
+        )
+    } / 2
+    guard mixDistance <= 0.2 + 1e-12 else {
+        let distance = mixDistance.formatted(.percent.precision(.fractionLength(0)))
+        return "Unavailable because provider/model mix differs by more than 20 percentage points "
+            + "(\(distance) distribution distance)."
+    }
+    guard let earlierFirstSeen,
+          let earlierLastSeen,
+          let laterFirstSeen,
+          let laterLastSeen,
+          earlierFirstSeen <= earlierLastSeen,
+          laterFirstSeen <= laterLastSeen
+    else {
+        return "Unavailable because one or both revision observation windows are missing."
+    }
+    let earlierSpan = earlierLastSeen - earlierFirstSeen
+    let laterSpan = laterLastSeen - laterFirstSeen
+    guard earlierSpan > 0, laterSpan > 0 else {
+        return "Unavailable until each revision has observations at more than one time."
+    }
+    let shorterSpan = min(earlierSpan, laterSpan)
+    let longerSpan = max(earlierSpan, laterSpan)
+    guard Double(longerSpan) / Double(shorterSpan) <= 2 + 1e-12 else {
+        return "Unavailable because revision observation spans differ by more than 2× "
+            + "(\(observationDuration(earlierSpan)) vs \(observationDuration(laterSpan)))."
+    }
     return nil
+}
+
+private struct ProviderModelKey: Hashable {
+    let provider: String
+    let model: String?
+}
+
+private func providerModelDistribution(
+    _ exposures: [ProviderModelExposure],
+    exposedLaunches: UInt64
+) -> [ProviderModelKey: Double]? {
+    guard exposedLaunches > 0 else { return nil }
+    let capturedLaunches = exposures.reduce(UInt64(0)) { $0 + $1.exposedLaunches }
+    guard capturedLaunches == exposedLaunches else { return nil }
+    var distribution: [ProviderModelKey: Double] = [:]
+    for exposure in exposures {
+        let key = ProviderModelKey(provider: exposure.provider, model: exposure.model)
+        distribution[key, default: 0] += Double(exposure.exposedLaunches) / Double(exposedLaunches)
+    }
+    return distribution
+}
+
+private func providerModelSummary(_ exposures: [ProviderModelExposure]) -> String {
+    guard !exposures.isEmpty else { return "Missing" }
+    return exposures.map { exposure in
+        "\(exposure.provider)/\(exposure.model ?? "model missing") \(exposure.exposedLaunches)"
+    }.joined(separator: " · ")
+}
+
+private func observationRange(first: Int64?, last: Int64?) -> String {
+    guard let first, let last else { return "Missing" }
+    let firstDate = Date(timeIntervalSince1970: TimeInterval(first))
+        .formatted(date: .abbreviated, time: .shortened)
+    let lastDate = Date(timeIntervalSince1970: TimeInterval(last))
+        .formatted(date: .abbreviated, time: .shortened)
+    return "\(firstDate) – \(lastDate)"
+}
+
+private func observationSpan(first: Int64?, last: Int64?) -> String {
+    guard let first, let last, last >= first else { return "Missing" }
+    return observationDuration(last - first)
+}
+
+private func observationDuration(_ seconds: Int64) -> String {
+    let magnitude = abs(seconds)
+    if magnitude >= 24 * 60 * 60 {
+        return (Double(seconds) / Double(24 * 60 * 60))
+            .formatted(.number.precision(.fractionLength(1))) + "d"
+    }
+    if magnitude >= 60 * 60 {
+        return (Double(seconds) / Double(60 * 60))
+            .formatted(.number.precision(.fractionLength(1))) + "h"
+    }
+    if magnitude >= 60 {
+        return (Double(seconds) / 60)
+            .formatted(.number.precision(.fractionLength(1))) + "m"
+    }
+    return "\(seconds)s"
 }
 
 private func displayKind(_ kind: ContextAssetKind?) -> String {

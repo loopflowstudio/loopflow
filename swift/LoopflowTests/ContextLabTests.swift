@@ -29,24 +29,86 @@ struct ContextLabTests {
 
     @Test("Revision comparison waits for enough similarly captured evidence")
     func revisionComparisonRequiresComparablePopulations() {
+        let fiveCodex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedLaunches: 5)]
+        let tenCodex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedLaunches: 10)]
         #expect(contextRevisionComparisonBlocker(
             earlierLaunches: 2,
             earlierCompleteCaptures: 2,
             laterLaunches: 3,
-            laterCompleteCaptures: 3
+            laterCompleteCaptures: 3,
+            earlierProviderModels: [],
+            laterProviderModels: [],
+            earlierFirstSeen: nil,
+            earlierLastSeen: nil,
+            laterFirstSeen: nil,
+            laterLastSeen: nil
         ) != nil)
         #expect(contextRevisionComparisonBlocker(
             earlierLaunches: 10,
             earlierCompleteCaptures: 10,
             laterLaunches: 10,
-            laterCompleteCaptures: 8
+            laterCompleteCaptures: 8,
+            earlierProviderModels: tenCodex,
+            laterProviderModels: tenCodex,
+            earlierFirstSeen: 100,
+            earlierLastSeen: 200,
+            laterFirstSeen: 300,
+            laterLastSeen: 400
         ) != nil)
         #expect(contextRevisionComparisonBlocker(
             earlierLaunches: 5,
             earlierCompleteCaptures: 4,
             laterLaunches: 10,
-            laterCompleteCaptures: 7
+            laterCompleteCaptures: 7,
+            earlierProviderModels: fiveCodex,
+            laterProviderModels: tenCodex,
+            earlierFirstSeen: 100,
+            earlierLastSeen: 200,
+            laterFirstSeen: 300,
+            laterLastSeen: 450
         ) == nil)
+    }
+
+    @Test("Revision comparison balances provider mix and observation spans")
+    func revisionComparisonRejectsConfoundedPopulations() {
+        let codex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedLaunches: 10)]
+        let claude = [ProviderModelExposure(provider: "claude", model: nil, exposedLaunches: 10)]
+        #expect(contextRevisionComparisonBlocker(
+            earlierLaunches: 10,
+            earlierCompleteCaptures: 9,
+            laterLaunches: 10,
+            laterCompleteCaptures: 9,
+            earlierProviderModels: codex,
+            laterProviderModels: claude,
+            earlierFirstSeen: 100,
+            earlierLastSeen: 200,
+            laterFirstSeen: 300,
+            laterLastSeen: 400
+        )?.contains("provider/model mix") == true)
+        #expect(contextRevisionComparisonBlocker(
+            earlierLaunches: 10,
+            earlierCompleteCaptures: 9,
+            laterLaunches: 10,
+            laterCompleteCaptures: 9,
+            earlierProviderModels: codex,
+            laterProviderModels: codex,
+            earlierFirstSeen: 100,
+            earlierLastSeen: 200,
+            laterFirstSeen: 300,
+            laterLastSeen: 550
+        )?.contains("observation spans") == true)
+        #expect(contextRevisionComparisonBlocker(
+            earlierLaunches: 10,
+            earlierCompleteCaptures: 9,
+            laterLaunches: 10,
+            laterCompleteCaptures: 9,
+            earlierProviderModels: [],
+            laterProviderModels: codex,
+            earlierFirstSeen: 100,
+            earlierLastSeen: 200,
+            laterFirstSeen: 300,
+            laterLastSeen: 400
+        )?.contains("exposure is missing") == true)
     }
 
     @Test("Task workspace backlinks retain the exact research selection")
@@ -64,7 +126,9 @@ struct ContextLabTests {
             models: [],
             surfaces: ["tui"],
             outcomes: [.completed],
-            captureStates: [.complete]
+            captureStates: [.complete],
+            steeredOnly: true,
+            currentRevisionOnly: true
         )
         let route = TaskWorkspaceRoute(
             wave: "intelligence",
@@ -86,6 +150,8 @@ struct ContextLabTests {
 
         #expect(decoded == route)
         #expect(decoded.context.query.startedAfter == 10)
+        #expect(decoded.context.query.steeredOnly)
+        #expect(decoded.context.query.currentRevisionOnly)
         #expect(decoded.context.selectedNodeId == "revision-1")
         #expect(decoded.initialSection == .terminal)
     }
@@ -115,7 +181,9 @@ struct ContextLabTests {
             models: [],
             surfaces: [],
             outcomes: [],
-            captureStates: []
+            captureStates: [],
+            steeredOnly: false,
+            currentRevisionOnly: false
         )
 
         let choices = refinementTaskChoices(in: roadmap, query: query)

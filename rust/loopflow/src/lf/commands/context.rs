@@ -26,6 +26,8 @@ pub struct SessionSetQuery {
     pub surfaces: Vec<String>,
     pub outcomes: Vec<String>,
     pub capture_states: Vec<String>,
+    pub steered_only: bool,
+    pub current_revision_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -165,10 +167,19 @@ pub struct SourceMeasurements {
     pub median_tokens_per_exposed_turn: Option<u64>,
     pub p95_tokens_per_exposed_turn: Option<u64>,
     pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
     pub completed_launches: u64,
     pub failed_launches: u64,
     pub steering_turns: Option<u64>,
     pub complete_capture_launches: u64,
+    pub provider_models: Vec<ProviderModelExposure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderModelExposure {
+    pub provider: String,
+    pub model: Option<String>,
+    pub exposed_launches: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -201,6 +212,8 @@ pub struct ContextQueryOptions {
     pub surfaces: Vec<String>,
     pub outcomes: Vec<String>,
     pub capture_states: Vec<String>,
+    pub steered_only: bool,
+    pub current_revision_only: bool,
     pub json: bool,
 }
 
@@ -227,6 +240,8 @@ pub fn run(options: ContextQueryOptions) -> Result<()> {
         surfaces: options.surfaces,
         outcomes: options.outcomes,
         capture_states: options.capture_states,
+        steered_only: options.steered_only,
+        current_revision_only: options.current_revision_only,
     };
     validate_query(&query)?;
 
@@ -298,10 +313,11 @@ fn matches_filter(values: &[String], candidate: Option<&String>) -> bool {
 
 pub fn aggregate(
     query: SessionSetQuery,
-    mut launches: Vec<AgentLaunchRow>,
+    launches: Vec<AgentLaunchRow>,
     turns: Vec<AgentTurnRow>,
     assets: Vec<ContextAssetRow>,
 ) -> ContextLabSnapshot {
+    let (mut launches, turns, assets) = filter_research_state(&query, launches, turns, assets);
     launches.sort_by_key(|launch| (launch.started_at, launch.id.clone()));
     let assembled_turns = turns
         .iter()
@@ -336,6 +352,88 @@ pub fn aggregate(
         sessions,
         evidence,
     }
+}
+
+fn filter_research_state(
+    query: &SessionSetQuery,
+    mut launches: Vec<AgentLaunchRow>,
+    mut turns: Vec<AgentTurnRow>,
+    mut assets: Vec<ContextAssetRow>,
+) -> (Vec<AgentLaunchRow>, Vec<AgentTurnRow>, Vec<ContextAssetRow>) {
+    if !query.steered_only && !query.current_revision_only {
+        return (launches, turns, assets);
+    }
+
+    let mut included_launches = launches
+        .iter()
+        .map(|launch| launch.id.clone())
+        .collect::<HashSet<_>>();
+    if query.steered_only {
+        let steered_launches = turns
+            .iter()
+            .filter(|turn| turn.input_op == "steer")
+            .map(|turn| turn.launch_id.clone())
+            .collect::<HashSet<_>>();
+        included_launches.retain(|launch_id| steered_launches.contains(launch_id));
+    }
+    if query.current_revision_only {
+        let current_launches = launches_with_current_file_revision(&launches, &turns, &assets);
+        included_launches.retain(|launch_id| current_launches.contains(launch_id));
+    }
+
+    launches.retain(|launch| included_launches.contains(&launch.id));
+    turns.retain(|turn| included_launches.contains(&turn.launch_id));
+    let included_turns = turns
+        .iter()
+        .map(|turn| turn.id.as_str())
+        .collect::<HashSet<_>>();
+    assets.retain(|asset| included_turns.contains(asset.turn_id.as_str()));
+    (launches, turns, assets)
+}
+
+fn launches_with_current_file_revision(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+    assets: &[ContextAssetRow],
+) -> HashSet<String> {
+    let launch_by_id = launches
+        .iter()
+        .map(|launch| (launch.id.as_str(), launch))
+        .collect::<HashMap<_, _>>();
+    let launch_id_by_turn = turns
+        .iter()
+        .map(|turn| (turn.id.as_str(), turn.launch_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    let mut current_hashes: BTreeMap<(ContextAssetKind, String), Option<String>> = BTreeMap::new();
+    let mut current_launches = HashSet::new();
+
+    for row in assets.iter().filter(|row| {
+        is_current_file_revision_kind(row.asset.kind) && row.asset.source_path.is_some()
+    }) {
+        let Some(launch_id) = launch_id_by_turn.get(row.turn_id.as_str()) else {
+            continue;
+        };
+        let Some(launch) = launch_by_id.get(launch_id) else {
+            continue;
+        };
+        let canonical = canonical_identity(launch, row);
+        let Some(path) = canonical.path else {
+            continue;
+        };
+        let current_hash = current_hashes
+            .entry((row.asset.kind, path.clone()))
+            .or_insert_with(|| {
+                hash_current_source(row.asset.kind, &path).map(|hashes| hashes.effective)
+            });
+        if current_hash.as_deref() == Some(row.asset.content_sha256.as_str()) {
+            current_launches.insert((*launch_id).to_string());
+        }
+    }
+    current_launches
+}
+
+fn is_current_file_revision_kind(kind: ContextAssetKind) -> bool {
+    is_instruction_kind(kind) && !matches!(kind, ContextAssetKind::Goal | ContextAssetKind::Memory)
 }
 
 fn group_assets(assets: &[ContextAssetRow]) -> HashMap<&str, Vec<&ContextAssetRow>> {
@@ -545,6 +643,8 @@ struct EvidenceCandidate {
     started_at: i64,
     outcome: String,
     capture: String,
+    provider: String,
+    model: Option<String>,
     supplied_context_tokens: Option<u64>,
     selected_source_tokens: u64,
     steering_turns: Option<u64>,
@@ -601,6 +701,8 @@ fn build_revisions(
                 started_at: turn.started_at,
                 outcome: launch.outcome.clone(),
                 capture: launch.capture_status.clone(),
+                provider: launch.provider.clone(),
+                model: launch.model.clone(),
                 supplied_context_tokens: (turn.context_coverage == "assembled")
                     .then(|| nonnegative(turn.supplied_context_tokens)),
                 selected_source_tokens: 0,
@@ -775,6 +877,12 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                 .map(|candidate| candidate.steering_turns)
                 .collect::<Option<Vec<_>>>()
                 .map(|values| values.into_iter().sum());
+            let mut provider_models = BTreeMap::new();
+            for candidate in launch_candidates.values() {
+                *provider_models
+                    .entry((candidate.provider.clone(), candidate.model.clone()))
+                    .or_insert(0) += 1;
+            }
             let current_source_hashes = key
                 .source_path
                 .as_deref()
@@ -801,6 +909,10 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                         .iter()
                         .map(|candidate| candidate.started_at)
                         .min(),
+                    last_seen: candidates
+                        .iter()
+                        .map(|candidate| candidate.started_at)
+                        .max(),
                     completed_launches: launch_candidates
                         .values()
                         .filter(|candidate| candidate.outcome == "completed")
@@ -814,6 +926,16 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                         .values()
                         .filter(|candidate| candidate.capture == "complete")
                         .count() as u64,
+                    provider_models: provider_models
+                        .into_iter()
+                        .map(
+                            |((provider, model), exposed_launches)| ProviderModelExposure {
+                                provider,
+                                model,
+                                exposed_launches,
+                            },
+                        )
+                        .collect(),
                 },
                 representatives: select_representatives(&candidates),
             }
@@ -1282,6 +1404,185 @@ mod tests {
     }
 
     #[test]
+    fn steered_only_filters_the_whole_atomic_population() {
+        let launches = vec![
+            launch("launch-smooth", "run-a", "completed", "complete", 100),
+            launch("launch-steered", "run-b", "completed", "complete", 200),
+        ];
+        let mut steered = turn("turn-steered", "launch-steered", 1, "assembled", 20, None);
+        steered.input_op = "steer".to_string();
+        let turns = vec![
+            turn("turn-smooth", "launch-smooth", 1, "assembled", 10, None),
+            steered,
+        ];
+        let mut selection = query();
+        selection.steered_only = true;
+
+        let snapshot = aggregate(selection, launches, turns, Vec::new());
+
+        assert_eq!(snapshot.totals.sessions, 1);
+        assert_eq!(snapshot.totals.launches, 1);
+        assert_eq!(snapshot.totals.turns, 1);
+        assert_eq!(snapshot.totals.steered_launches, 1);
+        assert_eq!(snapshot.sessions[0].id, "launch-steered");
+    }
+
+    #[test]
+    fn current_revision_only_keeps_launches_with_a_current_file_instruction() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("AGENTS.md");
+        fs::write(&path, "Current instructions\n").unwrap();
+        let current_hash = hex::encode(Sha256::digest(b"Current instructions\n"));
+        let mut current_launch = launch("launch-current", "run-a", "completed", "complete", 100);
+        current_launch.repo = directory.path().to_string_lossy().to_string();
+        current_launch.worktree = current_launch.repo.clone();
+        let mut historical_launch =
+            launch("launch-historical", "run-b", "completed", "complete", 200);
+        historical_launch.repo = current_launch.repo.clone();
+        historical_launch.worktree = current_launch.worktree.clone();
+        let mut unresolved_launch =
+            launch("launch-unresolved", "run-c", "completed", "complete", 300);
+        unresolved_launch.repo = current_launch.repo.clone();
+        unresolved_launch.worktree = current_launch.worktree.clone();
+        let turns = vec![
+            turn("turn-current", "launch-current", 1, "assembled", 20, None),
+            turn("turn-earlier", "launch-current", 2, "assembled", 5, None),
+            turn(
+                "turn-historical",
+                "launch-historical",
+                1,
+                "assembled",
+                30,
+                None,
+            ),
+            turn(
+                "turn-unresolved",
+                "launch-unresolved",
+                1,
+                "assembled",
+                10,
+                None,
+            ),
+        ];
+        let assets = vec![
+            asset(
+                "turn-current",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                &current_hash,
+                20,
+            ),
+            asset(
+                "turn-earlier",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "historical-hash",
+                5,
+            ),
+            asset(
+                "turn-historical",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "historical-hash",
+                30,
+            ),
+            asset(
+                "turn-unresolved",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "injected instructions",
+                None,
+                &current_hash,
+                10,
+            ),
+        ];
+        let mut selection = query();
+        selection.current_revision_only = true;
+
+        let snapshot = aggregate(
+            selection,
+            vec![current_launch, historical_launch, unresolved_launch],
+            turns,
+            assets,
+        );
+
+        assert_eq!(snapshot.totals.launches, 1);
+        assert_eq!(snapshot.totals.turns, 2);
+        assert_eq!(snapshot.sessions[0].id, "launch-current");
+        assert_eq!(snapshot.aggregate_root.attributed_tokens, 25);
+        assert!(snapshot
+            .evidence
+            .iter()
+            .any(|evidence| evidence.content_sha256 == current_hash));
+        assert!(snapshot
+            .evidence
+            .iter()
+            .any(|evidence| evidence.content_sha256 == "historical-hash"));
+    }
+
+    #[test]
+    fn revision_measurements_include_provider_model_mix_and_observation_window() {
+        let mut codex = launch("launch-codex", "run-a", "completed", "complete", 100);
+        codex.model = Some("gpt-5".to_string());
+        let mut claude = launch("launch-claude", "run-b", "completed", "complete", 300);
+        claude.provider = "claude".to_string();
+        claude.model = None;
+        let mut claude_turn = turn("turn-claude", "launch-claude", 1, "assembled", 20, None);
+        claude_turn.started_at = 301;
+        let turns = vec![
+            turn("turn-codex", "launch-codex", 1, "assembled", 10, None),
+            claude_turn,
+        ];
+        let assets = vec![
+            asset(
+                "turn-codex",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                None,
+                "hash",
+                10,
+            ),
+            asset(
+                "turn-claude",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                None,
+                "hash",
+                20,
+            ),
+        ];
+
+        let snapshot = aggregate(query(), vec![codex, claude], turns, assets);
+        let measurements = &snapshot.evidence[0].measurements;
+
+        assert_eq!(measurements.first_seen, Some(101));
+        assert_eq!(measurements.last_seen, Some(301));
+        assert_eq!(
+            measurements.provider_models,
+            [
+                ProviderModelExposure {
+                    provider: "claude".to_string(),
+                    model: None,
+                    exposed_launches: 1,
+                },
+                ProviderModelExposure {
+                    provider: "codex".to_string(),
+                    model: Some("gpt-5".to_string()),
+                    exposed_launches: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn representatives_never_repeat_one_session_across_roles() {
         let launches = vec![launch("launch-solo", "run-a", "completed", "complete", 100)];
         let turns = vec![turn("turn-solo", "launch-solo", 1, "assembled", 30, None)];
@@ -1423,10 +1724,16 @@ mod tests {
         let snapshot: ContextLabSnapshot = serde_json::from_str(fixture).unwrap();
 
         assert_eq!(snapshot.totals.sessions, 1);
+        assert!(snapshot.query.steered_only);
+        assert!(snapshot.query.current_revision_only);
         assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
         assert_eq!(
             snapshot.evidence[0].representatives[0].address.turn_id,
             "turn-1"
+        );
+        assert_eq!(
+            snapshot.evidence[0].measurements.provider_models[0].provider,
+            "codex"
         );
         assert_eq!(
             serde_json::to_value(&snapshot).unwrap(),
@@ -1449,6 +1756,8 @@ mod tests {
             surfaces: Vec::new(),
             outcomes: Vec::new(),
             capture_states: Vec::new(),
+            steered_only: false,
+            current_revision_only: false,
         }
     }
 

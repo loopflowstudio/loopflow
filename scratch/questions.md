@@ -39,10 +39,14 @@
   for `/Users/jack/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md` at
   effective hash `130b91c3afb3afa7897e22cb85068a1714ab6431469dee3392eda10eb8bdd4fe`;
   the current-file hash is identical and the revision is editable.
-- The current filter contract has no steered-only or current-revision selector;
-  steering is a stat/sort and Context Lab always returns all observed revisions.
-  The revision comparison gate checks exposure count and complete-capture parity
-  but does not balance provider/model mix or observation windows.
+- The research-state filters are now explicit atomic launch predicates.
+  `steered_only` requires a captured steer turn. `current_revision_only` keeps a
+  launch when at least one resolvable file-backed instruction revision matches
+  the current canonical file; the full launch remains in the snapshot so totals
+  and flame widths still reconcile. Revision comparison now blocks when
+  provider/model total-variation distance exceeds 20 percentage points or
+  non-zero observation spans differ by more than 2×, in addition to the existing
+  exposure and capture-parity gates.
 - The installed app logs repeated SwiftUI `AttributeGraph` cycles at startup.
   They predate opening Context Lab and have not yet been tied to a visible Lab
   failure, but the final installed-app pass should prove they are unrelated or

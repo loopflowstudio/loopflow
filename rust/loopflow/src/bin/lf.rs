@@ -1343,6 +1343,8 @@ fn main() -> anyhow::Result<()> {
                 surface,
                 outcome,
                 capture_state,
+                steered_only,
+                current_revision_only,
                 json,
             }) => loopflow::lf::commands::context::run(
                 loopflow::lf::commands::context::ContextQueryOptions {
@@ -1360,6 +1362,8 @@ fn main() -> anyhow::Result<()> {
                     surfaces: surface.clone(),
                     outcomes: outcome.clone(),
                     capture_states: capture_state.clone(),
+                    steered_only: *steered_only,
+                    current_revision_only: *current_revision_only,
                     json: *json,
                 },
             ),

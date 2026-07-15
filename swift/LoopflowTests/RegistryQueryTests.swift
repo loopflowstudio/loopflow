@@ -301,6 +301,7 @@ struct RegistryQueryTests {
                 "--skill", "implement", "--provider", "codex", "--model", "gpt-5",
                 "--surface", "headless", "--outcome", "completed",
                 "--capture-state", "complete",
+                "--steered-only", "--current-revision-only",
             ])
             return fixture
         }
@@ -317,7 +318,9 @@ struct RegistryQueryTests {
             models: ["gpt-5"],
             surfaces: ["headless"],
             outcomes: [.completed],
-            captureStates: [.complete]
+            captureStates: [.complete],
+            steeredOnly: true,
+            currentRevisionOnly: true
         )
 
         let snapshot = try await query.contextLab(selection)

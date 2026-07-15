@@ -193,6 +193,7 @@ lf trace <exec-or-trace-id> --events
 lf trace <exec-or-trace-id> --events --jsonl --launch <launch-id-prefix>
 lf trace <exec-or-trace-id> --json --content --launch <launch-id> --turn <turn-id>
 lf context --days 14 --repo "$PWD" --wave intelligence --project context --task W2-71 --json
+lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 ```
 
 `lf trace` accepts the exec ids shown by `lf execs` and the trace ids carried by
@@ -204,7 +205,10 @@ the exact prompt and normalized conversation for one trace address.
 context flame, prompt-ordered lanes, canonical revisions, and representative
 trace addresses. Project and Task filters use durable launch attribution; old
 unattributed launches do not guess from worktree names. Missing capture remains
-missing rather than becoming zero.
+missing rather than becoming zero. `--steered-only` requires an observed steer
+turn. `--current-revision-only` keeps launches containing a resolvable
+file-backed instruction revision that matches the file currently on disk;
+unresolvable revision identity never silently counts as current.
 
 ### Crons
 

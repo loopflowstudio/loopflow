@@ -210,6 +210,8 @@ public struct RegistryQuery: Sendable {
         Self.append(query.surfaces, flag: "--surface", to: &args)
         Self.append(query.outcomes.map(\.rawValue), flag: "--outcome", to: &args)
         Self.append(query.captureStates.map(\.rawValue), flag: "--capture-state", to: &args)
+        if query.steeredOnly { args.append("--steered-only") }
+        if query.currentRevisionOnly { args.append("--current-revision-only") }
         let stdout = try await run(args, nil)
         return try Self.decode(ContextLabSnapshot.self, from: stdout)
     }

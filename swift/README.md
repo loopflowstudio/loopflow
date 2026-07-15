@@ -39,8 +39,10 @@ and launch a fresh refinement session in an existing Intelligence Task
 worktree. Project and Task facets appear only for durably attributed launches;
 historical gaps stay unattributed. Selecting a segment never opens prompt bodies;
 **Open trace** is the explicit boundary. Saved views retain only the query and visualization mode.
-Revision comparisons stay unavailable until both revisions have enough
-similarly captured launches.
+The research-state filters can require observed steering or a launch containing
+a current resolvable file-backed instruction revision. Revision comparisons stay unavailable until
+both revisions have enough launches with comparable capture, provider/model mix,
+and observation spans.
 
 ## Product ownership
 

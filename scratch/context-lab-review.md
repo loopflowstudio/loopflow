@@ -290,6 +290,62 @@ seven Context Lab Swift tests, `scripts/check_migrations.py` through
 known warning about the divergent disposable development ledger; it did not
 touch the explicitly selected production ledger used for the reconciliation.
 
+## Fourth implementation pass (2026-07-15): research-state cohorts
+
+This pass closes the two remaining computable filter gaps and the known
+revision-comparison confounds without touching the externally blocked Task
+refinement journey.
+
+**Steered-only is an observed launch predicate.** `SessionSetQuery` now carries
+the required `steered_only` boolean through Rust, the shared fixture, Swift,
+deep links, and saved views. Rust loads candidate launches and turns, then
+retains only launch ids with a captured `input_op == "steer"` before building
+totals, coverage, lanes, flames, or evidence. A launch with no observed steer
+does not silently qualify. The filter rail names this **Observed steering
+only**, and `lf context --steered-only` exposes the same reader contract.
+
+**Current-revision-only is a canonical-source predicate, not a Swift hash
+guess.** The required `current_revision_only` boolean reaches Rust as
+`--current-revision-only`. Rust canonicalizes each resolvable file-backed
+instruction source, computes its kind-specific effective hash, and retains
+launches containing at least one captured revision that matches the file now on
+disk. Missing paths, unreadable files, goal/memory composite state, and
+source-less assets do not count as current. Once a launch qualifies, its whole
+context remains in the atomic snapshot so flame widths and session totals still
+reconcile; the UI therefore says **Contains current file instruction** rather
+than implying every asset in the launch is current.
+
+**Comparison cohorts now carry their confounds.** Every revision measurement
+adds required `last_seen` and `provider_models` fields. Provider/model buckets
+count distinct exposed launches; `model: null` is an explicit bucket, while a
+missing or incomplete bucket sum blocks comparison. Swift keeps the existing
+three-launch minimum and ten-percentage-point complete-capture limit, then also
+requires provider/model total-variation distance at or below 20 percentage
+points and non-zero observation spans within 2× of one another. Missing windows,
+single-time populations, imbalanced spans, and imbalanced mixes each render a
+concrete unavailability reason. No wire field has a serde or Swift default.
+
+A fresh branch-binary read of the production 30-day ledger reconciled 55
+sessions, 128 launches, 136 turns, and 1,014,654 attributed tokens; the aggregate
+root and sum of its children both equal 1,014,654. The observed-steering cohort
+contained two sessions, three launches, 11 turns, eight steer turns, and 31,318
+attributed tokens. The current-file-instruction cohort contained two sessions,
+two launches, two turns, and 17,508 attributed tokens. Across all 242 revision
+evidence rows, provider/model bucket counts summed to each revision's exposed
+launch count and every row carried first and last observation timestamps. These
+are moving reader snapshots, not intervention or causal-comparison results.
+
+Checks passed: `cargo fmt --all -- --check`; `cargo clippy -p loopflow
+--all-targets -- -D warnings`; 71 context-filtered Rust tests; migration-chain
+validation through `0.11.006_context_launch_work`; Swift multiplatform boundary
+validation; the full 119-test Swift suite; and focused Context Lab (eight), DTO
+fixture (five), and RegistryQuery (15) suites. `swift test` rebuilt LoopflowMac;
+the separate Xcode build-for-testing was not repeated because this slice changes
+only package-compiled models, query construction, and the existing Lab view.
+
+The real Intelligence Task launch, source edit, Task diff, lifecycle, backlink,
+and natural post-edit revision remain unclaimed and blocked exactly as before.
+
 ## Risks and bottlenecks
 
 1. **The refinement loop is not yet live.** The PM cache contains W2-71 under
@@ -317,25 +373,15 @@ touch the explicitly selected production ledger used for the reconciliation.
    correctly refuses the newer schema. The branch binary reads it cleanly, and
    the automatic 005 backup is
    `/Users/jack/.lf/loopflow.db.backup-0.11.005_provider_accounts`.
-8. **The filter rail does not yet cover the whole design.** Steering is visible
-   as a denominator and lane sort but cannot define a steered-only population;
-   revisions are always all revisions rather than current-versus-all. The Rust
-   query remains atomic for every filter it does expose.
-9. **Revision comparability is intentionally narrow.** The gate requires at
-   least three exposed launches per revision and complete-capture rates within
-   ten percentage points. It does not yet compare provider/model mix or balance
-   observation windows, so passing the gate is evidence coverage, not proof of
-   causal comparability.
-
 ## Done-when audit
 
 - **Research truth — reader truth holds; hosted interaction proof remains
   open.** The fresh 30-day production query reconciles supplied tokens, root
   width, child widths, and missing lane totals exactly. Atomic snapshot
-  replacement, cancellation, shared lane scale, ratio-based sorting, and
-  flame/table identity are implemented and tested. The installed-app keyboard
-  journey was not run, and the absent steered-only/current-revision filters keep
-  the full proposed filter contract incomplete.
+  replacement, cancellation, shared lane scale, ratio-based sorting,
+  flame/table identity, observed-steering filtering, and canonical
+  current-revision filtering are implemented and tested. The installed-app
+  keyboard journey was not run.
 - **Evidence truth — holds at the reader/model boundary.** Canonical revisions,
   distinct representative sessions, full hashes, artifact availability, and
   explicit exact-trace opening are present. The prior live body read remains
@@ -348,11 +394,13 @@ touch the explicitly selected production ledger used for the reconciliation.
   before command dispatch. Failures remove the new terminal. No real
   Intelligence Task launch, source diff, lifecycle action, or backlink was
   experienced.
-- **Learning truth — natural grouping holds; intervention proof remains open.**
-  Revision comparison operates on naturally observed hashes and explains
-  insufficient coverage. Its provider/model and observation-window
-  comparability remain narrow, and the edit → ordinary run → new canonical hash
-  journey remains undemonstrated.
+- **Learning truth — natural grouping and conservative cohort gates hold;
+  intervention proof remains open.** Revision comparison operates on naturally
+  observed hashes and explains insufficient launch count, capture parity,
+  provider/model mix, missing or single-time observation data, and imbalanced
+  spans. Passing those gates permits measured comparison; it does not prove
+  causality. The edit → ordinary run → new canonical hash journey remains
+  undemonstrated.
 - **Shipping proof — the full local matrix passes.** Python, Rust, website,
   Swift, E2E smoke, multiplatform boundaries, migrations, and Mac
   build-for-testing all passed. The hosted UI runner and installed-app demo were

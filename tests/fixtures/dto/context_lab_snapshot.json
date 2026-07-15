@@ -32,7 +32,9 @@
     ],
     "capture_states": [
       "complete"
-    ]
+    ],
+    "steered_only": true,
+    "current_revision_only": true
   },
   "coverage": {
     "complete_launches": 1,
@@ -171,10 +173,18 @@
         "median_tokens_per_exposed_turn": 800,
         "p95_tokens_per_exposed_turn": 800,
         "first_seen": 120,
+        "last_seen": 120,
         "completed_launches": 1,
         "failed_launches": 0,
         "steering_turns": 0,
-        "complete_capture_launches": 1
+        "complete_capture_launches": 1,
+        "provider_models": [
+          {
+            "provider": "codex",
+            "model": "gpt-5",
+            "exposed_launches": 1
+          }
+        ]
       },
       "representatives": [
         {

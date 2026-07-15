@@ -17,10 +17,14 @@ struct DTOFixtureTests {
         #expect(snapshot.coverage.unknownTurns == 1)
         #expect(snapshot.aggregateRoot.children[0].children[0].children.count == 1)
         #expect(snapshot.query.projects == ["context"])
+        #expect(snapshot.query.steeredOnly)
+        #expect(snapshot.query.currentRevisionOnly)
         #expect(snapshot.sessions[0].task == "W2-71")
         #expect(snapshot.sessions[0].turns[1].suppliedContextTokens == nil)
         #expect(snapshot.evidence[0].isEditable)
         #expect(snapshot.evidence[0].currentSourceSha256 == "fedcba9876543210")
+        #expect(snapshot.evidence[0].measurements.lastSeen == 120)
+        #expect(snapshot.evidence[0].measurements.providerModels[0].model == "gpt-5")
         #expect(snapshot.evidence[0].representatives[0].address.turnId == "turn-1")
     }
 

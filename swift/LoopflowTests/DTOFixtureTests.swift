@@ -10,7 +10,7 @@ struct DTOFixtureTests {
     @Test("wave detail fixture preserves Project and Task identity")
     func waveDetailFixturePreservesHierarchy() throws {
         let data = try loadFixtureData("wave_detail.json")
-        let detail = try JSONDecoder().decode(WaveStatusSnapshot.self, from: data)
+        let detail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
 
         #expect(detail.wave.home.address == "ssh://jack@mini-heart")
         #expect(detail.wave.home.owner == "jack")

@@ -44,7 +44,7 @@ codebase tree, and registry health.
   `lf ls/status/roadmap/runs/usage/doctor/tokens --json`; the app does not
   maintain a second roadmap or lifecycle database. Unavailable per-Wave
   evidence renders its reason, and refresh failures leave the last successful
-  roadmap visible.
+  roadmap or selected Wave detail visible.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` connects only to the
   selected Wave's `/events` stream; human subscriptions replay the latest 12
   turns before continuing live.

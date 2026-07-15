@@ -12,6 +12,25 @@ struct WaveWorkSelection: Equatable {
     let id: String
 }
 
+struct WaveDetailReading {
+    private(set) var snapshot: WaveDetailSnapshot?
+    private(set) var errorMessage: String?
+
+    mutating func update(_ snapshot: WaveDetailSnapshot) {
+        self.snapshot = snapshot
+        errorMessage = nil
+    }
+
+    mutating func recordFailure(_ error: Error) {
+        errorMessage = "Wave status unavailable: \(error.localizedDescription)"
+    }
+
+    mutating func clear() {
+        snapshot = nil
+        errorMessage = nil
+    }
+}
+
 /// One Wave surface: current Project/Task state beside the durable conversation.
 /// `lf status` supplies the work map; the Wave listener streams ordered chat and
 /// child activity from its journal.
@@ -103,10 +122,11 @@ private struct WavePlanView: View {
     @ObservedObject var terminalStore: TaskTerminalStore
 
     @Environment(\.palette) private var palette
-    @State private var workMap: WaveWorkMap?
-    @State private var workMapError: String?
+    @State private var reading = WaveDetailReading()
 
     private var identity: String { "\(repoPath)|\(wave.id)" }
+    private var refreshIdentity: String { "\(identity)|\(refreshSignal)" }
+    private var workMap: WaveWorkMap? { reading.snapshot?.workMap }
 
     var body: some View {
         ScrollView {
@@ -127,13 +147,12 @@ private struct WavePlanView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(palette.background)
-        .task(id: identity) {
+        .task(id: refreshIdentity) {
             while !Task.isCancelled {
-                await refreshWorkMap()
+                await refreshDetail()
                 try? await Task.sleep(for: .seconds(30))
             }
         }
-        .task(id: refreshSignal) { await refreshWorkMap() }
     }
 
     private var objective: some View {
@@ -170,12 +189,14 @@ private struct WavePlanView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
 
-            if let workMapError {
-                Label(workMapError, systemImage: "exclamationmark.triangle")
+            if let errorMessage = reading.errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle")
                     .font(Typography.caption(11))
                     .foregroundStyle(Color.statusError)
                     .textSelection(.enabled)
-            } else if let workMap, !workMap.projects.isEmpty {
+            }
+
+            if let workMap, !workMap.projects.isEmpty {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
                     ForEach(workMap.projects) { project in
                         WaveProjectWorkView(
@@ -198,10 +219,9 @@ private struct WavePlanView: View {
         }
     }
 
-    private func refreshWorkMap() async {
+    private func refreshDetail() async {
         guard wave.isRegistered else {
-            workMap = nil
-            workMapError = nil
+            reading.clear()
             return
         }
         do {
@@ -209,11 +229,11 @@ private struct WavePlanView: View {
                 wave: wave.name,
                 cwd: repoPath
             )
-            workMap = snapshot.workMap
-            workMapError = nil
+            guard !Task.isCancelled else { return }
+            reading.update(snapshot)
         } catch {
-            workMap = nil
-            workMapError = "Work map unavailable: \(error.localizedDescription)"
+            guard !Task.isCancelled else { return }
+            reading.recordFailure(error)
         }
     }
 }

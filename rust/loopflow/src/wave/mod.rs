@@ -420,7 +420,7 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::chat::turns::{ChatRole, ChatTurn};
+    use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
     use crate::chat::types::Lifecycle;
     use crate::wave::journal::MessageOp;
     use crate::wave::server::ResidentDoor;
@@ -1057,11 +1057,42 @@ mod tests {
         out
     }
 
+    /// Reconstruct the thread the way a real client does: a `turn` frame
+    /// replaces the turn of its id, a `turn-delta` frame absorbs one increment
+    /// into it. Returns the turns in first-seen order, each at its latest state.
     fn parse_turn_frames(sse_body: &str) -> Vec<ChatTurn> {
-        sse_body
-            .lines()
-            .filter_map(|line| line.strip_prefix("data:"))
-            .filter_map(|data| serde_json::from_str(data.trim()).ok())
+        let mut order: Vec<String> = Vec::new();
+        let mut by_id: std::collections::HashMap<String, ChatTurn> =
+            std::collections::HashMap::new();
+        let mut event = String::new();
+        for line in sse_body.lines() {
+            if let Some(name) = line.strip_prefix("event:") {
+                event = name.trim().to_string();
+            } else if let Some(data) = line.strip_prefix("data:") {
+                let data = data.trim();
+                match event.as_str() {
+                    "turn" => {
+                        if let Ok(turn) = serde_json::from_str::<ChatTurn>(data) {
+                            if !by_id.contains_key(&turn.id) {
+                                order.push(turn.id.clone());
+                            }
+                            by_id.insert(turn.id.clone(), turn);
+                        }
+                    }
+                    "turn-delta" => {
+                        if let Ok(delta) = serde_json::from_str::<TurnDelta>(data) {
+                            if let Some(turn) = by_id.get_mut(&delta.turn_id) {
+                                turn.absorb_item(delta.item);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        order
+            .into_iter()
+            .map(|id| by_id.remove(&id).expect("id tracked"))
             .collect()
     }
 

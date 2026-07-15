@@ -1,3 +1,5 @@
+use std::ops::ControlFlow;
+
 use anyhow::Result;
 use futures_util::StreamExt;
 
@@ -60,11 +62,13 @@ impl SseFrameParser {
 
 /// Follow one `/events` connection until it ends, handing every frame to
 /// `on_frame`. `query` is `""` for the mind's thread, or `"?inbox=true"` for
-/// the resident's scope. Connection failure and non-2xx are errors.
+/// the resident's scope. Returning [`ControlFlow::Break`] from `on_frame` closes
+/// the connection early — the human thread uses it to reconnect on a `resync`
+/// frame. Connection failure and non-2xx are errors.
 pub async fn stream_events(
     endpoint: &str,
     query: &str,
-    on_frame: &mut impl FnMut(Frame),
+    on_frame: &mut impl FnMut(Frame) -> ControlFlow<()>,
 ) -> Result<()> {
     let client = reqwest::Client::new();
     let response = client
@@ -78,7 +82,9 @@ pub async fn stream_events(
     while let Some(chunk) = bytes.next().await {
         for byte in chunk? {
             if let Some(frame) = parser.push(byte) {
-                on_frame(frame);
+                if on_frame(frame).is_break() {
+                    return Ok(());
+                }
             }
         }
     }

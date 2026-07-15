@@ -20,7 +20,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use loopflow::wave::runtime::WaveRuntime;
+use loopflow::wave::runtime::{TurnBroadcast, WaveRuntime};
 use loopflow::wave::wire::ResidentDelta;
 
 /// A turn's worth of deltas, sized from the real product journal: 657 deltas
@@ -71,7 +71,13 @@ fn main() {
             text: DELTA_TEXT.to_string(),
         });
         samples.push(start.elapsed().as_secs_f64() * 1e6);
-        wire_bytes += sub.turn_rx.try_recv().map_or(0, |frame| frame.json.len());
+        // The delta-granular wire: a text delta broadcasts one small `turn-delta`
+        // frame, not the whole accumulated turn. This sums what the wire actually
+        // carries — O(prose), where the old whole-turn re-broadcast was O(prose²).
+        wire_bytes += sub.turn_rx.try_recv().map_or(0, |frame| match frame {
+            TurnBroadcast::Whole(f) => f.json.len(),
+            TurnBroadcast::Delta(f) => f.json.len(),
+        });
     }
     let turn_elapsed = turn_start.elapsed().as_secs_f64();
     let turn_chars = DELTAS * DELTA_TEXT.len();

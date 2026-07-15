@@ -135,6 +135,23 @@ pub struct ChatTurn {
     pub activity: Option<ChildControlActivity>,
 }
 
+/// One live increment to an open turn: the `turn-delta` SSE frame. The listener
+/// broadcasts one per non-finalizing content delta instead of re-serializing the
+/// whole `ChatTurn` (see `crate::wave::runtime` — that whole-turn-per-token
+/// re-broadcast was O(prose²) on the wire). The client applies it with
+/// [`ChatTurn::absorb_item`] against the turn named by `turn_id`, reconstructing
+/// exactly what the listener holds; the finalized whole `turn` frame then
+/// re-baselines it at turn close. Every field required — same DTO discipline as
+/// [`ChatTurn`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurnDelta {
+    /// The open turn this increment grows (`"turn-<n>"`).
+    pub turn_id: String,
+    /// The item to absorb — a stream `Message` fragment grows `text`, any other
+    /// item appends to `items`, exactly as the listener's fold does.
+    pub item: ConversationItem,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChatTurnError {
     #[error("child activity entries cannot also carry prose, items, or a provider body")]
@@ -526,6 +543,39 @@ mod tests {
 
         let error = serde_json::from_value::<ChatTurn>(value).expect_err("reject mixed activity");
         assert!(error.to_string().contains("cannot also carry prose"));
+    }
+
+    #[test]
+    fn turn_delta_fixture_round_trips() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/turn_delta.json"
+        ));
+        let delta: TurnDelta = serde_json::from_str(fixture).expect("decode turn_delta fixture");
+        assert_eq!(delta.turn_id, "turn-3");
+        match &delta.item {
+            ConversationItem::Message { id, text, phase } => {
+                assert_eq!(id, "text-7");
+                assert_eq!(phase.as_deref(), Some("stream"));
+                assert!(text.contains("edge case"));
+            }
+            other => panic!("expected a stream message item, got {other:?}"),
+        }
+        // Applying the delta grows a turn exactly as the listener's fold does.
+        let mut turn = ChatTurn::user("turn-3".into(), String::new());
+        turn.role = ChatRole::Assistant;
+        turn.push_text("so ");
+        turn.absorb_item(delta.item.clone());
+        assert_eq!(turn.text, "so the parser handles the edge case now.");
+        assert!(
+            turn.items.is_empty(),
+            "a stream message joins text, not items"
+        );
+
+        // Round-trips: re-serialize and decode to the same value.
+        let reencoded = serde_json::to_string(&delta).expect("serialize");
+        let again: TurnDelta = serde_json::from_str(&reencoded).expect("decode");
+        assert_eq!(again, delta);
     }
 
     #[test]

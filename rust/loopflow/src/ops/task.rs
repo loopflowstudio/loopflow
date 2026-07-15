@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child_session::{
-    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
+    task_write_lease_from_env, ChildCommandEffect, ChildCommandId, ChildCommandKind,
+    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration,
+    ChildRef, ChildWriteLease,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -602,7 +603,115 @@ fn parse_pr_slug(value: &str) -> OpsResult<String> {
     Ok(value.to_string())
 }
 
-async fn task_for_worktree(store: &SharedStore, repo: &Path) -> OpsResult<Option<TaskSession>> {
+async fn update_task_pr_with_authority(
+    store: &SharedStore,
+    pr: &TaskPr,
+    lease: Option<&ChildWriteLease>,
+) -> Result<(), StoreError> {
+    match lease {
+        Some(lease) => store.update_task_pr_for_lease(pr, lease).await,
+        None => store.update_task_pr(pr).await,
+    }
+}
+
+async fn settle_task_pr_with_authority(
+    store: &SharedStore,
+    settled: &TaskPr,
+    next: Option<&TaskPr>,
+    lease: Option<&ChildWriteLease>,
+) -> Result<(), StoreError> {
+    match lease {
+        Some(lease) => store.settle_task_pr_for_lease(settled, next, lease).await,
+        None => store.settle_task_pr(settled, next).await,
+    }
+}
+
+async fn append_task_event_with_authority(
+    store: &SharedStore,
+    session_id: &crate::task::TaskSessionId,
+    event: &TaskEventKind,
+    lease: Option<&ChildWriteLease>,
+) -> Result<(), StoreError> {
+    match lease {
+        Some(lease) => {
+            store
+                .append_task_event_for_lease(session_id, lease, event)
+                .await?;
+        }
+        None => {
+            store.append_task_event(session_id, event).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn update_task_session_with_authority(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: Option<&ChildWriteLease>,
+) -> Result<(), StoreError> {
+    match lease {
+        Some(lease) => store.update_task_session_for_lease(session, lease).await,
+        None => store.update_task_session(session).await,
+    }
+}
+
+async fn complete_task_session_after_pr_with_authority(
+    store: &SharedStore,
+    session: &TaskSession,
+    pr: &TaskPr,
+    lease: Option<&ChildWriteLease>,
+) -> Result<(), StoreError> {
+    match lease {
+        Some(lease) => {
+            store
+                .complete_task_session_after_pr_for_lease(session, pr, lease)
+                .await
+        }
+        None => store.complete_task_session_after_pr(session, pr).await,
+    }
+}
+
+async fn complete_task_session_with_authority(
+    store: &SharedStore,
+    session: &TaskSession,
+    skipped_pr: Option<&TaskPr>,
+    lease: Option<&ChildWriteLease>,
+) -> Result<(), StoreError> {
+    match lease {
+        Some(lease) => {
+            store
+                .complete_task_session_for_lease(session, skipped_pr, lease)
+                .await
+        }
+        None => store.complete_task_session(session, skipped_pr).await,
+    }
+}
+
+fn ambient_task_write_lease(session: &TaskSession) -> OpsResult<Option<ChildWriteLease>> {
+    let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") else {
+        return Ok(None);
+    };
+    let value = value
+        .into_string()
+        .map_err(|_| task_error("ambient Task Session id is not valid UTF-8"))?;
+    let id = crate::task::TaskSessionId::parse(&value)
+        .map_err(|error| task_error(format!("invalid ambient Task Session id: {error}")))?;
+    if id != session.id {
+        return Err(task_error(format!(
+            "ambient Task Session {id} cannot mutate {}",
+            session.id
+        )));
+    }
+    task_write_lease_from_env()
+        .map(Some)
+        .map_err(|error| task_error(format!("ambient Task Session has no authority: {error}")))
+}
+
+async fn task_for_worktree(
+    store: &SharedStore,
+    repo: &Path,
+) -> OpsResult<Option<(TaskSession, Option<ChildWriteLease>)>> {
     let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
     if let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") {
         let value = value
@@ -626,7 +735,10 @@ async fn task_for_worktree(store: &SharedStore, repo: &Path) -> OpsResult<Option
                 repo.display()
             )));
         }
-        return Ok(Some(session));
+        let lease = task_write_lease_from_env().map_err(|error| {
+            task_error(format!("ambient Task Session has no authority: {error}"))
+        })?;
+        return Ok(Some((session, Some(lease))));
     }
 
     let mut matches = store
@@ -648,7 +760,7 @@ async fn task_for_worktree(store: &SharedStore, repo: &Path) -> OpsResult<Option
             repo.display()
         )));
     }
-    Ok(found)
+    Ok(found.map(|session| (session, None)))
 }
 
 pub(crate) fn request_task_pr_publication(
@@ -664,7 +776,7 @@ pub(crate) fn request_task_pr_publication(
         let Some(store) = open_existing_store().await.map(Arc::new) else {
             return Ok(false);
         };
-        let Some(session) = task_for_worktree(&store, repo).await? else {
+        let Some((session, lease)) = task_for_worktree(&store, repo).await? else {
             return Ok(false);
         };
         let mut pr = store
@@ -701,10 +813,11 @@ pub(crate) fn request_task_pr_publication(
             github: pr.github().cloned(),
         });
         pr.updated_at = now;
-        store
-            .update_task_pr(&pr)
-            .await
-            .map_err(|error| task_error(format!("failed to request PR publication: {error}")))?;
+        match lease.as_ref() {
+            Some(lease) => store.update_task_pr_for_lease(&pr, lease).await,
+            None => store.update_task_pr(&pr).await,
+        }
+        .map_err(|error| task_error(format!("failed to request PR publication: {error}")))?;
         Ok(true)
     })
 }
@@ -717,7 +830,7 @@ pub(crate) fn attach_task_github_pr(
         let Some(store) = open_existing_store().await.map(Arc::new) else {
             return Ok(false);
         };
-        let Some(session) = task_for_worktree(&store, repo).await? else {
+        let Some((session, lease)) = task_for_worktree(&store, repo).await? else {
             return Ok(false);
         };
         let mut pr = store
@@ -763,23 +876,27 @@ pub(crate) fn attach_task_github_pr(
             url: url.clone(),
         });
         pr.updated_at = time::OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&pr)
-            .await
-            .map_err(|error| task_error(format!("failed to attach GitHub PR: {error}")))?;
+        match lease.as_ref() {
+            Some(lease) => store.update_task_pr_for_lease(&pr, lease).await,
+            None => store.update_task_pr(&pr).await,
+        }
+        .map_err(|error| task_error(format!("failed to attach GitHub PR: {error}")))?;
         if opened {
-            store
-                .append_task_event(
-                    &session.id,
-                    &TaskEventKind::PrOpened {
-                        pr_id: pr.id,
-                        sequence: pr.sequence,
-                        number,
-                        url,
-                    },
-                )
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
+            let event = TaskEventKind::PrOpened {
+                pr_id: pr.id,
+                sequence: pr.sequence,
+                number,
+                url,
+            };
+            match lease.as_ref() {
+                Some(lease) => {
+                    store
+                        .append_task_event_for_lease(&session.id, lease, &event)
+                        .await
+                }
+                None => store.append_task_event(&session.id, &event).await,
+            }
+            .map_err(|error| task_error(error.to_string()))?;
         }
         Ok(true)
     })
@@ -813,7 +930,7 @@ pub(crate) fn abandon_task_pr(
         let Some(store) = open_existing_store().await.map(Arc::new) else {
             return Ok(false);
         };
-        let Some(mut session) = task_for_worktree(&store, repo).await? else {
+        let Some((mut session, lease)) = task_for_worktree(&store, repo).await? else {
             return Ok(false);
         };
         let mut pr = store
@@ -837,6 +954,12 @@ pub(crate) fn abandon_task_pr(
         let dirty = !is_clean(repo)?;
         if dirty && !force {
             return Err(task_error("uncommitted changes; use --force"));
+        }
+        if let Some(lease) = lease.as_ref() {
+            store
+                .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+                .await
+                .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
         }
         if dirty {
             progress.status("Discarding uncommitted Task PR changes...");
@@ -862,10 +985,11 @@ pub(crate) fn abandon_task_pr(
         let now = time::OffsetDateTime::now_utc();
         pr.abandoned_at = Some(now);
         pr.updated_at = now;
-        store
-            .settle_task_pr(&pr, None)
-            .await
-            .map_err(|error| task_error(format!("failed to settle Task PR: {error}")))?;
+        match lease.as_ref() {
+            Some(lease) => store.settle_task_pr_for_lease(&pr, None, lease).await,
+            None => store.settle_task_pr(&pr, None).await,
+        }
+        .map_err(|error| task_error(format!("failed to settle Task PR: {error}")))?;
         if !session.status.is_process_active() {
             let from = session.status;
             session.set_status(
@@ -967,11 +1091,11 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     let from = session.status;
     let mut launch = session.clone();
     let generation = launch.begin_generation(tmux_name.clone());
-    let reserved = store
+    let Some(lease) = store
         .reserve_task_process(&launch, from)
         .await
-        .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?;
-    if !reserved {
+        .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?
+    else {
         let current = store
             .get_task_session(&session.id)
             .await
@@ -994,19 +1118,8 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
             from.as_str(),
             current.status.as_str()
         )));
-    }
+    };
     *session = launch;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Starting,
-                reason: "task process is starting".to_string(),
-            },
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
 
     // argv[0] and the store come from the Session, never from this process:
     // whoever queued the command does not get to choose the child's binary or
@@ -1035,6 +1148,10 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         ),
         ("LF_TASK_SESSION_ID", session.id.as_str()),
         ("LF_TASK_GENERATION", generation_text.as_str()),
+        (
+            crate::child_session::TASK_LEASE_TOKEN_ENV,
+            lease.token.as_str(),
+        ),
         ("LF_DB_PATH", db_path.as_str()),
         ("LF_HOME", lf_home.as_str()),
         (crate::engine::wave_home::WAVE_HOME_ENV, wave_home.as_str()),
@@ -1042,6 +1159,16 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
     {
+        session.latest_process = Some(
+            super::child::revoke_and_reap_child_body(
+                store,
+                &ChildRef::Task(session.id.clone()),
+                crate::child_session::ChildBodyOutcome::Lost {
+                    reason: format!("task process launch failed: {error}"),
+                },
+            )
+            .await?,
+        );
         record_task_failure(
             store,
             session,
@@ -1060,7 +1187,7 @@ async fn wait_until_running(
     store: &SharedStore,
     session_id: &crate::task::TaskSessionId,
 ) -> OpsResult<TaskSession> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
     loop {
         let session = store
             .get_task_session(session_id)
@@ -1094,6 +1221,13 @@ pub(crate) async fn reconcile_process_liveness(
     if !session.status.is_process_active() {
         return Ok(());
     }
+    if session
+        .latest_process
+        .as_ref()
+        .is_some_and(super::child::child_body_reservation_is_fresh)
+    {
+        return Ok(());
+    }
     let alive = match session.latest_process.as_ref() {
         Some(process) => tmux_session_exists(&process.tmux_name)
             .await
@@ -1102,6 +1236,31 @@ pub(crate) async fn reconcile_process_liveness(
     };
     if alive {
         return Ok(());
+    }
+    let lost_reason = "task process disappeared before recording a terminal outcome";
+    if session.latest_process.as_ref().is_some_and(|process| {
+        matches!(
+            process.state,
+            crate::child_session::ChildLeaseState::Legacy
+                | crate::child_session::ChildLeaseState::Reserved
+                | crate::child_session::ChildLeaseState::Active
+        )
+    }) {
+        let outcome = super::child::lost_child_body_outcome(
+            session
+                .latest_process
+                .as_ref()
+                .expect("matched child process must still be present"),
+            lost_reason,
+        );
+        session.latest_process = Some(
+            super::child::revoke_and_reap_child_body(
+                store,
+                &ChildRef::Task(session.id.clone()),
+                outcome,
+            )
+            .await?,
+        );
     }
     let active = store
         .active_task_pr(&session.id)
@@ -1140,6 +1299,22 @@ pub(crate) async fn reconcile_process_liveness(
 pub(crate) async fn reconcile_task_pr(
     store: &SharedStore,
     session: &mut TaskSession,
+) -> OpsResult<Option<TaskPr>> {
+    reconcile_task_pr_with_authority(store, session, None).await
+}
+
+pub(crate) async fn reconcile_task_pr_for_lease(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+) -> OpsResult<Option<TaskPr>> {
+    reconcile_task_pr_with_authority(store, session, Some(lease)).await
+}
+
+async fn reconcile_task_pr_with_authority(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: Option<&ChildWriteLease>,
 ) -> OpsResult<Option<TaskPr>> {
     let Some(mut pr) = store
         .active_task_pr(&session.id)
@@ -1252,19 +1427,16 @@ pub(crate) async fn reconcile_task_pr(
     if pr_changed {
         pr.updated_at = now;
         if completes_task {
-            store
-                .complete_task_session_after_pr(session, &pr)
+            complete_task_session_after_pr_with_authority(store, session, &pr, lease)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
             session_saved_with_pr = true;
         } else if pr.is_settled() {
-            store
-                .settle_task_pr(&pr, None)
+            settle_task_pr_with_authority(store, &pr, None, lease)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
         } else {
-            store
-                .update_task_pr(&pr)
+            update_task_pr_with_authority(store, &pr, lease)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
         }
@@ -1273,23 +1445,23 @@ pub(crate) async fn reconcile_task_pr(
         && (session.status != previous_session_status
             || session.pm_writeback != PmWritebackState::Current)
     {
-        store
-            .update_task_session(session)
+        update_task_session_with_authority(store, session, lease)
             .await
             .map_err(|error| task_error(error.to_string()))?;
     }
     if session.status != previous_session_status {
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::StatusChanged {
-                    from: previous_session_status,
-                    to: session.status,
-                    reason: session.status_reason.clone(),
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
+        append_task_event_with_authority(
+            store,
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from: previous_session_status,
+                to: session.status,
+                reason: session.status_reason.clone(),
+            },
+            lease,
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     }
     if pr_changed {
         if let Some(event) = pr_event {
@@ -1299,8 +1471,7 @@ pub(crate) async fn reconcile_task_pr(
                 _ => true,
             };
             if should_append {
-                store
-                    .append_task_event(&session.id, &event)
+                append_task_event_with_authority(store, &session.id, &event, lease)
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
             }
@@ -1309,15 +1480,16 @@ pub(crate) async fn reconcile_task_pr(
     if previous_session_status != TaskSessionStatus::Completed
         && session.status == TaskSessionStatus::Completed
     {
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::Completed {
-                    summary: "pull request merge completed the Task".to_string(),
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
+        append_task_event_with_authority(
+            store,
+            &session.id,
+            &TaskEventKind::Completed {
+                summary: "pull request merge completed the Task".to_string(),
+            },
+            lease,
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     }
     Ok(Some(pr))
 }
@@ -1326,7 +1498,23 @@ pub(crate) async fn ensure_working_pr(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr(store, session).await?;
+    ensure_working_pr_with_authority(store, session, None).await
+}
+
+pub(crate) async fn ensure_working_pr_for_lease(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+) -> OpsResult<Option<TaskPr>> {
+    ensure_working_pr_with_authority(store, session, Some(lease)).await
+}
+
+async fn ensure_working_pr_with_authority(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: Option<&ChildWriteLease>,
+) -> OpsResult<Option<TaskPr>> {
+    reconcile_task_pr_with_authority(store, session, lease).await?;
     if session.status.is_terminal() {
         return Ok(None);
     }
@@ -1351,6 +1539,12 @@ pub(crate) async fn ensure_working_pr(
             "Task PR {} is neither active nor settled",
             settled.id
         )));
+    }
+    if let Some(lease) = lease {
+        store
+            .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+            .await
+            .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
     }
     let sequence = settled.sequence + 1;
     let slug = settled
@@ -1442,20 +1636,21 @@ pub(crate) async fn ensure_working_pr(
         created_at: now,
         updated_at: now,
     };
-    match store.settle_task_pr(&settled, Some(&next)).await {
+    match settle_task_pr_with_authority(store, &settled, Some(&next), lease).await {
         Ok(()) => {
-            store
-                .append_task_event(
-                    &session.id,
-                    &TaskEventKind::PrStarted {
-                        pr_id: next.id.clone(),
-                        sequence: next.sequence,
-                        branch: next.branch.clone(),
-                        base_commit: next.base_commit.clone(),
-                    },
-                )
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
+            append_task_event_with_authority(
+                store,
+                &session.id,
+                &TaskEventKind::PrStarted {
+                    pr_id: next.id.clone(),
+                    sequence: next.sequence,
+                    branch: next.branch.clone(),
+                    base_commit: next.base_commit.clone(),
+                },
+                lease,
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
             Ok(Some(next))
         }
         Err(error) => {
@@ -1518,6 +1713,13 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
             .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
         reconcile_task_pr(&store, &mut session).await?;
+        let lease = ambient_task_write_lease(&session)?;
+        if let Some(lease) = lease.as_ref() {
+            store
+                .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+                .await
+                .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
+        }
         if session.status == TaskSessionStatus::Completed {
             return Ok(session);
         }
@@ -1558,25 +1760,29 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
         let from = session.status;
         session.set_status(TaskSessionStatus::Completed, summary.clone());
         reconcile_pm_writeback(&store, &mut session, None).await;
-        store
-            .complete_task_session(&session, skipped_pr.as_ref())
+        complete_task_session_with_authority(&store, &session, skipped_pr.as_ref(), lease.as_ref())
             .await
             .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::StatusChanged {
-                    from,
-                    to: TaskSessionStatus::Completed,
-                    reason: session.status_reason.clone(),
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .append_task_event(&session.id, &TaskEventKind::Completed { summary })
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
+        append_task_event_with_authority(
+            &store,
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Completed,
+                reason: session.status_reason.clone(),
+            },
+            lease.as_ref(),
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+        append_task_event_with_authority(
+            &store,
+            &session.id,
+            &TaskEventKind::Completed { summary },
+            lease.as_ref(),
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
         Ok(session)
     })
 }
@@ -2123,10 +2329,13 @@ pub fn task_request_decision(
                 session.id
             )));
         }
+        let lease = task_write_lease_from_env()
+            .map_err(|error| task_error(format!("Task body has no write authority: {error}")))?;
         let decision_id = ChildDecisionId::new();
         store
-            .append_task_event(
+            .append_task_event_for_lease(
                 &session.id,
+                &lease,
                 &TaskEventKind::DecisionRequested {
                     decision_id: decision_id.clone(),
                     prompt,
@@ -2199,14 +2408,22 @@ pub fn task_acknowledge(issue: &str, version: u32, summary: String) -> OpsResult
                 session.id
             )));
         }
+        let lease = task_write_lease_from_env()
+            .map_err(|error| task_error(format!("Task body has no write authority: {error}")))?;
         let (directive, incorporated) = store
-            .incorporate_child_directive(&ChildRef::Task(session.id.clone()), version, &summary)
+            .incorporate_child_directive_for_lease(
+                &ChildRef::Task(session.id.clone()),
+                &lease,
+                version,
+                &summary,
+            )
             .await
             .map_err(|error| task_error(format!("failed to acknowledge directive: {error}")))?;
         if incorporated {
             store
-                .append_task_event(
+                .append_task_event_for_lease(
                     &session.id,
+                    &lease,
                     &TaskEventKind::DirectiveIncorporated {
                         directive_id: directive.id.clone(),
                         version,
@@ -2398,8 +2615,14 @@ mod tests {
             latest_process: Some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
+                process_group_id: None,
                 tmux_name: "task-pr-rotation".to_string(),
+                agent: "codex".to_string(),
+                provider: "codex".to_string(),
+                provider_session_id: Some("task-pr-rotation".to_string()),
                 started_at: now,
+                state: crate::child_session::ChildLeaseState::Active,
+                outcome: None,
             }),
             execution: Some(execution.clone()),
             abandon_intent: None,

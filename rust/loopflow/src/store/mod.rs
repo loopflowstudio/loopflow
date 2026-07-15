@@ -81,6 +81,8 @@ pub enum StoreError {
     NotFound,
     #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("{target} generation {generation} no longer holds its write lease")]
+    LeaseRevoked { target: String, generation: u32 },
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -403,9 +405,9 @@ mod tests {
     use super::sqlite::SqliteStore;
     use super::{open_store, PmSnapshotRow, RunEventRow, StorageConfig};
     use crate::child_session::{
-        BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource,
-        ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
-        ObservationRecipient,
+        BoundaryResult, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandKind,
+        ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState,
+        ChildProcessGeneration, ChildRef, ObservationRecipient,
     };
     use crate::id::WaveId;
     use crate::project_session::{
@@ -422,6 +424,7 @@ mod tests {
     use crate::wave::Wave;
     use std::env;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
@@ -511,8 +514,14 @@ mod tests {
             latest_process: Some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
+                process_group_id: None,
                 tmux_name: "lf-project-test".to_string(),
+                agent: "codex".to_string(),
+                provider: "codex".to_string(),
+                provider_session_id: Some("thread-project".to_string()),
                 started_at: now,
+                state: crate::child_session::ChildLeaseState::Active,
+                outcome: None,
             }),
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
@@ -1450,6 +1459,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_task_launchers_reserve_exactly_one_write_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut session = make_task_session(&wave, &project);
+        session.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&session, &make_task_pr(&session))
+            .await
+            .unwrap();
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let launch = |store: Arc<super::Store>, barrier: Arc<tokio::sync::Barrier>| {
+            let mut candidate = session.clone();
+            candidate.begin_generation("task-race".to_string());
+            tokio::spawn(async move {
+                barrier.wait().await;
+                store
+                    .reserve_task_process(&candidate, TaskSessionStatus::Waiting)
+                    .await
+                    .unwrap()
+            })
+        };
+        let first = launch(Arc::clone(&store), Arc::clone(&barrier));
+        let second = launch(Arc::clone(&store), Arc::clone(&barrier));
+        barrier.wait().await;
+        let (first, second) = tokio::join!(first, second);
+        let leases = [first.unwrap(), second.unwrap()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        assert_eq!(leases.len(), 1);
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskSessionStatus::Starting);
+        let process = persisted.latest_process.unwrap();
+        assert_eq!(process.generation, 1);
+        assert_eq!(process.state, ChildLeaseState::Reserved);
+    }
+
+    #[tokio::test]
     async fn task_process_resume_reserves_each_session_generation_once() {
         let dir = tempfile::tempdir().unwrap();
         let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -1469,17 +1526,54 @@ mod tests {
 
         let mut first_resume = session.clone();
         assert_eq!(first_resume.begin_generation("task-one".to_string()), 1);
-        assert!(store
+        let first_lease = store
             .reserve_task_process(&first_resume, TaskSessionStatus::Waiting)
             .await
-            .unwrap());
+            .unwrap()
+            .expect("first generation reserves a write lease");
 
         let mut racing_resume = session.clone();
         racing_resume.begin_generation("task-one".to_string());
-        assert!(!store
+        assert!(store
             .reserve_task_process(&racing_resume, TaskSessionStatus::Waiting)
             .await
-            .unwrap());
+            .unwrap()
+            .is_none());
+
+        if let Some(process) = &mut first_resume.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        first_resume.set_status(TaskSessionStatus::Running, "active");
+        store
+            .activate_task_process(&first_resume, &first_lease)
+            .await
+            .unwrap();
+        if let Some(process) = &mut first_resume.latest_process {
+            process.state = ChildLeaseState::Finished;
+            process.outcome = Some(ChildBodyOutcome::Interrupted {
+                reason: "test boundary".to_string(),
+            });
+        }
+        first_resume.set_status(TaskSessionStatus::Waiting, "ready again");
+        store
+            .finish_task_process(&first_resume, &first_lease)
+            .await
+            .unwrap();
+
+        let mut stale_resume = session.clone();
+        stale_resume.begin_generation("stale-generation-one".to_string());
+        assert!(store
+            .reserve_task_process(&stale_resume, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .is_none());
+        let mut current_resume = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(current_resume.begin_generation("task-next".to_string()), 2);
+        store
+            .reserve_task_process(&current_resume, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .expect("only the current receipt may advance the generation");
 
         let mut second = make_task_session(&wave, &project);
         second.launch.issue.id = LinearIssueId::new("issue-two").unwrap();
@@ -1491,14 +1585,253 @@ mod tests {
             .await
             .unwrap();
         second.begin_generation("task-two".to_string());
-        assert!(store
+        let second_lease = store
             .reserve_task_process(&second, TaskSessionStatus::Waiting)
             .await
-            .unwrap());
+            .unwrap()
+            .expect("other Session reserves its own write lease");
+        assert_ne!(first_lease.token, second_lease.token);
 
         let loaded = store.get_task_session(&session.id).await.unwrap().unwrap();
         assert_eq!(loaded.status, TaskSessionStatus::Starting);
-        assert_eq!(loaded.latest_process.unwrap().generation, 1);
+        assert_eq!(loaded.latest_process.unwrap().generation, 2);
+    }
+
+    #[tokio::test]
+    async fn revoked_task_lease_rejects_stale_writes_and_bars_its_successor_until_reaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut session = make_task_session(&wave, &project);
+        session.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&session, &make_task_pr(&session))
+            .await
+            .unwrap();
+        session.begin_generation("task-lease".to_string());
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut session.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        session.set_status(TaskSessionStatus::Running, "active");
+        store.activate_task_process(&session, &lease).await.unwrap();
+
+        let revoked = store
+            .revoke_task_process(
+                &session.id,
+                &ChildBodyOutcome::Superseded {
+                    reason: "test replacement".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        session.status_reason = "stale writer".to_string();
+        assert!(matches!(
+            store.update_task_session_for_lease(&session, &lease).await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+        assert!(matches!(
+            store
+                .append_task_event_for_lease(
+                    &session.id,
+                    &lease,
+                    &TaskEventKind::Progress {
+                        summary: "stale progress".to_string(),
+                    },
+                )
+                .await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+        assert!(matches!(
+            store
+                .mark_child_directive_applied_for_lease(
+                    &ChildRef::Task(session.id.clone()),
+                    &lease,
+                    session.current_directive_version,
+                )
+                .await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+        let mut pr = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        pr.updated_at = time::OffsetDateTime::now_utc();
+        assert!(matches!(
+            store.update_task_pr_for_lease(&pr, &lease).await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+        if let Some(process) = &mut session.latest_process {
+            process.state = ChildLeaseState::Finished;
+            process.outcome = Some(ChildBodyOutcome::Completed);
+        }
+        assert!(matches!(
+            store.finish_task_process(&session, &lease).await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+        let mut completed = session.clone();
+        completed.set_status(TaskSessionStatus::Completed, "stale completion");
+        assert!(matches!(
+            store
+                .complete_task_session_for_lease(&completed, None, &lease)
+                .await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+
+        let mut waiting = store.get_task_session(&session.id).await.unwrap().unwrap();
+        waiting.set_status(TaskSessionStatus::Waiting, "replacement requested");
+        store.update_task_session(&waiting).await.unwrap();
+        let mut successor = waiting.clone();
+        assert_eq!(successor.begin_generation("task-successor".to_string()), 2);
+        assert!(store
+            .reserve_task_process(&successor, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .is_none());
+
+        store
+            .finish_revoked_task_process(&session.id, revoked.generation)
+            .await
+            .unwrap();
+        let mut successor = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(successor.begin_generation("task-successor".to_string()), 2);
+        assert!(store
+            .reserve_task_process(&successor, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn project_and_task_sessions_share_stale_write_fencing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.status_reason = "reserved".to_string();
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        project.begin_generation("project-lease".to_string());
+        let lease = store
+            .reserve_project_process(&project, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut project.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        project.set_status(ProjectSessionStatus::Running, "active");
+        store
+            .activate_project_process(&project, &lease)
+            .await
+            .unwrap();
+        store
+            .revoke_project_process(
+                &project.id,
+                &ChildBodyOutcome::Superseded {
+                    reason: "test replacement".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        project.status_reason = "stale Project writer".to_string();
+        assert!(matches!(
+            store
+                .update_project_session_for_lease(&project, &lease)
+                .await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn terminal_intent_cannot_be_reverted_by_the_current_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.status_reason = "ready".to_string();
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        project.begin_generation("project-body".to_string());
+        let project_lease = store
+            .reserve_project_process(&project, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut project.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        project.set_status(ProjectSessionStatus::Running, "active");
+        store
+            .activate_project_process(&project, &project_lease)
+            .await
+            .unwrap();
+        let mut terminal_project = project.clone();
+        terminal_project.set_status(ProjectSessionStatus::Abandoned, "operator stopped intent");
+        store
+            .update_project_session(&terminal_project)
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .update_project_session_for_lease(&project, &project_lease)
+                .await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+
+        let mut task = make_task_session(&wave, &project);
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("task-body".to_string());
+        let task_lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut task.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        task.set_status(TaskSessionStatus::Running, "active");
+        store
+            .activate_task_process(&task, &task_lease)
+            .await
+            .unwrap();
+        let mut terminal_task = task.clone();
+        terminal_task.set_status(TaskSessionStatus::Completed, "work delivered");
+        store.update_task_session(&terminal_task).await.unwrap();
+        assert!(matches!(
+            store
+                .update_task_session_for_lease(&task, &task_lease)
+                .await,
+            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
+        ));
+        assert_eq!(
+            store
+                .get_task_session(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskSessionStatus::Completed
+        );
     }
 
     async fn run_store_basic_suite(store: &super::Store) {

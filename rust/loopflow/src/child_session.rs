@@ -15,6 +15,11 @@ use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
 use crate::task::TaskSessionId;
 
+pub(crate) const PROJECT_LEASE_TOKEN_ENV: &str = "LF_PROJECT_LEASE_TOKEN";
+pub(crate) const PROJECT_GENERATION_ENV: &str = "LF_PROJECT_GENERATION";
+pub(crate) const TASK_LEASE_TOKEN_ENV: &str = "LF_TASK_LEASE_TOKEN";
+pub(crate) const TASK_GENERATION_ENV: &str = "LF_TASK_GENERATION";
+
 macro_rules! prefixed_uuid_id {
     ($name:ident, $prefix:literal, $error:ty, $invalid:path) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -71,6 +76,10 @@ pub(crate) use prefixed_uuid_id;
 pub enum ChildSessionDataError {
     #[error("invalid child-session id: {0}")]
     InvalidId(String),
+    #[error("invalid child lease state: {0}")]
+    InvalidLeaseState(String),
+    #[error("invalid child write lease: {0}")]
+    InvalidWriteLease(String),
 }
 
 prefixed_uuid_id!(
@@ -92,6 +101,135 @@ prefixed_uuid_id!(
     ChildSessionDataError::InvalidId
 );
 
+/// Opaque capability held only by the body allowed to write for a Session.
+///
+/// The token deliberately implements neither serialization nor display. Its
+/// debug representation is redacted so an error path cannot turn the lease
+/// into ambient authority.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ChildLeaseToken(String);
+
+impl ChildLeaseToken {
+    pub(crate) fn new() -> Self {
+        Self(format!("cl_{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, ChildSessionDataError> {
+        let suffix = value.strip_prefix("cl_").ok_or_else(|| {
+            ChildSessionDataError::InvalidId("expected child lease token".to_string())
+        })?;
+        uuid::Uuid::parse_str(suffix)
+            .map_err(|error| ChildSessionDataError::InvalidId(error.to_string()))?;
+        Ok(Self(value.to_string()))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for ChildLeaseToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ChildLeaseToken([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ChildWriteLease {
+    pub(crate) generation: u32,
+    pub(crate) token: ChildLeaseToken,
+}
+
+impl std::fmt::Debug for ChildWriteLease {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ChildWriteLease")
+            .field("generation", &self.generation)
+            .field("token", &self.token)
+            .finish()
+    }
+}
+
+pub(crate) fn task_write_lease_from_env() -> Result<ChildWriteLease, ChildSessionDataError> {
+    child_write_lease_from_env("Task", TASK_GENERATION_ENV, TASK_LEASE_TOKEN_ENV)
+}
+
+pub(crate) fn project_write_lease_from_env() -> Result<ChildWriteLease, ChildSessionDataError> {
+    child_write_lease_from_env("Project", PROJECT_GENERATION_ENV, PROJECT_LEASE_TOKEN_ENV)
+}
+
+fn child_write_lease_from_env(
+    kind: &str,
+    generation_env: &str,
+    token_env: &str,
+) -> Result<ChildWriteLease, ChildSessionDataError> {
+    let generation = std::env::var(generation_env)
+        .map_err(|_| {
+            ChildSessionDataError::InvalidWriteLease(format!("{kind} body has no generation"))
+        })?
+        .parse::<u32>()
+        .map_err(|_| {
+            ChildSessionDataError::InvalidWriteLease(format!(
+                "{kind} body generation is not an unsigned integer"
+            ))
+        })?;
+    let token = std::env::var(token_env).map_err(|_| {
+        ChildSessionDataError::InvalidWriteLease(format!("{kind} body has no lease token"))
+    })?;
+    Ok(ChildWriteLease {
+        generation,
+        token: ChildLeaseToken::parse(&token).map_err(|_| {
+            ChildSessionDataError::InvalidWriteLease(format!("{kind} body lease token is invalid"))
+        })?,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ChildLeaseState {
+    Legacy,
+    Reserved,
+    Active,
+    Revoked,
+    Finished,
+}
+
+impl ChildLeaseState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Legacy => "legacy",
+            Self::Reserved => "reserved",
+            Self::Active => "active",
+            Self::Revoked => "revoked",
+            Self::Finished => "finished",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, ChildSessionDataError> {
+        match value {
+            "legacy" => Ok(Self::Legacy),
+            "reserved" => Ok(Self::Reserved),
+            "active" => Ok(Self::Active),
+            "revoked" => Ok(Self::Revoked),
+            "finished" => Ok(Self::Finished),
+            value => Err(ChildSessionDataError::InvalidLeaseState(value.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ChildBodyOutcome {
+    Completed,
+    Interrupted { reason: String },
+    Failed { reason: String },
+    Lost { reason: String },
+    Superseded { reason: String },
+    LegacyStopped { reason: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ObservationRecipient {
@@ -107,8 +245,31 @@ pub enum ObservationRecipient {
 pub struct ChildProcessGeneration {
     pub generation: u32,
     pub pid: Option<u32>,
+    /// Group that must be reaped in addition to the outer tmux/PID identity:
+    /// the provider's isolated group when it has one, otherwise the runner's.
+    pub process_group_id: Option<u32>,
     pub tmux_name: String,
+    pub agent: String,
+    pub provider: String,
+    pub provider_session_id: Option<String>,
     pub started_at: OffsetDateTime,
+    pub state: ChildLeaseState,
+    pub outcome: Option<ChildBodyOutcome>,
+}
+
+impl ChildProcessGeneration {
+    pub(crate) fn observe_provider(
+        &mut self,
+        provider: &str,
+        provider_session_id: Option<String>,
+        process_group_id: Option<u32>,
+    ) {
+        self.provider = provider.to_string();
+        self.provider_session_id = provider_session_id;
+        if let Some(process_group_id) = process_group_id {
+            self.process_group_id = Some(process_group_id);
+        }
+    }
 }
 
 /// Requested replacement of the agent/provider body acting for a durable
@@ -651,8 +812,8 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
 mod tests {
     use super::{
         observe, unincorporated_directive_version, BodyCategory, BodyControl, BodyEvidence,
-        BodyIntent, BodyOwner, ChildCommandId, ChildDecisionId, ChildDirectiveId, Duration,
-        DEFAULT_STALL_AFTER,
+        BodyIntent, BodyOwner, ChildCommandId, ChildDecisionId, ChildDirectiveId, ChildLeaseState,
+        ChildLeaseToken, ChildProcessGeneration, ChildWriteLease, Duration, DEFAULT_STALL_AFTER,
     };
 
     fn evidence(intent: BodyIntent, alive: bool, progress: Duration) -> BodyEvidence {
@@ -781,6 +942,33 @@ mod tests {
             ChildDirectiveId::parse(directive.as_str()).unwrap(),
             directive
         );
+    }
+
+    #[test]
+    fn child_write_lease_never_prints_or_serializes_its_token() {
+        let token = ChildLeaseToken::new();
+        let raw = token.as_str().to_string();
+        let lease = ChildWriteLease {
+            generation: 7,
+            token,
+        };
+
+        let debug = format!("{lease:?}");
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains(&raw));
+        let evidence = ChildProcessGeneration {
+            generation: lease.generation,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "body".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            started_at: time::OffsetDateTime::UNIX_EPOCH,
+            state: ChildLeaseState::Reserved,
+            outcome: None,
+        };
+        assert!(!serde_json::to_string(&evidence).unwrap().contains(&raw));
     }
 
     #[test]

@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child_session::{
-    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
+    project_write_lease_from_env, ChildCommandEffect, ChildCommandId, ChildCommandKind,
+    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration,
+    ChildRef,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -426,11 +427,11 @@ pub(crate) async fn launch_project_process(
     let from = session.status;
     let mut launch = session.clone();
     let generation = launch.begin_generation(tmux_name.clone());
-    let reserved = store
+    let Some(lease) = store
         .reserve_project_process(&launch, from)
         .await
-        .map_err(|error| project_error(format!("failed to reserve project process: {error}")))?;
-    if !reserved {
+        .map_err(|error| project_error(format!("failed to reserve project process: {error}")))?
+    else {
         let current = store
             .get_project_session(&session.id)
             .await
@@ -444,19 +445,8 @@ pub(crate) async fn launch_project_process(
             "Project Session {} changed while its process was reserved; retry",
             session.id
         )));
-    }
+    };
     *session = launch;
-    store
-        .append_project_event(
-            &session.id,
-            &ProjectEventKind::StatusChanged {
-                from,
-                to: ProjectSessionStatus::Starting,
-                reason: session.status_reason.clone(),
-            },
-        )
-        .await
-        .map_err(|error| project_error(error.to_string()))?;
 
     // argv[0] and the store come from the Session, never from this process.
     let argv = vec![
@@ -480,6 +470,10 @@ pub(crate) async fn launch_project_process(
         ),
         ("LF_PROJECT_SESSION_ID", session.id.as_str()),
         ("LF_PROJECT_GENERATION", generation_text.as_str()),
+        (
+            crate::child_session::PROJECT_LEASE_TOKEN_ENV,
+            lease.token.as_str(),
+        ),
         ("LF_DB_PATH", db_path.as_str()),
         ("LF_HOME", lf_home.as_str()),
         (crate::engine::wave_home::WAVE_HOME_ENV, wave_home.as_str()),
@@ -488,6 +482,16 @@ pub(crate) async fn launch_project_process(
         start_lf_session_with_env(&tmux_name, Path::new(wave.repo()), &argv, &environment).await
     {
         let reason = format!("project process launch failed: {error}");
+        session.latest_process = Some(
+            super::child::revoke_and_reap_child_body(
+                store,
+                &ChildRef::Project(session.id.clone()),
+                crate::child_session::ChildBodyOutcome::Lost {
+                    reason: reason.clone(),
+                },
+            )
+            .await?,
+        );
         session.set_status(ProjectSessionStatus::Failed, reason.clone());
         store
             .update_project_session(session)
@@ -512,7 +516,7 @@ async fn wait_until_project_running(
     store: &SharedStore,
     session_id: &ProjectSessionId,
 ) -> OpsResult<ProjectSession> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
     loop {
         let session = store
             .get_project_session(session_id)
@@ -546,6 +550,13 @@ async fn reconcile_project_liveness(
     if !session.status.is_process_active() {
         return Ok(());
     }
+    if session
+        .latest_process
+        .as_ref()
+        .is_some_and(super::child::child_body_reservation_is_fresh)
+    {
+        return Ok(());
+    }
     let alive = match session.latest_process.as_ref() {
         Some(process) => tmux_session_exists(&process.tmux_name)
             .await
@@ -554,6 +565,31 @@ async fn reconcile_project_liveness(
     };
     if alive {
         return Ok(());
+    }
+    let lost_reason = "project process disappeared before recording a terminal outcome";
+    if session.latest_process.as_ref().is_some_and(|process| {
+        matches!(
+            process.state,
+            crate::child_session::ChildLeaseState::Legacy
+                | crate::child_session::ChildLeaseState::Reserved
+                | crate::child_session::ChildLeaseState::Active
+        )
+    }) {
+        let outcome = super::child::lost_child_body_outcome(
+            session
+                .latest_process
+                .as_ref()
+                .expect("matched child process must still be present"),
+            lost_reason,
+        );
+        session.latest_process = Some(
+            super::child::revoke_and_reap_child_body(
+                store,
+                &ChildRef::Project(session.id.clone()),
+                outcome,
+            )
+            .await?,
+        );
     }
     let from = session.status;
     session.set_status(
@@ -840,10 +876,14 @@ pub fn project_request_decision(
                 session.id
             )));
         }
+        let lease = project_write_lease_from_env().map_err(|error| {
+            project_error(format!("Project body has no write authority: {error}"))
+        })?;
         let decision_id = ChildDecisionId::new();
         store
-            .append_project_event(
+            .append_project_event_for_lease(
                 &session.id,
+                &lease,
                 &ProjectEventKind::DecisionRequested {
                     decision_id: decision_id.clone(),
                     prompt,
@@ -929,14 +969,23 @@ pub fn project_acknowledge(
                 session.id
             )));
         }
+        let lease = project_write_lease_from_env().map_err(|error| {
+            project_error(format!("Project body has no write authority: {error}"))
+        })?;
         let (directive, incorporated) = store
-            .incorporate_child_directive(&ChildRef::Project(session.id.clone()), version, &summary)
+            .incorporate_child_directive_for_lease(
+                &ChildRef::Project(session.id.clone()),
+                &lease,
+                version,
+                &summary,
+            )
             .await
             .map_err(|error| project_error(format!("failed to acknowledge directive: {error}")))?;
         if incorporated {
             store
-                .append_project_event(
+                .append_project_event_for_lease(
                     &session.id,
+                    &lease,
                     &ProjectEventKind::DirectiveIncorporated {
                         directive_id: directive.id.clone(),
                         version,

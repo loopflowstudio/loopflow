@@ -2,8 +2,9 @@
 //! observation outbox that links each event to its next responsible recipient.
 
 use crate::child_session::{
-    AbandonIntent, BoundaryResult, ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect,
-    ChildCommandId, ChildDirective, ChildRef, ObservationRecipient,
+    AbandonIntent, BoundaryResult, ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand,
+    ChildCommandEffect, ChildCommandId, ChildDirective, ChildProcessGeneration, ChildRef,
+    ChildWriteLease, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::project_session::{
@@ -49,6 +50,70 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn activate_task_process(
+        &self,
+        session: &TaskSession,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.activate_task_process(&session, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn update_task_session_for_lease(
+        &self,
+        session: &TaskSession,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_task_session_for_lease(&session, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn finish_task_process(
+        &self,
+        session: &TaskSession,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.finish_task_process(&session, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn revoke_task_process(
+        &self,
+        session_id: &TaskSessionId,
+        outcome: &ChildBodyOutcome,
+    ) -> StoreResult<ChildProcessGeneration> {
+        let session_id = session_id.clone();
+        let outcome = outcome.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.revoke_task_process(&session_id, &outcome)
+        })
+        .await
+    }
+
+    pub(crate) async fn finish_revoked_task_process(
+        &self,
+        session_id: &TaskSessionId,
+        generation: u32,
+    ) -> StoreResult<ChildProcessGeneration> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.finish_revoked_task_process(&session_id, generation)
+        })
+        .await
+    }
+
     pub async fn complete_task_session(
         &self,
         session: &TaskSession,
@@ -62,11 +127,26 @@ impl Store {
         .await
     }
 
-    pub async fn reserve_task_process(
+    pub(crate) async fn complete_task_session_for_lease(
+        &self,
+        session: &TaskSession,
+        skipped_pr: Option<&TaskPr>,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let skipped_pr = skipped_pr.cloned();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_task_session_for_lease(&session, skipped_pr.as_ref(), &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn reserve_task_process(
         &self,
         session: &TaskSession,
         expected_status: TaskSessionStatus,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<ChildWriteLease>> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_task_process(&session, expected_status)
@@ -119,6 +199,19 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
     }
 
+    pub(crate) async fn update_task_pr_for_lease(
+        &self,
+        pr: &TaskPr,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let pr = pr.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_task_pr_for_lease(&pr, &lease)
+        })
+        .await
+    }
+
     pub async fn task_prs(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskPr>> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_prs(&session_id)).await
@@ -138,6 +231,21 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn settle_task_pr_for_lease(
+        &self,
+        settled: &TaskPr,
+        next: Option<&TaskPr>,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let settled = settled.clone();
+        let next = next.cloned();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.settle_task_pr_for_lease(&settled, next.as_ref(), &lease)
+        })
+        .await
+    }
+
     pub async fn complete_task_session_after_pr(
         &self,
         session: &TaskSession,
@@ -147,6 +255,21 @@ impl Store {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.complete_task_session_after_pr(&session, &pr)
+        })
+        .await
+    }
+
+    pub(crate) async fn complete_task_session_after_pr_for_lease(
+        &self,
+        session: &TaskSession,
+        pr: &TaskPr,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let pr = pr.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_task_session_after_pr_for_lease(&session, &pr, &lease)
         })
         .await
     }
@@ -232,6 +355,19 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn claim_child_commands_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<Vec<ChildCommand>> {
+        let target = target.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_child_commands_for_lease(&target, &lease)
+        })
+        .await
+    }
+
     pub async fn claim_task_commands_or_stop(
         &self,
         session_id: &TaskSessionId,
@@ -243,6 +379,27 @@ impl Store {
         let reason = reason.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.claim_task_commands_or_stop(&session_id, generation, stopped_status, &reason)
+        })
+        .await
+    }
+
+    pub(crate) async fn claim_task_commands_or_stop_for_lease(
+        &self,
+        session_id: &TaskSessionId,
+        lease: &ChildWriteLease,
+        stopped_status: TaskSessionStatus,
+        reason: &str,
+    ) -> StoreResult<BoundaryResult<TaskSession>> {
+        let session_id = session_id.clone();
+        let lease = lease.clone();
+        let reason = reason.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_task_commands_or_stop_for_lease(
+                &session_id,
+                &lease,
+                stopped_status,
+                &reason,
+            )
         })
         .await
     }
@@ -259,6 +416,22 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn accept_child_command_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        command_id: &ChildCommandId,
+        effect: Option<ChildCommandEffect>,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        let lease = lease.clone();
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.accept_child_command_for_lease(&target, &lease, &command_id, effect)
+        })
+        .await
+    }
+
     pub async fn mark_child_command_delivering(
         &self,
         command_id: &ChildCommandId,
@@ -271,6 +444,22 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn mark_child_command_delivering_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        command_id: &ChildCommandId,
+        effect: ChildCommandEffect,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        let lease = lease.clone();
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_child_command_delivering_for_lease(&target, &lease, &command_id, effect)
+        })
+        .await
+    }
+
     pub async fn mark_stale_child_deliveries_uncertain(
         &self,
         target: &ChildRef,
@@ -279,6 +468,19 @@ impl Store {
         let target = target.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.mark_stale_child_deliveries_uncertain(&target, generation)
+        })
+        .await
+    }
+
+    pub(crate) async fn mark_stale_child_deliveries_uncertain_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<Vec<ChildCommand>> {
+        let target = target.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_stale_child_deliveries_uncertain_for_lease(&target, &lease)
         })
         .await
     }
@@ -308,6 +510,36 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn fail_child_command_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        command_id: &ChildCommandId,
+        effect: Option<ChildCommandEffect>,
+        error: String,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        let lease = lease.clone();
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.fail_child_command_for_lease(&target, &lease, &command_id, effect, &error)
+        })
+        .await
+    }
+
+    pub(crate) async fn validate_child_write_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.validate_child_write_lease(&target, &lease)
+        })
+        .await
+    }
+
     pub async fn append_task_event(
         &self,
         session_id: &TaskSessionId,
@@ -319,6 +551,62 @@ impl Store {
         let write_kind = kind.clone();
         let event = run_sqlite(&self.sqlite, move |store| {
             store.append_task_event(&write_session_id, &write_kind)
+        })
+        .await?;
+        if kind.is_project_observable() {
+            if let Some(session) = self.get_task_session(&session_id).await? {
+                if let Err(error) =
+                    crate::ops::project::wake_project_session(&session.project_session_id).await
+                {
+                    tracing::debug!(
+                        %error,
+                        %session_id,
+                        project_session_id = %session.project_session_id,
+                        event_id = event.id,
+                        "Task observation wake failed; Project lifecycle touch will retry"
+                    );
+                }
+                if kind.is_root_wave_observable() {
+                    match self.get_wave(&session.wave_id).await? {
+                        Some(wave) => {
+                            if let Err(error) =
+                                crate::lf::commands::chat::nudge_child_observations(wave.name())
+                                    .await
+                            {
+                                tracing::debug!(
+                                    %error,
+                                    %session_id,
+                                    event_id = event.id,
+                                    "live Task observation delivery failed; Wave observer will retry"
+                                );
+                            }
+                        }
+                        None => tracing::error!(
+                            wave_id = %session.wave_id,
+                            %session_id,
+                            event_id = event.id,
+                            "Task observation cannot nudge its missing owning Wave"
+                        ),
+                    }
+                }
+            }
+        }
+        Ok(event)
+    }
+
+    pub(crate) async fn append_task_event_for_lease(
+        &self,
+        session_id: &TaskSessionId,
+        lease: &ChildWriteLease,
+        kind: &TaskEventKind,
+    ) -> StoreResult<TaskEvent> {
+        let session_id = session_id.clone();
+        let lease = lease.clone();
+        let kind = kind.clone();
+        let write_session_id = session_id.clone();
+        let write_kind = kind.clone();
+        let event = run_sqlite(&self.sqlite, move |store| {
+            store.append_task_event_for_lease(&write_session_id, &lease, &write_kind)
         })
         .await?;
         if kind.is_project_observable() {
@@ -415,11 +703,75 @@ impl Store {
         .await
     }
 
-    pub async fn reserve_project_process(
+    pub(crate) async fn activate_project_process(
+        &self,
+        session: &ProjectSession,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.activate_project_process(&session, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn update_project_session_for_lease(
+        &self,
+        session: &ProjectSession,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_project_session_for_lease(&session, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn finish_project_process(
+        &self,
+        session: &ProjectSession,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.finish_project_process(&session, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn revoke_project_process(
+        &self,
+        session_id: &ProjectSessionId,
+        outcome: &ChildBodyOutcome,
+    ) -> StoreResult<ChildProcessGeneration> {
+        let session_id = session_id.clone();
+        let outcome = outcome.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.revoke_project_process(&session_id, &outcome)
+        })
+        .await
+    }
+
+    pub(crate) async fn finish_revoked_project_process(
+        &self,
+        session_id: &ProjectSessionId,
+        generation: u32,
+    ) -> StoreResult<ChildProcessGeneration> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.finish_revoked_project_process(&session_id, generation)
+        })
+        .await
+    }
+
+    pub(crate) async fn reserve_project_process(
         &self,
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<ChildWriteLease>> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_project_process(&session, expected_status)
@@ -487,6 +839,26 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn claim_project_commands_or_stop_for_lease(
+        &self,
+        session_id: &ProjectSessionId,
+        lease: &ChildWriteLease,
+        stopped_status: ProjectSessionStatus,
+        reason: String,
+    ) -> StoreResult<BoundaryResult<ProjectSession>> {
+        let session_id = session_id.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_project_commands_or_stop_for_lease(
+                &session_id,
+                &lease,
+                stopped_status,
+                &reason,
+            )
+        })
+        .await
+    }
+
     pub async fn append_project_event(
         &self,
         session_id: &ProjectSessionId,
@@ -498,6 +870,48 @@ impl Store {
         let write_kind = kind.clone();
         let event = run_sqlite(&self.sqlite, move |store| {
             store.append_project_event(&write_session_id, &write_kind)
+        })
+        .await?;
+        if kind.is_wave_observable() {
+            if let Some(session) = self.get_project_session(&session_id).await? {
+                match self.get_wave(&session.wave_id).await? {
+                    Some(wave) => {
+                        if let Err(error) =
+                            crate::lf::commands::chat::nudge_child_observations(wave.name()).await
+                        {
+                            tracing::debug!(
+                                %error,
+                                %session_id,
+                                event_id = event.id,
+                                "live Project observation delivery failed; Wave observer will retry"
+                            );
+                        }
+                    }
+                    None => tracing::error!(
+                        wave_id = %session.wave_id,
+                        %session_id,
+                        event_id = event.id,
+                        "Project observation cannot nudge its missing owning Wave"
+                    ),
+                }
+            }
+        }
+        Ok(event)
+    }
+
+    pub(crate) async fn append_project_event_for_lease(
+        &self,
+        session_id: &ProjectSessionId,
+        lease: &ChildWriteLease,
+        kind: &ProjectEventKind,
+    ) -> StoreResult<ProjectEvent> {
+        let session_id = session_id.clone();
+        let lease = lease.clone();
+        let kind = kind.clone();
+        let write_session_id = session_id.clone();
+        let write_kind = kind.clone();
+        let event = run_sqlite(&self.sqlite, move |store| {
+            store.append_project_event_for_lease(&write_session_id, &lease, &write_kind)
         })
         .await?;
         if kind.is_wave_observable() {
@@ -570,6 +984,25 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn consume_task_observation_for_project_for_lease(
+        &self,
+        project_session_id: &ProjectSessionId,
+        observation: &ObservationOutboxRow,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<bool> {
+        let project_session_id = project_session_id.clone();
+        let observation = observation.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.consume_task_observation_for_project_for_lease(
+                &project_session_id,
+                &observation,
+                &lease,
+            )
+        })
+        .await
+    }
+
     pub async fn child_directives(&self, target: &ChildRef) -> StoreResult<Vec<ChildDirective>> {
         let target = target.clone();
         run_sqlite(&self.sqlite, move |store| store.child_directives(&target)).await
@@ -598,6 +1031,20 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn mark_child_directive_applied_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        version: u32,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_child_directive_applied_for_lease(&target, &lease, version)
+        })
+        .await
+    }
+
     pub async fn incorporate_child_directive(
         &self,
         target: &ChildRef,
@@ -608,6 +1055,22 @@ impl Store {
         let summary = summary.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.incorporate_child_directive(&target, version, &summary)
+        })
+        .await
+    }
+
+    pub(crate) async fn incorporate_child_directive_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        version: u32,
+        summary: &str,
+    ) -> StoreResult<(ChildDirective, bool)> {
+        let target = target.clone();
+        let lease = lease.clone();
+        let summary = summary.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.incorporate_child_directive_for_lease(&target, &lease, version, &summary)
         })
         .await
     }

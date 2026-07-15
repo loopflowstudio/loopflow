@@ -14,8 +14,9 @@ use crate::child_control::{
     reconcile_stale_deliveries, ChildTarget, CommandStop, DecisionResolution, PendingInput,
 };
 use crate::child_session::{
-    unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
-    ChildCommandId, ChildCommandKind, ChildCommandState, ChildDirective, ChildRef,
+    task_write_lease_from_env, unincorporated_directive_version, BoundaryResult, ChildBodyOutcome,
+    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
+    ChildDirective, ChildLeaseState, ChildRef, ChildWriteLease,
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::store::{open_existing_store, SharedStore};
@@ -26,9 +27,16 @@ use crate::wave::playhead::{
 use crate::wave::Wave;
 
 pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Result<()> {
-    let result = run_task_session_inner(session_id.clone(), generation).await;
+    let lease = task_write_lease_from_env().map_err(|error| anyhow!(error))?;
+    if lease.generation != generation {
+        anyhow::bail!(
+            "Task generation {generation} does not match its ambient write lease generation {}",
+            lease.generation
+        );
+    }
+    let result = run_task_session_inner(session_id.clone(), &lease).await;
     if let Err(error) = &result {
-        record_unhandled_failure(&session_id, generation, error).await;
+        record_unhandled_failure(&session_id, &lease, error).await;
     }
     result
 }
@@ -40,7 +48,8 @@ async fn owning_wave(store: &SharedStore, session: &TaskSession) -> Result<Wave>
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
 }
 
-async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> Result<()> {
+async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLease) -> Result<()> {
+    let generation = lease.generation;
     let store: SharedStore = Arc::new(
         open_existing_store()
             .await
@@ -61,42 +70,64 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
             recorded_generation
         );
     }
-    reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id), generation).await?;
-
     if let Some(process) = &mut session.latest_process {
         process.pid = Some(std::process::id());
+        process.process_group_id = crate::engine::process::current_process_group_id();
+        process.state = ChildLeaseState::Active;
     }
-    set_and_record_status(
-        &store,
-        &mut session,
-        TaskSessionStatus::Running,
-        "provider turn is active",
-    )
-    .await?;
+    let from = session.status;
+    session.set_status(TaskSessionStatus::Running, "provider turn is active");
+    store.activate_task_process(&session, lease).await?;
     store
-        .append_task_event(&session.id, &TaskEventKind::Started)
+        .append_task_event_for_lease(
+            &session.id,
+            lease,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Running,
+                reason: session.status_reason.clone(),
+            },
+        )
         .await?;
+    store
+        .append_task_event_for_lease(&session.id, lease, &TaskEventKind::Started)
+        .await?;
+    reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id, lease)).await?;
 
     let (mut flow, _) = Playhead::new(QueuedInvocation::load(&session.worktree, "task")?);
-    let prepared = prepare_task_flow_step(&store, &mut session, wave.name(), &flow).await?;
+    let prepared = prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(session.provider_session_id.clone());
+    store
+        .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+        .await?;
     harness.start(&prepared.config).await?;
+    session.provider = harness_name;
     if let Some(provider_session_id) = harness.provider_session_id() {
         session.provider_session_id = Some(provider_session_id);
     }
-    session.provider = harness_name;
-    store.update_task_session(&session).await?;
+    if let Some(process) = &mut session.latest_process {
+        process.observe_provider(
+            &session.provider,
+            session.provider_session_id.clone(),
+            harness.process_group_id(),
+        );
+    }
+    if let Err(error) = store.update_task_session_for_lease(&session, lease).await {
+        let _ = harness.stop().await;
+        return Err(error.into());
+    }
     let mut state_fingerprint = task_state_fingerprint(&session)?;
 
     let mut pending = VecDeque::new();
     let mut seen_commands = HashSet::new();
-    let commands = claim_commands(&store, &session, generation, &mut seen_commands).await?;
+    let commands = claim_commands(&store, &session, lease, &mut seen_commands).await?;
     if let Some(stop) = absorb_commands(
         &store,
         &session,
+        lease,
         commands,
         harness.as_mut(),
         false,
@@ -104,18 +135,19 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     )
     .await?
     {
-        return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
+        return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
     }
     let mut flow_turn_active = false;
     let mut sent_pending = false;
     while let Some(input) = pending.pop_front() {
-        if !pending_input_is_current(&store, &session, &input).await? {
+        if !pending_input_is_current(&store, &session, lease, &input).await? {
             continue;
         }
         let command = input.command_id.map(|id| (id, input.effect));
         apply_input(
             &store,
             &session,
+            lease,
             harness.as_mut(),
             &input.text,
             command,
@@ -126,7 +158,15 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         break;
     }
     if !sent_pending {
-        start_task_flow_turn(&store, &mut session, harness.as_mut(), &mut flow, prepared).await?;
+        start_task_flow_turn(
+            &store,
+            &mut session,
+            lease,
+            harness.as_mut(),
+            &mut flow,
+            prepared,
+        )
+        .await?;
         flow_turn_active = true;
     }
 
@@ -150,25 +190,26 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         tokio::select! {
             line = attachment_rx.recv() => {
                 if let Some(line) = line {
-                    handle_attachment(&store, &session, line).await?;
+                    handle_attachment(&store, &session, lease, line).await?;
                 }
             }
             _ = command_poll.tick() => {
                 let commands = claim_commands(
                     &store,
                     &session,
-                    generation,
+                    lease,
                     &mut seen_commands,
                 ).await?;
                 if let Some(stop) = absorb_commands(
                     &store,
                     &session,
+                    lease,
                     commands,
                     harness.as_mut(),
                     true,
                     &mut pending,
                 ).await? {
-                    return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
+                    return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
                 }
             }
             event = event_rx.recv() => {
@@ -176,6 +217,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                     return finish_failed(
                         &store,
                         &mut session,
+                        lease,
                         harness.as_mut(),
                         "provider event stream closed",
                     ).await;
@@ -183,7 +225,14 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                 if session.provider_session_id.is_none() {
                     if let Some(provider_session_id) = harness.provider_session_id() {
                         session.provider_session_id = Some(provider_session_id);
-                        store.update_task_session(&session).await?;
+                        if let Some(process) = &mut session.latest_process {
+                            process.observe_provider(
+                                &session.provider,
+                                session.provider_session_id.clone(),
+                                harness.process_group_id(),
+                            );
+                        }
+                        store.update_task_session_for_lease(&session, lease).await?;
                     }
                 }
                 match event {
@@ -193,6 +242,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                             return finish_failed(
                                 &store,
                                 &mut session,
+                                lease,
                                 harness.as_mut(),
                                 "provider turn failed",
                             ).await;
@@ -207,7 +257,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                         flow_turn_active = false;
                         loop {
                             while let Some(input) = pending.pop_front() {
-                                if !pending_input_is_current(&store, &session, &input).await? {
+                                if !pending_input_is_current(&store, &session, lease, &input).await? {
                                     continue;
                                 }
                                 if resume_interrupted_flow {
@@ -218,6 +268,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 apply_input(
                                     &store,
                                     &session,
+                                    lease,
                                     harness.as_mut(),
                                     &input.text,
                                     command,
@@ -229,6 +280,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 let prepared = prepare_task_flow_step(
                                     &store,
                                     &mut session,
+                                    lease,
                                     wave.name(),
                                     &flow,
                                 )
@@ -236,6 +288,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 start_task_flow_turn(
                                     &store,
                                     &mut session,
+                                    lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     prepared,
@@ -251,16 +304,23 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
                             if latest.status.is_terminal() {
                                 let _ = harness.stop().await;
+                                session = latest;
                                 if !summary.is_empty() {
                                     store
-                                        .append_task_event(
+                                        .append_task_event_for_lease(
                                             &session.id,
+                                            lease,
                                             &TaskEventKind::Progress {
                                                 summary: summary.clone(),
                                             },
                                         )
                                         .await?;
                                 }
+                                if let Some(process) = &mut session.latest_process {
+                                    process.state = ChildLeaseState::Finished;
+                                    process.outcome = Some(ChildBodyOutcome::Completed);
+                                }
+                                store.finish_task_process(&session, lease).await?;
                                 return Ok(());
                             }
                             session.current_directive_version = latest.current_directive_version;
@@ -270,22 +330,31 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 session.current_directive_version,
                                 session.incorporated_directive_version,
                             );
-                            let observed_pr =
-                                crate::ops::task::reconcile_task_pr(&store, &mut session)
-                                    .await
-                                    .map_err(|error| anyhow!(error.to_string()))?;
+                            let observed_pr = crate::ops::task::reconcile_task_pr_for_lease(
+                                &store,
+                                &mut session,
+                                lease,
+                            )
+                            .await
+                            .map_err(|error| anyhow!(error.to_string()))?;
                             if session.status == TaskSessionStatus::Completed {
                                 let _ = harness.stop().await;
                                 if !summary.is_empty() {
                                     store
-                                        .append_task_event(
+                                        .append_task_event_for_lease(
                                             &session.id,
+                                            lease,
                                             &TaskEventKind::Progress {
                                                 summary: summary.clone(),
                                             },
                                         )
                                         .await?;
                                 }
+                                if let Some(process) = &mut session.latest_process {
+                                    process.state = ChildLeaseState::Finished;
+                                    process.outcome = Some(ChildBodyOutcome::Completed);
+                                }
+                                store.finish_task_process(&session, lease).await?;
                                 return Ok(());
                             }
                             let needs_rotation = if observed_pr
@@ -311,15 +380,20 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
                             } else if needs_rotation {
-                                crate::ops::task::ensure_working_pr(&store, &mut session)
-                                    .await
-                                    .map_err(|error| anyhow!(error.to_string()))?;
+                                crate::ops::task::ensure_working_pr_for_lease(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                )
+                                .await
+                                .map_err(|error| anyhow!(error.to_string()))?;
                                 session.status_reason =
                                     "Task PR settled; starting the next PR".to_string();
-                                store.update_task_session(&session).await?;
+                                store.update_task_session_for_lease(&session, lease).await?;
                                 let prepared = prepare_task_flow_step(
                                     &store,
                                     &mut session,
+                                    lease,
                                     wave.name(),
                                     &flow,
                                 )
@@ -327,6 +401,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 start_task_flow_turn(
                                     &store,
                                     &mut session,
+                                    lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     prepared,
@@ -354,10 +429,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     session.status_reason =
                                         "Task flow changed the worktree; starting another iteration"
                                             .to_string();
-                                    store.update_task_session(&session).await?;
+                                    store.update_task_session_for_lease(&session, lease).await?;
                                     let prepared = prepare_task_flow_step(
                                         &store,
                                         &mut session,
+                                        lease,
                                         wave.name(),
                                         &flow,
                                     )
@@ -365,6 +441,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     start_task_flow_turn(
                                         &store,
                                         &mut session,
+                                        lease,
                                         harness.as_mut(),
                                         &mut flow,
                                         prepared,
@@ -381,11 +458,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                             };
                             // Persist non-status fields while the generation is still active.
                             // The following transaction alone chooses commands or inactivity.
-                            store.update_task_session(&session).await?;
+                            store.update_task_session_for_lease(&session, lease).await?;
                             let boundary = store
-                                .claim_task_commands_or_stop(
+                                .claim_task_commands_or_stop_for_lease(
                                     &session.id,
-                                    generation,
+                                    lease,
                                     stopped_status,
                                     &stopped_reason,
                                 )
@@ -399,27 +476,41 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     let from = session.status;
                                     session = stopped;
                                     if !summary.is_empty() {
-                                        store.append_task_event(
+                                        store.append_task_event_for_lease(
                                             &session.id,
+                                            lease,
                                             &TaskEventKind::Progress {
                                                 summary: summary.clone(),
                                             },
                                         ).await?;
                                     }
                                     if session.status == TaskSessionStatus::Completed {
-                                        store.append_task_event(
+                                        store.append_task_event_for_lease(
                                             &session.id,
+                                            lease,
                                             &TaskEventKind::Completed { summary },
                                         ).await?;
                                     }
-                                    store.append_task_event(
+                                    store.append_task_event_for_lease(
                                         &session.id,
+                                        lease,
                                         &TaskEventKind::StatusChanged {
                                             from,
                                             to: session.status,
                                             reason: session.status_reason.clone(),
                                         },
                                     ).await?;
+                                    if let Some(process) = &mut session.latest_process {
+                                        process.state = ChildLeaseState::Finished;
+                                        process.outcome = Some(if session.status == TaskSessionStatus::Completed {
+                                            ChildBodyOutcome::Completed
+                                        } else {
+                                            ChildBodyOutcome::Interrupted {
+                                                reason: session.status_reason.clone(),
+                                            }
+                                        });
+                                    }
+                                    store.finish_task_process(&session, lease).await?;
                                     return Ok(());
                                 }
                             };
@@ -429,6 +520,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                             if let Some(stop) = absorb_commands(
                                 &store,
                                 &session,
+                                lease,
                                 boundary_commands,
                                 harness.as_mut(),
                                 false,
@@ -437,6 +529,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 return finish_command_stop(
                                     &store,
                                     &mut session,
+                                    lease,
                                     harness.as_mut(),
                                     stop,
                                 )
@@ -446,6 +539,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 let prepared = prepare_task_flow_step(
                                     &store,
                                     &mut session,
+                                    lease,
                                     wave.name(),
                                     &flow,
                                 )
@@ -453,6 +547,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 start_task_flow_turn(
                                     &store,
                                     &mut session,
+                                    lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     prepared,
@@ -467,6 +562,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                         return finish_failed(
                             &store,
                             &mut session,
+                            lease,
                             harness.as_mut(),
                             &format!("{code}: {message}"),
                         ).await;
@@ -489,6 +585,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
 async fn prepare_task_flow_step(
     store: &SharedStore,
     session: &mut TaskSession,
+    lease: &ChildWriteLease,
     wave_name: &str,
     flow: &Playhead,
 ) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
@@ -528,7 +625,7 @@ async fn prepare_task_flow_step(
         step.total,
         step.step
     );
-    store.update_task_session(session).await?;
+    store.update_task_session_for_lease(session, lease).await?;
     let pr = store
         .active_task_pr(&session.id)
         .await?
@@ -554,15 +651,17 @@ fn open_task_flow_body(flow: &mut Playhead, session: &TaskSession) -> Result<()>
 async fn start_task_flow_turn(
     store: &SharedStore,
     session: &mut TaskSession,
+    lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     prepared: crate::lf::commands::run::PreparedHarnessTurn,
 ) -> Result<()> {
     open_task_flow_body(flow, session)?;
-    apply_input(store, session, harness, &prepared.input, None, None).await?;
+    apply_input(store, session, lease, harness, &prepared.input, None, None).await?;
     store
-        .mark_child_directive_applied(
+        .mark_child_directive_applied_for_lease(
             &ChildRef::Task(session.id.clone()),
+            lease,
             session.current_directive_version,
         )
         .await?;
@@ -594,12 +693,18 @@ fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
 async fn pending_input_is_current(
     store: &SharedStore,
     session: &TaskSession,
+    lease: &ChildWriteLease,
     input: &PendingInput,
 ) -> Result<bool> {
-    input_is_current(store, ChildTarget::Task(&session.id), input).await
+    input_is_current(store, ChildTarget::Task(&session.id, lease), input).await
 }
 
-async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: String) -> Result<()> {
+async fn handle_attachment(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: &ChildWriteLease,
+    line: String,
+) -> Result<()> {
     let line = line.trim();
     if line.is_empty() {
         return Ok(());
@@ -671,8 +776,9 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
     };
     for command_id in superseded {
         store
-            .append_task_event(
+            .append_task_event_for_lease(
                 &session.id,
+                lease,
                 &TaskEventKind::CommandChanged {
                     command_id,
                     state: ChildCommandState::Superseded,
@@ -684,8 +790,9 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
     }
     if let Some((directive_id, version, directive_kind)) = directive_event {
         store
-            .append_task_event(
+            .append_task_event_for_lease(
                 &session.id,
+                lease,
                 &TaskEventKind::DirectiveChanged {
                     directive_id,
                     version,
@@ -695,8 +802,9 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
             .await?;
     }
     store
-        .append_task_event(
+        .append_task_event_for_lease(
             &session.id,
+            lease,
             &TaskEventKind::CommandChanged {
                 command_id: command.id.clone(),
                 state: ChildCommandState::Persisted,
@@ -712,6 +820,7 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
 async fn absorb_commands(
     store: &SharedStore,
     session: &TaskSession,
+    lease: &ChildWriteLease,
     commands: Vec<ChildCommand>,
     harness: &mut dyn Harness,
     turn_active: bool,
@@ -719,7 +828,7 @@ async fn absorb_commands(
 ) -> Result<Option<CommandStop>> {
     absorb_child_commands(
         store,
-        ChildTarget::Task(&session.id),
+        ChildTarget::Task(&session.id, lease),
         commands,
         harness,
         turn_active,
@@ -731,11 +840,11 @@ async fn absorb_commands(
 async fn claim_commands(
     store: &SharedStore,
     session: &TaskSession,
-    generation: u32,
+    lease: &ChildWriteLease,
     seen: &mut HashSet<ChildCommandId>,
 ) -> Result<Vec<ChildCommand>> {
     let commands = store
-        .claim_child_commands(&ChildRef::Task(session.id.clone()), generation)
+        .claim_child_commands_for_lease(&ChildRef::Task(session.id.clone()), lease)
         .await?;
     Ok(filter_new_commands(commands, seen))
 }
@@ -752,7 +861,7 @@ fn filter_new_commands(
 
 async fn record_unhandled_failure(
     session_id: &TaskSessionId,
-    generation: u32,
+    lease: &ChildWriteLease,
     error: &anyhow::Error,
 ) {
     let Some(store) = open_existing_store().await.map(Arc::new) else {
@@ -766,19 +875,24 @@ async fn record_unhandled_failure(
             .latest_process
             .as_ref()
             .map(|process| process.generation)
-            != Some(generation)
+            != Some(lease.generation)
     {
         return;
     }
     let from = session.status;
     let message = format!("task process failed: {error}");
     session.set_status(TaskSessionStatus::Failed, &message);
-    if store.update_task_session(&session).await.is_err() {
+    if store
+        .update_task_session_for_lease(&session, lease)
+        .await
+        .is_err()
+    {
         return;
     }
     let _ = store
-        .append_task_event(
+        .append_task_event_for_lease(
             &session.id,
+            lease,
             &TaskEventKind::StatusChanged {
                 from,
                 to: TaskSessionStatus::Failed,
@@ -787,14 +901,20 @@ async fn record_unhandled_failure(
         )
         .await;
     let _ = store
-        .append_task_event(
+        .append_task_event_for_lease(
             &session.id,
+            lease,
             &TaskEventKind::Failed {
                 error: message.clone(),
                 resumable: true,
             },
         )
         .await;
+    if let Some(process) = &mut session.latest_process {
+        process.state = ChildLeaseState::Finished;
+        process.outcome = Some(ChildBodyOutcome::Failed { reason: message });
+    }
+    let _ = store.finish_task_process(&session, lease).await;
 }
 
 /// Send `text` to the harness and record the driving command's fate: accepted on
@@ -803,6 +923,7 @@ async fn record_unhandled_failure(
 async fn apply_input(
     store: &SharedStore,
     session: &TaskSession,
+    lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     text: &str,
     command: Option<(ChildCommandId, ChildCommandEffect)>,
@@ -813,7 +934,7 @@ async fn apply_input(
         .unwrap_or((None, ChildCommandEffect::NextTurn));
     apply_child_input(
         store,
-        ChildTarget::Task(&session.id),
+        ChildTarget::Task(&session.id, lease),
         harness,
         PendingInput {
             command_id,
@@ -830,15 +951,17 @@ async fn apply_input(
 async fn set_and_record_status(
     store: &SharedStore,
     session: &mut TaskSession,
+    lease: &ChildWriteLease,
     status: TaskSessionStatus,
     reason: impl Into<String>,
 ) -> Result<()> {
     let from = session.status;
     session.set_status(status, reason);
-    store.update_task_session(session).await?;
+    store.update_task_session_for_lease(session, lease).await?;
     store
-        .append_task_event(
+        .append_task_event_for_lease(
             &session.id,
+            lease,
             &TaskEventKind::StatusChanged {
                 from,
                 to: status,
@@ -852,26 +975,36 @@ async fn set_and_record_status(
 async fn finish_failed(
     store: &SharedStore,
     session: &mut TaskSession,
+    lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     error: &str,
 ) -> Result<()> {
     let _ = harness.stop().await;
-    set_and_record_status(store, session, TaskSessionStatus::Failed, error).await?;
+    set_and_record_status(store, session, lease, TaskSessionStatus::Failed, error).await?;
     store
-        .append_task_event(
+        .append_task_event_for_lease(
             &session.id,
+            lease,
             &TaskEventKind::Failed {
                 error: error.to_string(),
                 resumable: true,
             },
         )
         .await?;
+    if let Some(process) = &mut session.latest_process {
+        process.state = ChildLeaseState::Finished;
+        process.outcome = Some(ChildBodyOutcome::Failed {
+            reason: error.to_string(),
+        });
+    }
+    store.finish_task_process(session, lease).await?;
     anyhow::bail!(error.to_string())
 }
 
 async fn finish_abandoned(
     store: &SharedStore,
     session: &mut TaskSession,
+    lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     reason: String,
 ) -> Result<()> {
@@ -880,15 +1013,23 @@ async fn finish_abandoned(
     set_and_record_status(
         store,
         session,
+        lease,
         TaskSessionStatus::Abandoned,
         format!("Task Session explicitly abandoned: {reason}"),
     )
-    .await
+    .await?;
+    if let Some(process) = &mut session.latest_process {
+        process.state = ChildLeaseState::Finished;
+        process.outcome = Some(ChildBodyOutcome::Interrupted { reason });
+    }
+    store.finish_task_process(session, lease).await?;
+    Ok(())
 }
 
 async fn finish_command_stop(
     store: &SharedStore,
     session: &mut TaskSession,
+    lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     stop: CommandStop,
 ) -> Result<()> {
@@ -898,12 +1039,23 @@ async fn finish_command_stop(
             set_and_record_status(
                 store,
                 session,
+                lease,
                 TaskSessionStatus::Waiting,
                 "Task turn interrupted; waiting for resume or another instruction",
             )
-            .await
+            .await?;
+            if let Some(process) = &mut session.latest_process {
+                process.state = ChildLeaseState::Finished;
+                process.outcome = Some(ChildBodyOutcome::Interrupted {
+                    reason: "Task turn interrupted".to_string(),
+                });
+            }
+            store.finish_task_process(session, lease).await?;
+            Ok(())
         }
-        CommandStop::Abandoned(reason) => finish_abandoned(store, session, harness, reason).await,
+        CommandStop::Abandoned(reason) => {
+            finish_abandoned(store, session, lease, harness, reason).await
+        }
     }
 }
 
@@ -960,8 +1112,8 @@ mod tests {
     };
     use crate::child_session::{
         ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective,
-        ChildProcessGeneration, ChildRef,
+        ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildRef,
+        ChildWriteLease,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
@@ -1035,7 +1187,7 @@ mod tests {
         }
     }
 
-    async fn conformance_session(provider: &str) -> (SharedStore, TaskSession) {
+    async fn conformance_session(provider: &str) -> (SharedStore, TaskSession, ChildWriteLease) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("registry.db");
         let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
@@ -1078,7 +1230,7 @@ mod tests {
             updated_at: now,
         };
         store.create_project_session(&project).await.unwrap();
-        let session = TaskSession {
+        let mut session = TaskSession {
             id: TaskSessionId::new(),
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
@@ -1095,20 +1247,15 @@ mod tests {
             project_session_id: project.id,
             current_directive_version: 0,
             incorporated_directive_version: 0,
-            status: TaskSessionStatus::Running,
-            status_reason: "provider active".to_string(),
+            status: TaskSessionStatus::Waiting,
+            status_reason: "ready for provider".to_string(),
             status_at: now,
             worktree: PathBuf::from(format!("/repo.{provider}")),
             workspace_slug: format!("test-{provider}"),
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                tmux_name: format!("task-{provider}"),
-                started_at: now,
-            }),
+            latest_process: None,
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
@@ -1128,7 +1275,18 @@ mod tests {
             updated_at: now,
         };
         store.create_task_session(&session, &pr).await.unwrap();
-        (store, session)
+        session.begin_generation(format!("task-{provider}"));
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut session.latest_process {
+            process.state = crate::child_session::ChildLeaseState::Active;
+        }
+        session.set_status(TaskSessionStatus::Running, "provider active");
+        store.activate_task_process(&session, &lease).await.unwrap();
+        (store, session, lease)
     }
 
     #[test]
@@ -1140,7 +1298,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_claude_task_hands_off_to_codex_with_directive_and_active_pr() {
-        let (store, mut failed) = conformance_session("claude").await;
+        let (store, mut failed, _lease) = conformance_session("claude").await;
         let session_id = failed.id.clone();
         let worktree = failed.worktree.clone();
         failed.set_status(
@@ -1220,9 +1378,9 @@ mod tests {
 
     #[tokio::test]
     async fn attached_task_direction_is_versioned_before_provider_input() {
-        let (store, session) = conformance_session("codex").await;
+        let (store, session, lease) = conformance_session("codex").await;
 
-        handle_attachment(&store, &session, "fix the parser first".to_string())
+        handle_attachment(&store, &session, &lease, "fix the parser first".to_string())
             .await
             .unwrap();
 
@@ -1245,7 +1403,7 @@ mod tests {
             ("claude", false, ChildCommandEffect::Replacement),
             ("opencode", false, ChildCommandEffect::Replacement),
         ] {
-            let (store, session) = conformance_session(provider).await;
+            let (store, session, lease) = conformance_session(provider).await;
             let command = ChildCommand::new(
                 ChildRef::Task(session.id.clone()),
                 ChildCommandSource::Human,
@@ -1261,13 +1419,22 @@ mod tests {
             let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = VecDeque::new();
 
-            absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
-                .await
-                .unwrap();
+            absorb_commands(
+                &store,
+                &session,
+                &lease,
+                commands,
+                &mut harness,
+                true,
+                &mut pending,
+            )
+            .await
+            .unwrap();
             if let Some(input) = pending.pop_front() {
                 apply_input(
                     &store,
                     &session,
+                    &lease,
                     &mut harness,
                     &input.text,
                     input.command_id.map(|id| (id, input.effect)),
@@ -1292,7 +1459,7 @@ mod tests {
     #[tokio::test]
     async fn task_follow_up_is_fifo_and_never_interrupts() {
         for provider in ["codex", "claude", "opencode"] {
-            let (store, session) = conformance_session(provider).await;
+            let (store, session, lease) = conformance_session(provider).await;
             let first = ChildCommand::new(
                 ChildRef::Task(session.id.clone()),
                 ChildCommandSource::Human,
@@ -1316,9 +1483,17 @@ mod tests {
             let mut harness = ScriptedHarness::new(provider == "codex");
             let mut pending = VecDeque::new();
 
-            absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
-                .await
-                .unwrap();
+            absorb_commands(
+                &store,
+                &session,
+                &lease,
+                commands,
+                &mut harness,
+                true,
+                &mut pending,
+            )
+            .await
+            .unwrap();
 
             assert_eq!(harness.interrupts, 0, "{provider}");
             assert!(harness.sent.is_empty(), "{provider}");
@@ -1327,6 +1502,7 @@ mod tests {
                 apply_input(
                     &store,
                     &session,
+                    &lease,
                     &mut harness,
                     &input.text,
                     input.command_id.map(|id| (id, input.effect)),
@@ -1351,7 +1527,7 @@ mod tests {
 
     #[tokio::test]
     async fn task_replacement_supersedes_queued_input() {
-        let (store, session) = conformance_session("claude").await;
+        let (store, session, lease) = conformance_session("claude").await;
         let first = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
@@ -1374,9 +1550,17 @@ mod tests {
             .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
             .await
             .unwrap();
-        absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
-            .await
-            .unwrap();
+        absorb_commands(
+            &store,
+            &session,
+            &lease,
+            commands,
+            &mut harness,
+            true,
+            &mut pending,
+        )
+        .await
+        .unwrap();
 
         let replacement = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
@@ -1393,9 +1577,17 @@ mod tests {
             .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
             .await
             .unwrap();
-        absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
-            .await
-            .unwrap();
+        absorb_commands(
+            &store,
+            &session,
+            &lease,
+            commands,
+            &mut harness,
+            true,
+            &mut pending,
+        )
+        .await
+        .unwrap();
 
         let input = pending.pop_front().expect("replacement input");
         assert_eq!(input.command_id.as_ref(), Some(&replacement.id));
@@ -1417,7 +1609,7 @@ mod tests {
 
     #[tokio::test]
     async fn bare_task_interrupt_stops_one_turn_without_abandoning_the_session() {
-        let (store, session) = conformance_session("codex").await;
+        let (store, session, lease) = conformance_session("codex").await;
         let command = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
@@ -1431,9 +1623,17 @@ mod tests {
         let mut harness = ScriptedHarness::new(true);
         let mut pending = VecDeque::new();
 
-        let stop = absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
-            .await
-            .unwrap();
+        let stop = absorb_commands(
+            &store,
+            &session,
+            &lease,
+            commands,
+            &mut harness,
+            true,
+            &mut pending,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(stop, Some(CommandStop::Interrupted));
         assert_eq!(harness.interrupts, 1);
@@ -1454,7 +1654,7 @@ mod tests {
     async fn task_decisions_resume_every_provider_without_losing_lineage() {
         for (provider, supports_steer) in [("codex", true), ("claude", false), ("opencode", false)]
         {
-            let (store, session) = conformance_session(provider).await;
+            let (store, session, lease) = conformance_session(provider).await;
             let decision_id = ChildDecisionId::new();
             let command = ChildCommand::new(
                 ChildRef::Task(session.id.clone()),
@@ -1473,13 +1673,22 @@ mod tests {
             let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = VecDeque::new();
 
-            absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
-                .await
-                .unwrap();
+            absorb_commands(
+                &store,
+                &session,
+                &lease,
+                commands,
+                &mut harness,
+                true,
+                &mut pending,
+            )
+            .await
+            .unwrap();
             if let Some(input) = pending.pop_front() {
                 apply_input(
                     &store,
                     &session,
+                    &lease,
                     &mut harness,
                     &input.text,
                     input.command_id.map(|id| (id, input.effect)),
@@ -1527,7 +1736,7 @@ mod tests {
 
     #[tokio::test]
     async fn task_provider_control_failures_settle_the_receipt() {
-        let (store, session) = conformance_session("claude").await;
+        let (store, session, lease) = conformance_session("claude").await;
         let command = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
@@ -1546,6 +1755,7 @@ mod tests {
         let error = absorb_commands(
             &store,
             &session,
+            &lease,
             commands,
             &mut harness,
             true,

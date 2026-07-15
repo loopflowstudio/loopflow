@@ -171,26 +171,42 @@ The active authority is the tuple `(session_id, generation, lease_token)`, not
 
 1. A launch transaction verifies durable restart bars, advances generation,
    creates a random token, stores a `Reserved` receipt, changes status to
-   Starting, and appends the lease event atomically.
+   Starting, and appends both lease and status events atomically. The reservation
+   CAS includes the prior generation as well as status, so a stale snapshot can
+   neither reuse a generation number nor mint a new token for old intent. A fresh
+   reservation has the same bounded ten-second startup grace already used by the
+   launch wait; observers adopt it instead of declaring the not-yet-created tmux
+   body lost.
 2. The token and generation are passed to `__task` / `__project` and exported as
    `LF_TASK_LEASE_TOKEN` / `LF_PROJECT_LEASE_TOKEN` alongside the existing
    Session and generation environment.
 3. Before starting a provider, the runner exchanges `Reserved` for `Active` and
-   records its own PID/tmux evidence with a token CAS. Whenever the harness
-   starts or replaces its provider process, it exposes that current process
-   group and the runner records it through the same token CAS.
+   records its own PID/tmux evidence with a token CAS. After harness start, it
+   records the provider's independently isolated process group when one exists
+   (Codex); providers that stay in the runner group retain the activation group.
+   Thus tmux/PID owns the outer runner while `process_group_id` names the extra
+   group reaping must reach.
+   Provider start, input, and interrupt revalidate the lease immediately before
+   the external action; if the post-start receipt loses its CAS, the runner
+   explicitly stops the newly created harness before exiting.
 4. Every body-owned store mutation uses a lease-checked operation. At minimum:
    Session state/provider transcript updates, directive incorporation, command
    claims/delivery outcomes, flow-boundary stop, progress/failure/completion
    events, PR rotation/publication invoked from the body, and unhandled-failure
    recording. A stale token changes zero rows and returns a typed `LeaseRevoked`
    result; the runner stops its harness and exits without another write.
+   A matching token still cannot write a non-terminal status over completed or
+   abandoned intent; terminal intent is an additional one-way fence.
 5. Human/Wave/Project controls may append commands and durable intent, but they
    do not impersonate the body lease. Split control-plane mutations from
    body-owned mutations instead of teaching unrestricted full-row updates about
    both.
-6. An ambient Session command validates its generation/token before any mutating
-   operation. Read-only status/audit commands remain available to stale bodies.
+6. An ambient Session command parses the same private generation/token and
+   validates it in the mutation transaction. This includes directive
+   acknowledgement, decision requests, Project observation consumption, PR
+   publication/attachment/rotation/settlement, Session state, command receipts,
+   and completion. Read-only status/audit commands remain available to stale
+   bodies.
 
 Generation stays monotonic and human-readable. The random token prevents a
 stale process from gaining authority by knowing or guessing the next integer.
@@ -203,10 +219,10 @@ safe.
 
 1. Atomically change the matching Active/Reserved lease to Revoked with a typed
    outcome. From that commit onward all body writes fail their token CAS.
-2. Stop the provider through the runner's existing interrupt cleanup, kill the
-   tmux session, signal the recorded provider/body process group with TERM, and
+2. Kill the tmux session (whose signal hook runs the harness cleanup), signal the
+   recorded provider/body process group and outer runner PID with TERM, and
    escalate to KILL after a short bounded grace period.
-3. Confirm both tmux absence and process-group absence. Do not reserve generation
+3. Confirm tmux, runner PID, and process-group absence. Do not reserve generation
    + 1 until confirmation. A failed reap leaves the Session Recovering/Stopped
    with the old lease revoked; it never launches a concurrent writer.
 4. Mark the receipt Finished only after the body is proven gone. Preserve the
@@ -299,9 +315,11 @@ edits.
 - Keep live `resume --model` rejection until replay policy lands.
 
 Proof: concurrent launch yields one active token; stale generation writes and
-completion reports are rejected; revocation kills a fake runner plus forked
-grandchild and proves both absent before generation + 1; Task and Project tests
-exercise the same contract; terminal/open-PR bars still hold.
+completion reports are rejected across Session, event, PR, observation, and
+directive boundaries; a stale snapshot cannot reuse an old generation;
+revocation kills a fake runner plus forked grandchild and proves both absent
+before generation + 1; Task and Project tests exercise the same contract;
+terminal/open-PR bars still hold.
 
 ### PR 4 — progress evidence, wire, and safe recovery
 
@@ -346,7 +364,9 @@ cargo clippy -p loopflow -- -D warnings
 cargo test -p loopflow child_session
 cargo test -p loopflow child_sessions
 cargo test -p loopflow task_process_resume_reserves_each_session_generation_once
-cargo test -p loopflow
+env -u LF_RUN_ID -u LF_PROCESS_ID -u LF_DB_PATH -u LF_HOME \
+  -u LF_TASK_GENERATION -u LF_TASK_SESSION_ID -u LF_WAVE_ID \
+  cargo test -p loopflow
 uv run python scripts/check_migrations.py
 ```
 

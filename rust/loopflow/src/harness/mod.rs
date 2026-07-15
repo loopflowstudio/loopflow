@@ -81,6 +81,12 @@ pub trait Harness: Send + Sync {
     /// opencode announce it by the time `start` returns; claude announces it
     /// on the first turn's stream. Callers persist this before driving turns.
     fn provider_session_id(&self) -> Option<String>;
+    /// Independently isolated provider process group, when the harness owns
+    /// one. Providers that remain in the runner's process group return None;
+    /// the Session receipt retains the runner group recorded at activation.
+    fn process_group_id(&self) -> Option<u32> {
+        None
+    }
     /// Tee provider-native frames already visible to the adapter. The sender
     /// is optional because conformance tests and callers below the production
     /// launch gate do not own a trace capture.

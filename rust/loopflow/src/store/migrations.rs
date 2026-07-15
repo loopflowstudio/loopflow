@@ -102,6 +102,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "project_session_successors",
         sql: include_str!("migrations/0.11.002_project_session_successors.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 3,
+        },
+        name: "child_body_lease",
+        sql: include_str!("migrations/0.11.003_child_body_lease.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -438,7 +447,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.002_project_session_successors"
+            "0.11.003_child_body_lease"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -452,7 +461,8 @@ mod tests {
                 "0.10.001_initial".to_string(),
                 "0.10.002_session_execution_context".to_string(),
                 "0.11.001_task_prs".to_string(),
-                "0.11.002_project_session_successors".to_string()
+                "0.11.002_project_session_successors".to_string(),
+                "0.11.003_child_body_lease".to_string()
             ]
         );
     }
@@ -587,12 +597,14 @@ mod tests {
             "INSERT INTO project_sessions (
                 id, project_id, project_slug, project_name, project_prompt_context,
                 wave_id, pm_snapshot_synced_at, status, status_reason, status_at,
-                iteration, observation_cursor, agent, provider, created_at, updated_at,
+                iteration, observation_cursor, agent, provider,
+                process_generation, process_pid, process_tmux_name, process_started_at,
+                created_at, updated_at,
                 current_directive_version, incorporated_directive_version
              ) VALUES (
                 'ps_legacy', 'project-1', 'runtime', 'Runtime', 'Definition',
                 'wave-1', 9, 'running', 'active', 10, 1, 0, 'codex', 'codex',
-                10, 20, 1, 1
+                3, 33, 'project-legacy', 8, 10, 20, 1, 1
              )",
             [],
         )
@@ -602,14 +614,16 @@ mod tests {
                 id, issue_id, issue_identifier, issue_title, issue_description,
                 project_id, project_slug, project_name, project_prompt_context, wave_id,
                 status, status_reason, status_at, worktree, branch, base_commit,
-                agent, provider, pr_number, pr_url, created_at, updated_at,
+                agent, provider, process_generation, process_pid,
+                process_tmux_name, process_started_at, pr_number, pr_url, created_at, updated_at,
                 pm_snapshot_synced_at, pm_writeback_json, project_session_id,
                 current_directive_version, incorporated_directive_version
              ) VALUES (
                 'ts_legacy', 'issue-1', 'INF-123', 'Ship it', '',
                 'project-1', 'runtime', 'Runtime', 'Definition', 'wave-1',
                 'merged', 'pull request merged', 10, '/repo.inf-123',
-                'jack/inf-123', 'base-sha', 'codex', 'codex', 101,
+                'jack/inf-123', 'base-sha', 'codex', 'codex', 7, 77,
+                'task-legacy', 8, 101,
                 'https://github.com/loopflowstudio/loopflow/pull/101', 10, 20,
                 9, '{\"state\":\"current\"}', 'ps_legacy', 1, 1
              )",
@@ -636,6 +650,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(session, ("completed".to_string(), "inf-123".to_string()));
+        let project_lease: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT process_lease_token, process_lease_state, process_outcome_json
+                 FROM project_sessions WHERE id='ps_legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert!(project_lease.0.starts_with("cl_"));
+        assert_eq!(project_lease.1, "legacy");
+        assert_eq!(project_lease.2, None);
+        let task_lease: (String, String, String) = conn
+            .query_row(
+                "SELECT process_lease_token, process_lease_state, process_outcome_json
+                 FROM task_sessions WHERE id='ts_legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert!(task_lease.0.starts_with("cl_"));
+        assert_eq!(task_lease.1, "finished");
+        assert_eq!(task_lease.2, "{\"kind\":\"completed\"}");
         let pr: (i64, String, i64, String, i64, String, String, Option<i64>) = conn
             .query_row(
                 "SELECT sequence, branch, publication_requested_at, after_merge,
@@ -814,7 +850,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.002_project_session_successors"
+            "0.11.003_child_body_lease"
         );
     }
 

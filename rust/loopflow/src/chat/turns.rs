@@ -14,7 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::child_session::{ChildCommandEffect, ChildCommandState};
+use crate::child_session::{
+    ChildBodyOutcome, ChildCommandEffect, ChildCommandState, ChildProcessGeneration,
+};
 use crate::project_session::{ProjectEventKind, ProjectObservation};
 use crate::task::{TaskEventKind, TaskObservation};
 use crate::wave::playhead::{now_rfc3339, BodyProvenance};
@@ -313,6 +315,7 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             ),
             &handoff.reason,
         ),
+        TaskEventKind::BodyLeaseChanged { process } => body_lease_activity("Task", process),
         TaskEventKind::StatusChanged { to, reason, .. } => activity(
             ChildActivityKind::StateChanged,
             &format!("Task is {}", to.as_str()),
@@ -410,6 +413,7 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             ),
             &handoff.reason,
         ),
+        ProjectEventKind::BodyLeaseChanged { process } => body_lease_activity("Project", process),
         ProjectEventKind::StatusChanged { to, reason, .. } => activity(
             ChildActivityKind::StateChanged,
             &format!("Project is {}", to.as_str()),
@@ -478,6 +482,27 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             activity(ChildActivityKind::Failed, "Project failed", error)
         }
     }
+}
+
+fn body_lease_activity(subject: &str, process: &ChildProcessGeneration) -> ActivityFields {
+    let summary = match process.outcome.as_ref() {
+        Some(ChildBodyOutcome::Completed) => "completed",
+        Some(ChildBodyOutcome::Interrupted { reason })
+        | Some(ChildBodyOutcome::Failed { reason })
+        | Some(ChildBodyOutcome::Lost { reason })
+        | Some(ChildBodyOutcome::Superseded { reason })
+        | Some(ChildBodyOutcome::LegacyStopped { reason }) => reason,
+        None => "",
+    };
+    activity(
+        ChildActivityKind::StateChanged,
+        &format!(
+            "{subject} body generation {} is {}",
+            process.generation,
+            process.state.as_str()
+        ),
+        summary,
+    )
 }
 
 fn activity(kind: ChildActivityKind, title: &str, summary: &str) -> ActivityFields {

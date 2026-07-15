@@ -12,8 +12,8 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
-    ChildDecisionId, ChildDirectiveId, ChildExecutionContext, ChildProcessGeneration,
-    DirectiveKind,
+    ChildDecisionId, ChildDirectiveId, ChildExecutionContext, ChildLeaseState,
+    ChildProcessGeneration, DirectiveKind,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
@@ -447,8 +447,14 @@ impl TaskSession {
         self.latest_process = Some(ChildProcessGeneration {
             generation,
             pid: None,
+            process_group_id: None,
             tmux_name,
+            agent: self.agent.clone(),
+            provider: self.provider.clone(),
+            provider_session_id: self.provider_session_id.clone(),
             started_at: now,
+            state: ChildLeaseState::Reserved,
+            outcome: None,
         });
         self.set_status(TaskSessionStatus::Starting, "task process is starting");
         generation
@@ -461,6 +467,9 @@ pub enum TaskEventKind {
     Started,
     BodyHandedOff {
         handoff: crate::child_session::ChildBodyHandoff,
+    },
+    BodyLeaseChanged {
+        process: ChildProcessGeneration,
     },
     StatusChanged {
         from: TaskSessionStatus,
@@ -529,6 +538,10 @@ impl TaskEventKind {
     pub fn is_project_observable(&self) -> bool {
         match self {
             Self::Started | Self::Progress { .. } => false,
+            Self::BodyLeaseChanged { process } => matches!(
+                process.state,
+                ChildLeaseState::Revoked | ChildLeaseState::Finished
+            ),
             Self::CommandChanged { state, .. } => state.is_terminal(),
             _ => true,
         }

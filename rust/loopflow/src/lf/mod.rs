@@ -894,6 +894,12 @@ pub enum CronCommand {
     },
     /// List installed loopflow cron jobs
     List,
+    /// Reconcile installed launchd jobs to match a wave's declared `crons:`
+    Sync {
+        /// Wave whose GOAL.md `crons:` drive the installed jobs
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+    },
     /// Uninstall a scheduled lf invocation
     Remove {
         /// Wave name passed to `lf <flow> --wave <wave>`

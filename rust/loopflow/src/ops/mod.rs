@@ -20,8 +20,9 @@ pub(crate) mod util;
 pub use abandon::{abandon_branch, AbandonOptions};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{
-    add_cron, default_launch_agents_dir, list_crons, parse_schedule, remove_cron, resolve_lf_path,
-    CronSpec, InstalledCron, Schedule, SystemLaunchctl,
+    add_cron, daily_time_of, default_launch_agents_dir, list_crons, parse_schedule, remove_cron,
+    resolve_lf_path, schedule_from_cron, sync_crons, CronSpec, CronSyncResult, InstalledCron,
+    Schedule, SkippedCron, SystemLaunchctl,
 };
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;

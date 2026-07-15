@@ -17,6 +17,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child_session::{ChildRef, DirectiveKind, ObservationRecipient};
+use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
 use crate::lf::commands::runs::RunLedgerEntry;
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
@@ -76,6 +77,9 @@ pub struct WaveSnapshot {
     pub created_at: Option<String>,
     /// Parent wave id in the chord tree, `null` for a root wave.
     pub parent_wave_id: Option<String>,
+    /// Execution home: `local` or one SSH target. Lets a consumer distinguish a
+    /// local Wave from a remote-home one without owning transport.
+    pub home: WaveHomeDto,
 }
 
 /// `lf status <wave>` snapshot: native work hierarchy, the wave's runs, what
@@ -93,6 +97,10 @@ pub struct WaveDetailSnapshot {
     pub runs: Evidence<RunLedgerEntry>,
     /// Work whose next move belongs to someone other than itself.
     pub attention: Evidence<AttentionItem>,
+    /// The Wave's Home probed for liveness: state, evidence, attach endpoint, and
+    /// the one contextual action a conductor surface should offer. Probed for the
+    /// focused Wave only — `lf ls` stays address-only.
+    pub home_runtime: HomeRuntimeDto,
 }
 
 /// A reading, or the reason there is none. "We looked and found nothing" and
@@ -362,12 +370,18 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             now(),
             Liveness::probe(crate::engine::process::tmux_installed()),
         ));
+        // Probe the focused Wave's Home once so the detail carries live evidence
+        // and the single contextual action (Open/Attach, Start, or reason).
+        let home = crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name());
+        let home_runtime =
+            crate::ops::home::probe_home(wave.name(), &home, Path::new(wave.repo())).await;
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),
             attention,
             wave: snapshot,
             loop_state,
             projects,
+            home_runtime,
         };
         if json {
             println!("{}", serde_json::to_string(&status)?);
@@ -545,6 +559,12 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         .filter(|session| !session.status.is_terminal())
         .count() as u32;
     let config = crate::engine::wave_config::read_wave_config(Path::new(&repo), wave.name());
+    let home = WaveHomeDto::from(
+        &config
+            .as_ref()
+            .and_then(|config| config.home_authored())
+            .unwrap_or_else(|| crate::engine::wave_config::default_local_home(Path::new(&repo))),
+    );
     let paused = config.and_then(|config| config.paused).unwrap_or(false);
     let live = endpoint.is_some();
     let status = if paused {
@@ -568,6 +588,7 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         endpoint,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
+        home,
     })
 }
 
@@ -1002,7 +1023,7 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  ENDPOINT{reset}",
+        "{bold}{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  ENDPOINT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
@@ -1010,17 +1031,37 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
         live = "LIVE",
         tasks = "TASKS",
         projects = "PROJECTS",
+        home = "HOME",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {endpoint}",
+            "{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
             status = wave.status,
             live = if wave.live { "yes" } else { "no" },
             tasks = wave.active_tasks,
             projects = wave.active_projects,
+            home = truncate(&wave.home.address, 16),
             endpoint = wave.endpoint.as_deref().unwrap_or("-"),
         );
+    }
+}
+
+fn home_state_label(state: HomeState) -> &'static str {
+    match state {
+        HomeState::Unreachable => "unreachable",
+        HomeState::Stopped => "stopped",
+        HomeState::Running => "running",
+        HomeState::Unknown => "unknown",
+    }
+}
+
+/// The single contextual action a surface should offer, rendered for the CLI.
+fn home_action_label(action: &HomeActionDto) -> String {
+    match action {
+        HomeActionDto::Attach { endpoint } => format!("Attach ({endpoint})"),
+        HomeActionDto::Start { home } => format!("Start on {home}"),
+        HomeActionDto::Reason { message } => message.clone(),
     }
 }
 
@@ -1040,6 +1081,15 @@ fn print_status(status: &WaveDetailSnapshot) {
             .unwrap_or_default(),
     );
     println!("  goal      {}", wave.goal);
+    println!(
+        "  home      {}  [{}]",
+        wave.home.address,
+        home_state_label(status.home_runtime.state)
+    );
+    println!(
+        "  action    {}",
+        home_action_label(&status.home_runtime.action)
+    );
     println!(
         "  endpoint  {}",
         wave.endpoint.as_deref().unwrap_or("(stopped)")
@@ -1297,6 +1347,9 @@ mod tests {
             endpoint: Some("127.0.0.1:5678".into()),
             created_at: Some("2026-07-06T00:00:00Z".into()),
             parent_wave_id: None,
+            home: WaveHomeDto::from(
+                &crate::engine::wave_home::WaveHome::parse("ssh://jack@mini-heart").unwrap(),
+            ),
         };
         let value: serde_json::Value = serde_json::to_value(&snapshot).expect("serialize");
         assert_eq!(value["name"], "goals");
@@ -1304,6 +1357,12 @@ mod tests {
         assert_eq!(value["live"], true);
         assert_eq!(value["endpoint"], "127.0.0.1:5678");
         assert_eq!(value["active_tasks"], 2);
+        // A remote-home wave is distinguishable in the wire shape: the canonical
+        // address plus structured owner/location.
+        assert_eq!(value["home"]["address"], "ssh://jack@mini-heart");
+        assert_eq!(value["home"]["owner"], "jack");
+        assert_eq!(value["home"]["location"]["kind"], "ssh");
+        assert_eq!(value["home"]["location"]["host"], "mini-heart");
         // Explicitly-null Optional stays present (no serde skip): a stopped
         // wave's endpoint is `null`, not absent — one stable shape.
         assert!(value.as_object().unwrap().contains_key("parent_wave_id"));
@@ -1326,10 +1385,19 @@ mod tests {
                 endpoint: None,
                 created_at: None,
                 parent_wave_id: None,
+                home: WaveHomeDto::from(
+                    &crate::engine::wave_home::WaveHome::parse("jack@local").unwrap(),
+                ),
             },
             loop_state: None,
             runs: Evidence::complete(Vec::new()),
             attention: Evidence::complete(Vec::new()),
+            home_runtime: HomeRuntimeDto::new(
+                &crate::engine::wave_home::WaveHome::parse("jack@local").unwrap(),
+                HomeState::Stopped,
+                "reachable (local); no resident is serving this Wave".into(),
+                None,
+            ),
             projects: vec![ProjectDetailSnapshot {
                 project: PmProjectSummary {
                     id: "project-1".into(),

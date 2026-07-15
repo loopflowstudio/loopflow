@@ -224,6 +224,93 @@ public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
 
 /// One `lf ls` row / the `wave` field of `lf status`. Mirrors Rust
+/// `WaveHomeDto` (`engine/wave_home.rs`) — a Wave's Home: a user-owned execution
+/// address (owner plus location). `address` is the canonical string to show
+/// (`jack@local` or `ssh://jack@host[:port]`); `location` is the structured form
+/// to navigate/open. The app never parses or reimplements SSH — it reads these.
+struct WaveHome: Decodable, Equatable {
+    let address: String
+    let owner: String
+    let location: HomeLocation
+}
+
+/// `HomeLocationDto` — where a Home's execution context lives.
+enum HomeLocation: Decodable, Equatable {
+    case local
+    case ssh(host: String, port: Int?)
+
+    enum CodingKeys: String, CodingKey {
+        case kind, host, port
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .kind) {
+        case "local":
+            self = .local
+        case "ssh":
+            self = .ssh(
+                host: try container.decode(String.self, forKey: .host),
+                port: try container.decodeIfPresent(Int.self, forKey: .port)
+            )
+        case let other:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription: "unknown home location kind \(other)"
+            )
+        }
+    }
+}
+
+/// `HomeState` (`engine/wave_home.rs`) — a Home's observed liveness.
+enum HomeState: String, Decodable, Equatable {
+    case unreachable, stopped, running, unknown
+}
+
+/// `HomeActionDto` — the single contextual action a surface should offer, so the
+/// UI never branches on `HomeState` itself: Attach when running, Start when
+/// reachable-but-stopped, or the actionable reason otherwise.
+enum HomeAction: Decodable, Equatable {
+    case attach(endpoint: String)
+    case start(home: String)
+    case reason(message: String)
+
+    enum CodingKeys: String, CodingKey {
+        case kind, endpoint, home, message
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .kind) {
+        case "attach":
+            self = .attach(endpoint: try container.decode(String.self, forKey: .endpoint))
+        case "start":
+            self = .start(home: try container.decode(String.self, forKey: .home))
+        case "reason":
+            self = .reason(message: try container.decode(String.self, forKey: .message))
+        case let other:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription: "unknown home action kind \(other)"
+            )
+        }
+    }
+}
+
+/// `HomeRuntimeDto` — a Wave's Home probed for liveness: the address, the state
+/// with its evidence, the attach endpoint when running, and the one action.
+/// This is the shared contract the conductor renders; the app never probes SSH
+/// itself — it calls `lf home probe|start --json`.
+struct HomeRuntime: Decodable, Equatable {
+    let home: WaveHome
+    let state: HomeState
+    let reason: String
+    let endpoint: String?
+    let action: HomeAction
+}
+
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
 struct WaveSnapshot: Decodable {
@@ -239,9 +326,10 @@ struct WaveSnapshot: Decodable {
     let endpoint: String?
     let createdAt: String?
     let parentWaveId: String?
+    let home: WaveHome
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, paused, goal, repo, live, endpoint
+        case id, name, status, paused, goal, repo, live, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
@@ -266,9 +354,12 @@ struct WaveStatusSnapshot: Decodable {
     let projects: [WaveProjectWork]
     let runs: WorkEvidence<RunLedgerEntry>
     let attention: WorkEvidence<WaveAttentionItem>
+    /// The focused Wave's Home probed for liveness and its one contextual action.
+    let homeRuntime: HomeRuntime
 
     enum CodingKeys: String, CodingKey {
         case wave, projects, runs, attention
+        case homeRuntime = "home_runtime"
         case loopState = "loop_state"
     }
 }

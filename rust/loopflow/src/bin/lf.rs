@@ -1126,6 +1126,17 @@ fn main() -> anyhow::Result<()> {
     });
     debug!(?cli, "parsed CLI arguments");
 
+    // Route repo/PR/release/PM commands to the Wave's execution home before local
+    // dispatch. A remote (SSH) home forwards over `lf ssh`; a local or absent home
+    // falls through and runs in-process exactly as before.
+    if let Some(command) = &cli.command {
+        if let Some(routed) =
+            loopflow::lf::commands::home::route(command, cli.wave.as_deref(), &args)
+        {
+            return routed;
+        }
+    }
+
     let result = if cli.list {
         in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
     } else {
@@ -1177,6 +1188,9 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Pm { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
+            }
+            Some(Commands::Home { cmd }) => {
+                in_repo_runtime(&args, |repo| loopflow::lf::commands::home::run(cmd, repo))
             }
             Some(Commands::SyncSkills { yes, no_prune }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune)

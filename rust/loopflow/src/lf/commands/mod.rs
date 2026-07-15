@@ -5,6 +5,7 @@ pub mod doctor;
 #[cfg(test)]
 pub(crate) mod fixtures;
 pub mod flow;
+pub mod home;
 pub mod list;
 pub mod memory;
 pub mod ops;

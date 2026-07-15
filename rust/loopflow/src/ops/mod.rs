@@ -5,6 +5,7 @@ mod commit;
 pub mod cron;
 mod error;
 mod flow;
+pub mod home;
 mod land;
 pub mod pm;
 mod pr;

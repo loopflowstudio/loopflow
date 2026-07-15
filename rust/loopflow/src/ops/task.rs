@@ -1021,6 +1021,13 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     let generation_text = generation.to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
     let lf_home = execution.lf_home.to_string_lossy().to_string();
+    // Inherit the Wave's execution home so this Task's routed shipping commands
+    // (`lf commit`, `lf pr open`) target the same host as its Wave.
+    let wave_home = match owning_wave(store, session).await {
+        Ok(wave) => crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name())
+            .to_string(),
+        Err(_) => crate::engine::wave_config::default_local_home(&session.worktree).to_string(),
+    };
     let environment = [
         (
             crate::engine::wave_context::WAVE_ID_ENV,
@@ -1030,6 +1037,7 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         ("LF_TASK_GENERATION", generation_text.as_str()),
         ("LF_DB_PATH", db_path.as_str()),
         ("LF_HOME", lf_home.as_str()),
+        (crate::engine::wave_home::WAVE_HOME_ENV, wave_home.as_str()),
     ];
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await

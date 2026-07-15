@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
 
+use crate::engine::wave_home::WaveHome;
+
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
 /// The wave's resident loop reads these and opens a system pass when a
 /// schedule comes due (`crate::flowloop::wave`) — no daemon poller, no table.
@@ -35,6 +37,42 @@ pub struct WaveConfig {
     /// live (`crate::wave::runtime::WaveRuntime::paused`), not the registry
     /// row.
     pub paused: Option<bool>,
+    /// The wave's execution Home: a user-owned address such as `jack@local`
+    /// (the default form) or `ssh://jack@host[:port]`. Authored here, parsed via
+    /// [`WaveHome`], and used to resolve/probe/start and to route top-level `lf`
+    /// commands. Absent means the current user's local Home.
+    #[serde(default)]
+    pub home: Option<String>,
+}
+
+impl WaveConfig {
+    /// The authored Home, when present and parseable. `None` means the field is
+    /// absent or malformed; the caller supplies the default owner (see
+    /// [`read_wave_home`]).
+    pub fn home_authored(&self) -> Option<WaveHome> {
+        self.home.as_deref().and_then(WaveHome::parse)
+    }
+}
+
+/// Read the wave's execution Home straight from `GOAL.md`. When no Home is
+/// authored (or it is malformed), default to the current user's local Home
+/// (`<git-user>@local`). The single read site for resolve/probe/start, launch
+/// inheritance, and routing — keyed by the wave name (identity), never a string
+/// parsed from a branch or path.
+pub fn read_wave_home(repo: &Path, name: &str) -> WaveHome {
+    read_wave_config(repo, name)
+        .and_then(|config| config.home_authored())
+        .unwrap_or_else(|| default_local_home(repo))
+}
+
+/// The current user's local Home — the default when no Home is authored. Owner
+/// is the git user (falling back to `$USER`, then `user`); it names who the Home
+/// belongs to, not a credential.
+pub fn default_local_home(repo: &Path) -> WaveHome {
+    let owner = crate::engine::naming::git_user(repo).unwrap_or_else(|_| "user".to_string());
+    WaveHome::local(owner).unwrap_or_else(|| {
+        WaveHome::local("user").expect("literal owner 'user' is always a valid Home owner")
+    })
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.

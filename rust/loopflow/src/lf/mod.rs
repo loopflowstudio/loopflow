@@ -849,6 +849,13 @@ pub enum TaskCommand {
 pub enum PrCommand {
     /// Show current branch's PR state
     Status,
+    /// After an out-of-band merge, rotate this Task to its next serial PR,
+    /// carrying preserved follow-up edits forward onto the new branch.
+    Next {
+        /// Name the next serial branch (defaults to the settled PR's next slug,
+        /// then the sequence number).
+        slug: Option<String>,
+    },
     /// Create or update a PR
     Open {
         #[arg(short = 'm', long = "model", short_alias = 'M')]

@@ -38,6 +38,10 @@ selection. Follow the repo style guide.
   completes the Task; use bare `lf pr land --next <slug>` when another serial
   PR follows. Use `lf task complete <issue> --summary "..."` for clean
   work that needs no PR. Do not write Task completion directly through PM.
+- If a PR merged out of band (GitHub auto-merge, not settled by `lf pr land
+  -c`) and follow-up work remains, `lf pr next [slug]` reconciles the merge and
+  rotates to the next serial PR, carrying your uncommitted edits forward — no
+  manual git surgery.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
 - Report consequential progress through the Task Session; its linked events

@@ -153,6 +153,10 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             abandon_branch(repo, &AbandonOptions { branch, force }, progress)?;
             Ok(())
         }
+        PrCommand::Next { slug } => {
+            crate::ops::task::pr_next(repo, slug.as_deref())?;
+            Ok(())
+        }
         PrCommand::Status => Err(unsupported()),
     }
 }

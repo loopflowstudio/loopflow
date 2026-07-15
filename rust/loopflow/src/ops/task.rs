@@ -1500,7 +1500,7 @@ pub(crate) async fn ensure_working_pr(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<Option<TaskPr>> {
-    ensure_working_pr_with_authority(store, session, None).await
+    ensure_working_pr_with_authority(store, session, None, RotateOptions::runner()).await
 }
 
 pub(crate) async fn ensure_working_pr_for_lease(
@@ -1508,13 +1508,30 @@ pub(crate) async fn ensure_working_pr_for_lease(
     session: &mut TaskSession,
     lease: &ChildWriteLease,
 ) -> OpsResult<Option<TaskPr>> {
-    ensure_working_pr_with_authority(store, session, Some(lease)).await
+    ensure_working_pr_with_authority(store, session, Some(lease), RotateOptions::runner()).await
+}
+
+/// How a serial-PR rotation treats the worktree. The runner rotates only a clean
+/// tree (`carry_dirty = false`); the operator's `lf pr next` carries the
+/// preserved follow-up edits forward onto the next serial branch
+/// (`carry_dirty = true`) and may name that branch via `slug_override`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RotateOptions {
+    carry_dirty: bool,
+    slug_override: Option<String>,
+}
+
+impl RotateOptions {
+    fn runner() -> Self {
+        Self::default()
+    }
 }
 
 async fn ensure_working_pr_with_authority(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: Option<&ChildWriteLease>,
+    rotate: RotateOptions,
 ) -> OpsResult<Option<TaskPr>> {
     reconcile_task_pr_with_authority(store, session, lease).await?;
     if session.status.is_terminal() {
@@ -1549,10 +1566,15 @@ async fn ensure_working_pr_with_authority(
             .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
     }
     let sequence = settled.sequence + 1;
-    let slug = settled
-        .publication
-        .as_ref()
-        .and_then(|publication| publication.next_slug.clone())
+    let slug = rotate
+        .slug_override
+        .clone()
+        .or_else(|| {
+            settled
+                .publication
+                .as_ref()
+                .and_then(|publication| publication.next_slug.clone())
+        })
         .unwrap_or_else(|| sequence.to_string());
     let author = settled
         .branch
@@ -1572,8 +1594,9 @@ async fn ensure_working_pr_with_authority(
     let base_ref = format!("origin/{default_branch}");
     let base_commit = rev_parse(&session.worktree, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve next PR base: {error}")))?;
-    if !is_clean(&session.worktree)
-        .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+    if !rotate.carry_dirty
+        && !is_clean(&session.worktree)
+            .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
     {
         return Err(task_error(format!(
             "Task {} cannot rotate PRs while {} has uncommitted changes",
@@ -1676,6 +1699,51 @@ async fn ensure_working_pr_with_authority(
             }
         }
     }
+}
+
+/// Advance a Task to its next serial PR after an out-of-band merge. Reconciles
+/// the merge into the settled PR, then rotates the worktree to sequence N+1 —
+/// carrying preserved follow-up edits forward — so a stopped worker (or an
+/// operator) can push the next PR without manual git surgery. `slug` names the
+/// next branch; otherwise the settled PR's `next_slug`, otherwise the sequence.
+pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
+    let slug_override = slug.map(parse_pr_slug).transpose()?;
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let store = task_store().await?;
+        let (mut session, lease) = task_for_worktree(&store, &repo)
+            .await?
+            .ok_or_else(|| task_error("no Task Session owns this worktree"))?;
+        // Observe an out-of-band merge before deciding whether to rotate.
+        reconcile_task_pr_with_authority(&store, &mut session, lease.as_ref()).await?;
+        if let Some(active) = store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        {
+            let which = active
+                .github()
+                .map(|github| format!("#{}", github.number))
+                .unwrap_or_else(|| format!("sequence {}", active.sequence));
+            return Err(task_error(format!(
+                "current PR {which} is not merged yet; land it or wait for the merge before `lf pr next`"
+            )));
+        }
+        if session.status.is_terminal() {
+            return Err(task_error(format!(
+                "Task {} is already {}; nothing to rotate",
+                session.launch.issue.identifier,
+                session.status.as_str()
+            )));
+        }
+        let rotate = RotateOptions {
+            carry_dirty: true,
+            slug_override,
+        };
+        ensure_working_pr_with_authority(&store, &mut session, lease.as_ref(), rotate)
+            .await?
+            .ok_or_else(|| task_error("Task has no settled PR to rotate from"))
+    })
 }
 
 pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
@@ -2507,8 +2575,8 @@ mod tests {
 
     use super::{
         changes_snapshot, command_source_for_wave, derive_workspace_slug, diff_snapshot,
-        ensure_working_pr, file_snapshot, parse_pr_slug, parse_workspace_slug, project_context,
-        TaskControlResult, TaskWorkspace,
+        ensure_working_pr, ensure_working_pr_with_authority, file_snapshot, parse_pr_slug,
+        parse_workspace_slug, project_context, RotateOptions, TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
     use crate::id::WaveId;
@@ -2781,6 +2849,72 @@ mod tests {
         assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(prs[0].phase(), PrPhase::Merged);
         assert_eq!(prs[1].id, second.id);
+    }
+
+    #[tokio::test]
+    async fn rotate_forward_carries_uncommitted_follow_up_edits() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, mut session, mut first) =
+            rotation_task(&repo, first_branch, &base).await;
+        first.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 907,
+                url: "https://example.com/pr/907".to_string(),
+            }),
+        });
+        first.merge_commit = Some("merge-907".to_string());
+        first.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&first, None)
+            .await
+            .expect("settle first PR");
+
+        // The worker stopped before pushing: follow-up work sits uncommitted.
+        repo.create_file("follow-up.txt", "second PR work\n");
+
+        // The runner's strict path refuses to rotate over a dirty tree.
+        assert!(ensure_working_pr(&store, &mut session.clone())
+            .await
+            .is_err());
+
+        let second = ensure_working_pr_with_authority(
+            &store,
+            &mut session,
+            None,
+            RotateOptions {
+                carry_dirty: true,
+                slug_override: Some("keep-going".to_string()),
+            },
+        )
+        .await
+        .expect("rotate forward")
+        .expect("working PR");
+
+        assert_eq!(second.sequence, 2);
+        assert_eq!(second.branch, "jack/task-pr-proof-keep-going");
+        assert_eq!(second.base_commit, base);
+        assert_eq!(second.phase(), PrPhase::Working);
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            second.branch
+        );
+        // The preserved follow-up edit survived the rotation onto the new branch.
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("follow-up.txt")).expect("follow-up survives"),
+            "second PR work\n"
+        );
+        let prs = store.task_prs(&session.id).await.expect("read PR history");
+        assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(prs[0].phase(), PrPhase::Merged);
     }
 
     #[test]

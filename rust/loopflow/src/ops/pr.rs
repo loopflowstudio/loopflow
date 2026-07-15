@@ -336,7 +336,7 @@ pub(crate) fn current_or_merged_pr_for_branch(
     let list: Vec<GhPr> = serde_json::from_slice(&output.stdout).map_err(|error| {
         OpsError::Message(format!("failed to parse gh pr list output: {error}"))
     })?;
-    Ok(list.into_iter().next().map(|pr| PrInfo {
+    Ok(select_reconcile_pr(list).map(|pr| PrInfo {
         url: pr.url,
         number: pr.number,
         state: if pr.is_draft {
@@ -347,6 +347,24 @@ pub(crate) fn current_or_merged_pr_for_branch(
         branch: branch.to_string(),
         merge_commit: pr.merge_commit.map(|commit| commit.oid),
     }))
+}
+
+/// A branch can carry several PRs — a merged one plus a stray open/draft or
+/// closed sibling left behind by a land. The merged PR is the branch's truth;
+/// reconcile must observe it. Rank **merged > open/draft > closed**, newest as
+/// the tiebreak within a rank, so an out-of-band merge is never hidden by a
+/// noisier sibling.
+fn select_reconcile_pr(prs: Vec<GhPr>) -> Option<GhPr> {
+    prs.into_iter()
+        .max_by_key(|pr| (reconcile_rank(pr), pr.number))
+}
+
+fn reconcile_rank(pr: &GhPr) -> u8 {
+    match pr.state.to_ascii_uppercase().as_str() {
+        "MERGED" => 3,
+        "CLOSED" => 1,
+        _ => 2, // open, including drafts
+    }
 }
 
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
@@ -815,7 +833,44 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_generated_pr_copy, pr_number_from_url, PrCopy};
+    use super::{parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhPr, PrCopy};
+
+    fn gh_pr(number: u64, state: &str, is_draft: bool) -> GhPr {
+        GhPr {
+            url: format!("https://example.com/pr/{number}"),
+            state: state.to_string(),
+            is_draft,
+            number,
+            merge_commit: None,
+        }
+    }
+
+    #[test]
+    fn reconcile_prefers_the_merged_pr_over_a_newer_sibling() {
+        // A land left a newer empty draft (#909) beside the merged PR (#905).
+        let picked =
+            select_reconcile_pr(vec![gh_pr(909, "OPEN", true), gh_pr(905, "MERGED", false)])
+                .expect("a PR is selected");
+        assert_eq!(picked.number, 905);
+        assert_eq!(picked.state, "MERGED");
+    }
+
+    #[test]
+    fn reconcile_prefers_open_over_closed_and_newest_within_a_rank() {
+        assert_eq!(
+            select_reconcile_pr(vec![gh_pr(20, "CLOSED", false), gh_pr(10, "OPEN", false)])
+                .unwrap()
+                .number,
+            10
+        );
+        assert_eq!(
+            select_reconcile_pr(vec![gh_pr(10, "OPEN", false), gh_pr(20, "OPEN", true)])
+                .unwrap()
+                .number,
+            20
+        );
+        assert!(select_reconcile_pr(vec![]).is_none());
+    }
 
     #[test]
     fn created_pr_url_carries_the_attachment_number() {

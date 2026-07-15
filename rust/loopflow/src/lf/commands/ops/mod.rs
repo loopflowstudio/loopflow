@@ -93,7 +93,21 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Abandon { force, branch }) => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
+        Some(PrCommand::Next { slug }) => pr_next(slug.as_deref()),
     }
+}
+
+fn pr_next(slug: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let pr = crate::ops::task::pr_next(&repo_root, slug)?;
+    println!(
+        "Rotated to PR {} on {} (base {}).",
+        pr.sequence,
+        pr.branch,
+        &pr.base_commit[..pr.base_commit.len().min(12)]
+    );
+    println!("Push your follow-up edits, then `lf pr open` when ready.");
+    Ok(())
 }
 
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {

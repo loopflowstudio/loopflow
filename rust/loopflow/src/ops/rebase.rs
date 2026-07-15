@@ -270,6 +270,7 @@ fn scratch_stash_path(repo: &Path, branch: &str) -> PathBuf {
     let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
     let safe_branch = branch.replace(['/', '.'], "-");
     repo.join(".lf")
+        .join("tmp")
         .join("scratch-stash")
         .join(format!("{safe_branch}-{ts}"))
 }
@@ -396,5 +397,26 @@ pub fn rebase_strategy_name(strategy: &RebaseStrategy) -> &'static str {
         RebaseStrategy::Noop => "noop",
         RebaseStrategy::ResetToBase => "reset_to_base",
         RebaseStrategy::DirectRebase => "direct_rebase",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scratch_stash_path;
+    use std::path::Path;
+
+    #[test]
+    fn scratch_stash_lands_under_the_ignored_tmp_prefix() {
+        let path = scratch_stash_path(Path::new("/repo"), "jack/reconcile-out-of-band-merges");
+        // .lf/tmp/ is gitignored; a sibling like .lf/scratch-stash/ would dirty
+        // the worktree and block `lf task complete`.
+        assert!(
+            path.starts_with("/repo/.lf/tmp/scratch-stash"),
+            "stash must sit under the ignored .lf/tmp prefix, got {}",
+            path.display()
+        );
+        // Slashes and dots in the branch are flattened so the dir name is safe.
+        let leaf = path.file_name().unwrap().to_string_lossy();
+        assert!(leaf.starts_with("jack-reconcile-out-of-band-merges-"));
     }
 }

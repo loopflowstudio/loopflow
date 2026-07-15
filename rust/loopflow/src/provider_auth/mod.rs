@@ -1527,7 +1527,8 @@ impl AuthBroker for CodexAuthBroker {
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
         let mut command = self.command();
         self.add_file_store_override(&mut command);
-        command.args(["login", "--device-auth"]);
+        command.arg("login");
+        command.env("BROWSER", "echo");
 
         start_auth_command(
             Provider::Codex,
@@ -1540,13 +1541,10 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        Ok(
-            if extract_codex_token_from_home(&self.codex_home).is_some() {
-                AuthStatus::Active { login: None }
-            } else {
-                AuthStatus::None
-            },
-        )
+        Ok(match extract_codex_token_from_home(&self.codex_home) {
+            Some(token) => AuthStatus::Active { login: token.login },
+            None => AuthStatus::None,
+        })
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
@@ -2635,16 +2633,35 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
             "access_token_expires_at",
         ],
     );
+    let login = codex_login_from_auth(&json);
     Some(ProviderToken {
         provider: "codex".to_string(),
         access_token: token.to_string(),
         refresh_token: None,
         oauth_client_id: None,
         expires_at,
-        login: None,
+        login,
         updated_at: now_unix(),
         credential_type: CredentialType::OAuth,
     })
+}
+
+fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
+    let id_token = json
+        .get("id_token")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            json.get("tokens")
+                .and_then(|tokens| tokens.get("id_token"))
+                .and_then(serde_json::Value::as_str)
+        })?;
+    let payload = id_token.split('.').nth(1)?.trim_end_matches('=');
+    let claims = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let claims = serde_json::from_slice::<serde_json::Value>(&claims).ok()?;
+    claims
+        .get("email")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> {
@@ -3950,6 +3967,26 @@ mod tests {
     }
 
     #[test]
+    fn generic_parser_accepts_native_codex_oauth_without_a_device_code() {
+        let mut builder = AuthFlowBuilder::default();
+        parse_generic_auth_line(
+            "https://auth.openai.com/oauth/authorize?client_id=test&state=test-state",
+            &mut builder,
+        );
+
+        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        assert_eq!(
+            response.verification_uri,
+            "https://auth.openai.com/oauth/authorize"
+        );
+        assert_eq!(response.user_code, None);
+        assert_eq!(
+            response.verification_uri_complete.as_deref(),
+            Some("https://auth.openai.com/oauth/authorize?client_id=test&state=test-state")
+        );
+    }
+
+    #[test]
     fn github_parser_handles_code_and_url_on_separate_lines() {
         let mut builder = AuthFlowBuilder::default();
         parse_github_auth_line("! First copy your one-time code: 09FB-AAD5", &mut builder);
@@ -4409,6 +4446,29 @@ mod tests {
         let token = extract_codex_token(tmp.path()).expect("oauth token should load");
         assert_eq!(token.provider, "codex");
         assert_eq!(token.access_token, "nested-oauth-token");
+    }
+
+    #[test]
+    fn extract_codex_token_reads_login_from_the_id_token() {
+        let tmp = tempdir().expect("tempdir");
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        let claims = URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
+        let id_token = format!("header.{claims}.signature");
+        fs::write(
+            codex_dir.join("auth.json"),
+            serde_json::json!({
+                "tokens": {
+                    "access_token": "nested-oauth-token",
+                    "id_token": id_token,
+                }
+            })
+            .to_string(),
+        )
+        .expect("write auth json");
+
+        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
+        assert_eq!(token.login.as_deref(), Some("engineering@example.com"));
     }
 
     #[test]

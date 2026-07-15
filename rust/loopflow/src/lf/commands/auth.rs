@@ -161,8 +161,8 @@ async fn connect(raw_provider: &str) -> Result<()> {
         "Opening {} auth in your browser...",
         provider.display_name()
     );
-    println!("If the browser does not open, visit:\n{verification_url}");
     open_url(&verification_url);
+    println!("Complete authorization in the browser.");
 
     wait_for_active_status(&service, provider, flow.expires_in).await
 }
@@ -176,16 +176,7 @@ async fn connect_account(
     let provider = parse_managed_provider(raw_provider)?;
     let account_id = parse_account_id(raw_account)?;
     let profile = ensure_account_profile(provider, &account_id)?;
-    if (raw_chrome_profile.is_some() || raw_profile.is_some()) && provider != Provider::Claude {
-        return Err(anyhow!(
-            "--profile and --chrome-profile are supported for Claude only"
-        ));
-    }
-    let chrome_profile = if provider == Provider::Claude {
-        resolve_auth_chrome_profile(raw_profile, raw_chrome_profile).await?
-    } else {
-        None
-    };
+    let chrome_profile = resolve_auth_chrome_profile(raw_profile, raw_chrome_profile).await?;
     let controller_profile = (provider == Provider::Claude
         && profile.join(".credentials.json").is_file())
     .then(|| profile.clone());
@@ -207,7 +198,7 @@ async fn connect_account(
     );
     if handle.requires_authorization_code() {
         let opened_matching_chrome = if let Some(chrome_profile) = &chrome_profile {
-            open_claude_chrome_profile(chrome_profile, &verification_url)?;
+            open_chrome_profile(chrome_profile, &verification_url)?;
             true
         } else {
             false
@@ -226,7 +217,7 @@ async fn connect_account(
                 .submit_authorization_code(code.expose_secret())
                 .await?;
         } else {
-            println!("Chrome controller unavailable. Open:\n{verification_url}");
+            println!("Chrome controller unavailable; complete authorization in the browser.");
             if !opened_matching_chrome {
                 open_url(&verification_url);
             }
@@ -238,11 +229,12 @@ async fn connect_account(
                 .await?;
         }
     } else {
-        println!("If the browser does not open, visit:\n{verification_url}");
-        if let Some(user_code) = &flow.user_code {
-            println!("Enter code: {user_code}");
+        println!("Complete authorization in the browser.");
+        if let Some(chrome_profile) = &chrome_profile {
+            open_chrome_profile(chrome_profile, &verification_url)?;
+        } else {
+            open_url(&verification_url);
         }
-        open_url(&verification_url);
     }
     tokio::time::timeout(AUTH_STATUS_POLL_TIMEOUT, handle.wait())
         .await
@@ -351,7 +343,17 @@ async fn import_account(
         .map(String::from);
 
     let login = if provider_profile.join(".credentials.json").is_file() {
-        None
+        match provider_account_auth_status(provider, provider_profile.clone()).await? {
+            AuthStatus::Active { login } => login,
+            other => {
+                return Err(anyhow!(
+                    "{} account '{}' has status {}",
+                    provider.display_name(),
+                    account_id,
+                    other.as_str()
+                ))
+            }
+        }
     } else {
         let ambient = read_ambient_claude_status()?;
         if !ambient.logged_in {
@@ -451,20 +453,27 @@ fn verified_login_for_chrome_profile(
     let expected_login = chrome_profile
         .map(|profile| profile.label.as_str())
         .filter(|label| label.contains('@'));
-    if let (Some(expected), Some(actual)) = (expected_login, provider_login.as_deref()) {
-        if !expected.eq_ignore_ascii_case(actual) {
-            return Err(anyhow!(
-                "provider login '{}' does not match Chrome profile '{}'",
-                actual,
-                expected
-            ));
-        }
+    let Some(expected) = expected_login else {
+        return Ok(provider_login);
+    };
+    let actual = provider_login.as_deref().ok_or_else(|| {
+        anyhow!(
+            "provider did not report a login email for Chrome profile '{}'",
+            expected
+        )
+    })?;
+    if !expected.eq_ignore_ascii_case(actual) {
+        return Err(anyhow!(
+            "provider login '{}' does not match Chrome profile '{}'",
+            actual,
+            expected
+        ));
     }
-    Ok(provider_login.or_else(|| expected_login.map(String::from)))
+    Ok(provider_login)
 }
 
 #[cfg(target_os = "macos")]
-fn open_claude_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
+fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
     let chrome = Path::new("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
     if !chrome.is_file() {
         return Err(anyhow!("Google Chrome is not installed in /Applications"));
@@ -485,7 +494,7 @@ fn open_claude_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result
 }
 
 #[cfg(not(target_os = "macos"))]
-fn open_claude_chrome_profile(_profile: &LocalChromeProfile, _url: &str) -> Result<()> {
+fn open_chrome_profile(_profile: &LocalChromeProfile, _url: &str) -> Result<()> {
     Err(anyhow!(
         "opening a selected Chrome profile is currently supported on macOS only"
     ))
@@ -1024,9 +1033,6 @@ mod tests {
             Some("personal@example.com".to_string()),
         )
         .is_err());
-        assert_eq!(
-            verified_login_for_chrome_profile(Some(&chrome_profile), None).unwrap(),
-            Some("primary@example.com".to_string())
-        );
+        assert!(verified_login_for_chrome_profile(Some(&chrome_profile), None).is_err());
     }
 }

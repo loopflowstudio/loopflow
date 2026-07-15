@@ -484,11 +484,11 @@ lf auth set claude personal --login-email personal@example.com
 lf auth connect claude --account primary --profile primary@example.com
 lf auth set claude primary --login-email primary@example.com --plan max
 
-lf auth connect codex --account primary
+lf auth connect codex --account primary --profile primary@example.com
 lf auth set codex primary --login-email primary@example.com --plan max
-lf auth connect codex --account engineering
+lf auth connect codex --account engineering --profile engineering@example.com
 lf auth set codex engineering --login-email engineering@example.com --plan max
-lf auth connect codex --account personal
+lf auth connect codex --account personal --profile personal@example.com
 lf auth set codex personal --login-email personal@example.com
 lf auth accounts claude
 
@@ -513,6 +513,13 @@ lf auth disconnect claude --account personal
 
 These addresses are placeholders. Profiles, account bindings, and repository
 routes live in the local Loopflow database; Loopflow ships no account topology.
+
+Codex account connection uses Codex's native local OAuth callback. Loopflow
+opens the authorization URL in the profile's bound Chrome directory, waits for
+the human to approve it, verifies the login email from Codex's ID token, then
+registers the isolated account home. It does not drive the OpenAI page or use
+device-code auth. Authenticate on the local host before `lf ssh`; SSH forwards
+the selected credential for the process lifetime.
 
 Claude authorization runs through Claude in Chrome when its browser extension
 is connected. If the controller is unavailable, Loopflow falls back to a hidden

@@ -27,7 +27,7 @@ A Session used to re-derive its execution context from whichever process happene
 
 `lf status` claimed to be a wave's audit surface but reported only the project/task hierarchy and loop state. The runs a wave had produced and the work sitting on somebody were both missing.
 
-- **Runs and attention are on the wire** — both land in `WaveDetailSnapshot`, print in the human view, and are mirrored in Swift. Runs fold out of the same ledger and the same `summarize()` as `lf runs`, filtered to the wave, so the two surfaces cannot disagree; an active run is never dropped by the window cap (#881).
+- **Runs and attention are on the wire** — both land in `WaveDetailSnapshot`, print in the human view, and are mirrored in Swift. A run is now one agent-backed skill call, the grain that owns context, tokens, cost, and outcome; status filters those runs to its Wave. Process-level lookups moved to `lf execs`, and `lf trace <exec-id>` owns process-tree diagnosis. An active run is never dropped by the window cap (#881).
 - **"Found nothing" and "could not look" are different facts** — both fields ride a new `Evidence<T>` wire enum: `Ok { items, truncated }` or `Unavailable { reason }`. A status surface that renders a failed ledger read as an empty list is lying to whoever is on call, and `truncated` keeps a full page from reading as "that was all there was" (#881).
 - **Liveness is only asserted where it's observable** — attention derives from the durable Session registry. With no tmux, `process_alive: false` means "unknown", not "gone", and no phantom finding is raised. Bare `lf status` resolves the ambient wave by `LF_WAVE_ID`, and reports a *stale* context rather than "no wave" when the id isn't on this machine (#881).
 

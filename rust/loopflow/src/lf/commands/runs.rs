@@ -1,8 +1,9 @@
-//! `lf runs` and `lf trace` — read the local run ledger.
+//! `lf runs`, `lf execs`, and `lf trace` — read local execution evidence.
 //!
-//! Both commands are pure readers over the machine-grain SQLite ledger
-//! (`run_events`, written by every `lf` invocation) plus the prompt logs on
-//! disk. Local-only: nothing is fetched from anywhere.
+//! Runs are agent-backed skill launches, the grain that owns context and token
+//! evidence. Execs are `lf` processes, the grain that owns argv and process
+//! lineage. Trace joins the two through `run_id` and `process_id`. All commands
+//! are local-only readers; nothing is fetched from anywhere.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader};
@@ -17,92 +18,164 @@ use crate::wave::journal::short_id;
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
-/// `lf runs`: timeline of recent runs across every repo on this machine.
-/// `--json` emits the same window as a machine-readable array (Loopflow's
-/// run-history snapshot) — the durable ledger the live `op` frames mirror.
+/// `lf runs`: recent agent-backed skill launches across this machine.
 pub fn list(json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
     let events = store
         .list_run_events_since(since)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+    let launches = store
+        .agent_launches_since(since)
+        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?
+        .into_iter()
+        .filter(|launch| launch.skill.is_some())
+        .collect::<Vec<_>>();
+    let launch_ids = launches
+        .iter()
+        .map(|launch| launch.id.clone())
+        .collect::<Vec<_>>();
+    let turns = store
+        .agent_turns_for_launches(&launch_ids)
+        .map_err(|err| anyhow!("failed to read run turns: {err}"))?;
 
-    let mut summaries = summarize(&events);
-    summaries.sort_by_key(|run| std::cmp::Reverse(run.started));
-    summaries.truncate(MAX_RUNS);
+    let mut runs = summarize_runs(&events, &launches, &turns);
+    sort_runs(&mut runs);
+    cap_runs(&mut runs);
 
     if json {
-        println!("{}", serde_json::to_string(&summaries)?);
+        println!("{}", serde_json::to_string(&runs)?);
         return Ok(());
     }
 
-    if summaries.is_empty() {
-        println!("No runs recorded in the last {WINDOW_DAYS} days.");
+    if runs.is_empty() {
+        println!("No skill runs recorded in the last {WINDOW_DAYS} days.");
         return Ok(());
     }
 
     let colors = Colors::default();
     println!(
-        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<7}  TRACE/SPAN{reset}",
+        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {context:>9}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<7}  RUN{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
         repo = "REPO",
         wave = "WAVE",
         label = "RUN",
+        context = "CONTEXT",
         tokens = "TOKENS",
         cost = "COST",
         agent = "AGENT",
         status = "STATUS",
     );
-    for run in &summaries {
+    for run in &runs {
         println!(
-            "{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<7}  {run}/{span}",
+            "{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {context:>9}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<7}  {id}",
             time = format_time(run.started),
-            repo = truncate(&display_repo(run.repo.as_deref()), 14),
+            repo = truncate(&display_repo(Some(&run.repo)), 14),
             wave = truncate(run.wave.as_deref().unwrap_or("-"), 10),
-            label = truncate(&run.label, 22),
+            label = truncate(&run.label(), 22),
+            context = format_tokens(run.supplied_context_tokens),
             tokens = format_tokens(run.total_tokens()),
             cost = run
                 .cost_usd
                 .map(format_cost)
                 .unwrap_or_else(|| "-".to_string()),
-            agent = truncate(&format_agent(run.provider.as_deref(), run.model.as_deref()), 18),
+            agent = truncate(
+                &format_agent(Some(run.provider.as_str()), run.model.as_deref()),
+                18
+            ),
             status = run.status,
-            run = short_id(&run.run_id),
-            span = short_id(&run.process_id),
+            id = short_id(&run.id),
         );
     }
     Ok(())
 }
 
-/// `lf trace <run-id>`: reconstruct one run (id may be a unique prefix).
+/// `lf execs`: recent `lf` processes across every repo on this machine.
+pub fn list_execs(json: bool) -> Result<()> {
+    let store = open_ledger().map_err(|err| anyhow!("exec ledger unavailable: {err}"))?;
+    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
+    let events = store
+        .list_run_events_since(since)
+        .map_err(|err| anyhow!("failed to read exec ledger: {err}"))?;
+
+    let mut execs = summarize_execs(&events);
+    execs.sort_by_key(|exec| std::cmp::Reverse(exec.started));
+    execs.truncate(MAX_RUNS);
+
+    if json {
+        println!("{}", serde_json::to_string(&execs)?);
+        return Ok(());
+    }
+    if execs.is_empty() {
+        println!("No execs recorded in the last {WINDOW_DAYS} days.");
+        return Ok(());
+    }
+
+    let colors = Colors::default();
+    println!(
+        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<38}  {status:<7}  EXEC{reset}",
+        bold = colors.bold,
+        reset = colors.reset,
+        time = "TIME",
+        repo = "REPO",
+        wave = "WAVE",
+        label = "EXEC",
+        status = "STATUS",
+    );
+    for exec in &execs {
+        println!(
+            "{time:<12}  {repo:<14}  {wave:<10}  {label:<38}  {status:<7}  {id}",
+            time = format_time(exec.started),
+            repo = truncate(&display_repo(exec.repo.as_deref()), 14),
+            wave = truncate(exec.wave.as_deref().unwrap_or("-"), 10),
+            label = truncate(&exec.label, 38),
+            status = exec.status,
+            id = short_id(&exec.id),
+        );
+    }
+    Ok(())
+}
+
+/// `lf trace <exec-id>`: reconstruct the process tree containing one exec.
 pub fn trace(
-    run_id: &str,
+    exec_id: &str,
     json: bool,
     events_mode: bool,
     jsonl: bool,
     launch_prefix: Option<&str>,
 ) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
-    let events = store
-        .run_events_matching(run_id)
+    let matches = store
+        .run_events_matching_exec(exec_id)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
 
-    let ids: BTreeSet<&str> = events.iter().map(|event| event.run_id.as_str()).collect();
-    match ids.len() {
-        0 => return Err(anyhow!("no run matching '{run_id}' in the ledger")),
+    let exec_ids: BTreeSet<&str> = matches
+        .iter()
+        .map(|event| event.process_id.as_str())
+        .collect();
+    match exec_ids.len() {
+        0 => return Err(anyhow!("no exec matching '{exec_id}' in the ledger")),
         1 => {}
         _ => {
             return Err(anyhow!(
-                "'{run_id}' is ambiguous — matches: {}",
-                ids.into_iter().map(short_id).collect::<Vec<_>>().join(", ")
+                "exec '{exec_id}' is ambiguous — matches: {}",
+                exec_ids
+                    .into_iter()
+                    .map(short_id)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))
         }
     }
+    let trace_id = matches[0].run_id.clone();
+    let events = store
+        .run_events_matching(&trace_id)
+        .map_err(|err| anyhow!("failed to read trace: {err}"))?;
 
     let spans = trace_spans(&events);
-    let launches = store.agent_launches_matching(&events[0].run_id)?;
+    let launches = store.agent_launches_matching(&trace_id)?;
     if events_mode {
         return trace_events(&launches, launch_prefix, jsonl);
     }
@@ -116,7 +189,7 @@ pub fn trace(
         println!(
             "{}",
             serde_json::to_string(&TraceDto {
-                run_id: events[0].run_id.clone(),
+                trace_id: events[0].run_id.clone(),
                 spans,
                 launches,
                 turns,
@@ -134,7 +207,7 @@ pub fn trace(
 
     let header = &events[0];
     println!(
-        "{bold}run {id}{reset}  {repo}{wave}",
+        "{bold}trace {id}{reset}  {repo}{wave}",
         bold = colors.bold,
         reset = colors.reset,
         id = full_id,
@@ -226,7 +299,7 @@ pub fn trace(
 
 #[derive(Debug, serde::Serialize)]
 pub struct TraceDto {
-    pub run_id: String,
+    pub trace_id: String,
     pub spans: Vec<SpanDto>,
     pub launches: Vec<crate::trace::AgentLaunchRow>,
     pub turns: Vec<crate::trace::AgentTurnRow>,
@@ -326,79 +399,217 @@ fn print_recorded_event(event: &crate::trace::RecordedConversationEvent) {
     }
 }
 
-/// One run folded out of the ledger — the shape `lf runs` prints and
-/// `lf runs --json` emits, and the `runs` evidence in `lf status`. Wire type
-/// consumed by Loopflow: every field required or explicitly Optional, no serde
-/// defaults. `started`/`ended` are unix seconds (the ledger's grain).
+/// One agent-backed skill launch. This is the shared wire type for `lf runs`
+/// and the Runs evidence in `lf status`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RunLedgerEntry {
-    /// The process is the run's identity here; `id` is the key Loopflow keys on.
+pub struct SkillRunEntry {
+    /// Agent launch id: the run's stable identity.
     pub id: String,
-    pub run_id: String,
-    pub process_id: String,
-    pub parent_process_id: Option<String>,
+    pub trace_id: String,
+    pub exec_id: String,
+    pub parent_exec_id: Option<String>,
+    pub repo: String,
+    pub worktree: String,
+    pub wave: Option<String>,
+    pub flow: Option<String>,
+    pub skill: String,
+    pub status: String,
+    pub started: i64,
+    pub ended: Option<i64>,
+    pub turns: i64,
+    pub system_tokens: i64,
+    pub task_tokens: i64,
+    pub supplied_context_tokens: i64,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
+    pub cost_usd: Option<f64>,
+    pub duration_secs: Option<f64>,
+    pub provider: String,
+    pub model: Option<String>,
+    pub surface: String,
+    pub capture_status: String,
+}
+
+impl SkillRunEntry {
+    pub(crate) fn label(&self) -> String {
+        self.flow
+            .as_deref()
+            .filter(|flow| *flow != self.skill.as_str())
+            .map(|flow| format!("{flow}/{}", self.skill))
+            .unwrap_or_else(|| self.skill.clone())
+    }
+
+    pub(crate) fn total_tokens(&self) -> i64 {
+        self.input_tokens.unwrap_or(0) + self.output_tokens.unwrap_or(0)
+    }
+
+    fn is_active(&self) -> bool {
+        self.ended.is_none()
+    }
+}
+
+/// One `lf` process folded out of `run_events`. `lf execs` keeps this diagnostic
+/// grain separate from the skill runs that own model evidence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExecLedgerEntry {
+    /// Exec/process id: the stable identity shown by `lf execs`.
+    pub id: String,
+    pub trace_id: String,
+    pub parent_exec_id: Option<String>,
     pub repo: Option<String>,
     pub wave: Option<String>,
     pub label: String,
     pub status: String,
     pub started: i64,
     pub ended: Option<i64>,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_read_tokens: i64,
-    pub cost_usd: Option<f64>,
-    pub duration_secs: Option<f64>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
 }
 
-impl RunLedgerEntry {
-    fn total_tokens(&self) -> i64 {
-        self.input_tokens + self.output_tokens
-    }
-
-    /// A run the ledger never saw finish.
-    pub fn is_active(&self) -> bool {
-        self.ended.is_none()
-    }
-}
-
-/// The runs one wave produced, newest first, plus whether the window's cap hid
-/// older ones. Same ledger and same fold as `lf runs` — `lf status` differs only
-/// in the filter, so the two surfaces cannot disagree about a run.
-///
-/// An active run is never dropped by the cap: what the wave is doing right now
-/// outranks what it did.
-pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<RunLedgerEntry>, bool)> {
+/// The skill runs one Wave produced, newest first.
+pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<SkillRunEntry>, bool)> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
     let events = store
         .list_run_events_since(since)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+    let launches = store
+        .agent_launches_since(since)
+        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?
+        .into_iter()
+        .filter(|launch| launch.wave.as_deref() == Some(wave) && launch.skill.is_some())
+        .collect::<Vec<_>>();
+    let launch_ids = launches
+        .iter()
+        .map(|launch| launch.id.clone())
+        .collect::<Vec<_>>();
+    let turns = store
+        .agent_turns_for_launches(&launch_ids)
+        .map_err(|err| anyhow!("failed to read run turns: {err}"))?;
 
-    let mut runs = summarize(&events);
-    runs.retain(|run| run.wave.as_deref() == Some(wave));
-    runs.sort_by_key(|run| std::cmp::Reverse(run.started));
-
-    let truncated = runs.len() > MAX_RUNS;
-    if truncated {
-        let active = runs.iter().filter(|run| run.is_active()).count();
-        let mut budget = MAX_RUNS.saturating_sub(active);
-        runs.retain(|run| {
-            if run.is_active() {
-                return true;
-            }
-            if budget == 0 {
-                return false;
-            }
-            budget -= 1;
-            true
-        });
-    }
+    let mut runs = summarize_runs(&events, &launches, &turns);
+    sort_runs(&mut runs);
+    let truncated = cap_runs(&mut runs);
     Ok((runs, truncated))
 }
 
-fn summarize(events: &[RunEventRow]) -> Vec<RunLedgerEntry> {
+fn sort_runs(runs: &mut [SkillRunEntry]) {
+    runs.sort_by(|left, right| {
+        right
+            .started
+            .cmp(&left.started)
+            .then_with(|| right.id.cmp(&left.id))
+    });
+}
+
+fn cap_runs(runs: &mut Vec<SkillRunEntry>) -> bool {
+    let truncated = runs.len() > MAX_RUNS;
+    if !truncated {
+        return false;
+    }
+    let active = runs.iter().filter(|run| run.is_active()).count();
+    let mut budget = MAX_RUNS.saturating_sub(active);
+    runs.retain(|run| {
+        if run.is_active() {
+            return true;
+        }
+        if budget == 0 {
+            return false;
+        }
+        budget -= 1;
+        true
+    });
+    true
+}
+
+fn summarize_runs(
+    events: &[RunEventRow],
+    launches: &[crate::trace::AgentLaunchRow],
+    turns: &[crate::trace::AgentTurnRow],
+) -> Vec<SkillRunEntry> {
+    let process_parents = events
+        .iter()
+        .map(|event| (event.process_id.as_str(), event.parent_process_id.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut turns_by_launch: BTreeMap<&str, Vec<&crate::trace::AgentTurnRow>> = BTreeMap::new();
+    for turn in turns {
+        turns_by_launch
+            .entry(turn.launch_id.as_str())
+            .or_default()
+            .push(turn);
+    }
+
+    launches
+        .iter()
+        .filter_map(|launch| {
+            let skill = launch.skill.clone()?;
+            let turns = turns_by_launch
+                .get(launch.id.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            Some(SkillRunEntry {
+                id: launch.id.clone(),
+                trace_id: launch.run_id.clone(),
+                exec_id: launch.process_id.clone(),
+                parent_exec_id: process_parents
+                    .get(launch.process_id.as_str())
+                    .cloned()
+                    .flatten(),
+                repo: launch.repo.clone(),
+                worktree: launch.worktree.clone(),
+                wave: launch.wave.clone(),
+                flow: launch.flow.clone(),
+                skill,
+                status: launch_status_label(&launch.outcome).to_string(),
+                started: launch.started_at,
+                ended: launch.ended_at,
+                turns: turns.len() as i64,
+                system_tokens: turns.iter().map(|turn| turn.system_tokens).sum(),
+                task_tokens: turns.iter().map(|turn| turn.task_tokens).sum(),
+                supplied_context_tokens: turns
+                    .iter()
+                    .map(|turn| turn.supplied_context_tokens)
+                    .sum(),
+                input_tokens: sum_optional_i64(turns.iter().map(|turn| turn.provider_input_tokens)),
+                output_tokens: sum_optional_i64(
+                    turns.iter().map(|turn| turn.provider_output_tokens),
+                ),
+                reasoning_tokens: sum_optional_i64(turns.iter().map(|turn| turn.reasoning_tokens)),
+                cache_read_tokens: sum_optional_i64(
+                    turns.iter().map(|turn| turn.cache_read_tokens),
+                ),
+                cache_write_tokens: sum_optional_i64(
+                    turns.iter().map(|turn| turn.cache_write_tokens),
+                ),
+                cost_usd: sum_optional_f64(turns.iter().map(|turn| turn.cost_usd)),
+                duration_secs: launch
+                    .ended_at
+                    .map(|ended| ended.saturating_sub(launch.started_at).max(0) as f64),
+                provider: launch.provider.clone(),
+                model: launch.model.clone(),
+                surface: launch.surface.clone(),
+                capture_status: launch.capture_status.clone(),
+            })
+        })
+        .collect()
+}
+
+fn sum_optional_i64(values: impl Iterator<Item = Option<i64>>) -> Option<i64> {
+    values.fold(None, |total, value| match (total, value) {
+        (None, None) => None,
+        (total, value) => Some(total.unwrap_or(0) + value.unwrap_or(0)),
+    })
+}
+
+fn sum_optional_f64(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {
+    values.fold(None, |total, value| match (total, value) {
+        (None, None) => None,
+        (total, value) => Some(total.unwrap_or(0.0) + value.unwrap_or(0.0)),
+    })
+}
+
+fn summarize_execs(events: &[RunEventRow]) -> Vec<ExecLedgerEntry> {
     let mut by_process: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
     for event in events {
         by_process.entry(&event.process_id).or_default().push(event);
@@ -411,11 +622,10 @@ fn summarize(events: &[RunEventRow]) -> Vec<RunLedgerEntry> {
                 .iter()
                 .filter(|e| e.node == "run" && e.event != "started")
                 .max_by_key(|event| event.seq);
-            RunLedgerEntry {
+            ExecLedgerEntry {
                 id: process_id.to_string(),
-                run_id: events[0].run_id.clone(),
-                process_id: process_id.to_string(),
-                parent_process_id: events[0].parent_process_id.clone(),
+                trace_id: events[0].run_id.clone(),
+                parent_exec_id: events[0].parent_process_id.clone(),
                 repo: events.iter().find_map(|e| e.repo.clone()),
                 wave: events.iter().find_map(|e| e.wave.clone()),
                 label: events
@@ -430,17 +640,6 @@ fn summarize(events: &[RunEventRow]) -> Vec<RunLedgerEntry> {
                     .map(|e| status_label(&e.event))
                     .unwrap_or("running")
                     .to_string(),
-                input_tokens: terminal.and_then(|e| e.input_tokens).unwrap_or(0),
-                output_tokens: terminal.and_then(|e| e.output_tokens).unwrap_or(0),
-                cache_read_tokens: terminal.and_then(|e| e.cache_read_tokens).unwrap_or(0),
-                cost_usd: terminal.and_then(|e| e.cost_usd),
-                duration_secs: terminal.and_then(|e| e.duration_secs),
-                provider: terminal
-                    .and_then(|event| event.provider.clone())
-                    .or_else(|| events.iter().rev().find_map(|event| event.provider.clone())),
-                model: terminal
-                    .and_then(|event| event.model.clone())
-                    .or_else(|| events.iter().rev().find_map(|event| event.model.clone())),
             }
         })
         .collect()
@@ -646,6 +845,14 @@ fn status_label(event: &str) -> &'static str {
     }
 }
 
+fn launch_status_label(outcome: &str) -> &'static str {
+    match outcome {
+        "completed" => "ok",
+        "failed" | "interrupted" => "error",
+        _ => "running",
+    }
+}
+
 fn print_span_tree(spans: &[SpanDto]) {
     let mut children: BTreeMap<Option<&str>, Vec<&SpanDto>> = BTreeMap::new();
     for span in spans {
@@ -742,7 +949,7 @@ fn format_duration(secs: i64) -> String {
     }
 }
 
-fn format_tokens(value: i64) -> String {
+pub(crate) fn format_tokens(value: i64) -> String {
     if value >= 1_000_000 {
         format!("{:.1}M", value as f64 / 1_000_000.0)
     } else if value >= 1_000 {
@@ -757,7 +964,8 @@ fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        boundary_spans, format_duration, format_tokens, own_spend, summarize, trace_spans, SpanDto,
+        boundary_spans, format_duration, format_tokens, own_spend, summarize_execs, trace_spans,
+        SpanDto,
     };
     use crate::store::RunEventRow;
 
@@ -789,27 +997,24 @@ mod tests {
     }
 
     #[test]
-    fn summarize_folds_run_events_into_one_summary() {
-        let mut terminal = row("abc", 1, 110, "run", "completed");
-        terminal.input_tokens = Some(1000);
-        terminal.output_tokens = Some(200);
+    fn summarize_execs_folds_process_events_into_one_summary() {
+        let terminal = row("abc", 1, 110, "run", "completed");
         let events = vec![row("abc", 0, 100, "run", "started"), terminal];
 
-        let summaries = summarize(&events);
+        let summaries = summarize_execs(&events);
         assert_eq!(summaries.len(), 1);
         let run = &summaries[0];
-        assert_eq!(run.run_id, "abc");
+        assert_eq!(run.trace_id, "abc");
         assert_eq!(run.started, 100);
         assert_eq!(run.ended, Some(110));
         assert_eq!(run.status, "ok");
-        assert_eq!(run.total_tokens(), 1200);
         assert_eq!(run.label, "gate"); // from command argv
     }
 
     #[test]
-    fn summarize_marks_unterminated_runs_as_running() {
+    fn summarize_execs_marks_unterminated_processes_as_running() {
         let events = vec![row("abc", 0, 100, "run", "started")];
-        let summaries = summarize(&events);
+        let summaries = summarize_execs(&events);
         assert_eq!(summaries[0].status, "running");
         assert_eq!(summaries[0].ended, None);
     }
@@ -823,7 +1028,6 @@ mod tests {
         parent_end.seq = 1;
         parent_end.ts = 120;
         parent_end.event = "completed".to_string();
-        parent_end.cost_usd = Some(1.25);
 
         let mut child_start = row("66863649", 0, 105, "run", "started");
         child_start.process_id = "child".to_string();
@@ -833,22 +1037,19 @@ mod tests {
         child_end.seq = 1;
         child_end.ts = 110;
         child_end.event = "errored".to_string();
-        child_end.cost_usd = Some(0.05);
 
-        let summaries = summarize(&[parent_start, child_start, child_end, parent_end]);
+        let summaries = summarize_execs(&[parent_start, child_start, child_end, parent_end]);
         assert_eq!(summaries.len(), 2);
         let parent = summaries
             .iter()
-            .find(|summary| summary.process_id == "parent")
+            .find(|summary| summary.id == "parent")
             .unwrap();
         let child = summaries
             .iter()
-            .find(|summary| summary.process_id == "child")
+            .find(|summary| summary.id == "child")
             .unwrap();
         assert_eq!(parent.label, "wave intel");
-        assert_eq!(parent.cost_usd, Some(1.25));
         assert_eq!(child.label, "pm show");
-        assert_eq!(child.cost_usd, Some(0.05));
         assert_eq!(child.status, "error");
     }
 
@@ -938,11 +1139,9 @@ mod tests {
 
     #[test]
     fn json_entry_carries_fold_and_stable_keys() {
-        let mut terminal = row("abc", 1, 110, "run", "completed");
-        terminal.input_tokens = Some(1000);
-        terminal.output_tokens = Some(200);
+        let terminal = row("abc", 1, 110, "run", "completed");
         let events = vec![row("abc", 0, 100, "run", "started"), terminal];
-        let value = serde_json::to_value(&summarize(&events)[0]).expect("serialize");
+        let value = serde_json::to_value(&summarize_execs(&events)[0]).expect("serialize");
         assert_eq!(value["id"], "abc");
         assert_eq!(value["status"], "ok");
         assert_eq!(value["started"], 100);
@@ -950,7 +1149,7 @@ mod tests {
         assert_eq!(value["label"], "gate");
         // Explicitly-Optional fields stay present (a running run's `ended` is
         // null, never absent) — one stable shape for the client.
-        let running = summarize(&[row("xyz", 0, 100, "run", "started")]);
+        let running = summarize_execs(&[row("xyz", 0, 100, "run", "started")]);
         let value = serde_json::to_value(&running[0]).expect("serialize");
         assert_eq!(value["ended"], serde_json::Value::Null);
         assert_eq!(value["status"], "running");

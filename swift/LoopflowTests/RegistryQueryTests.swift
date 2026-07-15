@@ -68,7 +68,7 @@ struct RegistryQueryTests {
               "active_pr":null
             }]
           }],
-          "runs":{"state":"ok","truncated":false,"items":[{"id":"span-1","run_id":"abc","process_id":"span-1","parent_process_id":null,"repo":"/src/loopflow","wave":"goals","label":"pm sync","status":"ok","started":100,"ended":110,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus"}]},
+          "runs":{"state":"ok","truncated":false,"items":[{"id":"launch-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task_pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
           "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"review","reason":"PR is open","since":"2026-07-06T00:00:00Z","age_secs":7200}]},
           "home_runtime":{"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home":"jack@local"}}
         }
@@ -88,7 +88,8 @@ struct RegistryQueryTests {
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.slug == "wire-it")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.worktree == "/task-wt")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.branch == "jack/inf-123")
-        #expect(result.runs.items[0].label == "pm sync")
+        #expect(result.runs.items[0].skill == "task_pursue")
+        #expect(result.runs.items[0].suppliedContextTokens == 150)
         #expect(result.attention.items[0].subject == "INF-124")
         #expect(result.attention.items[0].owner == .review)
         #expect(result.attention.items[0].ageSeconds == 7200)
@@ -171,18 +172,19 @@ struct RegistryQueryTests {
     @Test("lf runs decodes the ledger window")
     func runsDecode() async throws {
         let json = """
-        [{"id":"span-1","run_id":"abc","process_id":"span-1","parent_process_id":null,"repo":"/src/loopflow","wave":"goals","label":"gate","status":"ok","started":100,"ended":110,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus"}]
+        [{"id":"launch-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","flow":"build","skill":"gate","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]
         """
         let query = RegistryQuery { _, _ in json }
 
         let runs = try await query.recentRuns()
         #expect(runs.count == 1)
-        #expect(runs[0].id == "span-1")
-        #expect(runs[0].runId == "abc")
+        #expect(runs[0].id == "launch-1")
+        #expect(runs[0].traceId == "abc")
         #expect(runs[0].wave == "goals")
         #expect(runs[0].status == "ok")
         #expect(runs[0].ended == 110)
         #expect(runs[0].cacheReadTokens == 800)
+        #expect(runs[0].suppliedContextTokens == 150)
         #expect(runs[0].model == "opus")
     }
 

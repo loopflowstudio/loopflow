@@ -324,16 +324,22 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show recent loopflow runs from the local ledger (all repos, local-only)
+    /// Show recent agent-backed skill runs with context and token evidence
     Runs {
         /// Emit the run history as JSON
         #[arg(long)]
         json: bool,
     },
-    /// Reconstruct one run from the local ledger: skills, durations, tokens, prompt logs
+    /// Show recent lf process executions (all repos, local-only)
+    Execs {
+        /// Emit the process history as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reconstruct the process tree containing one exec, with its skill launches
     Trace {
-        /// Run id from `lf runs` (a unique prefix is enough)
-        run_id: String,
+        /// Exec id from `lf execs` (a unique prefix is enough)
+        exec_id: String,
         /// Emit the process tree as JSON
         #[arg(long)]
         json: bool,

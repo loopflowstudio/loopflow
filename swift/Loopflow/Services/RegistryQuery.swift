@@ -108,11 +108,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    /// The recent-run window across every wave on the machine — the ledger the
-    /// live `op` frames mirror. A process timeline, not a second work hierarchy.
-    public func recentRuns() async throws -> [RunLedgerEntry] {
+    /// Recent agent-backed skill calls across every Wave, with their context and
+    /// token evidence. Process diagnostics live in `lf execs`.
+    public func recentRuns() async throws -> [SkillRunEntry] {
         let stdout = try await run(["runs", "--json"], nil)
-        return try Self.decode([RunLedgerEntry].self, from: stdout)
+        return try Self.decode([SkillRunEntry].self, from: stdout)
     }
 
     /// Filed PM tasks for one wave. Active runs remain a separate registry
@@ -380,7 +380,7 @@ struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
     let projects: [WaveProjectWork]
-    let runs: WorkEvidence<RunLedgerEntry>
+    let runs: WorkEvidence<SkillRunEntry>
     let attention: WorkEvidence<WaveAttentionItem>
     /// The focused Wave's Home probed for liveness and its one contextual action.
     let homeRuntime: HomeRuntime
@@ -392,38 +392,54 @@ struct WaveStatusSnapshot: Decodable {
     }
 }
 
-/// One folded run from `lf runs --json`. Mirrors Rust `RunLedgerEntry`
-/// (`lf/commands/runs.rs`): a ledger timeline entry, `started`/`ended` in unix
-/// seconds, `wave` a name (not an id).
-public struct RunLedgerEntry: Decodable, Sendable, Identifiable, Hashable {
+/// One agent-backed skill invocation from `lf runs --json`. Mirrors Rust
+/// `SkillRunEntry`; `lf status` filters the same dataset to one Wave.
+public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
-    public let runId: String
-    public let processId: String
-    public let parentProcessId: String?
-    public let repo: String?
+    public let traceId: String
+    public let execId: String
+    public let parentExecId: String?
+    public let repo: String
+    public let worktree: String
     public let wave: String?
-    public let label: String
+    public let flow: String?
+    public let skill: String
     public let status: String
     public let started: Int
     public let ended: Int?
-    public let inputTokens: Int
-    public let outputTokens: Int
-    public let cacheReadTokens: Int
+    public let turns: Int
+    public let systemTokens: Int
+    public let taskTokens: Int
+    public let suppliedContextTokens: Int
+    public let inputTokens: Int?
+    public let outputTokens: Int?
+    public let reasoningTokens: Int?
+    public let cacheReadTokens: Int?
+    public let cacheWriteTokens: Int?
     public let costUsd: Double?
     public let durationSecs: Double?
-    public let provider: String?
+    public let provider: String
     public let model: String?
+    public let surface: String
+    public let captureStatus: String
 
     enum CodingKeys: String, CodingKey {
-        case id, repo, wave, label, status, started, ended, provider, model
-        case runId = "run_id"
-        case processId = "process_id"
-        case parentProcessId = "parent_process_id"
+        case id, repo, worktree, wave, flow, skill, status, started, ended, turns, provider, model,
+            surface
+        case traceId = "trace_id"
+        case execId = "exec_id"
+        case parentExecId = "parent_exec_id"
+        case systemTokens = "system_tokens"
+        case taskTokens = "task_tokens"
+        case suppliedContextTokens = "supplied_context_tokens"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case reasoningTokens = "reasoning_tokens"
         case cacheReadTokens = "cache_read_tokens"
+        case cacheWriteTokens = "cache_write_tokens"
         case costUsd = "cost_usd"
         case durationSecs = "duration_secs"
+        case captureStatus = "capture_status"
     }
 }
 

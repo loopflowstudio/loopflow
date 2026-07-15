@@ -150,10 +150,11 @@ while Project and Task Sessions run.
 Inspect exactly what an agent received and what Loopflow observed:
 
 ```bash
-lf runs
-lf trace <run-id>
-lf trace <run-id> --events
-lf trace <run-id> --events --jsonl --launch <launch-id-prefix>
+lf runs                         # skill calls with context, tokens, and cost
+lf execs                        # every lf process, including lookups
+lf trace <exec-id>
+lf trace <exec-id> --events
+lf trace <exec-id> --events --jsonl --launch <launch-id-prefix>
 lf context --days 14 --wave intelligence
 ```
 
@@ -435,10 +436,11 @@ lf roadmap --wave product  # scope the same roadmap snapshot to one Wave
 lf pm show --wave product  # read the raw cached plan
 ```
 
-`lf status` answers what is running and whether it is healthy. `lf roadmap`
-starts from the durable local plan and overlays live Task evidence, including
-clickable Linear identifiers and Task workspaces. `lf pm` owns planning sync and
-mutation.
+`lf status` answers what is running and whether it is healthy. Its run history
+shows the Wave's skill calls—the same context-and-token dataset as `lf runs`.
+Use `lf execs` for process-level plumbing. `lf roadmap` starts from the durable
+local plan and overlays live Task evidence, including clickable Linear
+identifiers and Task workspaces. `lf pm` owns planning sync and mutation.
 
 Planning lives in Linear. Pin a wave to its Linear Initiative and its own team
 in `wave/<name>/GOAL.md` frontmatter — `lf pm init` writes both for you:

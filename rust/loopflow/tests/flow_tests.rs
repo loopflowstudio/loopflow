@@ -198,7 +198,12 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
         4
     );
 
-    let trace = run_lf(repo.path(), home.path(), &["trace", run_id, "--json"], None);
+    let trace = run_lf(
+        repo.path(),
+        home.path(),
+        &["trace", &launches[0].process_id, "--json"],
+        None,
+    );
     assert!(
         trace.status.success(),
         "lf trace failed: {}",

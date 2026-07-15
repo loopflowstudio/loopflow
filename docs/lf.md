@@ -240,18 +240,20 @@ woke, the miss is announced in its thread rather than passed over in silence.
 ## Reading the Local Ledger
 
 ```bash
-lf runs                         # one row per process, with trace/span ids
-lf trace 66863649               # render the nested process tree
-lf trace 66863649 --json        # feed the Telemetry dashboard
+lf runs                         # one row per skill call: context, tokens, cost
+lf execs                        # one row per lf process
+lf trace 66863649               # select an exec; render its process tree
+lf trace 66863649 --json        # inspect the same tree and its skill launches
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
 lf doctor                       # audit continuity, identity, lineage, coverage
 lf doctor --json                # machine-readable audit
 ```
 
-`run_id` identifies the whole trace. Each nested `lf` process gets its own
-`process_id`, and terminal rows carry their own command, tokens, cost, provider,
-and model. `lf trace` leaves killed processes open instead of hiding them.
+A run is one agent-backed skill invocation. It owns the context, model, token,
+cost, and outcome evidence. An exec is one `lf` process; nested execs share a
+trace. `lf trace` accepts an exec id and leaves killed processes open instead
+of hiding them.
 
 ## Measuring Codebase Weight
 

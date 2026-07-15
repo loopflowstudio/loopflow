@@ -600,10 +600,10 @@ fn usage_segment(usage: &Usage) -> String {
     segment
 }
 
-/// A run id shortened for the console (ids correlate by prefix).
-/// Shared with `lf runs`' ledger timeline.
-pub(crate) fn short_id(run_id: &str) -> String {
-    run_id.chars().take(8).collect()
+/// A ledger identity shortened for the console (ids correlate by prefix).
+/// Shared by the run, exec, and trace surfaces.
+pub(crate) fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 /// Append-only writer over one wave's JSONL log.

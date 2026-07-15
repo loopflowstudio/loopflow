@@ -1311,14 +1311,15 @@ fn main() -> anyhow::Result<()> {
                 loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json)
             }
             Some(Commands::Runs { json }) => loopflow::lf::commands::runs::list(*json),
+            Some(Commands::Execs { json }) => loopflow::lf::commands::runs::list_execs(*json),
             Some(Commands::Trace {
-                run_id,
+                exec_id,
                 json,
                 events,
                 jsonl,
                 launch,
             }) => loopflow::lf::commands::runs::trace(
-                run_id,
+                exec_id,
                 *json,
                 *events,
                 *jsonl,

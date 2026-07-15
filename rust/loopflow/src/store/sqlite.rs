@@ -526,8 +526,9 @@ impl SqliteStore {
         Ok(())
     }
 
-    // Run ledger (`run_events`): the machine-grain, append-only record of
-    // every run written directly by `lf`. Read by `lf runs` / `lf trace`.
+    // Exec ledger (`run_events`): the machine-grain, append-only record of
+    // every process written directly by `lf`. Read by `lf execs` / `lf trace`;
+    // `lf runs` joins it to agent launches for process lineage.
 
     /// Cached line/token counts for a git blob. Content-addressed, so a hit is
     /// always correct and a miss only costs one tokenization.
@@ -605,7 +606,7 @@ impl SqliteStore {
         )
     }
 
-    /// Events for one run; `run_id` may be a unique prefix.
+    /// Events for one trace; the persisted `run_id` may be a unique prefix.
     pub fn run_events_matching(&self, run_id: &str) -> StoreResult<Vec<RunEventRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
@@ -613,6 +614,19 @@ impl SqliteStore {
                     flow, skill, step_index, error, input_tokens, output_tokens,
                     cache_read_tokens, cost_usd, duration_secs, provider, model
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
+            params![prefix],
+        )
+    }
+
+    /// Events identifying one exec by process-id prefix. The caller resolves
+    /// its trace, then reads that trace whole.
+    pub fn run_events_matching_exec(&self, exec_id: &str) -> StoreResult<Vec<RunEventRow>> {
+        let prefix = format!("{}%", exec_id.replace(['%', '_'], ""));
+        self.query_run_events(
+            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
+                    flow, skill, step_index, error, input_tokens, output_tokens,
+                    cache_read_tokens, cost_usd, duration_secs, provider, model
+             FROM run_events WHERE process_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
     }

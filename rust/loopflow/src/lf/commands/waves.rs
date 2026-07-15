@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::child_session::{ChildRef, DirectiveKind, ObservationRecipient};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
-use crate::lf::commands::runs::RunLedgerEntry;
+use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
@@ -94,8 +94,8 @@ pub struct WaveDetailSnapshot {
     /// serving dormant.
     pub loop_state: Option<String>,
     pub projects: Vec<ProjectDetailSnapshot>,
-    /// This wave's runs from the local ledger, newest first.
-    pub runs: Evidence<RunLedgerEntry>,
+    /// This wave's agent-backed skill runs, newest first.
+    pub runs: Evidence<SkillRunEntry>,
     /// Work whose next move belongs to someone other than itself.
     pub attention: Evidence<AttentionItem>,
     /// The Wave's Home probed for liveness: state, evidence, attach endpoint, and
@@ -1517,19 +1517,21 @@ fn print_attention(attention: &Evidence<AttentionItem>) {
     }
 }
 
-fn print_runs(runs: &Evidence<RunLedgerEntry>) {
+fn print_runs(runs: &Evidence<SkillRunEntry>) {
     match runs {
         Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
-            println!("  runs       none in the ledger window")
+            println!("  runs       no skills in the ledger window")
         }
         Evidence::Ok { items, truncated } => {
             println!("  runs");
             for run in items {
                 println!(
-                    "    {label:<24}  {status:<8}  {age:>7} ago",
-                    label = truncate(&run.label, 24),
+                    "    {label:<24}  {status:<8}  ctx {context:>7}  tok {tokens:>7}  {age:>7} ago",
+                    label = truncate(&run.label(), 24),
                     status = run.status,
+                    context = format_tokens(run.supplied_context_tokens),
+                    tokens = format_tokens(run.total_tokens()),
                     age = format_age(now().unix_timestamp() - run.started),
                 );
             }
@@ -2016,7 +2018,7 @@ mod tests {
     /// has no runs".
     #[test]
     fn unavailable_evidence_is_a_state_not_an_empty_list() {
-        let runs: Evidence<RunLedgerEntry> =
+        let runs: Evidence<SkillRunEntry> =
             Evidence::from_result(Err(anyhow!("run ledger unavailable: disk is gone")));
         let value = serde_json::to_value(&runs).expect("serialize");
         assert_eq!(value["state"], "unavailable");

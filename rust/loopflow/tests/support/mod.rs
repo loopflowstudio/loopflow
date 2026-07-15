@@ -125,7 +125,12 @@ impl EnvGuard {
         env::remove_var("LF_DB_PATH");
         env::remove_var(CONTROL_HOME_ENV);
         env::remove_var(CONTROL_DB_PATH_ENV);
-        env::set_var("LF_HOME", lf_home.path());
+        if home.is_some() {
+            // Keep HOME-based config discovery intact while isolating its store.
+            env::set_var("LF_DB_PATH", lf_home.path().join("loopflow.db"));
+        } else {
+            env::set_var("LF_HOME", lf_home.path());
+        }
         Self {
             _lock: lock,
             previous_path,

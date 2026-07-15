@@ -1,5 +1,16 @@
 # W2-135 open questions / blockers
 
+## Gate status (verified 2026-07-14): W2-134 / PR #897 is OPEN, not merged
+
+Authoritative check this pass: `gh pr view 897` → `state=OPEN, mergedAt=None`;
+`origin/main` tip is `7a59f5b5b` (#889); `tests/fixtures/dto/turn_delta.json` is
+**not** on origin/main. Wave memory currently reads as if W2-134 "landed" — that
+describes the code on the `jack-heart/w2-134` branch, not main. **The gate is
+still closed.** Do not `lf rebase` onto W2-134 (nothing to rebase onto) and do not
+start the wire integration until `gh pr view 897` shows merged and `origin/main`
+carries `turn_delta.json`. PR #898 (the additive core) is already based on current
+main (#889) and stays open, unchanged, until then.
+
 ## PR1 is paused on W2-134 landing (by supervisor directive)
 
 **Done this pass (non-overlapping additive core, committed `160a8c4ca`):**

@@ -17,10 +17,108 @@ use tokio::sync::mpsc;
 use crate::chat::types::ConversationEvent;
 use crate::engine::agent::AgentConfig;
 
+pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
+    let (control_bin, control_home, control_db) = vendor_control_context()?;
+    set_vendor_std_env(command, &control_bin, &control_home, &control_db);
+    Ok(())
+}
+
+pub(crate) fn configure_vendor_tokio_env(command: &mut tokio::process::Command) -> Result<()> {
+    let (control_bin, control_home, control_db) = vendor_control_context()?;
+    command
+        .env(crate::store::CONTROL_BIN_ENV, control_bin)
+        .env(crate::store::CONTROL_HOME_ENV, control_home)
+        .env(crate::store::CONTROL_DB_PATH_ENV, control_db)
+        .env_remove("LF_BIN")
+        .env_remove("LF_HOME")
+        .env_remove("LF_DB_PATH")
+        .env_remove(crate::store::DEV_PRODUCTION_DB_OPT_IN_ENV);
+    Ok(())
+}
+
+fn vendor_control_context() -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)>
+{
+    let control_bin = std::env::var_os(crate::store::CONTROL_BIN_ENV)
+        .map(std::path::PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(crate::engine::process::resolve_pinned_lf_binary)?;
+    let control_home = std::env::var_os(crate::store::CONTROL_HOME_ENV)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(crate::store::lf_home_dir);
+    let control_db = std::env::var_os(crate::store::CONTROL_DB_PATH_ENV)
+        .map(std::path::PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(|| crate::store::database_path_from_env().map_err(anyhow::Error::from))?;
+    Ok((control_bin, control_home, control_db))
+}
+
+fn set_vendor_std_env(
+    command: &mut std::process::Command,
+    control_bin: &std::path::Path,
+    control_home: &std::path::Path,
+    control_db: &std::path::Path,
+) {
+    command
+        .env(crate::store::CONTROL_BIN_ENV, control_bin)
+        .env(crate::store::CONTROL_HOME_ENV, control_home)
+        .env(crate::store::CONTROL_DB_PATH_ENV, control_db)
+        .env_remove("LF_BIN")
+        .env_remove("LF_HOME")
+        .env_remove("LF_DB_PATH")
+        .env_remove(crate::store::DEV_PRODUCTION_DB_OPT_IN_ENV);
+}
+
 #[derive(Debug, Clone)]
 pub struct RawProviderEvent {
     pub stream: &'static str,
     pub line: String,
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    use super::set_vendor_std_env;
+
+    #[test]
+    fn vendor_receives_control_context_but_not_ordinary_store_context() {
+        let mut command = std::process::Command::new("vendor");
+        command
+            .env("LF_BIN", "/ambient/lf")
+            .env("LF_HOME", "/production")
+            .env("LF_DB_PATH", "/production/loopflow.db")
+            .env("LF_ALLOW_PRODUCTION_DB_FROM_DEV", "1")
+            .env("LF_CONTROL_HOME", "/old-control");
+
+        set_vendor_std_env(
+            &mut command,
+            Path::new("/control/lf"),
+            Path::new("/custom"),
+            Path::new("/custom/loopflow.db"),
+        );
+
+        let environment = command
+            .get_envs()
+            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(environment["LF_HOME"], None);
+        assert_eq!(environment["LF_DB_PATH"], None);
+        assert_eq!(environment["LF_BIN"], None);
+        assert_eq!(environment["LF_ALLOW_PRODUCTION_DB_FROM_DEV"], None);
+        assert_eq!(
+            environment["LF_CONTROL_BIN"],
+            Some(OsString::from("/control/lf"))
+        );
+        assert_eq!(
+            environment["LF_CONTROL_HOME"],
+            Some(OsString::from("/custom"))
+        );
+        assert_eq!(
+            environment["LF_CONTROL_DB_PATH"],
+            Some(OsString::from("/custom/loopflow.db"))
+        );
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

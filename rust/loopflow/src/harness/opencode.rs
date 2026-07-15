@@ -77,6 +77,7 @@ impl OpenCodeHarness {
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
         }
+        super::configure_vendor_tokio_env(&mut command)?;
 
         let mut child = command
             .spawn()

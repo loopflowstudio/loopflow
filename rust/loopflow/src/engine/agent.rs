@@ -915,6 +915,8 @@ pub fn launch_agent(
     cmd.env_remove("ANTHROPIC_API_KEY");
     cmd.env_remove("OPENAI_API_KEY");
     cmd.env_remove("GEMINI_API_KEY");
+    crate::harness::configure_vendor_std_env(&mut cmd)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
 
     // Harness-specific environment setup.
     let agent = launch.agent.as_deref().unwrap_or("claude");

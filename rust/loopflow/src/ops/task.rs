@@ -1152,8 +1152,8 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
             crate::child_session::TASK_LEASE_TOKEN_ENV,
             lease.token.as_str(),
         ),
-        ("LF_DB_PATH", db_path.as_str()),
-        ("LF_HOME", lf_home.as_str()),
+        (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
+        (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
         (crate::engine::wave_home::WAVE_HOME_ENV, wave_home.as_str()),
     ];
     if let Err(error) =

@@ -1,13 +1,32 @@
 # W2-172 — open questions & blockers
 
-## Blocker (reported, non-fatal): cannot `lf task acknowledge` from this shell
-`lf task acknowledge W2-172 --directive 1 ...` fails: installed `lf 0.11.1`
-rejects the shared local store at `~/.lf/loopflow.db`, which has migration
-`0.11.004_context_launch_work` applied. This branch's source tree only defines
-migrations through `0.11.003_child_body_lease`, so building `lf` from *this*
-branch would not resolve it either — some other divergent build owns 0.11.004.
-Acknowledge is store bookkeeping; the clarify deliverable (design) is computable
-without it. Retry acknowledge once the installed binary matches the DB.
+## Blocker (reported, non-fatal): installed `lf 0.11.1` can't touch the store
+`lf task acknowledge` / `lf pr open` / `lf commit` store-writes all fail: the
+installed `lf 0.11.1` rejects `~/.lf/loopflow.db`, which has migration
+`0.11.004` applied. **Mystery resolved:** that migration is `0.11.004_task_pr_ci_state`
+from **#916** (merged to main while this Task was in flight). This branch now
+rebases onto main *including* #916, so a freshly-built `lf` from this branch
+would match the DB — but the *installed* binary is still 0.11.1. Any `lf`
+command that writes the store (acknowledge, Task/PR row updates) stays blocked
+until the installed binary is rebuilt from ≥#916. Work proceeds via cargo
+tests + `git`/`gh` directly; PR bookkeeping the store can't record is tolerated
+by this Task's own degradation code.
+
+## Incident (recovered): `lf pr open` rebased mid-flight, then was killed
+`lf pr open` (installed 0.11.1) spawned a `claude` agent for PR-copy generation
+that hung, and it had already started a rebase onto freshly-arrived main
+(#916/#921/#922). Killing it left an interactive rebase paused on a conflict
+between PR1 and #916 (both touch reconcile / `current_or_merged_pr_for_branch`).
+Recovered by `git rebase --abort` → back to the clean PR1 commit (safe on remote
++ reflog), then a deliberate re-apply of PR1 onto the #916 base, integrating
+`head_sha`. No work lost. Lesson: `lf pr open`'s agent-copy + auto-rebase is a
+poor fit when the store is already broken; use `git push` + `gh pr create` for
+a reviewable PR in that state.
+
+## Status: PR1 open as #928 (waiting for CI)
+Bounded REST-first + degradation-tolerant observation. Integrated with #916.
+Full lib suite green, clippy clean. Next serial PR: carry committed follow-up on
+rotate (recover W2-166) + directive/completion race guard.
 
 ## Assumptions taken (reversible; simpler path chosen)
 - **Merged branch tip = REST `head.sha`.** The follow-up commit range carried on

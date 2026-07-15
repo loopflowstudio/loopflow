@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::profile::{
     ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount,
-    ProviderProfileCandidate,
+    ProviderProfileCandidate, RepoProfileRoute,
 };
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
@@ -420,12 +420,78 @@ pub async fn local_forwarded_profile_bundle(
     let Some(route) = store.repo_profile_route(&repo_id).await? else {
         return Ok(None);
     };
+    let (mappings, routed_accounts) = referenced_provider_accounts(store, &route).await?;
+    let mut accounts = Vec::new();
+    let mut credentials = Vec::new();
+    for (provider, account) in routed_accounts {
+        accounts.push(ForwardedProviderAccount {
+            provider,
+            account_id: account.account_id.clone(),
+            login_email: account.login_email.clone(),
+            credential_state: account.credential_state,
+            routing_state: account.routing_state,
+            plan: account.plan.clone(),
+            paid_through: account.paid_through,
+            utilization_percent: account.utilization_percent,
+            cooldown_until: account.cooldown_until,
+            cooldown_reason: account.cooldown_reason.clone(),
+        });
+        if !account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date()) {
+            continue;
+        }
+        let home =
+            account
+                .home
+                .as_deref()
+                .ok_or_else(|| ProviderAccountError::ForwardingCredential {
+                    provider,
+                    account_id: account.account_id.clone(),
+                    reason: "managed account has no native credential home".to_string(),
+                })?;
+        let access_token =
+            crate::provider_auth::prepare_provider_account_access_token(provider, home)
+                .await
+                .map_err(|error| ProviderAccountError::ForwardingCredential {
+                    provider,
+                    account_id: account.account_id.clone(),
+                    reason: error.to_string(),
+                })?
+                .ok_or_else(|| ProviderAccountError::ForwardingCredential {
+                    provider,
+                    account_id: account.account_id.clone(),
+                    reason: "provider CLI reports no active OAuth login".to_string(),
+                })?;
+        credentials.push(ForwardedProviderCredential::new(
+            provider,
+            account.account_id,
+            access_token,
+        ));
+    }
+    Ok(Some(ForwardedProfileBundle::new(
+        repo_id,
+        route.default_profile,
+        route.backup_profiles,
+        mappings,
+        accounts,
+        credentials,
+    )))
+}
+
+async fn referenced_provider_accounts(
+    store: &SharedStore,
+    route: &RepoProfileRoute,
+) -> Result<
+    (
+        Vec<ForwardedProfileProviderAccount>,
+        Vec<(Provider, ProviderAccount)>,
+    ),
+    ProviderAccountError,
+> {
     let mut profile_ids = Vec::with_capacity(route.backup_profiles.len() + 1);
     profile_ids.push(route.default_profile.clone());
     profile_ids.extend(route.backup_profiles.iter().cloned());
     let mut mappings = Vec::new();
     let mut accounts = Vec::new();
-    let mut credentials = Vec::new();
     let mut seen_accounts = HashSet::new();
     for profile_id in profile_ids {
         for provider in [Provider::Claude, Provider::Codex] {
@@ -452,56 +518,10 @@ pub async fn local_forwarded_profile_bundle(
                         mapping.account_id
                     ))
                 })?;
-            accounts.push(ForwardedProviderAccount {
-                provider,
-                account_id: account.account_id.clone(),
-                login_email: account.login_email.clone(),
-                credential_state: account.credential_state,
-                routing_state: account.routing_state,
-                plan: account.plan.clone(),
-                paid_through: account.paid_through,
-                utilization_percent: account.utilization_percent,
-                cooldown_until: account.cooldown_until,
-                cooldown_reason: account.cooldown_reason.clone(),
-            });
-            if !account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date()) {
-                continue;
-            }
-            let home = account.home.as_deref().ok_or_else(|| {
-                ProviderAccountError::ForwardingCredential {
-                    provider,
-                    account_id: account.account_id.clone(),
-                    reason: "managed account has no native credential home".to_string(),
-                }
-            })?;
-            let access_token =
-                crate::provider_auth::prepare_provider_account_access_token(provider, home)
-                    .await
-                    .map_err(|error| ProviderAccountError::ForwardingCredential {
-                        provider,
-                        account_id: account.account_id.clone(),
-                        reason: error.to_string(),
-                    })?
-                    .ok_or_else(|| ProviderAccountError::ForwardingCredential {
-                        provider,
-                        account_id: account.account_id.clone(),
-                        reason: "provider CLI reports no active OAuth login".to_string(),
-                    })?;
-            credentials.push(ForwardedProviderCredential::new(
-                provider,
-                account.account_id,
-                access_token,
-            ));
+            accounts.push((provider, account));
         }
     }
-    Ok(Some(ForwardedProfileBundle::new(
-        repo_id,
-        route.default_profile,
-        route.backup_profiles,
-        mappings,
-        accounts,
-        credentials,
-    )))
+    Ok((mappings, accounts))
 }
 
 pub async fn resolve_provider_account(
@@ -1160,6 +1180,89 @@ mod tests {
             .unwrap();
         assert_eq!(binding.chrome_directory, "Profile 3");
         assert!(!legacy_path.exists());
+    }
+
+    #[tokio::test]
+    async fn forwarded_route_keeps_profile_mappings_but_deduplicates_accounts() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&crate::store::StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let jack = ProfileId::parse("jack@loopflow.studio").unwrap();
+        let engineering = ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
+        let personal = ProfileId::parse("jackstah@gmail.com").unwrap();
+        for profile_id in [&jack, &engineering, &personal] {
+            store
+                .upsert_profile(&Profile {
+                    id: profile_id.clone(),
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        let claude_account = new_account(
+            Provider::Claude,
+            parse_account_id("personal").unwrap(),
+            temp.path().join("claude-personal"),
+            Some(crate::profile::EmailAddress::parse("jackstah@gmail.com").unwrap()),
+        );
+        let codex_account = new_account(
+            Provider::Codex,
+            parse_account_id("engineering").unwrap(),
+            temp.path().join("codex-engineering"),
+            Some(crate::profile::EmailAddress::parse("loopflow-eng@loopflow.studio").unwrap()),
+        );
+        store
+            .upsert_provider_account(&claude_account)
+            .await
+            .unwrap();
+        store.upsert_provider_account(&codex_account).await.unwrap();
+        for profile_id in [&jack, &engineering, &personal] {
+            store
+                .set_profile_provider_account(&ProfileProviderAccount {
+                    profile_id: profile_id.clone(),
+                    provider: Provider::Claude,
+                    account_id: claude_account.account_id.clone(),
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        store
+            .set_profile_provider_account(&ProfileProviderAccount {
+                profile_id: engineering.clone(),
+                provider: Provider::Codex,
+                account_id: codex_account.account_id.clone(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let route = RepoProfileRoute {
+            repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
+            default_profile: jack,
+            backup_profiles: vec![engineering, personal],
+            created_at: 1,
+            updated_at: 1,
+        };
+
+        let (mappings, accounts) = referenced_provider_accounts(&store, &route).await.unwrap();
+
+        assert_eq!(mappings.len(), 4);
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(
+            accounts
+                .iter()
+                .filter(|(provider, _)| *provider == Provider::Claude)
+                .count(),
+            1
+        );
     }
 
     #[test]

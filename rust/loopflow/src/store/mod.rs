@@ -2956,6 +2956,16 @@ mod tests {
             })
             .await
             .unwrap();
+        store
+            .upsert_chrome_profile_binding(&ChromeProfileBinding {
+                profile_id: ProfileId::parse("jack@loopflow.studio").unwrap(),
+                host_id: HostId::parse("mini-heart").unwrap(),
+                chrome_directory: "Default".to_string(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
         let route = RepoProfileRoute {
             repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
             default_profile: ProfileId::parse("jack@loopflow.studio").unwrap(),
@@ -2999,6 +3009,98 @@ mod tests {
                 .unwrap()
                 .chrome_directory,
             "Profile 7"
+        );
+        assert_eq!(
+            store
+                .chrome_profile_binding(
+                    &ProfileId::parse("jack@loopflow.studio").unwrap(),
+                    &HostId::parse("mini-heart").unwrap(),
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .chrome_directory,
+            "Default"
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_mappings_transition_independently_without_changing_the_repo_route() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let profile_id = ProfileId::parse("loopflow-eng@loopflow.studio").unwrap();
+        store
+            .upsert_profile(&Profile {
+                id: profile_id.clone(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let claude_personal = provider_account("claude", "personal", 0);
+        let claude_engineering = provider_account("claude", "engineering", 0);
+        let codex_engineering = provider_account("codex", "engineering", 0);
+        for account in [&claude_personal, &claude_engineering, &codex_engineering] {
+            store.upsert_provider_account(account).await.unwrap();
+        }
+        for (provider, account_id) in [
+            (Provider::Claude, claude_personal.account_id.clone()),
+            (Provider::Codex, codex_engineering.account_id.clone()),
+        ] {
+            store
+                .set_profile_provider_account(&ProfileProviderAccount {
+                    profile_id: profile_id.clone(),
+                    provider,
+                    account_id,
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        let route = RepoProfileRoute {
+            repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
+            default_profile: profile_id.clone(),
+            backup_profiles: Vec::new(),
+            created_at: 1,
+            updated_at: 1,
+        };
+        store.set_repo_profile_route(&route).await.unwrap();
+
+        store
+            .set_profile_provider_account(&ProfileProviderAccount {
+                profile_id: profile_id.clone(),
+                provider: Provider::Claude,
+                account_id: claude_engineering.account_id.clone(),
+                created_at: 1,
+                updated_at: 2,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .profile_provider_account(&profile_id, Provider::Claude)
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id,
+            claude_engineering.account_id
+        );
+        assert_eq!(
+            store
+                .profile_provider_account(&profile_id, Provider::Codex)
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id,
+            codex_engineering.account_id
+        );
+        assert_eq!(
+            store.repo_profile_route(&route.repo_id).await.unwrap(),
+            Some(route)
         );
     }
 

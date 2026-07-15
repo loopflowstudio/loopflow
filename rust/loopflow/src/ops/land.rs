@@ -72,6 +72,9 @@ fn prepare_pr(
     } else {
         crate::ops::pr::pr_exists_for_current_branch(&repo_root)?
     };
+    if pr_exists {
+        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch)?;
+    }
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
             "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
@@ -270,7 +273,7 @@ fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> 
     )?;
     if let Some(stacked) = stacked {
         let new_base = crate::engine::git::rev_parse(repo_root, &onto)?;
-        crate::ops::task::collapse_stack(&stacked, &new_base)?;
+        crate::ops::task::record_stack_rebase(&stacked, &new_base, true)?;
     }
     Ok(main_branch)
 }

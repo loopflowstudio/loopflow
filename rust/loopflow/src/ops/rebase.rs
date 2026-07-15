@@ -132,8 +132,10 @@ pub fn rebase_with_recovery(
 
     if let Some(branch) = options.onto.strip_prefix("origin/") {
         let _ = fetch(repo, "origin", branch);
-        // Keep local main in sync with origin so downstream reads see current state.
-        let _ = sync_main(repo, branch);
+        if branch == get_default_branch(repo)? {
+            // Keep local main in sync with origin so downstream reads see current state.
+            let _ = sync_main(repo, branch);
+        }
     }
 
     let fork_point = match resolve_fork_point(repo, options)? {
@@ -172,7 +174,9 @@ pub fn start_rebase_for_resolution(
 
     if let Some(branch) = options.onto.strip_prefix("origin/") {
         let _ = fetch(repo, "origin", branch);
-        let _ = sync_main(repo, branch);
+        if branch == get_default_branch(repo)? {
+            let _ = sync_main(repo, branch);
+        }
     }
 
     let fork_point = match resolve_fork_point(repo, options)? {

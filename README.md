@@ -94,7 +94,8 @@ that stable sibling worktree, directive, supervision state, and PR history
 through serial PRs, review, CI repair, provider failure, and explicit
 completion. A provider process and transcript are a replaceable body generation;
 plain `resume` keeps compatible provider history, while `--model` hands the same
-Session to another agent. Every Task PR targets `main`.
+Session to another agent. Root Task PRs target `main`; dependent Tasks get their
+own worktree and target the parent Task's active PR until it merges.
 
 Task Sessions inherit the Wave objective, curated memory, Project definition,
 and KRs. Typed, idempotent Task observations keep the Wave informed without
@@ -129,6 +130,18 @@ lf task run INF-123 --name release-scoped-migrations
 # work
 lf pr land -c
 ```
+
+Start dependent work without sharing the parent's worktree:
+
+```bash
+lf task run INF-124 --stack-on INF-123
+lf pr open   # targets INF-123's active branch
+```
+
+The parent Task must already have an open PR. After it merges, `lf rebase` or
+`lf pr land` replays only INF-124's commits onto `main` and retargets its PR.
+The selector binds to INF-123's active PR at launch; it does not follow that
+Task onto a later serial PR.
 
 The Task keeps one worktree and an ordered PR history. Each serial PR owns one
 branch. Use bare `lf pr land --next <slug>` when another PR
@@ -409,6 +422,7 @@ Install the Rust binaries directly with cargo.
 ```bash
 lf wave engbot        # start the Wave (Ctrl-C to stop)
 lf task run ENG-123 --name parser-recovery   # stable semantic worktree
+lf task run ENG-124 --stack-on ENG-123       # separate dependent worktree
 tmux ls              # list detached Wave, Project, and Task processes
 lf task attach ENG-123    # writable audited control prompt
 ```

@@ -229,26 +229,27 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_prs(&session_id)).await
     }
 
+    pub async fn get_task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
+        let pr_id = pr_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_pr(&pr_id)).await
+    }
+
     pub async fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| store.active_task_pr(&session_id)).await
     }
 
-    pub async fn stack_task_pr(&self, child: &TaskPr) -> StoreResult<()> {
-        let child = child.clone();
-        run_sqlite(&self.sqlite, move |store| store.stack_task_pr(&child)).await
-    }
-
-    pub async fn collapse_task_pr(
+    pub async fn rebase_task_pr(
         &self,
         pr_id: &TaskPrId,
         new_base: &str,
+        clear_parent: bool,
         updated_at: OffsetDateTime,
     ) -> StoreResult<()> {
         let pr_id = pr_id.clone();
         let new_base = new_base.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.collapse_task_pr(&pr_id, &new_base, updated_at)
+            store.rebase_task_pr(&pr_id, &new_base, clear_parent, updated_at)
         })
         .await
     }

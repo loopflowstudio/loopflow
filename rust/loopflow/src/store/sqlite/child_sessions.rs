@@ -567,15 +567,16 @@ impl SqliteStore {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    pub fn task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_pr_on(&conn, pr_id)
+    }
+
     pub fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A Task can hold several open PRs at once when a child is stacked on an
-        // unmerged parent; the active PR is the stack tip — the highest-sequence
-        // PR that has neither merged nor been abandoned.
         let query = format!(
             "{TASK_PR_COLUMNS}
-             WHERE task_session_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL
-             ORDER BY sequence DESC LIMIT 1"
+             WHERE task_session_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL"
         );
         conn.query_row(&query, params![session_id.as_str()], map_task_pr_row)
             .optional()
@@ -591,45 +592,28 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record a child PR stacked on an unmerged parent, leaving the parent open.
-    /// Unlike `settle_task_pr`, this does not settle the parent — a Task holds
-    /// several open PRs while a stack is in flight. The child must be the next
-    /// sequence and point at an open PR of the same Task.
-    pub fn stack_task_pr(&self, child: &TaskPr) -> StoreResult<()> {
-        validate_task_pr(child)?;
-        let parent_id = child.parent_pr_id.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("a stacked Task PR must name its parent".to_string())
-        })?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let parent = task_pr_on(&conn, parent_id)?.ok_or(StoreError::NotFound)?;
-        if parent.task_session_id != child.task_session_id
-            || child.sequence != parent.sequence + 1
-            || parent.is_settled()
-            || child.phase() != PrPhase::Working
-        {
-            return Err(StoreError::InvalidData(
-                "a stacked child must be the next Working PR on the same Task's open parent"
-                    .to_string(),
-            ));
-        }
-        insert_task_pr(&conn, child)
-    }
-
-    /// Collapse a stacked child onto the default branch after it rebased cleanly:
-    /// repoint its base to the new trunk tip and clear the parent link. This is a
-    /// deliberate transition, so it moves `base_commit` — which the ordinary
-    /// update pins as immutable identity — through its own statement.
-    pub fn collapse_task_pr(
+    /// Move a stacked Task PR to its parent's current tip, or clear the parent
+    /// after that work reaches the default branch. This deliberately moves the
+    /// otherwise-immutable `base_commit` through a dedicated transition.
+    pub fn rebase_task_pr(
         &self,
         pr_id: &TaskPrId,
         new_base: &str,
+        clear_parent: bool,
         updated_at: OffsetDateTime,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE task_prs SET base_commit=?2, parent_pr_id=NULL, updated_at=?3 WHERE id=?1",
-            params![pr_id.as_str(), new_base, updated_at.unix_timestamp()],
-        )?;
+        let changed = if clear_parent {
+            conn.execute(
+                "UPDATE task_prs SET base_commit=?2, parent_pr_id=NULL, updated_at=?3 WHERE id=?1",
+                params![pr_id.as_str(), new_base, updated_at.unix_timestamp()],
+            )?
+        } else {
+            conn.execute(
+                "UPDATE task_prs SET base_commit=?2, updated_at=?3 WHERE id=?1 AND parent_pr_id IS NOT NULL",
+                params![pr_id.as_str(), new_base, updated_at.unix_timestamp()],
+            )?
+        };
         if changed == 0 {
             return Err(StoreError::NotFound);
         }

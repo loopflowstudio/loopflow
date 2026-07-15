@@ -137,10 +137,10 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
-            ordinal: 6,
+            ordinal: 7,
         },
-        name: "task_pr_stack",
-        sql: include_str!("migrations/0.11.006_task_pr_stack.sql"),
+        name: "task_pr_parent",
+        sql: include_str!("migrations/0.11.007_task_pr_parent.sql"),
     },
 ];
 
@@ -652,7 +652,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.006_task_pr_stack"
+            "0.11.007_task_pr_parent"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -670,7 +670,7 @@ mod tests {
                 "0.11.003_child_body_lease".to_string(),
                 "0.11.004_task_pr_ci_state".to_string(),
                 "0.11.005_provider_accounts".to_string(),
-                "0.11.006_task_pr_stack".to_string()
+                "0.11.007_task_pr_parent".to_string()
             ]
         );
     }
@@ -1064,7 +1064,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.006_task_pr_stack"
+            "0.11.007_task_pr_parent"
         );
     }
 

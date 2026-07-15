@@ -65,7 +65,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             },
             &progress,
         ),
-        Some(PrCommand::Stack { next }) => stack_current(next.clone(), &progress),
         Some(PrCommand::Land {
             strict,
             local,
@@ -182,10 +181,24 @@ pub fn run_rebase(
         return Ok(());
     }
     let started = Instant::now();
-    // A stacked child rebases deterministically from its durable fork base.
-    let stacked = crate::ops::task::stacked_collapse(&repo_root)?;
+    // A Task stack owns its rebase target: the live parent branch until merge,
+    // then the default branch. An explicit override could silently drop work.
+    let stacked = crate::ops::task::task_stack(&repo_root)?;
+    if stacked.is_some() && onto.is_some() {
+        return Err(anyhow!(
+            "stacked Task rebases choose their parent automatically; omit --onto"
+        ));
+    }
+    let stacked_onto = stacked
+        .as_ref()
+        .and_then(|stacked| stacked.parent_branch.as_ref())
+        .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let plan = plan_rebase(&repo_root, onto, fork_base.clone())?;
+    let plan = plan_rebase(
+        &repo_root,
+        stacked_onto.as_deref().or(onto),
+        fork_base.clone(),
+    )?;
     let onto_ref = plan.base_ref.clone();
     if plan_only {
         print_rebase_plan(&plan);
@@ -215,7 +228,11 @@ pub fn run_rebase(
         Ok(()) => {
             if let Some(stacked) = stacked.as_ref() {
                 let new_base = crate::engine::git::rev_parse(&repo_root, &onto_ref)?;
-                crate::ops::task::collapse_stack(stacked, &new_base)?;
+                crate::ops::task::record_stack_rebase(
+                    stacked,
+                    &new_base,
+                    stacked.parent_branch.is_none(),
+                )?;
             }
             record_ops_metric(
                 &repo_root,
@@ -290,18 +307,6 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     with_rebase_retry(&repo_root, "land", progress, |repo| {
         land(repo, options, progress)
     })?;
-    Ok(())
-}
-
-fn stack_current(next: Option<String>, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let child = crate::ops::task::stack_task_pr(&repo_root, next)?;
-    progress.status(&format!(
-        "Stacked PR #{} on branch {} (base {}). Open it with lf pr open once ready.",
-        child.sequence,
-        child.branch,
-        &child.base_commit[..child.base_commit.len().min(12)]
-    ));
     Ok(())
 }
 

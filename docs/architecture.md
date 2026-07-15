@@ -46,6 +46,14 @@ worktree. `lf task run` does the same for an existing Linear issue. A newly
 reserved Project Session does not block Task launch on another provider turn;
 the Task's first consequential event wakes it through the observation outbox.
 
+Task worktrees are flat siblings even when work is dependent. `lf task run
+CHILD --stack-on PARENT` forks CHILD from PARENT's active published PR and
+records the parent PR id plus exact fork commit. CHILD's PR targets PARENT's
+branch until merge, then deterministically replays only CHILD-authored commits
+onto `main`. Same-Task PRs remain serial; concurrent stack nodes are Tasks.
+The Task argument is an ergonomic lookup: placement persists the active PR id,
+so a later serial PR on PARENT does not move CHILD's dependency.
+
 Free-text Project and Task starts verify the owning Wave before mutating
 Linear. They refresh the PM snapshot before creating local runtime state; a
 post-commit refresh failure reports the committed id and leaves no Session or

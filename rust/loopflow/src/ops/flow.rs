@@ -150,10 +150,6 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             )?;
             Ok(())
         }
-        PrCommand::Stack { next } => {
-            crate::ops::task::stack_task_pr(repo, next)?;
-            Ok(())
-        }
         PrCommand::Abandon { force, branch } => {
             abandon_branch(repo, &AbandonOptions { branch, force }, progress)?;
             Ok(())

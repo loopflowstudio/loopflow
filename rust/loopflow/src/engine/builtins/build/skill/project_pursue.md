@@ -51,6 +51,10 @@ its available status/next owner.
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
   same Task Session through review and merge.
+- When a separate Task depends on an open parent PR and should begin now, start
+  it with `lf task run <child> --stack-on <parent> --directive "..."`. The child
+  keeps its own worktree and worker; never create a second simultaneously open
+  PR inside the parent Task.
 - The Project Session owns no worktree or PR branch. Never edit, commit,
   test, or open a PR from the canonical main checkout; delegate every
   repository mutation to a Task Session.

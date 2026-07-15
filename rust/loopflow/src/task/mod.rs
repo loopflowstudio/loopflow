@@ -234,9 +234,9 @@ pub struct TaskPr {
     pub slug: String,
     pub branch: String,
     pub base_commit: String,
-    /// The serial PR this one was stacked on at placement, or `None` when rooted
-    /// on the default branch. `base_commit` is that parent's fork commit; the
-    /// link is cleared when the parent merges and the stack collapses onto main.
+    /// Another Task's PR this worktree was placed on, or `None` when rooted on
+    /// the default branch. `base_commit` is that parent's exact fork commit; the
+    /// link clears after the parent merges and this PR collapses onto main.
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
@@ -896,6 +896,7 @@ mod tests {
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
             base_commit: "abc".to_string(),
+            parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
                 after_merge: AfterMerge::Review,

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::{current_branch, get_default_branch, sync_main};
+use crate::engine::git::{current_branch, fetch, get_default_branch, rev_parse, sync_main};
 use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -74,7 +74,13 @@ pub fn create_or_update_pr(
     }
 
     let main_repo = resolve_main_repo(repo);
-    let base_branch = get_default_branch(&main_repo)?;
+    let default_branch = get_default_branch(&main_repo)?;
+    let stack = crate::ops::task::task_stack(repo)?;
+    let base_branch = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
+        Some(parent) => parent,
+        None if stack.is_some() => default_branch.clone(),
+        None => pr_target(repo, &main_repo, &default_branch)?,
+    };
 
     // Commit the feature branch before syncing so PR context reflects pushed state.
     let commit_options = CommitOptions {
@@ -86,19 +92,32 @@ pub fn create_or_update_pr(
     };
     commit_workflow(repo, &commit_options, progress)?;
 
-    let _ = sync_main(&main_repo, &base_branch);
+    if base_branch == default_branch {
+        let _ = sync_main(&main_repo, &default_branch);
+    } else {
+        fetch(&main_repo, "origin", &base_branch)?;
+    }
 
-    if commits_behind(repo, &base_branch)? > 0 {
+    let base_ref = format!("origin/{base_branch}");
+    let stack_needs_rebase = stack.as_ref().is_some_and(|stack| {
+        stack.parent_branch.is_none()
+            || rev_parse(repo, &base_ref).is_ok_and(|tip| tip != stack.fork_base)
+    });
+    if stack_needs_rebase || (stack.is_none() && commits_behind(repo, &base_branch)? > 0) {
         progress.status("Branch behind base, rebasing...");
         crate::ops::rebase::rebase_with_recovery(
             repo,
             &crate::ops::rebase::RebaseOptions {
-                onto: format!("origin/{base_branch}"),
+                onto: base_ref.clone(),
                 push: true,
-                fork_base: None,
+                fork_base: stack.as_ref().map(|stack| stack.fork_base.clone()),
             },
             progress,
         )?;
+        if let Some(stack) = &stack {
+            let new_base = rev_parse(repo, &base_ref)?;
+            crate::ops::task::record_stack_rebase(stack, &new_base, stack.parent_branch.is_none())?;
+        }
     }
 
     let copy = resolve_pr_copy(repo, options, progress)?;
@@ -110,7 +129,7 @@ pub fn create_or_update_pr(
 
     let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
         progress.status("Updating PR...");
-        update_pr(repo, pr.number, title, body)?;
+        update_pr(repo, pr.number, title, body, &base_branch)?;
         if pr.is_draft {
             mark_pr_ready(repo, pr.number)?;
         }
@@ -126,8 +145,7 @@ pub fn create_or_update_pr(
         )
     } else {
         progress.status("Creating PR...");
-        let base = pr_target(repo, &main_repo, &base_branch)?;
-        let url = create_pr(repo, title, body, &base)?;
+        let url = create_pr(repo, title, body, &base_branch)?;
         let visible = find_open_pr(repo)?;
         if let Some(pr) = &visible {
             if pr.is_draft {
@@ -225,7 +243,11 @@ pub fn generate_pr_copy(
     let template = get_builtin_ops_prompt("pr_message")
         .ok_or_else(|| OpsError::Message("builtin pr_message prompt not found".to_string()))?;
     let main_repo = resolve_main_repo(repo);
-    let base_branch = get_default_branch(&main_repo)?;
+    let default_branch = get_default_branch(&main_repo)?;
+    let base_branch = match crate::ops::task::task_stack(repo)? {
+        Some(stack) => stack.parent_branch.unwrap_or(default_branch),
+        None => pr_target(repo, &main_repo, &default_branch)?,
+    };
     let log = git_stdout(
         repo,
         &["log", &format!("origin/{base_branch}..HEAD"), "--oneline"],
@@ -489,7 +511,7 @@ fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     Ok(open)
 }
 
-fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()> {
+fn update_pr(repo: &Path, number: u64, title: &str, body: &str, base: &str) -> OpsResult<()> {
     let output = Command::new("gh")
         .arg("pr")
         .arg("edit")
@@ -498,11 +520,34 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()>
         .arg(title)
         .arg("--body")
         .arg(body)
+        .arg("--base")
+        .arg(base)
         .current_dir(repo)
         .output()?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
             command: "gh pr edit".to_string(),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn retarget_open_pr(repo: &Path, base: &str) -> OpsResult<()> {
+    let Some(pr) = find_open_pr(repo)? else {
+        return Ok(());
+    };
+    let output = Command::new("gh")
+        .arg("pr")
+        .arg("edit")
+        .arg(pr.number.to_string())
+        .arg("--base")
+        .arg(base)
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: "gh pr edit --base".to_string(),
             stderr: stderr_from_output(&output),
         });
     }

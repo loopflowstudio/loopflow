@@ -206,21 +206,18 @@ async fn task_store() -> OpsResult<SharedStore> {
     })
 }
 
-/// A stacked child PR that is cleared to collapse onto the default branch.
+/// Durable placement for a Task PR forked from another Task's active PR.
 #[derive(Debug, Clone)]
 pub struct StackedRebase {
-    /// The durable fork commit to replay from (`git rebase --onto <trunk> <base>`).
     pub fork_base: String,
-    /// The child PR, so the caller can collapse the stack after a clean rebase.
     pub child: TaskPr,
+    /// The live parent branch, or `None` once the parent has merged.
+    pub parent_branch: Option<String>,
 }
 
-/// Resolve whether the PR active in `worktree` is a stacked child cleared to
-/// collapse onto the default branch — its parent PR has merged, or its row was
-/// pruned. Returns `None` for an ordinary worktree, or when no registry is
-/// reachable, so the caller rebases normally. Refuses while the parent is still
-/// open: a child must not move onto trunk before its parent's work lands there.
-pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
+/// Resolve a Task's current cross-Task stack from durable ids, consulting
+/// GitHub because an out-of-band parent merge can precede registry reconcile.
+pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
     let key = worktree.display().to_string();
     block_on_task(async move {
         let Some(store) = open_existing_store().await.map(Arc::new) else {
@@ -243,41 +240,52 @@ pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
         let Some(parent_id) = active.parent_pr_id.clone() else {
             return Ok(None);
         };
-        let prs = store
-            .task_prs(&session.id)
+        let parent = store
+            .get_task_pr(&parent_id)
             .await
-            .map_err(|error| task_error(error.to_string()))?;
-        if let Some(parent) = prs.iter().find(|pr| pr.id == parent_id) {
-            // A non-tip parent is never reconciled, so its stored `merge_commit`
-            // can lag GitHub. Consult the live PR state before collapsing: only a
-            // merged (or gone) parent clears the child to move onto trunk.
-            let merged = parent.is_settled()
-                || match crate::ops::pr::current_or_merged_pr_for_branch(
-                    &session.worktree,
-                    &parent.branch,
-                )? {
-                    Some(info) => info.state == "merged",
-                    None => false,
-                };
-            if !merged {
-                return Err(task_error(format!(
-                    "Task PR #{} is stacked on {} which has not merged; land the parent first",
-                    active.sequence, parent.branch
-                )));
-            }
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
+        let live =
+            crate::ops::pr::current_or_merged_pr_for_branch(&session.worktree, &parent.branch)?;
+        let merged = parent.merge_commit.is_some()
+            || live.as_ref().is_some_and(|info| info.state == "merged");
+        let closed = parent.abandoned_at.is_some()
+            || live.as_ref().is_some_and(|info| info.state == "closed");
+        if closed && !merged {
+            return Err(task_error(format!(
+                "stack parent {} closed without merging; re-place the child deliberately",
+                parent.branch
+            )));
         }
         Ok(Some(StackedRebase {
             fork_base: active.base_commit.clone(),
             child: active,
+            parent_branch: (!merged).then_some(parent.branch),
         }))
     })
 }
 
-/// Collapse a stacked child after it rebased cleanly onto the default branch:
-/// repoint its base to the new trunk tip and clear the parent link. The audit
-/// trail rides the immutable event log; the row now reflects the post-collapse
-/// truth so `base_commit..HEAD` consumers report only child-authored work.
-pub fn collapse_stack(stacked: &StackedRebase, new_base: &str) -> OpsResult<()> {
+/// Return a stacked child only after its parent has merged. Landing before that
+/// would silently drop a dependency that is not present on the default branch.
+pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
+    let stacked = task_stack(worktree)?;
+    if let Some(stacked) = &stacked {
+        if let Some(parent) = &stacked.parent_branch {
+            return Err(task_error(format!(
+                "Task PR is stacked on {parent}, which has not merged; land the parent first"
+            )));
+        }
+    }
+    Ok(stacked)
+}
+
+/// Persist the exact base reached by a successful deterministic rebase. Clear
+/// the parent link only when its work is now present on the default branch.
+pub fn record_stack_rebase(
+    stacked: &StackedRebase,
+    new_base: &str,
+    clear_parent: bool,
+) -> OpsResult<()> {
     let pr_id = stacked.child.id.clone();
     let new_base = new_base.to_string();
     block_on_task(async move {
@@ -288,120 +296,15 @@ pub fn collapse_stack(stacked: &StackedRebase, new_base: &str) -> OpsResult<()> 
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // collapse only repoints the mutable row to the post-merge truth.
         store
-            .collapse_task_pr(&pr_id, &new_base, time::OffsetDateTime::now_utc())
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        Ok(())
-    })
-}
-
-/// Stack the next serial PR on the current open PR, leaving the parent open.
-///
-/// Branches a child off the parent's tip in the same worktree, records the
-/// durable fork base and parent link, and pushes it. The parent's GitHub PR
-/// stays open on its own branch; the worktree moves to the child. The child
-/// collapses onto the default branch when the parent lands (see
-/// [`stacked_collapse`]).
-pub fn stack_task_pr(worktree: &Path, slug: Option<String>) -> OpsResult<TaskPr> {
-    let worktree = worktree.to_path_buf();
-    block_on_task(async move {
-        let store = task_store().await?;
-        let session = store
-            .get_task_session_by_worktree(&worktree.display().to_string())
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error("not inside a Task worktree; nothing to stack on"))?;
-        let parent = store
-            .active_task_pr(&session.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| task_error("Task has no active PR to stack a child on"))?;
-        if parent.github().is_none() {
-            return Err(task_error(
-                "open the parent PR with `lf pr open` before stacking a child on it",
-            ));
-        }
-        if !is_clean(&worktree)
-            .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
-        {
-            return Err(task_error(
-                "commit or discard changes before stacking the next PR",
-            ));
-        }
-        let sequence = parent.sequence + 1;
-        let slug = slug.unwrap_or_else(|| sequence.to_string());
-        if slug.is_empty()
-            || slug.split('-').any(|word| {
-                word.is_empty()
-                    || !word
-                        .bytes()
-                        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-            })
-        {
-            return Err(task_error("stack slug must be lowercase kebab-case"));
-        }
-        let author = parent
-            .branch
-            .split_once('/')
-            .map(|(author, _)| author)
-            .ok_or_else(|| {
-                task_error(format!(
-                    "parent branch {:?} has no author prefix",
-                    parent.branch
-                ))
-            })?;
-        let branch = format!("{author}/{}-{slug}", session.workspace_slug);
-        let local_ref = format!("refs/heads/{branch}");
-        let remote_ref = format!("refs/remotes/origin/{branch}");
-        let collision = ref_exists(&worktree, &local_ref)
-            .map_err(|error| task_error(format!("failed to inspect branch collision: {error}")))?
-            || ref_exists(&worktree, &remote_ref).map_err(|error| {
-                task_error(format!("failed to inspect branch collision: {error}"))
-            })?;
-        if collision {
-            return Err(task_error(format!(
-                "stacked branch {branch:?} already exists; choose a clearer --next name"
-            )));
-        }
-        let base_commit = rev_parse(&worktree, "HEAD")
-            .map_err(|error| task_error(format!("failed to resolve parent tip: {error}")))?;
-        checkout_new_branch_from(&worktree, &branch, "HEAD")
-            .map_err(|error| task_error(format!("failed to create stacked branch: {error}")))?;
-        push_with_upstream(&worktree, "origin", &branch)
-            .map_err(|error| task_error(format!("failed to push stacked branch: {error}")))?;
-
-        let now = time::OffsetDateTime::now_utc();
-        let child = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
-            sequence,
-            slug,
-            branch,
-            base_commit,
-            parent_pr_id: Some(parent.id.clone()),
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .stack_task_pr(&child)
-            .await
-            .map_err(|error| task_error(format!("failed to record stacked PR: {error}")))?;
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::PrStarted {
-                    pr_id: child.id.clone(),
-                    sequence: child.sequence,
-                    branch: child.branch.clone(),
-                    base_commit: child.base_commit.clone(),
-                },
+            .rebase_task_pr(
+                &pr_id,
+                &new_base,
+                clear_parent,
+                time::OffsetDateTime::now_utc(),
             )
             .await
             .map_err(|error| task_error(error.to_string()))?;
-        Ok(child)
+        Ok(())
     })
 }
 
@@ -465,6 +368,7 @@ pub fn task_run(
     repo: &Path,
     issue: &str,
     name: Option<String>,
+    stack_on: Option<String>,
     directive: Option<String>,
 ) -> OpsResult<TaskSession> {
     let directive = directive
@@ -490,6 +394,37 @@ pub fn task_run(
                     return Err(task_error(format!(
                         "Task {} already uses workspace name {:?}",
                         session.launch.issue.identifier, session.workspace_slug
+                    )));
+                }
+            }
+            if let Some(requested) = stack_on.as_deref() {
+                let active = store
+                    .active_task_pr(&session.id)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?
+                    .ok_or_else(|| task_error("existing Task has no active PR"))?;
+                let parent_id = active.parent_pr_id.as_ref().ok_or_else(|| {
+                    task_error(format!(
+                        "Task {} is rooted on main, not stacked on {requested}",
+                        session.launch.issue.identifier
+                    ))
+                })?;
+                let parent = store
+                    .get_task_pr(parent_id)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?
+                    .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
+                let parent_session = store
+                    .get_task_session(&parent.task_session_id)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?
+                    .ok_or_else(|| task_error("stack parent Task Session is missing"))?;
+                if requested != parent_session.launch.issue.identifier
+                    && requested != parent_session.launch.issue.id.as_str()
+                {
+                    return Err(task_error(format!(
+                        "Task {} is stacked on {}, not {requested}",
+                        session.launch.issue.identifier, parent_session.launch.issue.identifier
                     )));
                 }
             }
@@ -535,9 +470,54 @@ pub fn task_run(
     }
     let default_branch =
         get_default_branch(&main_repo).map_err(|error| task_error(error.to_string()))?;
-    fetch(&main_repo, "origin", &default_branch)
-        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
-    let base_ref = format!("origin/{default_branch}");
+    let stack_parent = stack_on
+        .as_deref()
+        .map(|parent_issue| {
+            block_on_task(async {
+                let store = task_store().await?;
+                let parent_session = store
+                    .get_task_session_by_issue(parent_issue)
+                    .await
+                    .map_err(|error| task_error(format!("failed to read parent Task: {error}")))?
+                    .ok_or_else(|| {
+                        task_error(format!(
+                            "stack parent {parent_issue:?} has no Task Session; run it first"
+                        ))
+                    })?;
+                if parent_session.launch.issue.id.as_str() == resolved.item.id {
+                    return Err(task_error("a Task cannot stack on itself"));
+                }
+                let parent = store
+                    .active_task_pr(&parent_session.id)
+                    .await
+                    .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
+                    .ok_or_else(|| task_error("stack parent has no active PR"))?;
+                if parent.github().is_none() {
+                    return Err(task_error(format!(
+                        "open the parent PR from {} before stacking work on it",
+                        parent_session.worktree.display()
+                    )));
+                }
+                Ok(parent)
+            })
+        })
+        .transpose()?;
+    let base_ref = match &stack_parent {
+        Some(parent) => {
+            fetch(&main_repo, "origin", &parent.branch).map_err(|error| {
+                task_error(format!(
+                    "failed to fetch parent branch {}: {error}",
+                    parent.branch
+                ))
+            })?;
+            format!("origin/{}", parent.branch)
+        }
+        None => {
+            fetch(&main_repo, "origin", &default_branch)
+                .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+            format!("origin/{default_branch}")
+        }
+    };
     plan.base_ref = base_ref.clone();
     let base_commit = rev_parse(&main_repo, &base_ref)
         .map_err(|error| task_error(format!("failed to resolve task base: {error}")))?;
@@ -619,7 +599,7 @@ pub fn task_run(
             slug: workspace_slug,
             branch: plan.branch.clone(),
             base_commit,
-            parent_pr_id: None,
+            parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
             publication: None,
             merge_commit: None,
             abandoned_at: None,
@@ -739,6 +719,7 @@ pub fn task_start(
     title: String,
     project_id: &str,
     name: Option<String>,
+    stack_on: Option<String>,
     directive: Option<String>,
 ) -> OpsResult<TaskSession> {
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
@@ -760,7 +741,7 @@ pub fn task_start(
         &title,
         &marker,
     )?;
-    task_run(&main, &created.item.id, name, directive)
+    task_run(&main, &created.item.id, name, stack_on, directive)
 }
 
 fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {

@@ -31,6 +31,7 @@ lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
 lf task run DES-123 --directive "fix the flaky test" # keep one Task through merge
+lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
 
 ## Skills
@@ -148,6 +149,7 @@ lf stop designer                                   # stop its listener and resid
 lf project run <linear-project-id>                  # durable Project Session
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
+lf task run DES-124 --stack-on DES-123
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123 --message "take the smaller approach"
 lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
@@ -170,6 +172,9 @@ Its provider process and transcript are a replaceable body generation: plain
 Session, directive, worktree, and PR chain while selecting another provider.
 The Session remains resumable through serial PRs, review, and explicit
 completion.
+`--stack-on` places a new Task worktree on another Task's published PR. Its PR
+targets that parent branch automatically, then collapses onto `main` after the
+parent merges. The two Tasks keep separate identities, worktrees, and workers.
 `lf task attach` exposes a writable prompt that records structured commands;
 terminal bytes never drive the provider directly.
 

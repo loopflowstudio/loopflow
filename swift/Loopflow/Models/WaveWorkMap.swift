@@ -324,22 +324,3 @@ public struct WaveAttentionItem: Decodable, Sendable, Hashable, Identifiable {
         case ageSeconds = "age_secs"
     }
 }
-
-public struct WaveStatusResult: Sendable {
-    public let workMap: WaveWorkMap
-    public let loopState: String?
-    public let runs: WorkEvidence<SkillRunEntry>
-    public let attention: WorkEvidence<WaveAttentionItem>
-
-    public init(
-        workMap: WaveWorkMap,
-        loopState: String?,
-        runs: WorkEvidence<SkillRunEntry>,
-        attention: WorkEvidence<WaveAttentionItem>
-    ) {
-        self.workMap = workMap
-        self.loopState = loopState
-        self.runs = runs
-        self.attention = attention
-    }
-}

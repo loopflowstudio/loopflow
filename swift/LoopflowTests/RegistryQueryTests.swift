@@ -79,6 +79,10 @@ struct RegistryQueryTests {
         }
 
         let result = try await query.status(wave: "goals", cwd: nil)
+        #expect(result.wave.id == "goals")
+        #expect(result.wave.goal == "g")
+        #expect(result.homeRuntime.state == .stopped)
+        #expect(result.homeRuntime.action == .start(home: "jack@local"))
         #expect(result.loopState == "turning")
         #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
         #expect(result.workMap.projects[0].runtime?.status == .waiting)

@@ -54,15 +54,9 @@ public struct RegistryQuery: Sendable {
     /// One wave's Project/Task work, plus the live loop state when its resident
     /// is answering.
     public func status(wave: String, cwd: String?) async throws
-        -> WaveStatusResult {
+        -> WaveDetailSnapshot {
         let stdout = try await run(["status", wave, "--json"], cwd)
-        let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
-        return WaveStatusResult(
-            workMap: WaveWorkMap(objective: snapshot.wave.goal, projects: snapshot.projects),
-            loopState: snapshot.loopState,
-            runs: snapshot.runs,
-            attention: snapshot.attention
-        )
+        return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
     /// Probe one Wave's Home for liveness and the single contextual action.
@@ -387,15 +381,20 @@ public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let projects: WorkEvidence<RoadmapProject>
 }
 
-/// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot`.
-struct WaveStatusSnapshot: Decodable {
-    let wave: WaveSnapshot
-    let loopState: String?
-    let projects: [WaveProjectWork]
-    let runs: WorkEvidence<SkillRunEntry>
-    let attention: WorkEvidence<WaveAttentionItem>
+/// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
+/// reshaping or dropping fields, so every Wave surface starts from one reading.
+public struct WaveDetailSnapshot: Decodable, Sendable {
+    public let wave: WaveSnapshot
+    public let loopState: String?
+    public let projects: [WaveProjectWork]
+    public let runs: WorkEvidence<SkillRunEntry>
+    public let attention: WorkEvidence<WaveAttentionItem>
     /// The focused Wave's Home probed for liveness and its one contextual action.
-    let homeRuntime: HomeRuntime
+    public let homeRuntime: HomeRuntime
+
+    public var workMap: WaveWorkMap {
+        WaveWorkMap(objective: wave.goal, projects: projects)
+    }
 
     enum CodingKeys: String, CodingKey {
         case wave, projects, runs, attention

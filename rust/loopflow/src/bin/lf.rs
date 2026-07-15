@@ -606,10 +606,14 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             session.latest_process.as_ref(),
         );
         println!(
-            "{}  {}\n  session: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            "{}  {}\n  session: {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.launch.issue.identifier,
             session.status.as_str(),
             session.id,
+            session.resolved_flow,
+            session.interaction_policy.as_str(),
+            session.flow_iteration + 1,
+            session.flow_cursor + 1,
             body,
             session.worktree.display(),
             branch,
@@ -891,6 +895,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Run {
             issue,
             name,
+            flow,
             stack_on,
             directive,
             json,
@@ -898,9 +903,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let session = loopflow::ops::task::task_run(
                 repo,
                 issue,
-                name.clone(),
-                stack_on.clone(),
-                directive.clone(),
+                loopflow::ops::task::TaskLaunchOptions {
+                    name: name.clone(),
+                    flow: flow.clone(),
+                    stack_on: stack_on.clone(),
+                    directive: directive.clone(),
+                },
             )?;
             print_task_session(&session, *json)
         }
@@ -908,6 +916,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             title,
             project_id,
             name,
+            flow,
             stack_on,
             directive,
             json,
@@ -916,9 +925,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 title.clone(),
                 project_id,
-                name.clone(),
-                stack_on.clone(),
-                directive.clone(),
+                loopflow::ops::task::TaskLaunchOptions {
+                    name: name.clone(),
+                    flow: flow.clone(),
+                    stack_on: stack_on.clone(),
+                    directive: directive.clone(),
+                },
             )?;
             print_task_session(&session, *json)
         }

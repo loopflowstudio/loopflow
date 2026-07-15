@@ -802,6 +802,9 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         name: Option<String>,
+        /// Use this Task flow instead of the Project/default flow
+        #[arg(long, value_name = "FLOW")]
+        flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -817,6 +820,9 @@ pub enum TaskCommand {
         project_id: String,
         #[arg(long)]
         name: Option<String>,
+        /// Use this Task flow instead of the Project/default flow
+        #[arg(long, value_name = "FLOW")]
+        flow: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -1810,6 +1816,19 @@ mod tests {
         assert_eq!(name.as_deref(), Some("release-scoped-migrations"));
         assert_eq!(stack_on.as_deref(), Some("INF-122"));
         assert!(json);
+    }
+
+    #[test]
+    fn task_run_accepts_an_explicit_flow() {
+        let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--flow", "iterate"])
+            .expect("parse task review policy");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Run { flow, .. },
+        }) = cli.command
+        else {
+            panic!("expected task run command");
+        };
+        assert_eq!(flow.as_deref(), Some("iterate"));
     }
 
     #[test]

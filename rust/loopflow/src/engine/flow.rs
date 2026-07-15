@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -108,6 +109,31 @@ pub enum FlowAction {
 pub enum InteractionPolicy {
     Require,
     Defer,
+}
+
+impl InteractionPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Require => "require",
+            Self::Defer => "defer",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid interaction policy: {0}")]
+pub struct InteractionPolicyParseError(String);
+
+impl FromStr for InteractionPolicy {
+    type Err = InteractionPolicyParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "require" => Ok(Self::Require),
+            "defer" => Ok(Self::Defer),
+            _ => Err(InteractionPolicyParseError(value.to_string())),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

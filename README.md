@@ -145,10 +145,13 @@ lf project steer <linear-project-id> "prioritize the CLI path"
 lf project acknowledge <linear-project-id> --directive 2 --summary "CLI proof is first"
 lf project wait <linear-project-id> --until waiting
 
-lf task run INF-123 --name release-scoped-migrations
+lf task run INF-123 --flow code --name release-scoped-migrations
 # work
 lf pr land -c
 ```
+
+`--flow` selects the Task's inner loop. The Task Session retains that resolved
+flow and its next step across process generations.
 
 Start dependent work without sharing the parent's worktree:
 

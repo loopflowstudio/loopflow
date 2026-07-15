@@ -13,13 +13,17 @@ pub struct WaveCronDef {
     pub schedule: String,
 }
 
-/// The Linear Initiative representing a wave, from `pm.*` in GOAL.md.
+/// The Linear Initiative and team representing a wave, from `pm.*` in GOAL.md.
+/// The Initiative is the durable middle tier; the team owns the Task prefix
+/// (`PRD-*`, `INF-*`, …). Both store stable provider ids, not presentation.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WavePmConfig {
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
     pub linear_initiative: Option<String>,
+    #[serde(default)]
+    pub linear_team: Option<String>,
 }
 
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
@@ -282,7 +286,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\npm:\n  provider: linear\n  linear_initiative: \"lin-123\"\n---\nDrive the work.\n",
+            "---\npm:\n  provider: linear\n  linear_initiative: \"lin-123\"\n  linear_team: \"team-prd\"\n---\nDrive the work.\n",
         )
         .expect("write");
 
@@ -290,6 +294,7 @@ mod tests {
         let pm = config.pm.expect("pm config should exist");
         assert_eq!(pm.provider.as_deref(), Some("linear"));
         assert_eq!(pm.linear_initiative.as_deref(), Some("lin-123"));
+        assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
     }
 
     /// Crons live in GOAL.md frontmatter — the resident loop's schedule

@@ -7,7 +7,7 @@ use tracing::warn;
 
 use crate::pm::{
     parse_project_content, project_slug, render_project_content, PmError, PmItem, PmItemCreate,
-    PmItemUpdate, PmKr, PmProject, PmResult, PmWave, RATE_LIMIT_RETRIES,
+    PmItemUpdate, PmKr, PmProject, PmResult, PmWave, TeamBinding, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -21,6 +21,7 @@ const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
     nodes {
       id
       name
+      key
     }
   }
 }"#;
@@ -223,6 +224,65 @@ impl LinearClient {
             team_id,
             base_url,
         }
+    }
+
+    /// Adopt or create the team a wave should own, keyed by `key`. Returns the
+    /// stable team id. Diagnoses conflicts instead of guessing:
+    /// - the requested key already belongs to a team with the same name → adopt;
+    /// - the requested key belongs to a *different*-named team → refuse;
+    /// - the name exists under a different key → refuse (name the existing key);
+    /// - neither exists → create.
+    pub async fn ensure_team(&self, name: &str, key: &str) -> PmResult<TeamBinding> {
+        let requested_key = key.trim().to_ascii_uppercase();
+        if requested_key.is_empty() {
+            return Err(PmError::Message(
+                "team key cannot be empty; pass --team-key <KEY>".to_string(),
+            ));
+        }
+
+        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+        let teams = response.teams.nodes;
+
+        if let Some(team) = teams
+            .iter()
+            .find(|team| team.key.eq_ignore_ascii_case(&requested_key))
+        {
+            if team.name.eq_ignore_ascii_case(name) {
+                return Ok(TeamBinding {
+                    id: team.id.clone(),
+                    key: team.key.clone(),
+                    created: false,
+                });
+            }
+            return Err(PmError::Message(format!(
+                "Linear team key {requested_key:?} already belongs to team {:?} (id {}). \
+                 Pass a different --team-key or rename that team.",
+                team.name, team.id
+            )));
+        }
+
+        if let Some(team) = teams
+            .iter()
+            .find(|team| team.name.eq_ignore_ascii_case(name))
+        {
+            return Err(PmError::Message(format!(
+                "a Linear team named {name:?} already exists with key {:?} (id {}). \
+                 Pass --team-key {} to adopt it, or rename the team.",
+                team.key, team.id, team.key
+            )));
+        }
+
+        let response: TeamCreateData = self
+            .graphql(
+                CREATE_TEAM_MUTATION,
+                json!({ "name": name, "key": requested_key }),
+            )
+            .await?;
+        Ok(TeamBinding {
+            id: response.team_create.team.id,
+            key: requested_key,
+            created: true,
+        })
     }
 
     async fn resolve_team_id(&self) -> PmResult<String> {
@@ -794,6 +854,7 @@ struct TeamsConnection {
 struct TeamNode {
     id: String,
     name: String,
+    key: String,
 }
 
 #[derive(Deserialize)]
@@ -1328,6 +1389,108 @@ mod tests {
         let create_body: Value =
             serde_json::from_str(&requests[1].body).expect("create body is json");
         assert_eq!(create_body["variables"]["stateId"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn ensure_team_adopts_matching_key_without_creating() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "teams": { "nodes": [
+                { "id": "team-prd", "name": "Product", "key": "PRD" },
+                { "id": "team-inf", "name": "Infrastructure", "key": "INF" },
+            ] } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let binding = client
+            .ensure_team("Product", "PRD")
+            .await
+            .expect("adopt existing team");
+
+        assert_eq!(
+            binding,
+            TeamBinding {
+                id: "team-prd".to_string(),
+                key: "PRD".to_string(),
+                created: false,
+            }
+        );
+        // Only the list query fired — no team was created.
+        assert_eq!(requests.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ensure_team_creates_when_absent() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teams": { "nodes": [] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teamCreate": { "team": { "id": "team-new" } } } }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let binding = client
+            .ensure_team("Product", "prd")
+            .await
+            .expect("create team");
+
+        assert_eq!(
+            binding,
+            TeamBinding {
+                id: "team-new".to_string(),
+                key: "PRD".to_string(),
+                created: true,
+            }
+        );
+        let requests = requests.lock().await;
+        let create_body: Value =
+            serde_json::from_str(&requests[1].body).expect("create body is json");
+        assert_eq!(create_body["variables"]["key"], "PRD");
+        assert_eq!(create_body["variables"]["name"], "Product");
+    }
+
+    #[tokio::test]
+    async fn ensure_team_refuses_key_owned_by_another_team() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "teams": { "nodes": [
+                { "id": "team-x", "name": "Platform", "key": "PRD" },
+            ] } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let err = client
+            .ensure_team("Product", "PRD")
+            .await
+            .expect_err("conflicting key is refused");
+        let message = err.to_string();
+        assert!(message.contains("PRD"), "{message}");
+        assert!(message.contains("Platform"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn ensure_team_refuses_name_owned_under_a_different_key() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "teams": { "nodes": [
+                { "id": "team-y", "name": "Product", "key": "PROD" },
+            ] } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let err = client
+            .ensure_team("Product", "PRD")
+            .await
+            .expect_err("name reused under a different key is refused");
+        assert!(err.to_string().contains("PROD"), "{err}");
     }
 
     #[test]

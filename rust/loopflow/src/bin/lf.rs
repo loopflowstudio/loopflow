@@ -1330,12 +1330,35 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Top) => loopflow::lf::commands::top::run(),
             Some(Commands::Context {
                 days,
+                started_after,
+                started_before,
                 wave,
                 repo,
+                flow,
+                skill,
+                provider,
+                model,
+                surface,
+                outcome,
+                capture_state,
                 json,
-            }) => {
-                loopflow::lf::commands::context::run(*days, wave.as_deref(), repo.as_deref(), *json)
-            }
+            }) => loopflow::lf::commands::context::run(
+                loopflow::lf::commands::context::ContextQueryOptions {
+                    days: *days,
+                    started_after: *started_after,
+                    started_before: *started_before,
+                    repo_paths: repo.clone(),
+                    waves: wave.clone(),
+                    flows: flow.clone(),
+                    skills: skill.clone(),
+                    providers: provider.clone(),
+                    models: model.clone(),
+                    surfaces: surface.clone(),
+                    outcomes: outcome.clone(),
+                    capture_states: capture_state.clone(),
+                    json: *json,
+                },
+            ),
             Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
             Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
             Some(Commands::Status { wave, json }) => {
@@ -1349,15 +1372,19 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Trace {
                 exec_id,
                 json,
+                content,
                 events,
                 jsonl,
                 launch,
+                turn,
             }) => loopflow::lf::commands::runs::trace(
                 exec_id,
                 *json,
+                *content,
                 *events,
                 *jsonl,
                 launch.as_deref(),
+                turn.as_deref(),
             ),
             Some(Commands::Chat {
                 text,

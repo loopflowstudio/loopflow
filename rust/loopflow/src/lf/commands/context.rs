@@ -1,55 +1,264 @@
-//! `lf context` — query supplied-context evidence without opening prompt bodies.
+//! `lf context` — aggregate supplied-context evidence without opening prompt bodies.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{anyhow, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::journal::open_ledger;
-use crate::trace::{AgentLaunchRow, AgentTurnRow, ContextAssetRow, ContextDecisionRow};
+use crate::trace::{AgentLaunchRow, AgentTurnRow, ContextAssetRow};
 
-#[derive(Debug, Serialize)]
-pub struct ContextDatasetDto {
-    pub days: u32,
-    pub turns: Vec<ContextTurnDto>,
-    pub assets: Vec<ContextAssetRow>,
-    pub decisions: Vec<ContextDecisionRow>,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionSetQuery {
+    pub repo_paths: Vec<String>,
+    pub started_after: i64,
+    pub started_before: i64,
+    pub waves: Vec<String>,
+    pub flows: Vec<String>,
+    pub skills: Vec<String>,
+    pub providers: Vec<String>,
+    pub models: Vec<String>,
+    pub surfaces: Vec<String>,
+    pub outcomes: Vec<String>,
+    pub capture_states: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ContextTurnDto {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextLabSnapshot {
+    pub query: SessionSetQuery,
+    pub coverage: ContextCoverageDto,
+    pub totals: SessionSetTotals,
+    pub aggregate_root: ContextFlameNode,
+    pub sessions: Vec<SessionLane>,
+    pub evidence: Vec<SourceEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextCoverageDto {
+    pub launches: u64,
+    pub complete_launches: u64,
+    pub partial_launches: u64,
+    pub prompt_only_launches: u64,
+    pub capturing_launches: u64,
+    pub turns: u64,
+    pub assembled_turns: u64,
+    pub provider_total_only_turns: u64,
+    pub unknown_turns: u64,
+    pub prompt_artifacts_available: u64,
+    pub conversations_available: u64,
+    pub supplied_tokens: u64,
+    pub attributed_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionSetTotals {
+    pub sessions: u64,
+    pub launches: u64,
+    pub turns: u64,
+    pub assembled_turns: u64,
+    pub context_tokens: Option<u64>,
+    pub context_token_turns: u64,
+    pub median_context_tokens: Option<u64>,
+    pub p95_context_tokens: Option<u64>,
+    pub instruction_tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
+    pub cost_turns: u64,
+    pub completed_launches: u64,
+    pub failed_launches: u64,
+    pub interrupted_launches: u64,
+    pub running_launches: u64,
+    pub steering_turns: u64,
+    pub steered_launches: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextFlameLevel {
+    SessionSet,
+    Kind,
+    Source,
+    Revision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextFlameNode {
+    pub id: String,
+    pub level: ContextFlameLevel,
+    pub kind: String,
+    pub label: String,
+    pub source_path: Option<String>,
+    pub content_sha256: Option<String>,
+    pub attributed_tokens: u64,
+    pub isolated_tokens: u64,
+    pub session_count: u64,
+    pub turn_count: u64,
+    pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
+    pub children: Vec<ContextFlameNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionLane {
+    pub id: String,
     pub run_id: String,
-    pub process_id: String,
-    pub launch_id: String,
-    pub turn_id: String,
-    pub ordinal: i64,
-    pub timestamp: i64,
-    pub repo: String,
+    pub started_at: i64,
+    pub outcome: String,
+    pub steering_turns: Option<u64>,
+    pub capture: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub surface: String,
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
-    pub provider: String,
-    pub model: Option<String>,
-    pub coverage: String,
-    pub capture_status: String,
-    pub supplied_context_tokens: i64,
-    pub provider_input_tokens: Option<i64>,
-    pub context_gather_ms: i64,
-    pub context_render_ms: i64,
-    pub context_persist_ms: i64,
-    pub artifact_available: bool,
+    pub conversation_available: bool,
+    pub turns: Vec<TurnLane>,
 }
 
-pub fn run(days: u32, wave: Option<&str>, repo: Option<&str>, json: bool) -> Result<()> {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TurnLane {
+    pub id: String,
+    pub ordinal: u64,
+    pub started_at: i64,
+    pub status: String,
+    pub input_op: String,
+    pub coverage: String,
+    pub supplied_context_tokens: Option<u64>,
+    pub provider_input_tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
+    pub prompt_artifact_available: bool,
+    pub assets: Vec<ContextLaneAsset>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextLaneAsset {
+    pub node_id: String,
+    pub position: u64,
+    pub channel: String,
+    pub kind: String,
+    pub label: String,
+    pub source_path: Option<String>,
+    pub content_sha256: String,
+    pub included_by: String,
+    pub attributed_tokens: u64,
+    pub isolated_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct TraceAddress {
+    pub run_id: String,
+    pub launch_id: String,
+    pub turn_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceRole {
+    SmoothComplete,
+    HighContextComplete,
+    FailedOrSteered,
+    Recent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepresentativeTrace {
+    pub role: EvidenceRole,
+    pub address: TraceAddress,
+    pub started_at: i64,
+    pub outcome: String,
+    pub capture: String,
+    pub supplied_context_tokens: Option<u64>,
+    pub selected_source_tokens: u64,
+    pub steering_turns: Option<u64>,
+    pub prompt_artifact_available: bool,
+    pub conversation_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SourceMeasurements {
+    pub exposed_sessions: u64,
+    pub exposed_launches: u64,
+    pub exposed_turns: u64,
+    pub attributed_tokens: u64,
+    pub isolated_tokens: u64,
+    pub median_tokens_per_exposed_turn: Option<u64>,
+    pub p95_tokens_per_exposed_turn: Option<u64>,
+    pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
+    pub completed_launches: u64,
+    pub failed_launches: u64,
+    pub interrupted_launches: u64,
+    pub steering_turns: Option<u64>,
+    pub complete_capture_launches: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SourceEvidence {
+    pub node_id: String,
+    pub label: String,
+    pub kind: String,
+    pub source_path: Option<String>,
+    pub content_sha256: String,
+    pub editable: bool,
+    pub current_content_sha256: Option<String>,
+    pub precedence_layers: Vec<String>,
+    pub measurements: SourceMeasurements,
+    pub representatives: Vec<RepresentativeTrace>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContextQueryOptions {
+    pub days: u32,
+    pub started_after: Option<i64>,
+    pub started_before: Option<i64>,
+    pub repo_paths: Vec<String>,
+    pub waves: Vec<String>,
+    pub flows: Vec<String>,
+    pub skills: Vec<String>,
+    pub providers: Vec<String>,
+    pub models: Vec<String>,
+    pub surfaces: Vec<String>,
+    pub outcomes: Vec<String>,
+    pub capture_states: Vec<String>,
+    pub json: bool,
+}
+
+pub fn run(options: ContextQueryOptions) -> Result<()> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let started_before = options.started_before.unwrap_or(now);
+    let started_after = options
+        .started_after
+        .unwrap_or_else(|| started_before - i64::from(options.days).saturating_mul(24 * 60 * 60));
+    if started_after >= started_before {
+        return Err(anyhow!("context window must start before it ends"));
+    }
+    let query = SessionSetQuery {
+        repo_paths: options.repo_paths,
+        started_after,
+        started_before,
+        waves: options.waves,
+        flows: options.flows,
+        skills: options.skills,
+        providers: options.providers,
+        models: options.models,
+        surfaces: options.surfaces,
+        outcomes: options.outcomes,
+        capture_states: options.capture_states,
+    };
+    validate_query(&query)?;
+
     let store = open_ledger().map_err(|error| anyhow!("run ledger unavailable: {error}"))?;
-    let since = time::OffsetDateTime::now_utc().unix_timestamp()
-        - i64::from(days).saturating_mul(24 * 60 * 60);
     let launches = store
-        .agent_launches_since(since)
+        .agent_launches_since(query.started_after)
         .map_err(|error| anyhow!("failed to read context launches: {error}"))?
         .into_iter()
-        .filter(|launch| wave.is_none_or(|value| launch.wave.as_deref() == Some(value)))
-        .filter(|launch| repo.is_none_or(|value| launch.repo == value))
+        .filter(|launch| launch.started_at < query.started_before)
+        .filter(|launch| launch_matches(launch, &query))
         .collect::<Vec<_>>();
     let launch_ids = launches
         .iter()
@@ -58,165 +267,1253 @@ pub fn run(days: u32, wave: Option<&str>, repo: Option<&str>, json: bool) -> Res
     let turns = store.agent_turns_for_launches(&launch_ids)?;
     let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
     let assets = store.context_assets_for_turns(&turn_ids)?;
-    let decisions = store.context_decisions_for_turns(&turn_ids)?;
-    let rows = join_turns(&launches, &turns);
-    let dataset = ContextDatasetDto {
-        days,
-        turns: rows,
-        assets,
-        decisions,
-    };
+    let snapshot = aggregate(query, launches, turns, assets);
 
-    if json {
-        println!("{}", serde_json::to_string(&dataset)?);
+    if options.json {
+        println!("{}", serde_json::to_string(&snapshot)?);
     } else {
-        print_human(&dataset);
+        print_human(&snapshot);
     }
     Ok(())
 }
 
-fn join_turns(launches: &[AgentLaunchRow], turns: &[AgentTurnRow]) -> Vec<ContextTurnDto> {
-    let by_id: BTreeMap<&str, &AgentLaunchRow> = launches
+fn validate_query(query: &SessionSetQuery) -> Result<()> {
+    validate_values(
+        "outcome",
+        &query.outcomes,
+        &["running", "completed", "failed", "interrupted"],
+    )?;
+    validate_values(
+        "capture state",
+        &query.capture_states,
+        &["capturing", "complete", "partial", "prompt_only"],
+    )
+}
+
+fn validate_values(label: &str, values: &[String], allowed: &[&str]) -> Result<()> {
+    if let Some(value) = values
+        .iter()
+        .find(|value| !allowed.contains(&value.as_str()))
+    {
+        return Err(anyhow!("unknown {label} '{value}'"));
+    }
+    Ok(())
+}
+
+fn launch_matches(launch: &AgentLaunchRow, query: &SessionSetQuery) -> bool {
+    matches_filter(&query.repo_paths, Some(&launch.repo))
+        && matches_filter(&query.waves, launch.wave.as_ref())
+        && matches_filter(&query.flows, launch.flow.as_ref())
+        && matches_filter(&query.skills, launch.skill.as_ref())
+        && matches_filter(&query.providers, Some(&launch.provider))
+        && matches_filter(&query.models, launch.model.as_ref())
+        && matches_filter(&query.surfaces, Some(&launch.surface))
+        && matches_filter(&query.outcomes, Some(&launch.outcome))
+        && matches_filter(&query.capture_states, Some(&launch.capture_status))
+}
+
+fn matches_filter(values: &[String], candidate: Option<&String>) -> bool {
+    values.is_empty() || candidate.is_some_and(|candidate| values.contains(candidate))
+}
+
+pub fn aggregate(
+    query: SessionSetQuery,
+    mut launches: Vec<AgentLaunchRow>,
+    turns: Vec<AgentTurnRow>,
+    assets: Vec<ContextAssetRow>,
+) -> ContextLabSnapshot {
+    launches.sort_by_key(|launch| (launch.started_at, launch.id.clone()));
+    let launch_by_id = launches
         .iter()
         .map(|launch| (launch.id.as_str(), launch))
-        .collect();
-    turns
+        .collect::<HashMap<_, _>>();
+    let turn_by_id = turns
         .iter()
-        .filter_map(|turn| {
-            let launch = by_id.get(turn.launch_id.as_str())?;
-            Some(ContextTurnDto {
+        .map(|turn| (turn.id.as_str(), turn))
+        .collect::<HashMap<_, _>>();
+    let assets_by_turn = group_assets(&assets);
+
+    let sessions = build_session_lanes(&launches, &turns, &assets_by_turn);
+    let coverage = build_coverage(&launches, &turns, &assets);
+    let totals = build_totals(&launches, &turns, &assets);
+    let aggregate_root = build_flame(&launches, &turns, &assets);
+    let evidence = build_evidence(
+        &assets,
+        &launch_by_id,
+        &turn_by_id,
+        &assets_by_turn,
+        &sessions,
+    );
+    ContextLabSnapshot {
+        query,
+        coverage,
+        totals,
+        aggregate_root,
+        sessions,
+        evidence,
+    }
+}
+
+fn group_assets(assets: &[ContextAssetRow]) -> HashMap<&str, Vec<&ContextAssetRow>> {
+    let mut grouped: HashMap<&str, Vec<&ContextAssetRow>> = HashMap::new();
+    for asset in assets {
+        grouped
+            .entry(asset.turn_id.as_str())
+            .or_default()
+            .push(asset);
+    }
+    for rows in grouped.values_mut() {
+        rows.sort_by_key(|row| row.asset.position);
+    }
+    grouped
+}
+
+fn build_coverage(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+    assets: &[ContextAssetRow],
+) -> ContextCoverageDto {
+    ContextCoverageDto {
+        launches: launches.len() as u64,
+        complete_launches: count_launches(launches, "complete"),
+        partial_launches: count_launches(launches, "partial"),
+        prompt_only_launches: count_launches(launches, "prompt_only"),
+        capturing_launches: count_launches(launches, "capturing"),
+        turns: turns.len() as u64,
+        assembled_turns: count_turn_coverage(turns, "assembled"),
+        provider_total_only_turns: count_turn_coverage(turns, "provider_total_only"),
+        unknown_turns: count_turn_coverage(turns, "unknown"),
+        prompt_artifacts_available: turns
+            .iter()
+            .filter(|turn| artifact_available(&turn.task_prompt_path))
+            .count() as u64,
+        conversations_available: launches
+            .iter()
+            .filter(|launch| artifact_available(&launch.conversation_path))
+            .count() as u64,
+        supplied_tokens: turns
+            .iter()
+            .filter(|turn| turn.context_coverage == "assembled")
+            .map(|turn| nonnegative(turn.supplied_context_tokens))
+            .sum(),
+        attributed_tokens: assets.iter().map(|row| row.asset.attributed_tokens).sum(),
+    }
+}
+
+fn build_totals(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+    assets: &[ContextAssetRow],
+) -> SessionSetTotals {
+    let mut context_values = turns
+        .iter()
+        .filter(|turn| turn.context_coverage == "assembled")
+        .map(|turn| nonnegative(turn.supplied_context_tokens))
+        .collect::<Vec<_>>();
+    context_values.sort_unstable();
+    let cost_values = turns
+        .iter()
+        .filter_map(|turn| turn.cost_usd)
+        .collect::<Vec<_>>();
+    let steered_launches = turns
+        .iter()
+        .filter(|turn| turn.input_op == "steer")
+        .map(|turn| turn.launch_id.as_str())
+        .collect::<HashSet<_>>()
+        .len() as u64;
+    let instruction_tokens = assets
+        .iter()
+        .filter(|row| is_instruction_kind(row.asset.kind.as_str()))
+        .map(|row| row.asset.attributed_tokens)
+        .sum::<u64>();
+    let attributed_tokens = assets
+        .iter()
+        .map(|row| row.asset.attributed_tokens)
+        .sum::<u64>();
+    let context_tokens = (!context_values.is_empty()).then(|| context_values.iter().sum());
+    let instruction_tokens = context_tokens.and_then(|context_tokens| {
+        (attributed_tokens > 0 || context_tokens == 0).then_some(instruction_tokens)
+    });
+    SessionSetTotals {
+        sessions: launches
+            .iter()
+            .map(|launch| launch.run_id.as_str())
+            .collect::<HashSet<_>>()
+            .len() as u64,
+        launches: launches.len() as u64,
+        turns: turns.len() as u64,
+        assembled_turns: context_values.len() as u64,
+        context_tokens,
+        context_token_turns: context_values.len() as u64,
+        median_context_tokens: percentile(&context_values, 50),
+        p95_context_tokens: percentile(&context_values, 95),
+        instruction_tokens,
+        cost_usd: (!cost_values.is_empty()).then(|| cost_values.iter().sum()),
+        cost_turns: cost_values.len() as u64,
+        completed_launches: count_outcomes(launches, "completed"),
+        failed_launches: count_outcomes(launches, "failed"),
+        interrupted_launches: count_outcomes(launches, "interrupted"),
+        running_launches: count_outcomes(launches, "running"),
+        steering_turns: turns.iter().filter(|turn| turn.input_op == "steer").count() as u64,
+        steered_launches,
+    }
+}
+
+fn build_session_lanes(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+    assets_by_turn: &HashMap<&str, Vec<&ContextAssetRow>>,
+) -> Vec<SessionLane> {
+    let mut turns_by_launch: HashMap<&str, Vec<&AgentTurnRow>> = HashMap::new();
+    for turn in turns {
+        turns_by_launch
+            .entry(turn.launch_id.as_str())
+            .or_default()
+            .push(turn);
+    }
+    launches
+        .iter()
+        .map(|launch| {
+            let mut launch_turns = turns_by_launch
+                .remove(launch.id.as_str())
+                .unwrap_or_default();
+            launch_turns.sort_by_key(|turn| turn.ordinal);
+            let steering_turns = launch_turns
+                .iter()
+                .filter(|turn| turn.input_op == "steer")
+                .count() as u64;
+            SessionLane {
+                id: launch.id.clone(),
                 run_id: launch.run_id.clone(),
-                process_id: launch.process_id.clone(),
-                launch_id: launch.id.clone(),
-                turn_id: turn.id.clone(),
-                ordinal: turn.ordinal,
-                timestamp: turn.started_at,
-                repo: launch.repo.clone(),
+                started_at: launch.started_at,
+                outcome: launch.outcome.clone(),
+                steering_turns: Some(steering_turns),
+                capture: launch.capture_status.clone(),
+                provider: launch.provider.clone(),
+                model: launch.model.clone(),
+                surface: launch.surface.clone(),
                 wave: launch.wave.clone(),
                 flow: launch.flow.clone(),
                 skill: launch.skill.clone(),
-                provider: launch.provider.clone(),
-                model: launch.model.clone(),
-                coverage: turn.context_coverage.clone(),
-                capture_status: launch.capture_status.clone(),
-                supplied_context_tokens: turn.supplied_context_tokens,
-                provider_input_tokens: turn.provider_input_tokens,
-                context_gather_ms: turn.context_gather_ms,
-                context_render_ms: turn.context_render_ms,
-                context_persist_ms: turn.context_persist_ms,
-                artifact_available: crate::trace::resolve_artifact(&turn.task_prompt_path)
-                    .is_ok_and(|path| path.is_file()),
-            })
+                conversation_available: artifact_available(&launch.conversation_path),
+                turns: launch_turns
+                    .into_iter()
+                    .map(|turn| TurnLane {
+                        id: turn.id.clone(),
+                        ordinal: nonnegative(turn.ordinal),
+                        started_at: turn.started_at,
+                        status: turn.status.clone(),
+                        input_op: turn.input_op.clone(),
+                        coverage: turn.context_coverage.clone(),
+                        supplied_context_tokens: (turn.context_coverage == "assembled")
+                            .then(|| nonnegative(turn.supplied_context_tokens)),
+                        provider_input_tokens: turn.provider_input_tokens.map(nonnegative),
+                        cost_usd: turn.cost_usd,
+                        prompt_artifact_available: artifact_available(&turn.task_prompt_path),
+                        assets: assets_by_turn
+                            .get(turn.id.as_str())
+                            .into_iter()
+                            .flatten()
+                            .map(|row| lane_asset(launch, row))
+                            .collect(),
+                    })
+                    .collect(),
+            }
         })
         .collect()
 }
 
-fn print_human(dataset: &ContextDatasetDto) {
-    if dataset.turns.is_empty() {
-        println!(
-            "No captured agent context in the last {} days.",
-            dataset.days
-        );
-        return;
+fn lane_asset(launch: &AgentLaunchRow, row: &ContextAssetRow) -> ContextLaneAsset {
+    let kind = row.asset.kind.as_str();
+    let canonical = canonical_identity(launch, row);
+    ContextLaneAsset {
+        node_id: revision_node_id(kind, &canonical, &row.asset.content_sha256),
+        position: u64::from(row.asset.position),
+        channel: row.asset.channel.as_str().to_string(),
+        kind: kind.to_string(),
+        label: row.asset.label.clone(),
+        source_path: canonical.path,
+        content_sha256: row.asset.content_sha256.clone(),
+        included_by: row.asset.included_by.clone(),
+        attributed_tokens: row.asset.attributed_tokens,
+        isolated_tokens: row.asset.isolated_tokens,
     }
-    println!("CONTEXT BY WAVE");
-    let mut groups: BTreeMap<&str, Vec<&ContextTurnDto>> = BTreeMap::new();
-    for turn in &dataset.turns {
-        groups
-            .entry(turn.wave.as_deref().unwrap_or("(no wave)"))
-            .or_default()
-            .push(turn);
-    }
-    for (wave, turns) in groups {
-        let mut values = turns
-            .iter()
-            .filter(|turn| turn.ordinal == 1 && turn.coverage == "assembled")
-            .map(|turn| turn.supplied_context_tokens)
-            .collect::<Vec<_>>();
-        if values.is_empty() {
-            continue;
-        }
-        values.sort_unstable();
-        let sum: i64 = values.iter().sum();
-        let average = sum / values.len() as i64;
-        let complete = turns
-            .iter()
-            .filter(|turn| turn.ordinal == 1 && turn.capture_status == "complete")
-            .count();
-        let partial = turns
-            .iter()
-            .filter(|turn| turn.ordinal == 1 && turn.capture_status == "partial")
-            .count();
-        let prompt_only = turns
-            .iter()
-            .filter(|turn| turn.ordinal == 1 && turn.capture_status == "prompt_only")
-            .count();
-        let provider_inputs = turns
-            .iter()
-            .filter_map(|turn| turn.provider_input_tokens)
-            .collect::<Vec<_>>();
-        let provider_average = (!provider_inputs.is_empty())
-            .then(|| provider_inputs.iter().sum::<i64>() / provider_inputs.len() as i64);
-        println!(
-            "  {wave:<18} {:>4} launches  avg {:>8}  p50 {:>8}  p95 {:>8}  provider avg {:>8}  complete {complete} partial {partial} prompt-only {prompt_only}",
-            values.len(),
-            average,
-            percentile(&values, 50),
-            percentile(&values, 95),
-            provider_average
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-        );
-    }
-
-    println!("\nASSET CONTRIBUTIONS");
-    let initial_turns: HashSet<&str> = dataset
-        .turns
-        .iter()
-        .filter(|turn| turn.ordinal == 1 && turn.coverage == "assembled")
-        .map(|turn| turn.turn_id.as_str())
-        .collect();
-    let mut kinds: BTreeMap<String, (u64, usize)> = BTreeMap::new();
-    for row in dataset
-        .assets
-        .iter()
-        .filter(|row| initial_turns.contains(row.turn_id.as_str()))
-    {
-        let entry = kinds
-            .entry(row.asset.kind.as_str().to_string())
-            .or_default();
-        entry.0 += row.asset.attributed_tokens;
-        entry.1 += 1;
-    }
-    for (kind, (tokens, count)) in kinds {
-        println!(
-            "  {kind:<22} {:>10} tokens  {:>8} avg/asset  {count:>5} assets",
-            tokens,
-            tokens / count as u64,
-        );
-    }
-    let follow_up_tokens: i64 = dataset
-        .turns
-        .iter()
-        .filter(|turn| turn.ordinal > 1)
-        .map(|turn| turn.supplied_context_tokens)
-        .sum();
-    let follow_up_turns = dataset.turns.iter().filter(|turn| turn.ordinal > 1).count();
-    println!("\nFOLLOW-UP INPUT  {follow_up_tokens:>10} tokens  {follow_up_turns:>5} turns");
 }
 
-fn percentile(sorted: &[i64], percent: usize) -> i64 {
+#[derive(Debug, Clone, Default)]
+struct NodeAccumulator {
+    attributed_tokens: u64,
+    isolated_tokens: u64,
+    sessions: BTreeSet<String>,
+    turns: BTreeSet<String>,
+    first_seen: Option<i64>,
+    last_seen: Option<i64>,
+}
+
+impl NodeAccumulator {
+    fn add(
+        &mut self,
+        run_id: &str,
+        turn_id: &str,
+        timestamp: i64,
+        attributed_tokens: u64,
+        isolated_tokens: u64,
+    ) {
+        self.attributed_tokens += attributed_tokens;
+        self.isolated_tokens += isolated_tokens;
+        self.sessions.insert(run_id.to_string());
+        self.turns.insert(turn_id.to_string());
+        self.first_seen = Some(
+            self.first_seen
+                .map_or(timestamp, |value| value.min(timestamp)),
+        );
+        self.last_seen = Some(
+            self.last_seen
+                .map_or(timestamp, |value| value.max(timestamp)),
+        );
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RevisionKey {
+    kind: String,
+    canonical_key: String,
+    label: String,
+    source_path: Option<String>,
+    content_sha256: String,
+}
+
+type SourceGroupKey = (String, String, String, Option<String>);
+
+#[derive(Debug, Clone)]
+struct FlameNodeDescriptor {
+    id: String,
+    level: ContextFlameLevel,
+    kind: String,
+    label: String,
+    source_path: Option<String>,
+    content_sha256: Option<String>,
+}
+
+fn build_flame(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+    assets: &[ContextAssetRow],
+) -> ContextFlameNode {
+    let launch_by_id = launches
+        .iter()
+        .map(|launch| (launch.id.as_str(), launch))
+        .collect::<HashMap<_, _>>();
+    let turn_by_id = turns
+        .iter()
+        .map(|turn| (turn.id.as_str(), turn))
+        .collect::<HashMap<_, _>>();
+    let mut revisions: BTreeMap<RevisionKey, NodeAccumulator> = BTreeMap::new();
+    for row in assets {
+        let Some(turn) = turn_by_id.get(row.turn_id.as_str()) else {
+            continue;
+        };
+        let Some(launch) = launch_by_id.get(turn.launch_id.as_str()) else {
+            continue;
+        };
+        let canonical = canonical_identity(launch, row);
+        revisions
+            .entry(RevisionKey {
+                kind: row.asset.kind.as_str().to_string(),
+                canonical_key: canonical.key,
+                label: canonical.label,
+                source_path: canonical.path,
+                content_sha256: row.asset.content_sha256.clone(),
+            })
+            .or_default()
+            .add(
+                &launch.run_id,
+                &turn.id,
+                turn.started_at,
+                row.asset.attributed_tokens,
+                row.asset.isolated_tokens,
+            );
+    }
+
+    let mut by_source: BTreeMap<SourceGroupKey, Vec<(ContextFlameNode, NodeAccumulator)>> =
+        BTreeMap::new();
+    for (key, accumulator) in revisions {
+        let node = node_from_accumulator(
+            FlameNodeDescriptor {
+                id: revision_node_id(&key.kind, &canonical_from_key(&key), &key.content_sha256),
+                level: ContextFlameLevel::Revision,
+                kind: key.kind.clone(),
+                label: short_hash(&key.content_sha256),
+                source_path: key.source_path.clone(),
+                content_sha256: Some(key.content_sha256.clone()),
+            },
+            accumulator.clone(),
+            Vec::new(),
+        );
+        by_source
+            .entry((
+                key.kind.clone(),
+                key.canonical_key.clone(),
+                key.label.clone(),
+                key.source_path.clone(),
+            ))
+            .or_default()
+            .push((node, accumulator));
+    }
+
+    let mut by_kind: BTreeMap<String, Vec<(ContextFlameNode, NodeAccumulator)>> = BTreeMap::new();
+    for ((kind, canonical_key, label, source_path), mut built_children) in by_source {
+        built_children.sort_by(|left, right| node_order(&left.0, &right.0));
+        let accumulator =
+            merge_accumulators(built_children.iter().map(|(_, accumulator)| accumulator));
+        let children = built_children.into_iter().map(|(node, _)| node).collect();
+        let node = node_from_accumulator(
+            FlameNodeDescriptor {
+                id: stable_id(&format!("source\0{kind}\0{canonical_key}")),
+                level: ContextFlameLevel::Source,
+                kind: kind.clone(),
+                label,
+                source_path,
+                content_sha256: None,
+            },
+            accumulator.clone(),
+            children,
+        );
+        by_kind
+            .entry(kind.clone())
+            .or_default()
+            .push((node, accumulator));
+    }
+
+    let mut kind_nodes = Vec::new();
+    for (kind, mut built_children) in by_kind {
+        built_children.sort_by(|left, right| node_order(&left.0, &right.0));
+        let accumulator =
+            merge_accumulators(built_children.iter().map(|(_, accumulator)| accumulator));
+        let children = built_children.into_iter().map(|(node, _)| node).collect();
+        kind_nodes.push(node_from_accumulator(
+            FlameNodeDescriptor {
+                id: stable_id(&format!("kind\0{kind}")),
+                level: ContextFlameLevel::Kind,
+                kind: kind.clone(),
+                label: kind_label(&kind),
+                source_path: None,
+                content_sha256: None,
+            },
+            accumulator,
+            children,
+        ));
+    }
+    sort_nodes(&mut kind_nodes);
+    let mut root_accumulator = NodeAccumulator {
+        attributed_tokens: kind_nodes.iter().map(|node| node.attributed_tokens).sum(),
+        isolated_tokens: kind_nodes.iter().map(|node| node.isolated_tokens).sum(),
+        first_seen: launches.iter().map(|launch| launch.started_at).min(),
+        last_seen: turns.iter().map(|turn| turn.started_at).max(),
+        ..NodeAccumulator::default()
+    };
+    root_accumulator.sessions = launches
+        .iter()
+        .map(|launch| launch.run_id.clone())
+        .collect();
+    root_accumulator.turns = turns.iter().map(|turn| turn.id.clone()).collect();
+    node_from_accumulator(
+        FlameNodeDescriptor {
+            id: "session-set".to_string(),
+            level: ContextFlameLevel::SessionSet,
+            kind: "session_set".to_string(),
+            label: "Session set".to_string(),
+            source_path: None,
+            content_sha256: None,
+        },
+        root_accumulator,
+        kind_nodes,
+    )
+}
+
+fn canonical_from_key(key: &RevisionKey) -> CanonicalIdentity {
+    CanonicalIdentity {
+        key: key.canonical_key.clone(),
+        label: key.label.clone(),
+        path: key.source_path.clone(),
+    }
+}
+
+fn node_from_accumulator(
+    descriptor: FlameNodeDescriptor,
+    accumulator: NodeAccumulator,
+    children: Vec<ContextFlameNode>,
+) -> ContextFlameNode {
+    ContextFlameNode {
+        id: descriptor.id,
+        level: descriptor.level,
+        kind: descriptor.kind,
+        label: descriptor.label,
+        source_path: descriptor.source_path,
+        content_sha256: descriptor.content_sha256,
+        attributed_tokens: accumulator.attributed_tokens,
+        isolated_tokens: accumulator.isolated_tokens,
+        session_count: accumulator.sessions.len() as u64,
+        turn_count: accumulator.turns.len() as u64,
+        first_seen: accumulator.first_seen,
+        last_seen: accumulator.last_seen,
+        children,
+    }
+}
+
+fn merge_accumulators<'a>(
+    accumulators: impl IntoIterator<Item = &'a NodeAccumulator>,
+) -> NodeAccumulator {
+    let mut accumulator = NodeAccumulator::default();
+    for child in accumulators {
+        accumulator.attributed_tokens += child.attributed_tokens;
+        accumulator.isolated_tokens += child.isolated_tokens;
+        accumulator.first_seen = merge_min(accumulator.first_seen, child.first_seen);
+        accumulator.last_seen = merge_max(accumulator.last_seen, child.last_seen);
+        accumulator.sessions.extend(child.sessions.iter().cloned());
+        accumulator.turns.extend(child.turns.iter().cloned());
+    }
+    accumulator
+}
+
+fn merge_min(left: Option<i64>, right: Option<i64>) -> Option<i64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (left, right) => left.or(right),
+    }
+}
+
+fn merge_max(left: Option<i64>, right: Option<i64>) -> Option<i64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (left, right) => left.or(right),
+    }
+}
+
+fn sort_nodes(nodes: &mut [ContextFlameNode]) {
+    nodes.sort_by(node_order);
+}
+
+fn node_order(left: &ContextFlameNode, right: &ContextFlameNode) -> std::cmp::Ordering {
+    right
+        .attributed_tokens
+        .cmp(&left.attributed_tokens)
+        .then_with(|| left.label.cmp(&right.label))
+}
+
+#[derive(Debug, Clone)]
+struct EvidenceCandidate {
+    address: TraceAddress,
+    started_at: i64,
+    outcome: String,
+    capture: String,
+    supplied_context_tokens: Option<u64>,
+    selected_source_tokens: u64,
+    steering_turns: Option<u64>,
+    prompt_artifact_available: bool,
+    conversation_available: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct EvidenceAccumulator {
+    label: String,
+    kind: String,
+    source_path: Option<String>,
+    content_sha256: String,
+    sessions: BTreeSet<String>,
+    launches: BTreeSet<String>,
+    turns: BTreeMap<String, u64>,
+    isolated_tokens: u64,
+    precedence_layers: BTreeSet<String>,
+    candidates: Vec<EvidenceCandidate>,
+}
+
+fn build_evidence(
+    assets: &[ContextAssetRow],
+    launch_by_id: &HashMap<&str, &AgentLaunchRow>,
+    turn_by_id: &HashMap<&str, &AgentTurnRow>,
+    assets_by_turn: &HashMap<&str, Vec<&ContextAssetRow>>,
+    sessions: &[SessionLane],
+) -> Vec<SourceEvidence> {
+    let session_by_id = sessions
+        .iter()
+        .map(|session| (session.id.as_str(), session))
+        .collect::<HashMap<_, _>>();
+    let mut groups: BTreeMap<String, EvidenceAccumulator> = BTreeMap::new();
+    for row in assets {
+        let Some(turn) = turn_by_id.get(row.turn_id.as_str()) else {
+            continue;
+        };
+        let Some(launch) = launch_by_id.get(turn.launch_id.as_str()) else {
+            continue;
+        };
+        let canonical = canonical_identity(launch, row);
+        let kind = row.asset.kind.as_str();
+        let node_id = revision_node_id(kind, &canonical, &row.asset.content_sha256);
+        let group = groups
+            .entry(node_id)
+            .or_insert_with(|| EvidenceAccumulator {
+                label: canonical.label.clone(),
+                kind: kind.to_string(),
+                source_path: canonical.path.clone(),
+                content_sha256: row.asset.content_sha256.clone(),
+                ..EvidenceAccumulator::default()
+            });
+        group.sessions.insert(launch.run_id.clone());
+        group.launches.insert(launch.id.clone());
+        *group.turns.entry(turn.id.clone()).or_default() += row.asset.attributed_tokens;
+        group.isolated_tokens += row.asset.isolated_tokens;
+        group
+            .precedence_layers
+            .insert(row.asset.included_by.clone());
+
+        if group
+            .candidates
+            .iter()
+            .all(|candidate| candidate.address.turn_id != turn.id)
+        {
+            let session = session_by_id.get(launch.id.as_str());
+            let source_tokens = assets_by_turn
+                .get(turn.id.as_str())
+                .into_iter()
+                .flatten()
+                .filter(|candidate| {
+                    let identity = canonical_identity(launch, candidate);
+                    revision_node_id(
+                        candidate.asset.kind.as_str(),
+                        &identity,
+                        &candidate.asset.content_sha256,
+                    ) == group_node_id(kind, &canonical, &row.asset.content_sha256)
+                })
+                .map(|candidate| candidate.asset.attributed_tokens)
+                .sum();
+            group.candidates.push(EvidenceCandidate {
+                address: TraceAddress {
+                    run_id: launch.run_id.clone(),
+                    launch_id: launch.id.clone(),
+                    turn_id: turn.id.clone(),
+                },
+                started_at: turn.started_at,
+                outcome: launch.outcome.clone(),
+                capture: launch.capture_status.clone(),
+                supplied_context_tokens: (turn.context_coverage == "assembled")
+                    .then(|| nonnegative(turn.supplied_context_tokens)),
+                selected_source_tokens: source_tokens,
+                steering_turns: session.and_then(|session| session.steering_turns),
+                prompt_artifact_available: artifact_available(&turn.task_prompt_path),
+                conversation_available: session
+                    .is_some_and(|session| session.conversation_available),
+            });
+        }
+    }
+
+    let mut evidence = groups
+        .into_iter()
+        .map(|(node_id, group)| {
+            let mut per_turn = group.turns.values().copied().collect::<Vec<_>>();
+            per_turn.sort_unstable();
+            let launch_candidates = group
+                .candidates
+                .iter()
+                .map(|candidate| (candidate.address.launch_id.as_str(), candidate))
+                .collect::<BTreeMap<_, _>>();
+            let steering_turns = launch_candidates
+                .values()
+                .map(|candidate| candidate.steering_turns)
+                .collect::<Option<Vec<_>>>()
+                .map(|values| values.into_iter().sum());
+            let current_content_sha256 = group
+                .source_path
+                .as_deref()
+                .and_then(|path| hash_effective_source(&group.kind, path));
+            let editable = group.source_path.as_deref().is_some_and(|path| {
+                Path::new(path).is_file()
+                    && current_content_sha256.as_deref() == Some(group.content_sha256.as_str())
+            });
+            SourceEvidence {
+                node_id,
+                label: group.label,
+                kind: group.kind,
+                source_path: group.source_path,
+                content_sha256: group.content_sha256,
+                editable,
+                current_content_sha256,
+                precedence_layers: group.precedence_layers.into_iter().collect(),
+                measurements: SourceMeasurements {
+                    exposed_sessions: group.sessions.len() as u64,
+                    exposed_launches: group.launches.len() as u64,
+                    exposed_turns: group.turns.len() as u64,
+                    attributed_tokens: per_turn.iter().sum(),
+                    isolated_tokens: group.isolated_tokens,
+                    median_tokens_per_exposed_turn: percentile(&per_turn, 50),
+                    p95_tokens_per_exposed_turn: percentile(&per_turn, 95),
+                    first_seen: group
+                        .candidates
+                        .iter()
+                        .map(|candidate| candidate.started_at)
+                        .min(),
+                    last_seen: group
+                        .candidates
+                        .iter()
+                        .map(|candidate| candidate.started_at)
+                        .max(),
+                    completed_launches: launch_candidates
+                        .values()
+                        .filter(|candidate| candidate.outcome == "completed")
+                        .count() as u64,
+                    failed_launches: launch_candidates
+                        .values()
+                        .filter(|candidate| candidate.outcome == "failed")
+                        .count() as u64,
+                    interrupted_launches: launch_candidates
+                        .values()
+                        .filter(|candidate| candidate.outcome == "interrupted")
+                        .count() as u64,
+                    steering_turns,
+                    complete_capture_launches: launch_candidates
+                        .values()
+                        .filter(|candidate| candidate.capture == "complete")
+                        .count() as u64,
+                },
+                representatives: select_representatives(&group.candidates),
+            }
+        })
+        .collect::<Vec<_>>();
+    evidence.sort_by(|left, right| {
+        right
+            .measurements
+            .attributed_tokens
+            .cmp(&left.measurements.attributed_tokens)
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    evidence
+}
+
+fn group_node_id(kind: &str, canonical: &CanonicalIdentity, content_sha256: &str) -> String {
+    revision_node_id(kind, canonical, content_sha256)
+}
+
+fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<RepresentativeTrace> {
+    let mut selected = Vec::new();
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| candidate.outcome == "completed" && candidate.capture == "complete")
+        .min_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(u64::MAX))
+    {
+        selected.push(representative(EvidenceRole::SmoothComplete, candidate));
+    }
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| candidate.outcome == "completed")
+        .max_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(0))
+    {
+        selected.push(representative(EvidenceRole::HighContextComplete, candidate));
+    }
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.outcome == "failed"
+                || candidate.outcome == "interrupted"
+                || candidate.steering_turns.unwrap_or(0) > 0
+        })
+        .max_by_key(|candidate| candidate.selected_source_tokens)
+    {
+        selected.push(representative(EvidenceRole::FailedOrSteered, candidate));
+    }
+    if let Some(candidate) = candidates
+        .iter()
+        .max_by_key(|candidate| candidate.started_at)
+    {
+        selected.push(representative(EvidenceRole::Recent, candidate));
+    }
+    selected
+}
+
+fn representative(role: EvidenceRole, candidate: &EvidenceCandidate) -> RepresentativeTrace {
+    RepresentativeTrace {
+        role,
+        address: candidate.address.clone(),
+        started_at: candidate.started_at,
+        outcome: candidate.outcome.clone(),
+        capture: candidate.capture.clone(),
+        supplied_context_tokens: candidate.supplied_context_tokens,
+        selected_source_tokens: candidate.selected_source_tokens,
+        steering_turns: candidate.steering_turns,
+        prompt_artifact_available: candidate.prompt_artifact_available,
+        conversation_available: candidate.conversation_available,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CanonicalIdentity {
+    key: String,
+    label: String,
+    path: Option<String>,
+}
+
+fn canonical_identity(launch: &AgentLaunchRow, row: &ContextAssetRow) -> CanonicalIdentity {
+    if let Some(source_path) = &row.asset.source_path {
+        let path = canonical_source_path(launch, source_path);
+        let label = Path::new(&path)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| row.asset.label.clone());
+        return CanonicalIdentity {
+            key: path.clone(),
+            label,
+            path: Some(path),
+        };
+    }
+    let key = format!("@{}/{}", row.asset.kind.as_str(), row.asset.label);
+    CanonicalIdentity {
+        key,
+        label: row.asset.label.clone(),
+        path: None,
+    }
+}
+
+fn canonical_source_path(launch: &AgentLaunchRow, source_path: &str) -> String {
+    let source = Path::new(source_path);
+    let joined = if source.is_absolute() {
+        source
+            .strip_prefix(&launch.worktree)
+            .map(|relative| Path::new(&launch.repo).join(relative))
+            .unwrap_or_else(|_| source.to_path_buf())
+    } else {
+        Path::new(&launch.repo).join(source)
+    };
+    fs::canonicalize(&joined)
+        .unwrap_or_else(|_| normalize_path(&joined))
+        .to_string_lossy()
+        .to_string()
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn revision_node_id(kind: &str, canonical: &CanonicalIdentity, content_sha256: &str) -> String {
+    stable_id(&format!(
+        "revision\0{kind}\0{}\0{content_sha256}",
+        canonical.key
+    ))
+}
+
+fn stable_id(value: &str) -> String {
+    format!("context-{}", hex::encode(Sha256::digest(value.as_bytes())))
+}
+
+fn short_hash(value: &str) -> String {
+    value.chars().take(10).collect()
+}
+
+fn hash_effective_source(kind: &str, path: &str) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    let effective = match kind {
+        "operating_instructions" => format!("<lf:loopflow>\n{content}\n</lf:loopflow>"),
+        "skill_instructions" => {
+            crate::engine::flow::split_frontmatter(&content).map_or(content, |(_, body)| body)
+        }
+        // These assets combine the file with generated or journal-backed state;
+        // one file hash cannot prove that the effective slice is still current.
+        "goal" | "memory" => return None,
+        _ => content,
+    };
+    Some(hex::encode(Sha256::digest(effective.as_bytes())))
+}
+
+fn artifact_available(path: &str) -> bool {
+    crate::trace::resolve_artifact(path).is_ok_and(|path| path.is_file())
+}
+
+fn nonnegative(value: i64) -> u64 {
+    u64::try_from(value).unwrap_or(0)
+}
+
+fn count_launches(launches: &[AgentLaunchRow], capture: &str) -> u64 {
+    launches
+        .iter()
+        .filter(|launch| launch.capture_status == capture)
+        .count() as u64
+}
+
+fn count_outcomes(launches: &[AgentLaunchRow], outcome: &str) -> u64 {
+    launches
+        .iter()
+        .filter(|launch| launch.outcome == outcome)
+        .count() as u64
+}
+
+fn count_turn_coverage(turns: &[AgentTurnRow], coverage: &str) -> u64 {
+    turns
+        .iter()
+        .filter(|turn| turn.context_coverage == coverage)
+        .count() as u64
+}
+
+fn is_instruction_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "operating_instructions"
+            | "surface_instructions"
+            | "provider_instructions"
+            | "repo_instructions"
+            | "skill_instructions"
+            | "direction"
+            | "goal"
+            | "memory"
+    )
+}
+
+fn kind_label(kind: &str) -> String {
+    kind.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn percentile(sorted: &[u64], percent: usize) -> Option<u64> {
+    if sorted.is_empty() {
+        return None;
+    }
     let rank = (sorted.len() * percent).div_ceil(100).max(1);
-    sorted[rank - 1]
+    Some(sorted[rank - 1])
+}
+
+fn print_human(snapshot: &ContextLabSnapshot) {
+    if snapshot.totals.launches == 0 {
+        println!("No captured agent context in the selected session set.");
+        return;
+    }
+    let totals = &snapshot.totals;
+    println!(
+        "SESSION SET  {} sessions  {} launches  {} turns",
+        totals.sessions, totals.launches, totals.turns
+    );
+    println!(
+        "CONTEXT      {} tokens / {} assembled turns  median {}  p95 {}",
+        display_optional(totals.context_tokens),
+        totals.context_token_turns,
+        display_optional(totals.median_context_tokens),
+        display_optional(totals.p95_context_tokens),
+    );
+    println!(
+        "CAPTURE      {} complete  {} partial  {} prompt-only  prompts {}/{}  conversations {}/{}",
+        snapshot.coverage.complete_launches,
+        snapshot.coverage.partial_launches,
+        snapshot.coverage.prompt_only_launches,
+        snapshot.coverage.prompt_artifacts_available,
+        snapshot.coverage.turns,
+        snapshot.coverage.conversations_available,
+        snapshot.coverage.launches,
+    );
+    println!("\nCONTEXT FLAME");
+    for node in &snapshot.aggregate_root.children {
+        println!(
+            "  {:<24} {:>10} tokens  {:>5} sessions  {:>5} turns",
+            node.label, node.attributed_tokens, node.session_count, node.turn_count
+        );
+    }
+}
+
+fn display_optional(value: Option<u64>) -> String {
+    value.map_or_else(|| "missing".to_string(), |value| value.to_string())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::percentile;
+    use super::*;
+    use crate::trace::{ContextAsset, ContextAssetKind, ContextChannel, ContextScope};
 
     #[test]
-    fn percentiles_count_each_turn_once() {
-        assert_eq!(percentile(&[10, 20, 30, 40], 50), 20);
-        assert_eq!(percentile(&[10, 20, 30, 40], 95), 40);
+    fn aggregate_preserves_missing_values_and_flame_widths() {
+        let query = query();
+        let launches = vec![launch("launch-a", "run-a", "completed", "complete", 100)];
+        let turns = vec![
+            turn("turn-a", "launch-a", 1, "assembled", 100, Some(0.25)),
+            turn("turn-b", "launch-a", 2, "unknown", 0, None),
+        ];
+        let assets = vec![
+            asset(
+                "turn-a",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "a",
+                60,
+            ),
+            asset(
+                "turn-a",
+                1,
+                ContextAssetKind::SkillInstructions,
+                "implement",
+                None,
+                "b",
+                40,
+            ),
+        ];
+
+        let snapshot = aggregate(query, launches, turns, assets);
+
+        assert_eq!(snapshot.totals.context_tokens, Some(100));
+        assert_eq!(snapshot.totals.context_token_turns, 1);
+        assert_eq!(snapshot.totals.cost_usd, Some(0.25));
+        assert_eq!(snapshot.totals.cost_turns, 1);
+        assert_eq!(snapshot.coverage.unknown_turns, 1);
+        assert_eq!(snapshot.aggregate_root.attributed_tokens, 100);
+        assert_eq!(
+            snapshot
+                .aggregate_root
+                .children
+                .iter()
+                .map(|node| node.attributed_tokens)
+                .sum::<u64>(),
+            snapshot.aggregate_root.attributed_tokens
+        );
+        assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
+    }
+
+    #[test]
+    fn revisions_stay_separate_under_one_canonical_source() {
+        let query = query();
+        let launches = vec![
+            launch("launch-a", "run-a", "completed", "complete", 100),
+            launch("launch-b", "run-b", "failed", "partial", 200),
+        ];
+        let turns = vec![
+            turn("turn-a", "launch-a", 1, "assembled", 60, Some(0.1)),
+            turn("turn-b", "launch-b", 1, "assembled", 90, Some(0.2)),
+        ];
+        let assets = vec![
+            asset(
+                "turn-a",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "old-hash",
+                60,
+            ),
+            asset(
+                "turn-b",
+                0,
+                ContextAssetKind::RepoInstructions,
+                "AGENTS.md",
+                Some("AGENTS.md"),
+                "new-hash",
+                90,
+            ),
+        ];
+
+        let snapshot = aggregate(query, launches, turns, assets);
+        let kind = &snapshot.aggregate_root.children[0];
+        assert_eq!(kind.children.len(), 1);
+        assert_eq!(kind.children[0].children.len(), 2);
+        assert_eq!(kind.children[0].attributed_tokens, 150);
+        assert_eq!(kind.children[0].session_count, 2);
+        assert_eq!(kind.children[0].turn_count, 2);
+        assert_ne!(
+            kind.children[0].children[0].id,
+            kind.children[0].children[1].id
+        );
+        assert_eq!(snapshot.evidence.len(), 2);
+        assert!(snapshot.evidence.iter().any(|item| item
+            .representatives
+            .iter()
+            .any(|trace| trace.role == EvidenceRole::FailedOrSteered)));
+        let failed = snapshot
+            .evidence
+            .iter()
+            .find(|item| item.content_sha256 == "new-hash")
+            .expect("new revision evidence");
+        assert_eq!(failed.measurements.first_seen, Some(101));
+        assert_eq!(failed.measurements.failed_launches, 1);
+        assert_eq!(failed.measurements.complete_capture_launches, 0);
+    }
+
+    #[test]
+    fn percentiles_count_each_captured_turn_once() {
+        assert_eq!(percentile(&[10, 20, 30, 40], 50), Some(20));
+        assert_eq!(percentile(&[10, 20, 30, 40], 95), Some(40));
+        assert_eq!(percentile(&[], 95), None);
+    }
+
+    #[test]
+    fn canonical_sources_collapse_task_worktrees_into_the_main_repo() {
+        let mut launch = launch("launch-a", "run-a", "completed", "complete", 100);
+        launch.repo = "/src/loopflow".to_string();
+        launch.worktree = "/src/loopflow.intelligence.context".to_string();
+        let row = asset(
+            "turn-a",
+            0,
+            ContextAssetKind::OperatingInstructions,
+            "LOOPFLOW.md",
+            Some(
+                "/src/loopflow.intelligence.context/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
+            ),
+            "hash",
+            20,
+        );
+
+        let identity = canonical_identity(&launch, &row);
+
+        assert_eq!(
+            identity.path.as_deref(),
+            Some("/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md")
+        );
+    }
+
+    #[test]
+    fn swift_fixture_round_trips_the_context_lab_contract() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/context_lab_snapshot.json"
+        ));
+        let snapshot: ContextLabSnapshot = serde_json::from_str(fixture).unwrap();
+
+        assert_eq!(snapshot.totals.sessions, 1);
+        assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
+        assert_eq!(
+            snapshot.evidence[0].representatives[0].address.turn_id,
+            "turn-1"
+        );
+        assert_eq!(
+            serde_json::to_value(&snapshot).unwrap(),
+            serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+        );
+    }
+
+    fn query() -> SessionSetQuery {
+        SessionSetQuery {
+            repo_paths: Vec::new(),
+            started_after: 0,
+            started_before: 1_000,
+            waves: Vec::new(),
+            flows: Vec::new(),
+            skills: Vec::new(),
+            providers: Vec::new(),
+            models: Vec::new(),
+            surfaces: Vec::new(),
+            outcomes: Vec::new(),
+            capture_states: Vec::new(),
+        }
+    }
+
+    fn launch(
+        id: &str,
+        run_id: &str,
+        outcome: &str,
+        capture_status: &str,
+        started_at: i64,
+    ) -> AgentLaunchRow {
+        AgentLaunchRow {
+            id: id.to_string(),
+            run_id: run_id.to_string(),
+            process_id: format!("process-{id}"),
+            started_at,
+            ended_at: Some(started_at + 10),
+            repo: "/tmp/context-lab".to_string(),
+            worktree: "/tmp/context-lab".to_string(),
+            wave: Some("intelligence".to_string()),
+            flow: Some("implement".to_string()),
+            skill: Some("implement".to_string()),
+            provider: "codex".to_string(),
+            model: Some("gpt-5".to_string()),
+            surface: "headless".to_string(),
+            capture_status: capture_status.to_string(),
+            incomplete_reason: None,
+            outcome: outcome.to_string(),
+            artifact_dir: "missing".to_string(),
+            conversation_path: "missing/conversation.jsonl".to_string(),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 0,
+            conversation_bytes: 0,
+        }
+    }
+
+    fn turn(
+        id: &str,
+        launch_id: &str,
+        ordinal: i64,
+        coverage: &str,
+        tokens: i64,
+        cost_usd: Option<f64>,
+    ) -> AgentTurnRow {
+        AgentTurnRow {
+            id: id.to_string(),
+            launch_id: launch_id.to_string(),
+            ordinal,
+            provider_turn_id: None,
+            started_at: 100 + ordinal,
+            ended_at: Some(110 + ordinal),
+            status: "completed".to_string(),
+            input_op: if ordinal == 1 { "initial" } else { "message" }.to_string(),
+            context_coverage: coverage.to_string(),
+            tokenizer: "cl100k_base".to_string(),
+            system_prompt_path: None,
+            task_prompt_path: "missing/prompt.txt".to_string(),
+            system_tokens: 0,
+            task_tokens: tokens,
+            supplied_context_tokens: tokens,
+            provider_input_tokens: None,
+            provider_output_tokens: None,
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            cost_usd,
+            context_gather_ms: 1,
+            context_render_ms: 1,
+            context_persist_ms: 1,
+            first_event_seq: None,
+            last_event_seq: None,
+        }
+    }
+
+    fn asset(
+        turn_id: &str,
+        position: u32,
+        kind: ContextAssetKind,
+        label: &str,
+        source_path: Option<&str>,
+        content_sha256: &str,
+        tokens: u64,
+    ) -> ContextAssetRow {
+        ContextAssetRow {
+            turn_id: turn_id.to_string(),
+            asset: ContextAsset {
+                position,
+                channel: ContextChannel::Task,
+                kind,
+                scope: ContextScope::Repo,
+                label: label.to_string(),
+                source_path: source_path.map(ToString::to_string),
+                included_by: "docs".to_string(),
+                content_sha256: content_sha256.to_string(),
+                byte_start: 0,
+                byte_end: tokens,
+                bytes: tokens,
+                isolated_tokens: tokens,
+                attributed_tokens: tokens,
+            },
+        }
     }
 }

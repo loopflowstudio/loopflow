@@ -297,13 +297,40 @@ pub enum Commands {
         /// Window in days
         #[arg(long, default_value_t = 30)]
         days: u32,
+        /// Inclusive window start as a Unix timestamp (overrides --days)
+        #[arg(long)]
+        started_after: Option<i64>,
+        /// Exclusive window end as a Unix timestamp
+        #[arg(long)]
+        started_before: Option<i64>,
         /// Filter by wave
         #[arg(long)]
-        wave: Option<String>,
+        wave: Vec<String>,
         /// Filter by absolute main-repo path
         #[arg(long)]
-        repo: Option<String>,
-        /// Emit the stable context dataset as JSON
+        repo: Vec<String>,
+        /// Filter by flow
+        #[arg(long)]
+        flow: Vec<String>,
+        /// Filter by skill
+        #[arg(long)]
+        skill: Vec<String>,
+        /// Filter by provider
+        #[arg(long)]
+        provider: Vec<String>,
+        /// Filter by model
+        #[arg(long)]
+        model: Vec<String>,
+        /// Filter by launch surface
+        #[arg(long)]
+        surface: Vec<String>,
+        /// Filter by launch outcome
+        #[arg(long)]
+        outcome: Vec<String>,
+        /// Filter by capture state
+        #[arg(long)]
+        capture_state: Vec<String>,
+        /// Emit the Context Lab snapshot as JSON
         #[arg(long)]
         json: bool,
     },
@@ -359,6 +386,9 @@ pub enum Commands {
         /// Emit the process tree as JSON
         #[arg(long)]
         json: bool,
+        /// Include exact prompt and normalized conversation bodies for one address
+        #[arg(long, requires = "json", conflicts_with = "events")]
+        content: bool,
         /// Render the normalized recorded conversation
         #[arg(long, conflicts_with = "json")]
         events: bool,
@@ -366,8 +396,11 @@ pub enum Commands {
         #[arg(long, requires = "events")]
         jsonl: bool,
         /// Select one launch by id prefix
-        #[arg(long, requires = "events")]
+        #[arg(long)]
         launch: Option<String>,
+        /// Select one turn by id prefix (with --content)
+        #[arg(long, requires = "content")]
+        turn: Option<String>,
     },
     /// Converse with a served mind's thread (humans); --follow replays it and
     /// --steer reaches the live body. Agents use `lf radio pub` for
@@ -1858,6 +1891,73 @@ mod tests {
             panic!("expected task run command");
         };
         assert_eq!(flow.as_deref(), Some("iterate"));
+    }
+
+    #[test]
+    fn context_accepts_repeatable_session_set_filters() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "context",
+            "--started-after",
+            "100",
+            "--started-before",
+            "200",
+            "--repo",
+            "/src/a",
+            "--repo",
+            "/src/b",
+            "--outcome",
+            "failed",
+            "--capture-state",
+            "partial",
+            "--json",
+        ])
+        .expect("parse context query");
+        let Some(Commands::Context {
+            started_after,
+            started_before,
+            repo,
+            outcome,
+            capture_state,
+            json,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected context command");
+        };
+
+        assert_eq!(started_after, Some(100));
+        assert_eq!(started_before, Some(200));
+        assert_eq!(repo, ["/src/a", "/src/b"]);
+        assert_eq!(outcome, ["failed"]);
+        assert_eq!(capture_state, ["partial"]);
+        assert!(json);
+    }
+
+    #[test]
+    fn trace_content_requires_json_and_accepts_an_exact_address() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "trace",
+            "run-1",
+            "--json",
+            "--content",
+            "--launch",
+            "launch-1",
+            "--turn",
+            "turn-1",
+        ])
+        .expect("parse trace content");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Trace {
+                content: true,
+                launch: Some(launch),
+                turn: Some(turn),
+                ..
+            }) if launch == "launch-1" && turn == "turn-1"
+        ));
+        assert!(Cli::try_parse_from(["lf", "trace", "run-1", "--content"]).is_err());
     }
 
     #[test]

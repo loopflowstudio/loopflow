@@ -39,6 +39,16 @@ final class TmuxSession {
         }
     }
 
+    /// Paste one literal command into the session's shell. `set-buffer` receives
+    /// the command as a process argument, not shell input, so the structured
+    /// refinement seed cannot become a second command before the paste.
+    func sendCommand(_ command: String) async throws {
+        let buffer = "lf-ui-\(UUID().uuidString.lowercased())"
+        try await run("tmux", "set-buffer", "-b", buffer, command)
+        try await run("tmux", "paste-buffer", "-d", "-b", buffer, "-t", sessionName)
+        try await run("tmux", "send-keys", "-t", sessionName, "Enter")
+    }
+
     nonisolated static func killSessionIfExists(named sessionName: String) throws {
         do {
             _ = try runCommandSync(["tmux", "kill-session", "-t", sessionName])

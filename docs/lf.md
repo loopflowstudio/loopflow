@@ -289,6 +289,8 @@ lf runs                         # one row per skill call: context, tokens, cost
 lf execs                        # one row per lf process
 lf trace 66863649               # select an exec; render its process tree
 lf trace 66863649 --json        # inspect the same tree and its skill launches
+lf trace 66863649 --json --content --launch <launch> --turn <turn>
+lf context --days 30 --repo "$PWD" --json
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
 lf top                          # last-hour output throughput + live lf processes
@@ -299,7 +301,9 @@ lf doctor --json                # machine-readable audit
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a
 trace. `lf trace` accepts an exec id and leaves killed processes open instead
-of hiding them.
+of hiding them. `lf context` aggregates one filtered session set without opening
+bodies. `lf trace --content` is the explicit reader for the exact prompt and
+normalized conversation at one immutable run/launch/turn address.
 
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print

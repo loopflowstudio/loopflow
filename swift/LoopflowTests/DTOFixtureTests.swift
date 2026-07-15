@@ -7,6 +7,20 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Context Lab fixture preserves missing coverage and trace identity")
+    func contextLabFixturePreservesResearchTruth() throws {
+        let data = try loadFixtureData("context_lab_snapshot.json")
+        let snapshot = try JSONDecoder().decode(ContextLabSnapshot.self, from: data)
+
+        #expect(snapshot.totals.sessions == 1)
+        #expect(snapshot.totals.contextTokens == 1_000)
+        #expect(snapshot.coverage.unknownTurns == 1)
+        #expect(snapshot.aggregateRoot.children[0].children[0].children.count == 1)
+        #expect(snapshot.sessions[0].turns[1].suppliedContextTokens == nil)
+        #expect(snapshot.evidence[0].editable)
+        #expect(snapshot.evidence[0].representatives[0].address.turnId == "turn-1")
+    }
+
     @Test("wave detail fixture preserves Project and Task identity")
     func waveDetailFixturePreservesHierarchy() throws {
         let data = try loadFixtureData("wave_detail.json")

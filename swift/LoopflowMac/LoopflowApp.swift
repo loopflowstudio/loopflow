@@ -89,6 +89,27 @@ struct LoopflowApp: App {
         }
         .defaultSize(width: 1180, height: 860)
 
+        WindowGroup("Context Lab", id: "context-lab", for: ContextLabRoute.self) { $route in
+            ContextLabView(
+                initialRepoPath: portfolioService.repos.first?.path,
+                route: route
+            )
+                .tint(.loopflowBurgundy)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+        }
+        .defaultSize(width: 1420, height: 900)
+
+        WindowGroup("Task workspace", id: "task-workspace", for: TaskWorkspaceRoute.self) { $route in
+            if let route {
+                TaskWorkspaceWindow(route: route)
+                    .tint(.loopflowBurgundy)
+                    .preferredColorScheme(theme.preferredScheme)
+                    .environment(\.palette, theme.palette)
+            }
+        }
+        .defaultSize(width: 1180, height: 820)
+
         .commands {
             CommandGroup(after: .appSettings) {
                 Picker("Appearance", selection: Binding(
@@ -119,6 +140,11 @@ struct LoopflowApp: App {
                     openWindow(id: "telemetry")
                 }
                 .keyboardShortcut("1", modifiers: .command)
+
+                Button("Context Lab") {
+                    openWindow(id: "context-lab")
+                }
+                .keyboardShortcut("2", modifiers: .command)
 
                 if !portfolioService.repos.isEmpty {
                     Menu("Move to Repo") {

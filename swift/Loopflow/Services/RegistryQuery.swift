@@ -190,6 +190,45 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(DoctorReport.self, from: stdout)
     }
 
+    /// One atomic Context Lab population. Rust owns every trace join, token
+    /// attribution, revision identity, and representative choice; the app sends
+    /// only the filter query and renders the returned snapshot.
+    public func contextLab(_ query: SessionSetQuery) async throws -> ContextLabSnapshot {
+        var args = [
+            "context", "--json",
+            "--started-after", String(query.startedAfter),
+            "--started-before", String(query.startedBefore),
+        ]
+        Self.append(query.repoPaths, flag: "--repo", to: &args)
+        Self.append(query.waves, flag: "--wave", to: &args)
+        Self.append(query.flows, flag: "--flow", to: &args)
+        Self.append(query.skills, flag: "--skill", to: &args)
+        Self.append(query.providers, flag: "--provider", to: &args)
+        Self.append(query.models, flag: "--model", to: &args)
+        Self.append(query.surfaces, flag: "--surface", to: &args)
+        Self.append(query.outcomes.map(\.rawValue), flag: "--outcome", to: &args)
+        Self.append(query.captureStates.map(\.rawValue), flag: "--capture-state", to: &args)
+        let stdout = try await run(args, nil)
+        return try Self.decode(ContextLabSnapshot.self, from: stdout)
+    }
+
+    /// Exact local artifacts for one immutable trace address. Unlike Context
+    /// Lab's aggregate query, this intentionally opens prompt and conversation
+    /// bodies and must only be called after an explicit Open trace action.
+    public func traceContent(_ address: TraceAddress) async throws -> TraceContentSnapshot {
+        let stdout = try await run([
+            "trace", address.runId, "--json", "--content",
+            "--launch", address.launchId, "--turn", address.turnId,
+        ], nil)
+        return try Self.decode(TraceContentSnapshot.self, from: stdout)
+    }
+
+    private static func append(_ values: [String], flag: String, to args: inout [String]) {
+        for value in values {
+            args.append(contentsOf: [flag, value])
+        }
+    }
+
     private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
         // `lf` prints one JSON line; trim any surrounding whitespace/newline.
         let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)

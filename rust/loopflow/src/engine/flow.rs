@@ -652,6 +652,12 @@ fn find_skill_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     Err(LoadError::SkillNotFound(name.to_string()))
 }
 
+/// The editable file that supplied a file-backed skill. Built-in skills return
+/// `None`: their embedded content has no source file in an installed binary.
+pub fn find_skill_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
+    find_skill_path(name, repo).ok()
+}
+
 fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     let wave_goal = repo.join("wave").join(name).join("GOAL.md");
     if exact_path_exists(&wave_goal) {

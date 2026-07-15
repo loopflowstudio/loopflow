@@ -570,12 +570,16 @@ pub(crate) fn attributed_context(
     };
 
     if components.operate {
+        let source_path = std::path::Path::new(&components.repo_root)
+            .join("rust/loopflow/src/engine/builtins/LOOPFLOW.md");
         push(
             &crate::engine::prompt::loopflow_section(),
             Kind::OperatingInstructions,
             Scope::Global,
-            "Loopflow operating guide".to_string(),
-            None,
+            "LOOPFLOW.md".to_string(),
+            source_path
+                .is_file()
+                .then(|| source_path.to_string_lossy().to_string()),
             "operate",
         );
     }
@@ -607,7 +611,10 @@ pub(crate) fn attributed_context(
             Kind::Direction,
             Scope::Task,
             direction.name.clone(),
-            None,
+            direction
+                .source
+                .is_file()
+                .then(|| direction.source.to_string_lossy().to_string()),
             "direction",
         );
     }
@@ -702,12 +709,16 @@ pub(crate) fn attributed_context(
     }
     if let Some(skill) = &components.skill {
         if let Some(content) = &skill.content {
+            let source_path = crate::engine::find_skill_source_path(
+                &skill.name,
+                std::path::Path::new(&components.repo_root),
+            );
             push(
                 content,
                 Kind::SkillInstructions,
                 Scope::Step,
                 skill.name.clone(),
-                None,
+                source_path.map(|path| path.to_string_lossy().to_string()),
                 "skill",
             );
         } else {

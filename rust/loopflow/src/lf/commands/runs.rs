@@ -142,10 +142,15 @@ pub fn list_execs(json: bool) -> Result<()> {
 pub fn trace(
     exec_id: &str,
     json: bool,
+    content: bool,
     events_mode: bool,
     jsonl: bool,
     launch_prefix: Option<&str>,
+    turn_prefix: Option<&str>,
 ) -> Result<()> {
+    if launch_prefix.is_some() && !events_mode && !content {
+        return Err(anyhow!("--launch requires --events or --content"));
+    }
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let matches = store
         .run_events_matching_exec(exec_id)
@@ -184,6 +189,11 @@ pub fn trace(
         .map(|launch| launch.id.clone())
         .collect::<Vec<_>>();
     let turns = store.agent_turns_for_launches(&launch_ids)?;
+    if content {
+        let dto = trace_content(&launches, &turns, launch_prefix, turn_prefix)?;
+        println!("{}", serde_json::to_string(&dto)?);
+        return Ok(());
+    }
     if json {
         let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
         println!(
@@ -295,6 +305,105 @@ pub fn trace(
     }
 
     Ok(())
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TraceContentDto {
+    pub address: crate::lf::commands::context::TraceAddress,
+    pub system_prompt: TraceArtifactDto,
+    pub task_prompt: TraceArtifactDto,
+    pub conversation: TraceArtifactDto,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TraceArtifactDto {
+    pub available: bool,
+    pub path: Option<String>,
+    pub content: Option<String>,
+    pub unavailable_reason: Option<String>,
+}
+
+fn trace_content(
+    launches: &[crate::trace::AgentLaunchRow],
+    turns: &[crate::trace::AgentTurnRow],
+    launch_prefix: Option<&str>,
+    turn_prefix: Option<&str>,
+) -> Result<TraceContentDto> {
+    let selected_launches = launches
+        .iter()
+        .filter(|launch| launch_prefix.is_none_or(|prefix| launch.id.starts_with(prefix)))
+        .collect::<Vec<_>>();
+    let launch = match selected_launches.as_slice() {
+        [] => return Err(anyhow!("no captured launch matches the requested trace")),
+        [launch] => *launch,
+        _ if launch_prefix.is_none() => {
+            return Err(anyhow!(
+                "--content needs --launch when a trace has multiple launches"
+            ))
+        }
+        _ => return Err(anyhow!("launch prefix is ambiguous")),
+    };
+    let selected_turns = turns
+        .iter()
+        .filter(|turn| turn.launch_id == launch.id)
+        .filter(|turn| turn_prefix.is_none_or(|prefix| turn.id.starts_with(prefix)))
+        .collect::<Vec<_>>();
+    let turn = match selected_turns.as_slice() {
+        [] => return Err(anyhow!("no captured turn matches the requested trace")),
+        [turn] => *turn,
+        _ if turn_prefix.is_none() => {
+            return Err(anyhow!(
+                "--content needs --turn when a launch has multiple turns"
+            ))
+        }
+        _ => return Err(anyhow!("turn prefix is ambiguous")),
+    };
+
+    Ok(TraceContentDto {
+        address: crate::lf::commands::context::TraceAddress {
+            run_id: launch.run_id.clone(),
+            launch_id: launch.id.clone(),
+            turn_id: turn.id.clone(),
+        },
+        system_prompt: turn.system_prompt_path.as_deref().map_or_else(
+            || TraceArtifactDto::unavailable("turn has no system prompt"),
+            read_trace_artifact,
+        ),
+        task_prompt: read_trace_artifact(&turn.task_prompt_path),
+        conversation: read_trace_artifact(&launch.conversation_path),
+    })
+}
+
+impl TraceArtifactDto {
+    fn unavailable(reason: &str) -> Self {
+        Self {
+            available: false,
+            path: None,
+            content: None,
+            unavailable_reason: Some(reason.to_string()),
+        }
+    }
+}
+
+fn read_trace_artifact(relative: &str) -> TraceArtifactDto {
+    let path = match crate::trace::resolve_artifact(relative) {
+        Ok(path) => path,
+        Err(error) => return TraceArtifactDto::unavailable(&error.to_string()),
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(content) => TraceArtifactDto {
+            available: true,
+            path: Some(path.to_string_lossy().to_string()),
+            content: Some(content),
+            unavailable_reason: None,
+        },
+        Err(error) => TraceArtifactDto {
+            available: false,
+            path: Some(path.to_string_lossy().to_string()),
+            content: None,
+            unavailable_reason: Some(error.to_string()),
+        },
+    }
 }
 
 #[derive(Debug, serde::Serialize)]

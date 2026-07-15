@@ -821,6 +821,34 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 }
             }
         }
+        CronCommand::Sync { wave } => {
+            let repo_root = find_repo_root()?;
+            let declared = crate::engine::wave_config::read_wave_config(&repo_root, wave)
+                .and_then(|config| config.crons)
+                .unwrap_or_default();
+            let lf_path = crate::ops::resolve_lf_path()?;
+            let result = crate::ops::sync_crons(
+                &launch_agents_dir,
+                wave,
+                &declared,
+                &repo_root,
+                &lf_path,
+                &SystemLaunchctl,
+            )?;
+            if result.installed.is_empty() && result.removed.is_empty() && result.skipped.is_empty()
+            {
+                println!("no crons declared for wave {wave}; nothing to sync");
+            }
+            for cron in &result.installed {
+                println!("installed {} ({})", cron.label, cron.flow);
+            }
+            for cron in &result.removed {
+                println!("pruned {} ({})", cron.label, cron.flow);
+            }
+            for skip in &result.skipped {
+                eprintln!("skipped {} ({}): {}", skip.flow, skip.schedule, skip.reason);
+            }
+        }
         CronCommand::Remove { wave, flow } => {
             match crate::ops::remove_cron(&launch_agents_dir, wave, flow, &SystemLaunchctl)? {
                 Some(cron) => println!("removed {}", cron.label),

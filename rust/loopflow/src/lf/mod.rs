@@ -1288,6 +1288,27 @@ pub enum AuthCommand {
         /// Create or reconnect an isolated OAuth account profile
         #[arg(long)]
         account: Option<String>,
+        /// Chrome profile directory, name, or signed-in email for Claude OAuth
+        #[arg(long, requires = "account")]
+        chrome_profile: Option<String>,
+    },
+    /// Pair a managed Claude account with its Chrome profile
+    Pair {
+        provider: String,
+        account: String,
+        /// Chrome profile directory, name, or signed-in email
+        #[arg(long)]
+        chrome_profile: String,
+    },
+    /// Adopt an existing Claude login into a managed account
+    Import {
+        provider: String,
+        /// Create or register this isolated OAuth account profile
+        #[arg(long)]
+        account: String,
+        /// Chrome profile directory, name, or signed-in email
+        #[arg(long)]
+        chrome_profile: Option<String>,
     },
     /// List managed Claude and Codex OAuth accounts
     Accounts {
@@ -1417,6 +1438,8 @@ mod tests {
 
         for flow in [
             "connect",
+            "pair",
+            "import",
             "accounts",
             "use",
             "enable",
@@ -1445,8 +1468,95 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
-                cmd: AuthCommand::Connect { provider, account }
+                cmd: AuthCommand::Connect {
+                    provider,
+                    account,
+                    chrome_profile: None,
+                }
             }) if provider == "claude" && account.as_deref() == Some("primary")
+        ));
+    }
+
+    #[test]
+    fn auth_connect_accepts_matching_chrome_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "connect",
+            "claude",
+            "--account",
+            "loopflow",
+            "--chrome-profile",
+            "operator@example.com",
+        ])
+        .expect("parse Chrome profile pairing");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Connect {
+                    provider,
+                    account,
+                    chrome_profile: Some(chrome_profile),
+                }
+            }) if provider == "claude"
+                && account.as_deref() == Some("loopflow")
+                && chrome_profile == "operator@example.com"
+        ));
+    }
+
+    #[test]
+    fn auth_pair_accepts_matching_chrome_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "pair",
+            "claude",
+            "primary",
+            "--chrome-profile",
+            "jackstah@example.com",
+        ])
+        .expect("parse Chrome profile pairing");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Pair {
+                    provider,
+                    account,
+                    chrome_profile,
+                }
+            }) if provider == "claude"
+                && account == "primary"
+                && chrome_profile == "jackstah@example.com"
+        ));
+    }
+
+    #[test]
+    fn auth_import_accepts_managed_account_and_chrome_profile() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "auth",
+            "import",
+            "claude",
+            "--account",
+            "loopflow",
+            "--chrome-profile",
+            "jack@example.com",
+        ])
+        .expect("parse existing login import");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Import {
+                    provider,
+                    account,
+                    chrome_profile: Some(chrome_profile),
+                }
+            }) if provider == "claude"
+                && account == "loopflow"
+                && chrome_profile == "jack@example.com"
         ));
     }
 

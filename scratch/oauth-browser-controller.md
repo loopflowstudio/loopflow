@@ -68,6 +68,11 @@ receive the provider-native file and need no copy.
 
 - The official Claude extension must be installed, signed in, granted browser
   permissions, and connected once. Loopflow cannot bypass that bootstrap.
+- Each managed account can persist one matching Chrome profile directory so
+  multiple installed extensions never make browser selection ambiguous.
+- Existing native Claude logins can be imported into the router without
+  repeating OAuth; an empty macOS profile captures only the current Keychain
+  login after its email matches the paired Chrome profile.
 - The controller may authorize an already signed-in account. Account login,
   MFA, CAPTCHA, account creation, purchases, and recovery remain human actions.
 - Chrome control is restricted to Anthropic authorization/callback origins.

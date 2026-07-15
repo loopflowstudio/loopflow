@@ -15,6 +15,8 @@ use std::fs;
 use std::future::Future;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::Command as ProcessCommand;
 use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -66,7 +68,7 @@ const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
 const CLAUDE_BROWSER_AUTH_TIMEOUT: Duration = Duration::from_secs(120);
 const CLAUDE_BROWSER_OUTPUT_SCHEMA: &str = r#"{"type":"object","properties":{"status":{"type":"string","enum":["authorized","unavailable"]},"authorization_code":{"type":["string","null"]}},"required":["status","authorization_code"],"additionalProperties":false}"#;
-const CLAUDE_BROWSER_ALLOWED_TOOLS: &str = "Skill,ToolSearch,mcp__claude-in-chrome__list_connected_browsers,mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__computer";
+const CLAUDE_BROWSER_ALLOWED_TOOLS: &str = "Skill,ToolSearch,mcp__claude-in-chrome__list_connected_browsers,mcp__claude-in-chrome__select_browser,mcp__claude-in-chrome__switch_browser,mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__computer";
 pub(crate) const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -1850,11 +1852,19 @@ fn kill_auth_process_group(pid: u32) {
 pub async fn drive_claude_browser_authorization(
     verification_url: &str,
     controller_profile: Option<&Path>,
+    browser_profile_label: Option<&str>,
 ) -> Result<Option<SecretString>, AuthError> {
     validate_claude_authorization_url(verification_url)?;
 
+    let browser_instruction = match browser_profile_label {
+        Some(label) => format!(
+            " Use only the connected browser whose profile or account label exactly matches {}. Select it explicitly; if it is absent, return status unavailable.",
+            serde_json::to_string(label).expect("Chrome profile label should serialize")
+        ),
+        None => String::new(),
+    };
     let prompt = format!(
-        "Act only as Loopflow's Claude OAuth browser controller. Load the claude-in-chrome skill. First list connected browsers. If none are connected, return status unavailable. Otherwise open this exact URL in a new tab: {verification_url}\nOnly interact with claude.com and platform.claude.com. If an already signed-in account can continue, click Authorize. Do not sign in, create an account, handle MFA or CAPTCHA, or change account settings. After the callback page appears, read its complete one-time code#state handoff. Return status authorized with that value. Never include the handoff in prose."
+        "Act only as Loopflow's Claude OAuth browser controller. Load the claude-in-chrome skill. First list connected browsers. If none are connected, return status unavailable.{browser_instruction} Otherwise open this exact URL in a new tab: {verification_url}\nOnly interact with claude.com and platform.claude.com. If an already signed-in account can continue, click Authorize. Do not sign in, create an account, handle MFA or CAPTCHA, or change account settings. After the callback page appears, read its complete one-time code#state handoff. Return status authorized with that value. Never include the handoff in prose."
     );
 
     let mut command = Command::new("claude");
@@ -2496,11 +2506,19 @@ fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>,
             "Claude Keychain credential is missing its account metadata".to_string(),
         ));
     };
-    let blob =
-        security_framework::passwords::get_generic_password(CLAUDE_KEYCHAIN_SERVICE, &account)
-            .map_err(|error| {
-                AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
-            })?;
+    let blob = match security_framework::passwords::get_generic_password(
+        CLAUDE_KEYCHAIN_SERVICE,
+        &account,
+    ) {
+        Ok(blob) => blob,
+        Err(native_error) => read_claude_keychain_blob_with_security().map_err(
+            |fallback_error| {
+                AuthError::Filesystem(format!(
+                    "read Claude Keychain credential: {native_error}; security fallback: {fallback_error}"
+                ))
+            },
+        )?,
+    };
     let blob = String::from_utf8(blob).map_err(|_| {
         AuthError::Filesystem("Claude Keychain credential is not valid UTF-8".to_string())
     })?;
@@ -2508,6 +2526,18 @@ fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>,
         account,
         blob: SecretString::new(blob),
     }))
+}
+
+#[cfg(target_os = "macos")]
+fn read_claude_keychain_blob_with_security() -> Result<Vec<u8>, String> {
+    let output = ProcessCommand::new("security")
+        .args(["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(format!("security exited with {}", output.status));
+    }
+    Ok(output.stdout)
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -470,8 +470,9 @@ this release may need one `lf auth linear` reconnect to record their PKCE client
 Route new Claude or Codex sessions across several OAuth accounts:
 
 ```bash
-lf auth connect claude --account primary
-lf auth connect claude --account reserve
+lf auth pair claude primary --chrome-profile jackstah@example.com
+lf auth import claude --account primary
+lf auth connect claude --account reserve --chrome-profile reserve@example.com
 lf auth use claude primary
 lf auth accounts claude
 
@@ -483,7 +484,11 @@ lf auth disconnect claude --account reserve
 
 Claude authorization runs through Claude in Chrome when its browser extension
 is connected. If the controller is unavailable, Loopflow falls back to a hidden
-terminal prompt for the one-time handoff code.
+terminal prompt for the one-time handoff code. `--chrome-profile` accepts the
+Chrome profile directory, name, or signed-in email and remembers the pairing
+for reconnects. `auth import` adopts an existing isolated Claude credential—or
+the current macOS Keychain login when the profile is empty—without another OAuth
+flow.
 
 Each account keeps independent provider auth and session state under
 `~/.lf/accounts/`. Shared Claude/Codex configuration and compiled skills stay in

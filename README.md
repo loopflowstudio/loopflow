@@ -39,6 +39,7 @@ Run the wave in your terminal:
 ```bash
 lf wave designer              # one persistent Wave loop, until Ctrl-C
 lf chat --steer "ship the button audit first" # steer the live body, else queue
+lf chat --history --json -w designer # read saved Chat without a listener
 lf memory add "buttons: variants unified" # curate what it knows
 lf stop designer              # stop its listener and resident gracefully
 ```
@@ -53,7 +54,8 @@ canonical main checkout. Wave turns coordinate there; Task Sessions own every
 repository mutation. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
 queues when it cannot). Truth is an append-only journal, so a restart keeps the
-whole thread while human chat resumes from its recent tail. Commands, tools,
+whole thread while human chat resumes from its recent tail. The saved tail is
+readable while the Wave is stopped. Commands, tools,
 file edits, and loop bookkeeping stay out of chat; decisions, deliveries, and
 human-level failures remain visible. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
 memory` curates retained facts. A running Wave folds family reports into its

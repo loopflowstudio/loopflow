@@ -31,6 +31,72 @@ struct WaveChatConnectionTests {
         "{\"type\":\"message\",\"id\":\"\(id)\",\"text\":\"\(text)\",\"phase\":\"stream\"}"
     }
 
+    @Test("start installs durable history before waiting for a listener")
+    func startLoadsDurableHistoryOffline() async throws {
+        let saved = try ChatTurn(
+            id: "turn-7",
+            role: .user,
+            text: "saved before restart",
+            status: .completed,
+            items: [],
+            createdAt: "2026-07-15T04:00:00Z",
+            from: nil,
+            body: nil,
+            activity: nil
+        )
+        let conn = WaveChatConnection(
+            repoPath: "/tmp/no-wave-listener",
+            waveName: "ship",
+            loadHistory: { repo, wave, limit in
+                #expect(repo == "/tmp/no-wave-listener")
+                #expect(wave == "ship")
+                #expect(limit == 12)
+                return ChatHistorySnapshot(
+                    state: .partial,
+                    detail: "Later history is unreadable.",
+                    turns: [saved],
+                    truncated: true
+                )
+            }
+        )
+        conn.start()
+        defer { conn.stop() }
+
+        for _ in 0..<100 where conn.historyState == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(conn.turns == [saved])
+        #expect(conn.historyState == .partial)
+        #expect(conn.historyDetail == "Later history is unreadable.")
+        #expect(conn.historyTruncated)
+        #expect(conn.phase == .notRunning)
+
+        conn.handle(event: "turn", data: frame(id: "turn-8", text: "live", status: "completed"))
+        #expect(conn.historyState == .partial, "a live frame cannot repair durable history")
+    }
+
+    @Test("the first durable turn promotes missing history")
+    func firstTurnPromotesMissingHistory() async throws {
+        let conn = WaveChatConnection(
+            repoPath: "/tmp/no-wave-listener",
+            waveName: "ship",
+            loadHistory: { _, _, _ in
+                ChatHistorySnapshot(state: .missing, detail: "No journal.", turns: [], truncated: false)
+            }
+        )
+        conn.start()
+        defer { conn.stop() }
+
+        for _ in 0..<100 where conn.historyState == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        conn.handle(event: "turn", data: frame(id: "turn-1", text: "now durable", status: "completed"))
+
+        #expect(conn.historyState == .available)
+        #expect(conn.historyDetail == nil)
+    }
+
     @Test("turn-delta frames grow the open turn to match a whole-turn reconstruction")
     func turnDeltaFramesReconstructTheTurn() {
         let conn = connection()

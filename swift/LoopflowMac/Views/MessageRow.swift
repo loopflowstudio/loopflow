@@ -61,7 +61,7 @@ struct MessageRow: View {
                 failedBadge
             }
 
-            if let timestampLabel {
+            if let timestampLabel, attemptFailure?.count ?? 1 == 1 {
                 Text(timestampLabel)
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
@@ -127,9 +127,35 @@ struct MessageRow: View {
                     .foregroundStyle(palette.text)
                     .textSelection(.enabled)
 
-                Text("\(attemptFailure.flow) / \(attemptFailure.step)")
+                HStack(spacing: Spacing.xs) {
+                    Text("\(attemptFailure.flow) / \(attemptFailure.step)")
+                    if attemptFailure.count > 1, let timestampLabel {
+                        Text("· latest \(timestampLabel)")
+                    }
+                }
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
+
+                if attemptFailure.count > 1 {
+                    DisclosureGroup("Details") {
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            ForEach(attemptFailure.attempts) { attempt in
+                                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                    Text("\(attempt.turnId) · \(attempt.createdAt)")
+                                        .font(Typography.caption(10).monospaced())
+                                        .foregroundStyle(palette.textSecondary)
+                                    Text(attempt.reason)
+                                        .font(Typography.caption(11))
+                                        .foregroundStyle(palette.text)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
+                        .padding(.top, Spacing.xs)
+                    }
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+                }
             }
         }
     }

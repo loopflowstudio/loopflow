@@ -133,6 +133,76 @@ struct AttemptFailurePresentationTests {
         ).isEmpty)
     }
 
+    @Test("equivalent operational failures roll up at the latest attempt")
+    func equivalentFailuresRollUp() throws {
+        let first = turn("turn-10", .failed, body: body("body-1", reason: capacityReason))
+        let second = turn("turn-11", .failed, body: body("body-2", reason: capacityReason))
+        let third = turn("turn-12", .failed, body: body("body-3", reason: capacityReason))
+        let authored = try ChatTurn(
+            id: "turn-13",
+            role: .assistant,
+            text: "The provider is still at capacity; the Wave remains available for messages.",
+            status: .completed,
+            items: [],
+            createdAt: "2026-07-10T17:54:00Z",
+            from: nil,
+            body: body("body-4"),
+            activity: nil
+        )
+        let turns = [first, second, third, authored]
+
+        let failures = attemptFailurePresentations(
+            turns: turns,
+            playhead: nil,
+            loopState: .failed
+        )
+
+        #expect(failures.keys.sorted() == ["turn-12"])
+        #expect(failures["turn-12"]?.count == 3)
+        #expect(failures["turn-12"]?.title == "3 attempts failed · recovered on retry")
+        #expect(failures["turn-12"]?.attempts.map(\.bodyId) == ["body-1", "body-2", "body-3"])
+        #expect(visibleConversationTurns(turns, failures: failures).map(\.id) == [
+            "turn-12", "turn-13",
+        ])
+    }
+
+    @Test("authored failure prose never collapses")
+    func authoredFailureProseStaysVisible() throws {
+        let first = try ChatTurn(
+            id: "turn-10",
+            role: .assistant,
+            text: "First attempt reached the provider but failed.",
+            status: .failed,
+            items: [],
+            createdAt: "2026-07-10T17:53:00Z",
+            from: nil,
+            body: body("body-1", reason: capacityReason),
+            activity: nil
+        )
+        let second = try ChatTurn(
+            id: "turn-11",
+            role: .assistant,
+            text: "Second attempt failed after preserving the queue.",
+            status: .failed,
+            items: [],
+            createdAt: "2026-07-10T17:54:00Z",
+            from: nil,
+            body: body("body-2", reason: capacityReason),
+            activity: nil
+        )
+
+        let failures = attemptFailurePresentations(
+            turns: [first, second],
+            playhead: nil,
+            loopState: .failed
+        )
+
+        #expect(failures.count == 2)
+        #expect(visibleConversationTurns([first, second], failures: failures).map(\.id) == [
+            "turn-10", "turn-11",
+        ])
+    }
+
     @Test("whitespace-only thoughts are hidden without hiding real thoughts")
     func emptyThoughtVisibility() {
         #expect(!ConversationItem.thought(id: "empty", text: "  \n").isVisibleInConversation)

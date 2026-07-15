@@ -41,7 +41,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
+use serde::{Deserialize, Serialize};
 
+use crate::chat::turns::ChatTurn;
 use crate::engine::wave_context::{
     read_endpoint_pointer, resolve_ambient_channel, wave_origin, AmbientChannelRef,
 };
@@ -50,19 +52,106 @@ use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
 use crate::store::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
-use crate::wave::journal::MessageOp;
+use crate::wave::journal::{
+    fold_thread, journal_path, read_events_with_state, MessageOp, ReadOnlyJournalState,
+};
+use crate::wave::server::HUMAN_THREAD_REPLAY_LIMIT;
 use crate::wave::Wave;
 
-pub fn run(text_args: &[String], follow: bool, steer: bool, target: &WaveTargetArgs) -> Result<()> {
+/// Evidence state for a bounded read of the durable Wave thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatHistoryState {
+    Available,
+    Missing,
+    Partial,
+    Unavailable,
+}
+
+/// Stable `lf chat --history --json` response, mirrored by Swift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatHistorySnapshot {
+    pub state: ChatHistoryState,
+    pub detail: Option<String>,
+    pub turns: Vec<ChatTurn>,
+    pub truncated: bool,
+}
+
+pub fn run(
+    text_args: &[String],
+    follow: bool,
+    steer: bool,
+    history: bool,
+    json: bool,
+    limit: Option<usize>,
+    target: &WaveTargetArgs,
+) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        if follow {
+        if history {
+            if !json {
+                bail!("--history currently requires --json");
+            }
+            history_with_context(&context, target, limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT)).await
+        } else if follow {
             follow_with_context(&context, steer, target).await
         } else {
             run_with_context(&context, text_args, steer, target).await
         }
     })
+}
+
+/// Print the bounded durable thread without requiring a live Wave listener.
+async fn history_with_context(
+    context: &CliContext,
+    target: &WaveTargetArgs,
+    limit: usize,
+) -> Result<()> {
+    if limit == 0 {
+        bail!("--limit must be at least 1");
+    }
+    let Some(resolved) = resolve_target(
+        target,
+        context.store.as_ref(),
+        context.repo.as_deref(),
+        context.env_wave_id.as_deref(),
+        context.env_channel.as_deref(),
+    )
+    .await?
+    else {
+        bail!("no wave here — name one with `lf chat --history --json -w <wave>`");
+    };
+    let repo_root = resolved.repo_root.ok_or_else(|| {
+        anyhow!(
+            "wave '{}' has no local origin repository for durable history",
+            resolved.name
+        )
+    })?;
+    let snapshot = history_snapshot(&repo_root, &resolved.name, limit);
+    println!("{}", serde_json::to_string(&snapshot)?);
+    Ok(())
+}
+
+fn history_snapshot(repo_root: &Path, wave: &str, limit: usize) -> ChatHistorySnapshot {
+    let read = read_events_with_state(&journal_path(repo_root, wave));
+    let state = match read.state {
+        ReadOnlyJournalState::Available => ChatHistoryState::Available,
+        ReadOnlyJournalState::Missing => ChatHistoryState::Missing,
+        ReadOnlyJournalState::Partial => ChatHistoryState::Partial,
+        ReadOnlyJournalState::Unavailable => ChatHistoryState::Unavailable,
+    };
+    let mut fold = fold_thread(&read.events);
+    fold.turns.append(&mut fold.open);
+    let truncated = fold.turns.len() > limit;
+    let keep_from = fold.turns.len().saturating_sub(limit);
+    let turns = fold.turns.split_off(keep_from);
+    ChatHistorySnapshot {
+        state,
+        detail: read.detail,
+        turns,
+        truncated,
+    }
 }
 
 /// The command body, a function of the detected [`CliContext`]. Resolves the
@@ -450,6 +539,53 @@ mod tests {
     use crate::lf::commands::fixtures::{boot_server, make_wave, temp_store};
     use crate::wave::journal::{EventKind, MessageOp};
     use crate::wave::runtime::InboxItem;
+
+    #[test]
+    fn durable_history_is_bounded_and_does_not_need_a_listener() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime =
+            crate::wave::runtime::WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf())
+                .expect("open wave journal");
+        for index in 0..15 {
+            runtime
+                .deliver(MessageOp::Message, format!("message {index}"))
+                .expect("append message");
+        }
+
+        let snapshot = history_snapshot(tmp.path(), "ship", 12);
+        assert_eq!(snapshot.state, ChatHistoryState::Available);
+        assert_eq!(snapshot.turns.len(), 12);
+        assert!(snapshot.truncated);
+        assert_eq!(snapshot.turns.first().unwrap().text, "message 3");
+        assert_eq!(snapshot.turns.last().unwrap().text, "message 14");
+    }
+
+    #[test]
+    fn durable_history_distinguishes_missing_evidence_from_an_empty_thread() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let snapshot = history_snapshot(tmp.path(), "ship", 12);
+        assert_eq!(snapshot.state, ChatHistoryState::Missing);
+        assert!(snapshot.turns.is_empty());
+        assert!(!snapshot.truncated);
+        assert!(snapshot.detail.is_some());
+    }
+
+    #[test]
+    fn chat_history_fixture_round_trips() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/chat_history.json"
+        ));
+        let snapshot: ChatHistorySnapshot =
+            serde_json::from_str(fixture).expect("decode chat history fixture");
+        assert_eq!(snapshot.state, ChatHistoryState::Partial);
+        assert_eq!(snapshot.turns.len(), 1);
+        assert!(snapshot.truncated);
+        let encoded = serde_json::to_string(&snapshot).expect("encode chat history fixture");
+        let decoded: ChatHistorySnapshot =
+            serde_json::from_str(&encoded).expect("re-decode chat history fixture");
+        assert_eq!(decoded, snapshot);
+    }
 
     #[test]
     fn interactive_commands_parse_and_everything_else_is_speech() {

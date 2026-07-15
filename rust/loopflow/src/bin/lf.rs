@@ -1347,8 +1347,13 @@ fn main() -> anyhow::Result<()> {
                 text,
                 follow,
                 steer,
+                history,
+                json,
+                limit,
                 target,
-            }) => loopflow::lf::commands::chat::run(text, *follow, *steer, target),
+            }) => loopflow::lf::commands::chat::run(
+                text, *follow, *steer, *history, *json, *limit, target,
+            ),
             Some(Commands::Radio { command }) => match command {
                 loopflow::lf::RadioCommand::Pub {
                     text,

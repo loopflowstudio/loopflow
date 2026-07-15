@@ -366,15 +366,24 @@ pub enum Commands {
     /// --steer reaches the live body. Agents use `lf radio pub` for
     /// agent-to-agent comms, not this.
     Chat {
-        /// Message text (reads stdin when omitted unless --follow)
+        /// Message text (reads stdin when omitted unless --follow or --history)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
         /// Replay and follow the thread while typed lines post into it.
-        #[arg(long, conflicts_with = "text")]
+        #[arg(long, conflicts_with_all = ["text", "history", "json", "limit"])]
         follow: bool,
         /// Inject into a live steer-capable turn; otherwise queue.
-        #[arg(long, conflicts_with = "parent")]
+        #[arg(long, conflicts_with_all = ["parent", "history", "json", "limit"])]
         steer: bool,
+        /// Read the latest durable turns without requiring a live listener.
+        #[arg(long, conflicts_with = "text")]
+        history: bool,
+        /// Emit the durable history snapshot as JSON.
+        #[arg(long, requires = "history")]
+        json: bool,
+        /// Maximum durable turns to return (default: 12).
+        #[arg(long, requires = "history")]
+        limit: Option<usize>,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
@@ -2109,6 +2118,7 @@ mod tests {
             follow,
             steer,
             target,
+            ..
         }) = cli.command
         else {
             panic!("expected chat command");
@@ -2171,6 +2181,7 @@ mod tests {
             follow,
             steer,
             target,
+            ..
         }) = cli.command
         else {
             panic!("expected chat command");
@@ -2181,6 +2192,44 @@ mod tests {
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
         assert!(Cli::try_parse_from(["lf", "chat", "--follow", "hello"]).is_err());
+
+        let cli = Cli::try_parse_from([
+            "lf",
+            "chat",
+            "--history",
+            "--json",
+            "--limit",
+            "20",
+            "--wave",
+            "goals",
+        ])
+        .expect("parse durable history");
+        let Some(Commands::Chat {
+            history,
+            json,
+            limit,
+            target,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected chat command");
+        };
+        assert!(history);
+        assert!(json);
+        assert_eq!(limit, Some(20));
+        assert_eq!(target.wave.as_deref(), Some("goals"));
+
+        assert!(Cli::try_parse_from(["lf", "chat", "--json", "--wave", "goals"]).is_err());
+        assert!(Cli::try_parse_from([
+            "lf",
+            "chat",
+            "--history",
+            "--json",
+            "--follow",
+            "--wave",
+            "goals"
+        ])
+        .is_err());
         assert!(Cli::command().find_subcommand("wavechat").is_none());
     }
 

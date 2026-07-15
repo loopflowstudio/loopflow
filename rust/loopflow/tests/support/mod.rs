@@ -10,7 +10,9 @@ use loopflow::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
     ProjectLaunchReceipt, TaskLaunchReceipt,
 };
-use loopflow::store::{open_store, StorageConfig, Store};
+use loopflow::store::{
+    open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
+};
 use loopflow::task::{
     PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
 };
@@ -26,6 +28,8 @@ fn env_lock() -> &'static Mutex<()> {
 struct HomeOverride {
     previous_lf_home: Option<OsString>,
     previous_db_path: Option<OsString>,
+    previous_control_home: Option<OsString>,
+    previous_control_db_path: Option<OsString>,
     _temp: TempDir,
 }
 
@@ -34,12 +38,18 @@ impl HomeOverride {
         let temp = TempDir::new().expect("temp home dir");
         let previous_lf_home = env::var_os("LF_HOME");
         let previous_db_path = env::var_os("LF_DB_PATH");
+        let previous_control_home = env::var_os(CONTROL_HOME_ENV);
+        let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
         env::remove_var("LF_HOME");
         env::remove_var("LF_DB_PATH");
+        env::remove_var(CONTROL_HOME_ENV);
+        env::remove_var(CONTROL_DB_PATH_ENV);
         env::set_var("LF_HOME", temp.path());
         Self {
             previous_lf_home,
             previous_db_path,
+            previous_control_home,
+            previous_control_db_path,
             _temp: temp,
         }
     }
@@ -54,6 +64,14 @@ impl Drop for HomeOverride {
         match &self.previous_db_path {
             Some(prev) => env::set_var("LF_DB_PATH", prev),
             None => env::remove_var("LF_DB_PATH"),
+        }
+        match &self.previous_control_home {
+            Some(prev) => env::set_var(CONTROL_HOME_ENV, prev),
+            None => env::remove_var(CONTROL_HOME_ENV),
+        }
+        match &self.previous_control_db_path {
+            Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
+            None => env::remove_var(CONTROL_DB_PATH_ENV),
         }
     }
 }
@@ -71,6 +89,8 @@ pub struct EnvGuard {
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
     previous_db_path: Option<OsString>,
+    previous_control_home: Option<OsString>,
+    previous_control_db_path: Option<OsString>,
     _bin: TempDir,
     _lf_home: TempDir,
 }
@@ -100,9 +120,13 @@ impl EnvGuard {
         }
         let previous_lf_home = env::var_os("LF_HOME");
         let previous_db_path = env::var_os("LF_DB_PATH");
+        let previous_control_home = env::var_os(CONTROL_HOME_ENV);
+        let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
         let lf_home = TempDir::new().expect("temp lf home dir");
         env::remove_var("LF_HOME");
         env::remove_var("LF_DB_PATH");
+        env::remove_var(CONTROL_HOME_ENV);
+        env::remove_var(CONTROL_DB_PATH_ENV);
         env::set_var("LF_HOME", lf_home.path());
         Self {
             _lock: lock,
@@ -110,6 +134,8 @@ impl EnvGuard {
             previous_home,
             previous_lf_home,
             previous_db_path,
+            previous_control_home,
+            previous_control_db_path,
             _bin: bin,
             _lf_home: lf_home,
         }
@@ -142,6 +168,14 @@ impl Drop for EnvGuard {
         match &self.previous_db_path {
             Some(prev) => env::set_var("LF_DB_PATH", prev),
             None => env::remove_var("LF_DB_PATH"),
+        }
+        match &self.previous_control_home {
+            Some(prev) => env::set_var(CONTROL_HOME_ENV, prev),
+            None => env::remove_var(CONTROL_HOME_ENV),
+        }
+        match &self.previous_control_db_path {
+            Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
+            None => env::remove_var(CONTROL_DB_PATH_ENV),
         }
     }
 }

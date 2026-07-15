@@ -42,6 +42,8 @@ pub(crate) struct TestLedgerGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_lf_home: Option<std::ffi::OsString>,
     previous_db_path: Option<std::ffi::OsString>,
+    previous_control_home: Option<std::ffi::OsString>,
+    previous_control_db_path: Option<std::ffi::OsString>,
     previous_test_path: Option<PathBuf>,
     home: tempfile::TempDir,
 }
@@ -53,8 +55,12 @@ impl TestLedgerGuard {
         let home = tempfile::TempDir::new().expect("test ledger home");
         let previous_lf_home = std::env::var_os("LF_HOME");
         let previous_db_path = std::env::var_os("LF_DB_PATH");
+        let previous_control_home = std::env::var_os(crate::store::CONTROL_HOME_ENV);
+        let previous_control_db_path = std::env::var_os(crate::store::CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_HOME");
         std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var(crate::store::CONTROL_HOME_ENV);
+        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
         std::env::set_var("LF_HOME", home.path());
         let previous_test_path =
             TEST_LEDGER_DB_PATH.with(|path| path.replace(Some(home.path().join("loopflow.db"))));
@@ -62,6 +68,8 @@ impl TestLedgerGuard {
             _lock: lock,
             previous_lf_home,
             previous_db_path,
+            previous_control_home,
+            previous_control_db_path,
             previous_test_path,
             home,
         }
@@ -87,6 +95,14 @@ impl Drop for TestLedgerGuard {
         match &self.previous_db_path {
             Some(value) => std::env::set_var("LF_DB_PATH", value),
             None => std::env::remove_var("LF_DB_PATH"),
+        }
+        match &self.previous_control_home {
+            Some(value) => std::env::set_var(crate::store::CONTROL_HOME_ENV, value),
+            None => std::env::remove_var(crate::store::CONTROL_HOME_ENV),
+        }
+        match &self.previous_control_db_path {
+            Some(value) => std::env::set_var(crate::store::CONTROL_DB_PATH_ENV, value),
+            None => std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV),
         }
     }
 }

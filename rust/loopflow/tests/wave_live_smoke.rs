@@ -74,6 +74,8 @@ async fn wave_two_process_live_smoke() {
         .current_dir(&repo)
         // A private registry so the smoke never touches the machine's ~/.lf.
         .env("LF_DB_PATH", tmp.path().join("loopflow.db"))
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

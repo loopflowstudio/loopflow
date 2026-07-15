@@ -139,6 +139,8 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .arg("--json")
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_RUN_ID")
         .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");

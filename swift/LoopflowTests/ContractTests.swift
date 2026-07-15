@@ -107,6 +107,36 @@ struct ContractTests {
         #expect(unattributed.from == nil)
     }
 
+    @Test("turn_delta.json decodes and grows a turn through absorbing")
+    func turnDeltaFixtureParses() throws {
+        let data = try fixtureData("dto/turn_delta.json")
+        let delta = try JSONDecoder().decode(TurnDelta.self, from: data)
+
+        #expect(delta.turnId == "turn-3")
+        guard case let .message(id, text, phase) = delta.item else {
+            Issue.record("turn-delta item should be a message")
+            return
+        }
+        #expect(id == "text-7")
+        #expect(phase == "stream")
+        #expect(text.contains("edge case"))
+
+        // Applying the delta grows a turn exactly as the listener's fold does: a
+        // stream message concatenates into text, never into items.
+        let opened = try ChatTurn(
+            id: "turn-3", role: .assistant, text: "so ", status: .running, items: [],
+            createdAt: "2026-07-03T18:30:00Z", from: nil, body: nil, activity: nil
+        )
+        let grown = try opened.absorbing(delta.item)
+        #expect(grown.text == "so the parser handles the edge case now.")
+        #expect(grown.items.isEmpty)
+
+        // Round-trips: re-encode and decode again yields an identical delta.
+        let reencoded = try JSONEncoder().encode(delta)
+        let roundTripped = try JSONDecoder().decode(TurnDelta.self, from: reencoded)
+        #expect(roundTripped == delta)
+    }
+
     @Test("child activity cannot masquerade as an ordinary conversation turn")
     func childActivityEnvelopeIsChecked() throws {
         let activity = try fixtureJSON("dto/child_control_activity.json")

@@ -121,7 +121,7 @@ use crate::chat::turns::ChatTurn;
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
-use crate::wave::runtime::{InboxItem, TurnBroadcast, WaveRuntime};
+use crate::wave::runtime::{InboxItem, TurnBroadcast, TurnDeltaFrame, TurnFrame, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
@@ -744,12 +744,13 @@ fn turn_event_stream(
 ) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
     stream::unfold(Some(BroadcastStream::new(rx)), |state| async move {
         let mut inner = state?;
-        match inner.next().await {
-            Some(Ok(TurnBroadcast::Whole(frame))) => Some((
+        let recv = inner.next().await?;
+        match turn_wire_frame(recv) {
+            TurnWireFrame::Whole(frame) => Some((
                 Ok(Event::default().event("turn").data(frame.json.as_str())),
                 Some(inner),
             )),
-            Some(Ok(TurnBroadcast::Delta(frame))) => Some((
+            TurnWireFrame::Delta(frame) => Some((
                 Ok(Event::default()
                     .event("turn-delta")
                     .data(frame.json.as_str())),
@@ -757,12 +758,28 @@ fn turn_event_stream(
             )),
             // Lag: signal an explicit resync, then end the substream (state
             // `None`) so the next poll returns nothing and the client reconnects.
-            Some(Err(BroadcastStreamRecvError::Lagged(_))) => {
+            TurnWireFrame::Resync => {
                 Some((Ok(Event::default().event("resync").data("reconnect")), None))
             }
-            None => None,
         }
     })
+}
+
+/// One turn broadcast poll resolved to what it becomes on the wire. A lag is
+/// `Resync`, NEVER a silently dropped frame — that distinction is the whole
+/// point of this substream, so it is pinned by a unit test.
+enum TurnWireFrame {
+    Whole(Arc<TurnFrame>),
+    Delta(Arc<TurnDeltaFrame>),
+    Resync,
+}
+
+fn turn_wire_frame(recv: Result<TurnBroadcast, BroadcastStreamRecvError>) -> TurnWireFrame {
+    match recv {
+        Ok(TurnBroadcast::Whole(frame)) => TurnWireFrame::Whole(frame),
+        Ok(TurnBroadcast::Delta(frame)) => TurnWireFrame::Delta(frame),
+        Err(BroadcastStreamRecvError::Lagged(_)) => TurnWireFrame::Resync,
+    }
 }
 
 fn turn_event(turn: &ChatTurn) -> Event {
@@ -925,6 +942,50 @@ pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::turns::ChatTurn;
+
+    fn whole_broadcast(id: &str) -> TurnBroadcast {
+        let turn = ChatTurn::user(id.to_string(), "hi".to_string());
+        let json = serde_json::to_string(&turn).expect("serialize");
+        TurnBroadcast::Whole(Arc::new(TurnFrame { turn, json }))
+    }
+
+    #[test]
+    fn a_lagged_turn_broadcast_maps_to_resync_not_a_dropped_frame() {
+        // The distinction this substream exists for: a lag becomes an explicit
+        // resync, never a silently swallowed increment.
+        assert!(matches!(
+            turn_wire_frame(Err(BroadcastStreamRecvError::Lagged(3))),
+            TurnWireFrame::Resync
+        ));
+        assert!(matches!(
+            turn_wire_frame(Ok(whole_broadcast("turn-1"))),
+            TurnWireFrame::Whole(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn turn_stream_signals_one_resync_then_ends_on_lag() {
+        // A capacity-2 channel overfilled before any read: the receiver lags.
+        let (tx, rx) = broadcast::channel::<TurnBroadcast>(2);
+        for i in 0..8 {
+            let _ = tx.send(whole_broadcast(&format!("turn-{i}")));
+        }
+        drop(tx);
+
+        let mut stream = Box::pin(turn_event_stream(rx));
+        // Exactly one frame — the resync — then the substream ends. A silent
+        // drop would surface the retained tail instead of telling the client to
+        // reconnect; ending is what forces the fresh atomic snapshot.
+        assert!(
+            stream.next().await.is_some(),
+            "a lagged turn stream signals resync, not silence"
+        );
+        assert!(
+            stream.next().await.is_none(),
+            "the substream ends after resync so the client reconnects"
+        );
+    }
 
     #[test]
     fn write_and_remove_endpoint_roundtrips() {

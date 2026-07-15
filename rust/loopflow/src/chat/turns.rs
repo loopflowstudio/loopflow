@@ -546,6 +546,39 @@ mod tests {
     }
 
     #[test]
+    fn turn_delta_fixture_round_trips() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/turn_delta.json"
+        ));
+        let delta: TurnDelta = serde_json::from_str(fixture).expect("decode turn_delta fixture");
+        assert_eq!(delta.turn_id, "turn-3");
+        match &delta.item {
+            ConversationItem::Message { id, text, phase } => {
+                assert_eq!(id, "text-7");
+                assert_eq!(phase.as_deref(), Some("stream"));
+                assert!(text.contains("edge case"));
+            }
+            other => panic!("expected a stream message item, got {other:?}"),
+        }
+        // Applying the delta grows a turn exactly as the listener's fold does.
+        let mut turn = ChatTurn::user("turn-3".into(), String::new());
+        turn.role = ChatRole::Assistant;
+        turn.push_text("so ");
+        turn.absorb_item(delta.item.clone());
+        assert_eq!(turn.text, "so the parser handles the edge case now.");
+        assert!(
+            turn.items.is_empty(),
+            "a stream message joins text, not items"
+        );
+
+        // Round-trips: re-serialize and decode to the same value.
+        let reencoded = serde_json::to_string(&delta).expect("serialize");
+        let again: TurnDelta = serde_json::from_str(&reencoded).expect("decode");
+        assert_eq!(again, delta);
+    }
+
+    #[test]
     fn absorb_item_joins_prose_and_appends_the_rest() {
         let mut turn = ChatTurn::user("turn-3".into(), String::new());
         turn.absorb_item(ConversationItem::Message {

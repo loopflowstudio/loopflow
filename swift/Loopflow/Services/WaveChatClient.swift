@@ -391,19 +391,26 @@ public final class WaveChatConnection {
         for try await chunk in body {
             for frame in parser.consume(chunk) {
                 if Task.isCancelled { return }
+                // `resync`: the live turn stream lagged, so a `turn-delta` may
+                // have been dropped and the open-turn reconstruction could be
+                // short a fragment. End this connection; `run()` reconnects for a
+                // fresh atomic snapshot (which resets `turns` and replays whole).
+                if frame.event == "resync" { return }
                 handle(event: frame.event, data: frame.data)
             }
         }
     }
 
-    /// One SSE frame off `/events`. `state` carries the
-    /// bare loop-state name (sent on subscribe and on every transition);
-    /// `turn` carries a whole turn — re-sent under the same id as it grows,
-    /// then a terminal frame at finalization, every frame replacing the
-    /// previous state of its id; `memory` carries a MEMORY.md curation
-    /// summary (live-only, parsed and exposed, no UI yet). Unknown events
-    /// drop. A turn payload that fails to decode is a hole in the transcript:
-    /// logged always, asserted in debug — never silent. Internal for tests.
+    /// One SSE frame off `/events`. `state` carries the bare loop-state name
+    /// (sent on subscribe and on every transition); `turn` carries a whole turn
+    /// — sent when a turn opens and finalizes, replacing its id's state;
+    /// `turn-delta` carries one in-turn increment absorbed into the matching
+    /// turn (so a per-token turn does not re-send whole each frame); `resync`
+    /// (handled in `stream`, not here) means the turn stream lagged and the
+    /// connection reconnects; `memory` carries a MEMORY.md curation summary
+    /// (live-only, parsed and exposed, no UI yet). Unknown events drop. A turn
+    /// payload that fails to decode is a hole in the transcript: logged always,
+    /// asserted in debug — never silent. Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
             guard let state = WaveLoopState(rawValue: data) else { return }
@@ -420,12 +427,36 @@ public final class WaveChatConnection {
             memorySummary = data
             return
         }
+        if event == "turn-delta" {
+            guard let json = data.data(using: .utf8) else { return }
+            do {
+                applyDelta(try decoder.decode(TurnDelta.self, from: json))
+            } catch {
+                LoggingService.wave("wave chat: dropped turn-delta frame (\(error)): \(data.prefix(200))")
+                assertionFailure("wave chat turn-delta frame failed to decode: \(error)")
+            }
+            return
+        }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
         do {
             upsert(try decoder.decode(ChatTurn.self, from: json))
         } catch {
             LoggingService.wave("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
             assertionFailure("wave chat turn frame failed to decode: \(error)")
+        }
+    }
+
+    /// Grow the open turn named by a `turn-delta` frame through the same
+    /// `absorb` rule the listener folds with. No turn for this id means we
+    /// missed its opening (a gap the server heals with `resync`) — drop the
+    /// delta until the whole-turn replay rebuilds it. Internal for tests.
+    func applyDelta(_ delta: TurnDelta) {
+        guard let index = turns.firstIndex(where: { $0.id == delta.turnId }) else { return }
+        do {
+            turns[index] = try turns[index].absorbing(delta.item)
+        } catch {
+            LoggingService.wave("wave chat: turn-delta absorb failed (\(error))")
+            assertionFailure("wave chat turn-delta absorb failed: \(error)")
         }
     }
 

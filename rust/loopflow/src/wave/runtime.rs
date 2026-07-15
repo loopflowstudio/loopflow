@@ -2056,6 +2056,49 @@ mod tests {
         assert!(states.try_recv().is_err(), "no extra state frames");
     }
 
+    /// The bug W2-134 kills: a per-token text delta used to re-serialize the
+    /// whole accumulated turn, so a turn carrying a large tool output put that
+    /// output on the wire again on every subsequent token (O(prose²)). The delta
+    /// frame must carry ONLY the increment, whatever the open turn has piled up.
+    #[test]
+    fn a_text_delta_never_carries_the_turns_accumulated_items() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let mut frames = rt.subscribe_with_snapshot(None).turn_rx;
+
+        rt.apply_resident_delta(d_opened(&[]));
+        let _ = frames.try_recv().expect("opened frame");
+
+        // A big tool output lands in the open turn.
+        let big_output = "x".repeat(100_000);
+        rt.apply_resident_delta(ResidentDelta::TurnItem {
+            item: ConversationItem::Tool {
+                id: "item-big".into(),
+                name: "Bash".into(),
+                status: Lifecycle::Completed,
+                input: None,
+                output: Some(big_output.clone()),
+            },
+        });
+        let _ = frames.try_recv().expect("tool delta");
+
+        // The next token's frame is O(fragment): it carries just the fragment,
+        // never the 100 KB the turn now holds — the amplification is gone.
+        rt.apply_resident_delta(d_text("tiny"));
+        let TurnBroadcast::Delta(frame) = frames.try_recv().expect("text delta") else {
+            panic!("a text increment must broadcast a delta, not a whole turn");
+        };
+        assert!(
+            !frame.json.contains(&big_output),
+            "the delta frame must not re-send the turn's accumulated items"
+        );
+        assert!(
+            frame.json.len() < 200,
+            "a token's frame stays tiny ({} bytes) regardless of turn size",
+            frame.json.len()
+        );
+    }
+
     #[test]
     fn empty_thoughts_never_enter_the_thread_or_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");

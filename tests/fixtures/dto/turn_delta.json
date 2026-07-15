@@ -1,0 +1,9 @@
+{
+  "turn_id": "turn-3",
+  "item": {
+    "type": "message",
+    "id": "text-7",
+    "text": "the parser handles the edge case now.",
+    "phase": "stream"
+  }
+}

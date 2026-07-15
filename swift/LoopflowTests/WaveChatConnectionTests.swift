@@ -21,6 +21,53 @@ struct WaveChatConnectionTests {
         "{\"id\":\"\(id)\",\"role\":\"\(role)\",\"text\":\"\(text)\",\"status\":\"\(status)\",\"items\":\(items),\"created_at\":\"2026-07-04T00:00:00Z\"}"
     }
 
+    /// A wire-shaped `turn-delta` SSE payload growing the turn named `turnId`
+    /// by one item.
+    private func deltaFrame(turnId: String, item: String) -> String {
+        "{\"turn_id\":\"\(turnId)\",\"item\":\(item)}"
+    }
+
+    private func streamMessage(id: String, text: String) -> String {
+        "{\"type\":\"message\",\"id\":\"\(id)\",\"text\":\"\(text)\",\"phase\":\"stream\"}"
+    }
+
+    @Test("turn-delta frames grow the open turn to match a whole-turn reconstruction")
+    func turnDeltaFramesReconstructTheTurn() {
+        let conn = connection()
+        // The turn opens as a whole (empty, running) frame.
+        conn.handle(event: "turn", data: frame(id: "turn-1", text: "", status: "running"))
+        #expect(conn.turns.count == 1)
+        #expect(conn.turns[0].text == "")
+
+        // Prose arrives as stream-message increments — concatenated into text,
+        // never added to items, exactly as the listener folds.
+        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-1", item: streamMessage(id: "text-0", text: "I fixed ")))
+        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-1", item: streamMessage(id: "text-1", text: "the parser.")))
+        #expect(conn.turns[0].text == "I fixed the parser.")
+        #expect(conn.turns[0].items.isEmpty)
+
+        // A non-message item appends to items and leaves text alone.
+        let tool = "{\"type\":\"tool\",\"id\":\"t-1\",\"name\":\"Bash\",\"status\":\"completed\",\"input\":null,\"output\":\"ok\"}"
+        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-1", item: tool))
+        #expect(conn.turns[0].text == "I fixed the parser.")
+        #expect(conn.turns[0].items.count == 1)
+        #expect(conn.turns[0].isInProgress)
+
+        // The finalized whole turn re-baselines under the same id.
+        conn.handle(event: "turn", data: frame(id: "turn-1", text: "I fixed the parser.", status: "completed", items: "[\(tool)]"))
+        #expect(conn.turns.count == 1)
+        #expect(!conn.turns[0].isInProgress)
+    }
+
+    @Test("a turn-delta for an unknown turn id is dropped, not misapplied")
+    func deltaForUnknownTurnDrops() {
+        let conn = connection()
+        conn.handle(event: "turn", data: frame(id: "turn-1", text: "hi", status: "running"))
+        conn.handle(event: "turn-delta", data: deltaFrame(turnId: "turn-99", item: streamMessage(id: "text-0", text: "stray")))
+        #expect(conn.turns.count == 1)
+        #expect(conn.turns[0].text == "hi", "a delta for a turn we never opened changes nothing")
+    }
+
     @Test("repeated same-id frames grow the turn in place and finalize it")
     func sameIdFramesUpdateInPlace() {
         let conn = connection()

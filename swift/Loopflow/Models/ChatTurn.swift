@@ -396,6 +396,38 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
 
     public var isInProgress: Bool { status == .running }
 
+    /// Grow this turn by one increment, mirroring the listener's
+    /// `ChatTurn::absorb_item`: a stream `Message` fragment concatenates into
+    /// `text`, a non-stream `Message` joins newline-separated, and every other
+    /// item appends to `items`. The reader applies this to each `turn-delta`
+    /// frame so its open-turn reconstruction matches the served turn without the
+    /// whole turn crossing the wire per token.
+    public func absorbing(_ item: ConversationItem) throws -> ChatTurn {
+        var grownText = text
+        var grownItems = items
+        if case let .message(_, messageText, phase) = item {
+            if phase == "stream" {
+                grownText += messageText
+            } else {
+                if !grownText.isEmpty { grownText += "\n" }
+                grownText += messageText
+            }
+        } else {
+            grownItems.append(item)
+        }
+        return try ChatTurn(
+            id: id,
+            role: role,
+            text: grownText,
+            status: status,
+            items: grownItems,
+            createdAt: createdAt,
+            from: from,
+            body: body,
+            activity: activity
+        )
+    }
+
     // ISO8601DateFormatter is safe for concurrent read-only formatting but isn't
     // marked Sendable; these are only ever read.
     nonisolated(unsafe) private static let rfc3339: ISO8601DateFormatter = {
@@ -409,4 +441,23 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
+}
+
+/// One live increment to an open turn: the `turn-delta` SSE frame. Mirrors Rust
+/// `TurnDelta`. The listener sends one per in-turn content delta instead of the
+/// whole `ChatTurn`; the reader applies it with [`ChatTurn/absorbing(_:)`]
+/// against the turn named by `turnId`.
+public struct TurnDelta: Codable, Sendable, Hashable {
+    public let turnId: String
+    public let item: ConversationItem
+
+    private enum CodingKeys: String, CodingKey {
+        case turnId = "turn_id"
+        case item
+    }
+
+    public init(turnId: String, item: ConversationItem) {
+        self.turnId = turnId
+        self.item = item
+    }
 }

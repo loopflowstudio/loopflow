@@ -181,7 +181,24 @@ pub fn run_rebase(
         return Ok(());
     }
     let started = Instant::now();
-    let plan = plan_rebase(&repo_root, onto)?;
+    // A Task stack owns its rebase target: the live parent branch until merge,
+    // then the default branch. An explicit override could silently drop work.
+    let stacked = crate::ops::task::task_stack(&repo_root)?;
+    if stacked.is_some() && onto.is_some() {
+        return Err(anyhow!(
+            "stacked Task rebases choose their parent automatically; omit --onto"
+        ));
+    }
+    let stacked_onto = stacked
+        .as_ref()
+        .and_then(|stacked| stacked.parent_branch.as_ref())
+        .map(|branch| format!("origin/{branch}"));
+    let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
+    let plan = plan_rebase(
+        &repo_root,
+        stacked_onto.as_deref().or(onto),
+        fork_base.clone(),
+    )?;
     let onto_ref = plan.base_ref.clone();
     if plan_only {
         print_rebase_plan(&plan);
@@ -193,6 +210,7 @@ pub fn run_rebase(
             &RebaseOptions {
                 onto: onto_ref,
                 push: false,
+                fork_base,
             },
             progress,
         )
@@ -203,10 +221,19 @@ pub fn run_rebase(
         &RebaseOptions {
             onto: onto_ref.clone(),
             push: true,
+            fork_base,
         },
         progress,
     ) {
         Ok(()) => {
+            if let Some(stacked) = stacked.as_ref() {
+                let new_base = crate::engine::git::rev_parse(&repo_root, &onto_ref)?;
+                crate::ops::task::record_stack_rebase(
+                    stacked,
+                    &new_base,
+                    stacked.parent_branch.is_none(),
+                )?;
+            }
             record_ops_metric(
                 &repo_root,
                 serde_json::json!({
@@ -240,6 +267,9 @@ pub fn run_rebase(
 fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
+    if let Some(fork_base) = &plan.fork_base {
+        println!("fork_base: {fork_base}");
+    }
     println!("class: {}", rebase_class_name(&plan.class));
     println!("strategy: {}", rebase_strategy_name(&plan.strategy));
     println!("unique_commits: {}", plan.unique_commits);

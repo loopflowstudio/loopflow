@@ -899,6 +899,7 @@ mod tests {
             slug: session.workspace_slug.clone(),
             branch: format!("jack/{}", session.workspace_slug),
             base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,
@@ -1619,6 +1620,7 @@ mod tests {
             slug: "released-proof".to_string(),
             branch: format!("jack/{}-released-proof", session.workspace_slug),
             base_commit: "main-after-101".to_string(),
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,
@@ -1655,6 +1657,7 @@ mod tests {
             slug: "conflict".to_string(),
             branch: first.branch.clone(),
             base_commit: "main-after-102".to_string(),
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,
@@ -1675,6 +1678,110 @@ mod tests {
                 .phase(),
             PrPhase::Working
         );
+    }
+
+    #[tokio::test]
+    async fn separate_task_worktree_tracks_and_collapses_its_parent_pr() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let parent_session = make_task_session(&wave, &project);
+        let mut parent = make_task_pr(&parent_session);
+        store
+            .create_task_session(&parent_session, &parent)
+            .await
+            .unwrap();
+
+        // The parent is published but not merged — the child stacks on it.
+        parent.publication = Some(PrPublication {
+            requested_at: parent.updated_at,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 200,
+                url: "https://github.com/loopflowstudio/loopflow/pull/200".to_string(),
+                head_sha: Some("parent-tip".to_string()),
+            }),
+        });
+        store.update_task_pr(&parent).await.unwrap();
+
+        let mut child_session = make_task_session(&wave, &project);
+        child_session.launch.issue.id = LinearIssueId::new("issue-child").unwrap();
+        child_session.launch.issue.identifier = "INF-124".to_string();
+        child_session.worktree = PathBuf::from("/repo.child-task");
+        let now = OffsetDateTime::now_utc();
+        let child = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: child_session.id.clone(),
+            sequence: 1,
+            slug: child_session.workspace_slug.clone(),
+            branch: "jack/child-task".to_string(),
+            base_commit: "parent-tip".to_string(),
+            parent_pr_id: Some(parent.id.clone()),
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store
+            .create_task_session(&child_session, &child)
+            .await
+            .unwrap();
+
+        let active = store
+            .active_task_pr(&child_session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(active.id, child.id);
+        assert_eq!(active.parent_pr_id, Some(parent.id.clone()));
+        assert_eq!(
+            store.get_task_pr(&parent.id).await.unwrap(),
+            Some(parent.clone())
+        );
+
+        // A parent update moves the child's durable fork without changing its
+        // ownership or parent link.
+        store
+            .rebase_task_pr(&child.id, "parent-tip-2", false, OffsetDateTime::now_utc())
+            .await
+            .unwrap();
+        let rebased = store.get_task_pr(&child.id).await.unwrap().unwrap();
+        assert_eq!(rebased.base_commit, "parent-tip-2");
+        assert_eq!(rebased.parent_pr_id, Some(parent.id.clone()));
+
+        // The parent merges; the child collapses onto main, dropping the link.
+        parent.merge_commit = Some("merge-200".to_string());
+        parent.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&parent).await.unwrap();
+        store
+            .rebase_task_pr(&child.id, "main-after-200", true, OffsetDateTime::now_utc())
+            .await
+            .unwrap();
+
+        let collapsed = store
+            .active_task_pr(&child_session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(collapsed.id, child.id);
+        assert_eq!(collapsed.parent_pr_id, None);
+        assert_eq!(collapsed.base_commit, "main-after-200");
+
+        // The worktree lookup the rebase path relies on resolves the session.
+        let by_worktree = store
+            .get_task_session_by_worktree(&child_session.worktree.display().to_string())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(by_worktree.id, child_session.id);
     }
 
     #[tokio::test]

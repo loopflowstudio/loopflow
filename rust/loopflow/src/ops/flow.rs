@@ -44,6 +44,7 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
                 &RebaseOptions {
                     onto: onto_ref,
                     push: true,
+                    fork_base: None,
                 },
                 progress,
             )?;

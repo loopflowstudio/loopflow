@@ -18,6 +18,7 @@ lf pr land -c                    # land and complete the owning Task after merge
 lf pr land --next parser-proof   # name the next serial Task PR
 lf rebase --plan              # show reset/rebase strategy
 lf rebase                     # apply the planned update
+lf task run CHILD --stack-on PARENT  # separate Task worktree based on PARENT's open PR
 ```
 
 ### `pr` vs `submit` vs `land`
@@ -65,6 +66,10 @@ whenever the seed remains computable.
 
 A one-shot operation is a direct skill or flow run. Durable delegated work
 starts from an existing Linear task with `lf task run <issue-id>`.
+When dependent work must begin before another Task PR merges, start a separate
+Task with `--stack-on <parent-task>`. Do not rotate the parent Task onto a second
+simultaneously open PR; its multi-PR history remains serial. The child binds to
+the parent's active PR at launch and never follows later serial PRs implicitly.
 
 ## Speak
 

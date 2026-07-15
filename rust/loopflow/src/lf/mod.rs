@@ -704,6 +704,9 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         name: Option<String>,
+        /// Fork this Task's worktree from another Task's active PR
+        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
         #[arg(long)]
@@ -716,6 +719,9 @@ pub enum TaskCommand {
         project_id: String,
         #[arg(long)]
         name: Option<String>,
+        /// Fork this Task's worktree from another Task's active PR
+        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
         #[arg(long)]
@@ -1383,19 +1389,27 @@ mod tests {
             "INF-123",
             "--name",
             "release-scoped-migrations",
+            "--stack-on",
+            "INF-122",
             "--json",
         ])
         .expect("parse task run");
         let Some(Commands::Task {
-            cmd: TaskCommand::Run {
-                issue, name, json, ..
-            },
+            cmd:
+                TaskCommand::Run {
+                    issue,
+                    name,
+                    stack_on,
+                    json,
+                    ..
+                },
         }) = cli.command
         else {
             panic!("expected task run command");
         };
         assert_eq!(issue, "INF-123");
         assert_eq!(name.as_deref(), Some("release-scoped-migrations"));
+        assert_eq!(stack_on.as_deref(), Some("INF-122"));
         assert!(json);
     }
 
@@ -1771,6 +1785,7 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "pr", "stack"]).is_err());
     }
 
     #[test]

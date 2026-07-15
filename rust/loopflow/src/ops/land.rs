@@ -72,6 +72,9 @@ fn prepare_pr(
     } else {
         crate::ops::pr::pr_exists_for_current_branch(&repo_root)?
     };
+    if pr_exists {
+        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch)?;
+    }
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
             "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
@@ -255,14 +258,23 @@ fn prepare_land(
 
 fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {
     let main_branch = get_default_branch(main_repo)?;
+    let onto = format!("origin/{main_branch}");
+    // A stacked child collapses onto trunk deterministically: replay only
+    // `base..HEAD`, dropping the (squash-)merged parent commits.
+    let stacked = crate::ops::task::stacked_collapse(repo_root)?;
     crate::ops::rebase::rebase_with_recovery(
         repo_root,
         &crate::ops::rebase::RebaseOptions {
-            onto: format!("origin/{main_branch}"),
+            onto: onto.clone(),
             push: true,
+            fork_base: stacked.as_ref().map(|stacked| stacked.fork_base.clone()),
         },
         progress,
     )?;
+    if let Some(stacked) = stacked {
+        let new_base = crate::engine::git::rev_parse(repo_root, &onto)?;
+        crate::ops::task::record_stack_rebase(&stacked, &new_base, true)?;
+    }
     Ok(main_branch)
 }
 

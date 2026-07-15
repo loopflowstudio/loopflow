@@ -1062,8 +1062,13 @@ fn task_seed(
     wave_name: &str,
     directive: &ChildDirective,
 ) -> String {
+    let placement = pr
+        .parent_pr_id
+        .as_ref()
+        .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
+        .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` completes the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` completes clean work that needs no PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying your uncommitted edits forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` completes the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` completes clean work that needs no PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying your uncommitted edits forward. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,
@@ -1080,6 +1085,7 @@ fn task_seed(
         pr_sequence = pr.sequence,
         pr_branch = pr.branch,
         base_commit = pr.base_commit,
+        placement = placement,
     )
 }
 
@@ -1265,6 +1271,7 @@ mod tests {
             slug: session.workspace_slug.clone(),
             branch: format!("test/{provider}"),
             base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
             publication: None,
             merge_commit: None,
             abandoned_at: None,

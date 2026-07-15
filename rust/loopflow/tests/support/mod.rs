@@ -291,6 +291,7 @@ pub fn register_task(
         slug: session.workspace_slug.clone(),
         branch: branch.to_string(),
         base_commit: base_commit.to_string(),
+        parent_pr_id: None,
         publication: None,
         merge_commit: None,
         abandoned_at: None,

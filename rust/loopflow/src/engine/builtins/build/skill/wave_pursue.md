@@ -53,6 +53,9 @@ its available status/next owner.
   The Task owns one stable worktree and provider transcript. Its ordered
   PRs own serial branches to main; the Project receives routine
   observations and decisions.
+- If a separate Task depends on an open parent PR and should start now, run
+  `lf task run <child> --stack-on <parent> --directive "..."`. It gets a
+  separate worktree and worker; same-Task PRs remain serial.
 - Supervise active work with `lf task status`, `lf task steer`, `lf task
   interrupt`, `lf task wait`, and `lf task resume` when root inspection or
   override is needed. This never replaces the Task's Project Session.

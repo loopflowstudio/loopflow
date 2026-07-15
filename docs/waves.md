@@ -30,6 +30,7 @@ Every concrete file-writing change begins with a Linear task:
 ```bash
 lf task start "add retry to token refresh" --project <linear-project-id>
 lf task run INF-123
+lf task run INF-124 --stack-on INF-123
 lf task follow-up INF-123 "also audit retry callers"
 ```
 
@@ -40,6 +41,10 @@ PRs to `main`, and reports linked events to its Wave. It inherits the Wave's
 Each Task Session gets a sibling worktree. Its active PR owns the current branch;
 after merge or abandonment, Loopflow rotates that worktree onto the next branch
 from fetched `origin/main`:
+
+A dependent Task can start before its parent PR merges. `--stack-on` forks a
+separate sibling worktree from the parent Task's active branch; PR creation and
+the later collapse onto `main` use the recorded parent id and fork commit.
 
 ```bash
 lf task status INF-123

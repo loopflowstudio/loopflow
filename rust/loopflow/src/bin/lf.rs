@@ -621,12 +621,18 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
                 .github()
                 .map(|github| format!("GitHub #{}", github.number))
                 .unwrap_or_else(|| "not opened on GitHub".to_string());
+            let placement = pr
+                .parent_pr_id
+                .as_ref()
+                .map(|parent| format!("  stacked on {parent}"))
+                .unwrap_or_default();
             println!(
-                "  PR {}: {}  {}  {}",
+                "  PR {}: {}  {}  {}{}",
                 pr.sequence,
                 pr.phase().as_str(),
                 provider,
-                pr.branch
+                pr.branch,
+                placement,
             );
         }
     }
@@ -885,17 +891,24 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Run {
             issue,
             name,
+            stack_on,
             directive,
             json,
         } => {
-            let session =
-                loopflow::ops::task::task_run(repo, issue, name.clone(), directive.clone())?;
+            let session = loopflow::ops::task::task_run(
+                repo,
+                issue,
+                name.clone(),
+                stack_on.clone(),
+                directive.clone(),
+            )?;
             print_task_session(&session, *json)
         }
         TaskCommand::Start {
             title,
             project_id,
             name,
+            stack_on,
             directive,
             json,
         } => {
@@ -904,6 +917,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 title.clone(),
                 project_id,
                 name.clone(),
+                stack_on.clone(),
                 directive.clone(),
             )?;
             print_task_session(&session, *json)

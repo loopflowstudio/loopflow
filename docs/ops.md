@@ -209,6 +209,15 @@ the current conflict paths; repeat edit/continue until the rebase completes.
 Inspect, switch, and clean worktrees. Normal roadmap work starts with
 `lf task run <issue-id>`; `lf wt` remains a low-level Git primitive.
 
+Place dependent roadmap work through the Task API, not `lf wt`:
+
+```bash
+lf task run CHILD --stack-on PARENT
+```
+
+This creates CHILD's readable sibling worktree from PARENT's open PR branch.
+`lf pr open`, `lf rebase`, and `lf pr land` carry the recorded placement forward.
+
 ### lf wt switch
 
 Switch to a worktree by directory name, identity leaf, or full branch.

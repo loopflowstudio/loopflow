@@ -652,7 +652,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.005_provider_accounts"
+            "0.11.006_task_pr_stack"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -669,7 +669,8 @@ mod tests {
                 "0.11.002_project_session_successors".to_string(),
                 "0.11.003_child_body_lease".to_string(),
                 "0.11.004_task_pr_ci_state".to_string(),
-                "0.11.005_provider_accounts".to_string()
+                "0.11.005_provider_accounts".to_string(),
+                "0.11.006_task_pr_stack".to_string()
             ]
         );
     }
@@ -1063,7 +1064,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.005_provider_accounts"
+            "0.11.006_task_pr_stack"
         );
     }
 

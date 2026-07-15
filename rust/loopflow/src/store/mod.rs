@@ -1681,6 +1681,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stacked_child_stays_open_and_collapses_onto_main() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let session = make_task_session(&wave, &project);
+        let mut parent = make_task_pr(&session);
+        store.create_task_session(&session, &parent).await.unwrap();
+
+        // The parent is published but not merged — the child stacks on it.
+        parent.publication = Some(PrPublication {
+            requested_at: parent.updated_at,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 200,
+                url: "https://github.com/loopflowstudio/loopflow/pull/200".to_string(),
+            }),
+        });
+        store.update_task_pr(&parent).await.unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        let child = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 2,
+            slug: "child".to_string(),
+            branch: format!("jack/{}-child", session.workspace_slug),
+            base_commit: "parent-tip".to_string(),
+            parent_pr_id: Some(parent.id.clone()),
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.stack_task_pr(&child).await.unwrap();
+
+        // Two PRs are open at once; the active PR is the stack tip.
+        let open: Vec<_> = store
+            .task_prs(&session.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|pr| !pr.is_settled())
+            .map(|pr| pr.sequence)
+            .collect();
+        assert_eq!(open, vec![1, 2]);
+        let active = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        assert_eq!(active.id, child.id);
+        assert_eq!(active.parent_pr_id, Some(parent.id.clone()));
+
+        // The parent merges; the child collapses onto main, dropping the link.
+        parent.merge_commit = Some("merge-200".to_string());
+        parent.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&parent).await.unwrap();
+        store
+            .collapse_task_pr(&child.id, "main-after-200", OffsetDateTime::now_utc())
+            .await
+            .unwrap();
+
+        let collapsed = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        assert_eq!(collapsed.id, child.id);
+        assert_eq!(collapsed.parent_pr_id, None);
+        assert_eq!(collapsed.base_commit, "main-after-200");
+
+        // The worktree lookup the rebase path relies on resolves the session.
+        let by_worktree = store
+            .get_task_session_by_worktree(&session.worktree.display().to_string())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(by_worktree.id, session.id);
+    }
+
+    #[tokio::test]
+    async fn stacking_requires_an_open_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let session = make_task_session(&wave, &project);
+        let mut parent = make_task_pr(&session);
+        store.create_task_session(&session, &parent).await.unwrap();
+        // A settled parent (here, abandoned) cannot carry a fresh stacked child.
+        parent.abandoned_at = Some(OffsetDateTime::now_utc());
+        parent.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&parent).await.unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        let child = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 2,
+            slug: "child".to_string(),
+            branch: format!("jack/{}-child", session.workspace_slug),
+            base_commit: "parent-tip".to_string(),
+            parent_pr_id: Some(parent.id.clone()),
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert!(store.stack_task_pr(&child).await.is_err());
+    }
+
+    #[tokio::test]
     async fn pr_publication_round_trips_before_github_exists() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))

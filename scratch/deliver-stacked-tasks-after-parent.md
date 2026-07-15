@@ -145,20 +145,28 @@ effect until something both writes a stacked base and reads it back. So the
 first landable slice folds them together; prune/divergence/full-surface
 agreement follow.
 
-1. **`stacked-land`** (this PR) — add `parent_pr_id` + migration and
-   `TaskPr.parent_pr_id`; `lf pr stack --next <slug>` creates a child stacked on
-   the open parent (base = parent tip, `parent_pr_id` set); `lf pr land` /
-   `lf rebase` in a Task worktree resolve the active PR's persisted base
-   (worktree → session → active PR) and rebase the child onto `origin/<default>`
-   via `--onto <base>`, squash/merge-safe, with an ancestry guard that stops and
-   names commits on unsafe history; reconcile clears `parent_pr_id` on
-   parent-merge collapse (audit events preserved). Integration tests: merged and
-   squash-merged parents → child diff only. Absorbs the earlier narrow "persist
-   child base commit" diagnosis; ships the squash-proof core.
-2. **`prune-divergence`** — pruned + divergent parent paths; parent-abandon
-   guard; make `rebase --plan`, Task status, and PR range/gh base all surface
-   the persisted base (full agreement + DTO/fixture); full
-   merged/squash/pruned/divergent suite + the 3-PR dogfood.
+1. **`stacked-land`** (this PR, SHIPPED) — migration `0.11.004_task_pr_stack`
+   adds `parent_pr_id` and retires the one-open-PR-per-session index so a Task
+   can hold a concurrent open serial-PR stack; `active_task_pr` is now the stack
+   tip (highest-sequence open PR). `TaskPr.parent_pr_id` + full store plumbing
+   (`stack_task_pr` insert, `collapse_task_pr` repoint, `task_session_by_worktree`
+   lookup). Engine: `RebaseOptions.fork_base` drives `git rebase --onto <onto>
+   <base>` with an ancestry guard (`OpsError::UnsafeRebaseBase`) that stops and
+   names commits on unsafe history; `RebasePlan.fork_base` + `lf rebase --plan`
+   surface it. `lf pr stack --next <slug>` creates a child stacked on the open
+   parent (base = parent tip); `lf pr land` / `lf rebase` in a Task worktree
+   resolve the stacked child (worktree → session → active PR) and collapse it
+   onto `origin/<default>` via the persisted base — squash/merge-safe — then
+   clear the parent link and repoint the base. Tests: engine squash-drop +
+   ancestry refusal (`rebase_tests`), store round-trip / stack-tip / collapse /
+   open-parent guard (`store::tests`). Absorbs the earlier narrow "persist child
+   base commit" diagnosis; ships the squash-proof core.
+2. **`prune-divergence`** — pruned + divergent parent paths driven end-to-end
+   through `lf pr stack`/`land`; restack-onto-open-parent when trunk advances
+   under an unmerged parent (this PR refuses the child land until the parent
+   merges); parent-abandon guard (block abandoning a parent with a live stacked
+   child); make Task status and PR range/gh base also surface the persisted base
+   (full agreement + DTO/fixture); the 3-PR dogfood on a real worktree.
 
 ## Exclusions
 

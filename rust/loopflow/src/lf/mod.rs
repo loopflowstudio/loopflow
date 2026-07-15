@@ -893,6 +893,14 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
+    /// Stack the next serial PR on the current open PR without landing it.
+    /// Branches a child off the parent's tip so work continues while the parent
+    /// awaits merge; the child collapses onto main deterministically once the
+    /// parent lands.
+    Stack {
+        #[arg(long = "next")]
+        next: Option<String>,
+    },
     /// Land a PR hands-off: rebase, clear scratch, and arm auto-merge
     Land {
         #[arg(long)]

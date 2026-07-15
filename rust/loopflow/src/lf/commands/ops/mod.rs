@@ -65,6 +65,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             },
             &progress,
         ),
+        Some(PrCommand::Stack { next }) => stack_current(next.clone(), &progress),
         Some(PrCommand::Land {
             strict,
             local,
@@ -289,6 +290,18 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     with_rebase_retry(&repo_root, "land", progress, |repo| {
         land(repo, options, progress)
     })?;
+    Ok(())
+}
+
+fn stack_current(next: Option<String>, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let child = crate::ops::task::stack_task_pr(&repo_root, next)?;
+    progress.status(&format!(
+        "Stacked PR #{} on branch {} (base {}). Open it with lf pr open once ready.",
+        child.sequence,
+        child.branch,
+        &child.base_commit[..child.base_commit.len().min(12)]
+    ));
     Ok(())
 }
 

@@ -272,8 +272,7 @@ impl TaskPr {
 
     /// The current head SHA of the open PR, when recorded.
     pub fn head_sha(&self) -> Option<&str> {
-        self.github()
-            .and_then(|github| github.head_sha.as_deref())
+        self.github().and_then(|github| github.head_sha.as_deref())
     }
 
     /// The CI reading, but only while it still describes the PR's current head.
@@ -880,6 +879,56 @@ mod tests {
 
         pr.publication.as_mut().unwrap().after_merge = AfterMerge::CompleteTask;
         assert!(pr.validate().is_err());
+    }
+
+    fn open_pr(head_sha: &str, observation: Option<super::CiObservation>) -> TaskPr {
+        let now = time::OffsetDateTime::now_utc();
+        TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "abc".to_string(),
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number: 900,
+                    url: "https://github.com/loopflow/loopflow/pull/900".to_string(),
+                    head_sha: Some(head_sha.to_string()),
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: observation,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn fresh_ci_ignores_a_reading_for_a_past_head() {
+        let now = time::OffsetDateTime::now_utc();
+        let observation = super::CiObservation {
+            head_sha: "old-head".to_string(),
+            state: super::CiState::Failing,
+            failing_checks: vec![super::CiCheck {
+                name: "build".to_string(),
+                url: None,
+            }],
+            observed_at: now,
+        };
+        // Reading matches the current head: fresh.
+        let current = open_pr("old-head", Some(observation.clone()));
+        assert_eq!(
+            current.fresh_ci().map(|ci| ci.state),
+            Some(super::CiState::Failing)
+        );
+        // Head has moved on: the stale reading never surfaces (and never wakes work).
+        let moved = open_pr("new-head", Some(observation));
+        assert!(moved.fresh_ci().is_none());
     }
 
     #[test]

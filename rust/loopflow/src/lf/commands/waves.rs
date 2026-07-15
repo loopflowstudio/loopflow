@@ -1778,6 +1778,62 @@ mod tests {
     use crate::id::WaveId;
     use crate::store::{open_store, PmSnapshotRow, StorageConfig};
 
+    fn ci(state: CiState, failing: &[&str]) -> CiObservation {
+        CiObservation {
+            head_sha: "head".to_string(),
+            state,
+            failing_checks: failing
+                .iter()
+                .map(|name| crate::task::CiCheck {
+                    name: name.to_string(),
+                    url: None,
+                })
+                .collect(),
+            observed_at: time::OffsetDateTime::now_utc(),
+        }
+    }
+
+    #[test]
+    fn open_pr_next_move_is_ci_derived() {
+        // Pending required checks: CI owns the next move, no body burned.
+        let pending = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Pending, &[])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(pending.owner, NextMoveOwner::Ci);
+
+        // A required failure: CI owner, and the reason names the failing checks.
+        let failing = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["build", "lint"])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(failing.owner, NextMoveOwner::Ci);
+        assert!(failing.reason.contains("build"));
+        assert!(failing.reason.contains("lint"));
+
+        // Green checks: back to the review/merge gate.
+        let passing = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Passing, &[])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(passing.owner, NextMoveOwner::Review);
+
+        // No CI reading yet: unchanged review waiting.
+        let unknown = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            None,
+            "pull request #900 is open for review",
+        );
+        assert_eq!(unknown.owner, NextMoveOwner::Review);
+    }
+
     #[test]
     fn swift_fixture_preserves_active_pr_publication_disposition() {
         let fixture = include_str!(concat!(

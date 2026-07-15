@@ -925,7 +925,10 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhPr, PrCopy};
+    use super::{
+        parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhCheck, GhPr, PrCopy,
+        RequiredChecks,
+    };
 
     fn gh_pr(number: u64, state: &str, is_draft: bool) -> GhPr {
         GhPr {
@@ -934,6 +937,15 @@ mod tests {
             is_draft,
             number,
             merge_commit: None,
+            head_ref_oid: None,
+        }
+    }
+
+    fn check(name: &str, bucket: &str) -> GhCheck {
+        GhCheck {
+            name: name.to_string(),
+            bucket: bucket.to_string(),
+            link: Some(format!("https://ci/{name}")),
         }
     }
 
@@ -962,6 +974,49 @@ mod tests {
             20
         );
         assert!(select_reconcile_pr(vec![]).is_none());
+    }
+
+    #[test]
+    fn required_checks_let_failure_dominate_pending() {
+        let checks = RequiredChecks::from_checks(vec![
+            check("build", "fail"),
+            check("test", "pending"),
+            check("lint", "pass"),
+        ]);
+        assert!(checks.failing);
+        assert!(checks.pending);
+        assert_eq!(
+            checks
+                .failing_checks
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["build"]
+        );
+    }
+
+    #[test]
+    fn required_checks_treat_cancel_as_failing() {
+        let checks = RequiredChecks::from_checks(vec![check("deploy", "cancel")]);
+        assert!(checks.failing);
+        assert_eq!(checks.failing_checks.len(), 1);
+    }
+
+    #[test]
+    fn required_checks_pending_only_when_nothing_failed() {
+        let checks =
+            RequiredChecks::from_checks(vec![check("build", "pending"), check("lint", "pass")]);
+        assert!(!checks.failing);
+        assert!(checks.pending);
+        assert!(checks.failing_checks.is_empty());
+    }
+
+    #[test]
+    fn required_checks_pass_when_all_green() {
+        let checks =
+            RequiredChecks::from_checks(vec![check("build", "pass"), check("lint", "skipping")]);
+        assert!(!checks.failing);
+        assert!(!checks.pending);
     }
 
     #[test]

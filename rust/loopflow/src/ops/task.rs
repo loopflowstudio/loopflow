@@ -1449,8 +1449,12 @@ async fn reconcile_task_pr_with_authority(
                     format!("pull request #{} is open for review", github_pr.number),
                 );
             }
-            pr.ci_observation =
-                observe_required_checks(&session.worktree, &pr.branch, github_pr.head_sha.as_deref(), now);
+            pr.ci_observation = observe_required_checks(
+                &session.worktree,
+                &pr.branch,
+                github_pr.head_sha.as_deref(),
+                now,
+            );
             Some(TaskEventKind::PrOpened {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,

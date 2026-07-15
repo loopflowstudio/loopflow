@@ -955,23 +955,19 @@ impl SqliteStore {
     }
 
     pub fn project_session_by_project(&self, project: &str) -> StoreResult<Option<ProjectSession>> {
+        if let Ok(session_id) = ProjectSessionId::parse(project) {
+            return self.project_session(&session_id);
+        }
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
-            "{PROJECT_SESSION_COLUMNS} WHERE project_id=?1 OR project_slug=?1 ORDER BY created_at"
+            "{PROJECT_SESSION_COLUMNS}
+             WHERE project_id=?1 OR project_slug=?1
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1"
         );
-        let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params![project], map_project_session_row)?;
-        let mut sessions = Vec::new();
-        for row in rows {
-            sessions.push(row?);
-        }
-        match sessions.len() {
-            0 => Ok(None),
-            1 => Ok(sessions.pop()),
-            count => Err(StoreError::InvalidData(format!(
-                "project {project:?} resolves to {count} Project Sessions"
-            ))),
-        }
+        conn.query_row(&query, params![project], map_project_session_row)
+            .optional()
+            .map_err(StoreError::from)
     }
 
     pub fn list_project_sessions(

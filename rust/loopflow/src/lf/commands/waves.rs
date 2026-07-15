@@ -681,6 +681,9 @@ async fn snapshot_projects(
             project_session.launch.project.id.as_str(),
             &project_session.launch.project.slug,
         )?;
+        if details[index].runtime.is_some() {
+            continue;
+        }
         details[index].next_move =
             next_move_for_project(project_session.status, &project_session.status_reason);
         details[index].runtime = Some(snapshot_project_runtime(store, project_session).await?);

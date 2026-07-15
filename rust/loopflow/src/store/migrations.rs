@@ -93,6 +93,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_prs",
         sql: include_str!("migrations/0.11.001_task_prs.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 2,
+        },
+        name: "project_session_successors",
+        sql: include_str!("migrations/0.11.002_project_session_successors.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -333,6 +342,8 @@ fn incompatible() -> StoreError {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::OptionalExtension;
+
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, latest_version_sqlite,
         product_schema, validate_set, Migration, MigrationId, MIGRATIONS,
@@ -422,7 +433,13 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_sqlite(&conn).unwrap();
 
-        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.001_task_prs");
+        assert!(conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, bool>(0))
+            .unwrap());
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.11.002_project_session_successors"
+        );
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
@@ -434,8 +451,85 @@ mod tests {
             vec![
                 "0.10.001_initial".to_string(),
                 "0.10.002_session_execution_context".to_string(),
-                "0.11.001_task_prs".to_string()
+                "0.11.001_task_prs".to_string(),
+                "0.11.002_project_session_successors".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn project_successor_migration_preserves_history_and_child_references() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, &MIGRATIONS[..2]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+                 VALUES ('w1', 'infrastructure', '/repo', 1);
+             INSERT INTO project_sessions (
+                 id, project_id, project_slug, project_name,
+                 project_prompt_context, wave_id, pm_snapshot_synced_at,
+                 status, status_reason, status_at, iteration,
+                 observation_cursor, agent, provider, created_at, updated_at,
+                 current_directive_version, incorporated_directive_version
+             ) VALUES (
+                 'ps_old', 'project-1', 'developer-efficiency',
+                 'Developer Efficiency', 'Definition', 'w1', 1,
+                 'abandoned', 'legacy Session ended', 2, 1, 0,
+                 'codex', 'codex', 1, 2, 1, 1
+             );
+             INSERT INTO project_events (session_id, kind_json, created_at)
+                 VALUES ('ps_old', '{\"kind\":\"completed\",\"summary\":\"history\"}', 2);",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM project_events WHERE session_id = 'ps_old'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+        conn.execute_batch(
+            "INSERT INTO project_sessions (
+                 id, project_id, project_slug, project_name,
+                 project_prompt_context, wave_id, pm_snapshot_synced_at,
+                 status, status_reason, status_at, iteration,
+                 observation_cursor, agent, provider, created_at, updated_at,
+                 current_directive_version, incorporated_directive_version
+             ) VALUES (
+                 'ps_new', 'project-1', 'developer-efficiency',
+                 'Developer Efficiency', 'Definition', 'w1', 3,
+                 'created', 'successor', 3, 0, 0,
+                 'codex', 'codex', 3, 3, 1, 0
+             );",
+        )
+        .unwrap();
+        assert!(conn
+            .execute_batch(
+                "INSERT INTO project_sessions (
+                     id, project_id, project_slug, project_name,
+                     project_prompt_context, wave_id, pm_snapshot_synced_at,
+                     status, status_reason, status_at, iteration,
+                     observation_cursor, agent, provider, created_at, updated_at,
+                     current_directive_version, incorporated_directive_version
+                 ) VALUES (
+                     'ps_parallel', 'project-1', 'developer-efficiency',
+                     'Developer Efficiency', 'Definition', 'w1', 3,
+                     'created', 'parallel', 3, 0, 0,
+                     'codex', 'codex', 3, 3, 1, 0
+                 );"
+            )
+            .is_err());
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_key_check", [], |row| row
+                .get::<_, String>(0))
+                .optional()
+                .unwrap(),
+            None
         );
     }
 
@@ -718,7 +812,10 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_sqlite(&conn).unwrap();
-        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.001_task_prs");
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.11.002_project_session_successors"
+        );
     }
 
     #[test]

@@ -1,14 +1,19 @@
 #if os(macOS)
-import CryptoKit
 import Loopflow
 import SwiftUI
 
 enum ContextLabMode: String, Codable, CaseIterable, Identifiable, Hashable {
-    case aggregate = "Aggregate flame"
-    case lanes = "Session lanes"
-    case table = "Table"
+    case aggregate, lanes, table
 
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .aggregate: "Aggregate flame"
+        case .lanes: "Session lanes"
+        case .table: "Table"
+        }
+    }
 }
 
 private enum ContextLaneSort: String, CaseIterable, Identifiable {
@@ -372,7 +377,7 @@ struct ContextLabView: View {
                 .frame(width: 120)
             }
             Picker("Mode", selection: $mode) {
-                ForEach(ContextLabMode.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(ContextLabMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .frame(width: 360)

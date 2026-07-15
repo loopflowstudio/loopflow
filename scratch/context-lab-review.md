@@ -193,18 +193,14 @@ simultaneously the smoothest, the highest-context, and the most recent, the same
 `TraceAddress` was emitted three times. The evidence rail renders one row per
 representative (role + run-id short hash + Open trace), so that population would
 show one session as three "independent" pieces of evidence — a false read of the
-evidence base the design describes as distinct sessions. The function now claims
-addresses in priority order and skips any role whose winning candidate was
-already claimed, so a lone qualifying run surfaces exactly once under its
-highest-priority label. Populations large enough to have distinct smooth,
-high-context, failed/steered, and recent traces are unchanged: on the live
-`LOOPFLOW.md` population the smooth and high-context representatives were already
-different traces, so this only collapses the tiny-population duplication.
+evidence base the design describes as distinct sessions. That pass claimed exact
+addresses in priority order and skipped a role when its winning address had
+already been claimed. The next independent pass below strengthens the identity
+boundary from address to session and fills roles from the next-best distinct
+session when possible.
 
-New test `representatives_never_repeat_one_address_across_roles` builds a
-single completed/zero-steer launch and asserts exactly one representative
-(`SmoothComplete`). `smooth_representative_excludes_steered_launches` and the
-rest of the context suite still pass.
+The original single-launch regression is now the strengthened
+`representatives_never_repeat_one_session_across_roles` test described below.
 
 The seed-wording versus byte-guard inconsistency from the prior pass was left as
 deliberate soft guidance; nothing else in token attribution, flame summing,
@@ -216,13 +212,83 @@ and none is claimed here. See Risk 1 and the Refinement-truth audit below.
 
 Checks run this pass, all green: `cargo fmt --check`; `cargo clippy -p loopflow
 --lib -- -D warnings`; `cargo test -p loopflow --lib context` (67 tests,
-including the new `representatives_never_repeat_one_address_across_roles` and the
-Swift contract round-trip); `scripts/check_migrations.py` (chain intact through
+including the original exact-address regression and the Swift contract
+round-trip); `scripts/check_migrations.py` (chain intact through
 `0.11.006_context_launch_work`); and
 `scripts/check_swift_multiplatform_boundaries.py`. The change touches only Rust
 aggregation semantics and adds no wire field, so the committed pass's Swift suite
 (117 tests) and `xcodebuild build-for-testing` still hold and were not re-run;
 Python, website, E2E, and hosted UI suites were likewise untouched.
+
+## Third independent pass (2026-07-15): session evidence and launch receipts
+
+This pass re-read the full feature diff against every “Done when” checkpoint,
+then reviewed the uncommitted representative change as production code rather
+than accepting its prior rationale. It found two correctness gaps and one small
+persistence hazard.
+
+**Correction — representative uniqueness now means one real session.** The
+evidence copy promises representative sessions, but the prior dedup key was the
+full `TraceAddress`. One outer Loopflow session can contain several launches and
+turns, so it could still occupy several roles under different addresses. The
+prior algorithm also discarded a role when its first choice was already claimed
+instead of looking for the next-best independent session. `select_representatives`
+now claims `run_id` in role priority order and filters claimed sessions before
+each selection. A one-session population produces one row; a larger population
+retains smooth, high-context, failed/steered, and recent roles whenever distinct
+eligible sessions exist. The strengthened
+`representatives_never_repeat_one_session_across_roles` test covers multiple
+addresses from one run, while
+`representatives_fill_roles_from_distinct_sessions_when_possible` proves the
+fallback rather than merely proving deletion.
+
+**Correction — the source receipt is rechecked at the last safe moment.** The
+handoff already refreshed Context Lab evidence and revalidated the chosen Task
+workspace, but the canonical source could still change while roadmap and Task
+state were being resolved. The launch path now rehashes both the canonical file
+and the mapped Task-worktree file against Rust's fresh raw-source receipt after
+terminal creation and immediately before dispatching `lf refine`. Any mismatch
+closes the new terminal and returns a concrete refresh/rebase repair path. No
+agent command runs against a stale starting receipt. The Swift hash test now
+also proves that a post-receipt file mutation is detected.
+
+**Simplification — persisted visualization values are semantic.** Saved views
+and deep links now store `aggregate`, `lanes`, or `table`; user-facing labels
+come from a separate `title`. Renaming a tab no longer invalidates persisted
+research state. An unused `CryptoKit` import was removed at the same time.
+
+A fresh branch-binary query of the production 30-day ledger found 54 sessions,
+127 launches, 135 turns, and 127 assembled turns. Eight provider-total-only
+turns remain coverage-only. Attributed context, aggregate-root width, and the
+sum of root children all reconciled at 1,003,087 tokens; no lane with attributed
+assets lacked a supplied total. The current population reports $9.67248525 over
+nine cost-captured turns and outcomes of 100 completed, four failed, one
+interrupted, and 22 running launches. Evidence contains no repeated
+representative `run_id`.
+
+The natural editable `LOOPFLOW.md` revision remains effective hash
+`130b91c3afb3afa7897e22cb85068a1714ab6431469dee3392eda10eb8bdd4fe`.
+It now has eight exposed launches and 9,320 attributed tokens in the moving live
+population, with distinct smooth, high-context, and recent session
+representatives. These changing counts are a current reader snapshot, not a
+before/after intervention result.
+
+This pass did **not** launch a real Intelligence Task refinement, edit a source,
+observe its Task diff, follow the backlink, or run a natural post-edit session.
+The installed-app keyboard journey and hosted UI runner were also not available
+in this headless environment. None of those missing proofs is inferred from
+unit, model, or build success.
+
+Final checks all passed: `uv run python scripts/test.py --all` ran 57 Python
+tests, 1,329 Rust tests (three skipped), 59 website tests (three skipped), 117
+Swift tests, the E2E smoke test, Swift multiplatform boundary validation, and
+LoopflowMac `xcodebuild build-for-testing` (**TEST BUILD SUCCEEDED**). After the
+saved-mode regression was added, the full Swift suite was rerun at 118 tests
+across 22 suites. Focused checks also passed: 68 context-filtered Rust tests,
+seven Context Lab Swift tests, `scripts/check_migrations.py` through
+`0.11.006_context_launch_work`, and `git diff --check`. The E2E run repeated the
+known warning about the divergent disposable development ledger; it did not
+touch the explicitly selected production ledger used for the reconciliation.
 
 ## Risks and bottlenecks
 
@@ -263,36 +329,34 @@ Python, website, E2E, and hosted UI suites were likewise untouched.
 
 ## Done-when audit
 
-- **Research truth — code and live reader hold; hosted proof remains open.** A
-  fresh 30-day production-ledger query reconciles supplied tokens, root width,
-  child widths, and missing lane totals exactly. Atomic snapshot replacement,
-  query cancellation, shared lane scale, selected-share sorting, and
-  flame/table identity are implemented and tested. This pass did not run the
-  installed app or hosted keyboard journey, and the missing steering/revision
-  filters keep “any useful session set” from being fully proven.
+- **Research truth — reader truth holds; hosted interaction proof remains
+  open.** The fresh 30-day production query reconciles supplied tokens, root
+  width, child widths, and missing lane totals exactly. Atomic snapshot
+  replacement, cancellation, shared lane scale, ratio-based sorting, and
+  flame/table identity are implemented and tested. The installed-app keyboard
+  journey was not run, and the absent steered-only/current-revision filters keep
+  the full proposed filter contract incomplete.
 - **Evidence truth — holds at the reader/model boundary.** Canonical revisions,
-  representative roles, exact full hashes, artifact availability, explicit
-  exact-trace opening, and a fresh editable canonical `LOOPFLOW.md` capture are
-  present. Missing-artifact rows can still open the address and report the
-  actual absence rather than disabling the path.
-- **Refinement truth — guarded code path, not continuous proof.** The structured
-  seed and stale source/workspace guards exist; Task, Project Session, branch,
-  and worktree identity are revalidated before terminal creation, and the route
-  targets the terminal receiving the fresh process. A real Intelligence Task
-  launch, source diff, lifecycle, and backlink have not been experienced.
+  distinct representative sessions, full hashes, artifact availability, and
+  explicit exact-trace opening are present. The prior live body read remains
+  valid evidence; this pass did not reopen prompt or conversation bodies merely
+  to repeat it. Missing-artifact rows still open their exact address and surface
+  the absence explicitly.
+- **Refinement truth — launch guards are stronger; continuous proof is still
+  absent.** Task, Project Session, branch, worktree, and source identity are
+  revalidated, and canonical plus Task bytes are checked again immediately
+  before command dispatch. Failures remove the new terminal. No real
+  Intelligence Task launch, source diff, lifecycle action, or backlink was
+  experienced.
 - **Learning truth — natural grouping holds; intervention proof remains open.**
-  Revision comparison runs over naturally observed hashes and shows a concrete
-  coverage blocker on real data. Its current comparability rule is limited, and
-  the edit → ordinary run → new canonical hash journey remains undemonstrated.
-- **Shipping proof — proportional final checks pass.** This pass ran 117 Swift
-  tests, 8 focused aggregation tests, 21 context integration tests, the canonical
-  migration registration test, Swift multiplatform boundaries,
-  `scripts/check_migrations.py`, `cargo fmt --check`, and
-  `cargo clippy --all-targets -- -D warnings`. The signed macOS app and UI-test
-  runners also completed `xcodebuild build-for-testing`. Python, website, E2E,
-  and hosted UI behavior were not rerun because this uncommitted pass changed
-  only Rust aggregation semantics and Swift app behavior; their prior branch
-  proof is not promoted into a new continuous-demo claim.
+  Revision comparison operates on naturally observed hashes and explains
+  insufficient coverage. Its provider/model and observation-window
+  comparability remain narrow, and the edit → ordinary run → new canonical hash
+  journey remains undemonstrated.
+- **Shipping proof — the full local matrix passes.** Python, Rust, website,
+  Swift, E2E smoke, multiplatform boundaries, migrations, and Mac
+  build-for-testing all passed. The hosted UI runner and installed-app demo were
+  not run; build success is not promoted into interaction proof.
 
 ## What is intentionally not included
 

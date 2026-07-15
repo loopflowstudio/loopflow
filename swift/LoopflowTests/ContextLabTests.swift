@@ -6,6 +6,12 @@ import Testing
 
 @Suite("Context Lab")
 struct ContextLabTests {
+    @Test("Saved visualization modes use semantic values")
+    func contextLabModesPersistIndependentlyFromLabels() {
+        #expect(ContextLabMode.allCases.map(\.rawValue) == ["aggregate", "lanes", "table"])
+        #expect(ContextLabMode.allCases.map(\.title) == ["Aggregate flame", "Session lanes", "Table"])
+    }
+
     @Test("Selected-source sorting uses share rather than raw token load")
     func selectedSourceShareUsesTheSessionDenominator() {
         let heavierSlice = contextSelectedSourceShare(
@@ -153,10 +159,11 @@ struct ContextLabTests {
 
         let operating = directory.appendingPathComponent("LOOPFLOW.md")
         try "Guide\n".write(to: operating, atomically: true, encoding: .utf8)
-        #expect(
-            sourceFileHash(path: operating.path)
-                == "3274fcad886cde4e2ca86b11d30fd7c44858eadf1c437a9583f31e7815db1af6"
-        )
+        let operatingReceipt = try #require(sourceFileHash(path: operating.path))
+        #expect(operatingReceipt == "3274fcad886cde4e2ca86b11d30fd7c44858eadf1c437a9583f31e7815db1af6")
+
+        try "Changed\n".write(to: operating, atomically: true, encoding: .utf8)
+        #expect(sourceFileHash(path: operating.path) != operatingReceipt)
 
         let skill = directory.appendingPathComponent("refine.md")
         try "---\nname: refine\n---\nBuild it.\n".write(to: skill, atomically: true, encoding: .utf8)

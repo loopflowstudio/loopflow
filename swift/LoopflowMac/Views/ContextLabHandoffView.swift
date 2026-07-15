@@ -217,8 +217,7 @@ struct RefinementTaskSheet: View {
     @MainActor
     private func launch() async {
         guard let selectedTaskId,
-              let selectedChoice = tasks.first(where: { $0.id == selectedTaskId }),
-              let sourcePath = evidence.sourcePath
+              let selectedChoice = tasks.first(where: { $0.id == selectedTaskId })
         else { return }
         isLaunching = true
         defer { isLaunching = false }
@@ -226,7 +225,9 @@ struct RefinementTaskSheet: View {
             let refreshed = try await RegistryQueryLocal.shared.contextLab(query)
             guard let currentEvidence = refreshed.evidence.first(where: { $0.nodeId == evidence.nodeId }),
                   currentEvidence.isEditable,
-                  currentEvidence.contentSha256 == evidence.contentSha256
+                  currentEvidence.contentSha256 == evidence.contentSha256,
+                  let currentSourcePath = currentEvidence.sourcePath,
+                  let currentSourceSha256 = currentEvidence.currentSourceSha256
             else {
                 throw ContextRefinementError(
                     "The selected source revision changed. Refresh Context Lab and select the current revision."
@@ -249,20 +250,13 @@ struct RefinementTaskSheet: View {
                 )
             }
             let taskSource = try taskSourcePath(
-                sourcePath: sourcePath,
+                sourcePath: currentSourcePath,
                 repoPath: choice.repoPath,
                 worktree: workspace.worktree
             )
             guard FileManager.default.fileExists(atPath: workspace.worktree) else {
                 throw ContextRefinementError(
                     "The Task worktree is missing. Resume or recreate \(choice.task.task.identifier) first."
-                )
-            }
-            guard let currentSourceSha256 = currentEvidence.currentSourceSha256,
-                  sourceFileHash(path: taskSource) == currentSourceSha256
-            else {
-                throw ContextRefinementError(
-                    "The Task worktree does not contain the selected source revision. Rebase it, then retry."
                 )
             }
 
@@ -293,6 +287,16 @@ struct RefinementTaskSheet: View {
                 worktree: workspace.worktree
             )
             do {
+                guard sourceFileHash(path: currentSourcePath) == currentSourceSha256 else {
+                    throw ContextRefinementError(
+                        "The canonical source changed during launch. Refresh Context Lab and select the current revision."
+                    )
+                }
+                guard sourceFileHash(path: taskSource) == currentSourceSha256 else {
+                    throw ContextRefinementError(
+                        "The Task worktree does not contain the selected source revision. Rebase it, then retry."
+                    )
+                }
                 try await TmuxSession(
                     sessionName: terminal.tmuxName,
                     worktreePath: workspace.worktree

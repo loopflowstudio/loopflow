@@ -830,54 +830,53 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
 }
 
 fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<RepresentativeTrace> {
-    // Roles are surfaced in priority order and each is a distinct piece of
-    // evidence, so one trace never fills two roles. A small population where the
-    // smooth complete run is also the most recent shows one honest row, not the
-    // same address twice under different labels.
+    // Roles are surfaced in priority order and each is a distinct session. When
+    // the best candidate for a later role already represents an earlier role,
+    // take the next-best session rather than repeating one or dropping a
+    // role that the population can still fill.
     let mut selected = Vec::new();
-    let mut claimed: HashSet<TraceAddress> = HashSet::new();
-    let mut claim = |role: EvidenceRole, candidate: Option<&EvidenceCandidate>| {
-        if let Some(candidate) = candidate {
-            if claimed.insert(candidate.address.clone()) {
-                selected.push(representative(role, candidate));
-            }
-        }
-    };
-    claim(
-        EvidenceRole::SmoothComplete,
-        candidates
-            .iter()
-            .filter(|candidate| {
-                candidate.outcome == "completed"
-                    && candidate.capture == "complete"
-                    && candidate.steering_turns.unwrap_or(0) == 0
-            })
-            .min_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(u64::MAX)),
-    );
-    claim(
-        EvidenceRole::HighContextComplete,
-        candidates
-            .iter()
-            .filter(|candidate| candidate.outcome == "completed")
-            .max_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(0)),
-    );
-    claim(
-        EvidenceRole::FailedOrSteered,
-        candidates
-            .iter()
-            .filter(|candidate| {
-                candidate.outcome == "failed"
-                    || candidate.outcome == "interrupted"
-                    || candidate.steering_turns.unwrap_or(0) > 0
-            })
-            .max_by_key(|candidate| candidate.selected_source_tokens),
-    );
-    claim(
-        EvidenceRole::Recent,
-        candidates
-            .iter()
-            .max_by_key(|candidate| candidate.started_at),
-    );
+    let mut claimed_sessions = HashSet::new();
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.outcome == "completed"
+                && candidate.capture == "complete"
+                && candidate.steering_turns.unwrap_or(0) == 0
+        })
+        .min_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(u64::MAX))
+    {
+        claimed_sessions.insert(candidate.address.run_id.clone());
+        selected.push(representative(EvidenceRole::SmoothComplete, candidate));
+    }
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| !claimed_sessions.contains(&candidate.address.run_id))
+        .filter(|candidate| candidate.outcome == "completed")
+        .max_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(0))
+    {
+        claimed_sessions.insert(candidate.address.run_id.clone());
+        selected.push(representative(EvidenceRole::HighContextComplete, candidate));
+    }
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| !claimed_sessions.contains(&candidate.address.run_id))
+        .filter(|candidate| {
+            candidate.outcome == "failed"
+                || candidate.outcome == "interrupted"
+                || candidate.steering_turns.unwrap_or(0) > 0
+        })
+        .max_by_key(|candidate| candidate.selected_source_tokens)
+    {
+        claimed_sessions.insert(candidate.address.run_id.clone());
+        selected.push(representative(EvidenceRole::FailedOrSteered, candidate));
+    }
+    if let Some(candidate) = candidates
+        .iter()
+        .filter(|candidate| !claimed_sessions.contains(&candidate.address.run_id))
+        .max_by_key(|candidate| candidate.started_at)
+    {
+        selected.push(representative(EvidenceRole::Recent, candidate));
+    }
     selected
 }
 
@@ -1283,7 +1282,7 @@ mod tests {
     }
 
     #[test]
-    fn representatives_never_repeat_one_address_across_roles() {
+    fn representatives_never_repeat_one_session_across_roles() {
         let launches = vec![launch("launch-solo", "run-a", "completed", "complete", 100)];
         let turns = vec![turn("turn-solo", "launch-solo", 1, "assembled", 30, None)];
         let assets = vec![asset(
@@ -1304,6 +1303,61 @@ mod tests {
         assert_eq!(representatives.len(), 1);
         assert_eq!(representatives[0].role, EvidenceRole::SmoothComplete);
         assert_eq!(representatives[0].address.launch_id, "launch-solo");
+    }
+
+    #[test]
+    fn representatives_fill_roles_from_distinct_sessions_when_possible() {
+        let launches = vec![
+            launch("launch-low", "run-a", "completed", "complete", 100),
+            launch("launch-same-session", "run-a", "completed", "complete", 150),
+            launch("launch-high", "run-b", "completed", "complete", 200),
+            launch("launch-recent", "run-c", "completed", "partial", 300),
+        ];
+        let turns = vec![
+            turn("turn-low", "launch-low", 1, "assembled", 10, None),
+            turn(
+                "turn-same-session",
+                "launch-same-session",
+                1,
+                "assembled",
+                100,
+                None,
+            ),
+            turn("turn-high", "launch-high", 1, "assembled", 80, None),
+            turn("turn-recent", "launch-recent", 1, "assembled", 40, None),
+        ];
+        let assets = turns
+            .iter()
+            .map(|turn| {
+                asset(
+                    &turn.id,
+                    0,
+                    ContextAssetKind::RepoInstructions,
+                    "AGENTS.md",
+                    Some("AGENTS.md"),
+                    "hash",
+                    nonnegative(turn.supplied_context_tokens),
+                )
+            })
+            .collect();
+
+        let snapshot = aggregate(query(), launches, turns, assets);
+        let representatives = &snapshot.evidence[0].representatives;
+
+        assert_eq!(
+            representatives
+                .iter()
+                .map(|representative| (
+                    representative.role,
+                    representative.address.launch_id.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (EvidenceRole::SmoothComplete, "launch-low"),
+                (EvidenceRole::HighContextComplete, "launch-high"),
+                (EvidenceRole::Recent, "launch-recent"),
+            ]
+        );
     }
 
     #[test]

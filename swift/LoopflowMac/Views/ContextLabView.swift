@@ -83,7 +83,7 @@ struct ContextLabView: View {
 
     init(initialRepoPath: String?, route: ContextLabRoute? = nil) {
         self.initialRepoPath = initialRepoPath
-        let path = route?.query.repoPaths.first ?? initialRepoPath ?? ""
+        let path = (route?.query.repoPaths.first ?? initialRepoPath).map(WaveOrigin.resolve) ?? ""
         _repoPath = State(initialValue: path)
         _repoDraft = State(initialValue: path)
         if let route {

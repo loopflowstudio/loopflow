@@ -51,6 +51,21 @@ impl Store {
         .await
     }
 
+    pub async fn rebind_task_issue_identifier(
+        &self,
+        issue_id: &str,
+        old_identifier: &str,
+        new_identifier: &str,
+    ) -> StoreResult<bool> {
+        let issue_id = issue_id.to_string();
+        let old_identifier = old_identifier.to_string();
+        let new_identifier = new_identifier.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.rebind_task_issue_identifier(&issue_id, &old_identifier, &new_identifier)
+        })
+        .await
+    }
+
     pub(crate) async fn activate_task_process(
         &self,
         session: &TaskSession,

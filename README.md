@@ -504,7 +504,8 @@ the wave's Linear **team** — the team key becomes each Task's prefix, so every
 wave owns its own identifiers (`PRD-1`, `INF-1`, `INT-1`) instead of sharing one.
 `--team-key` sets the prefix; a conflicting key or reused name is refused with a
 recovery action rather than guessed. Both ids are stable provider identity;
-keys and titles stay mutable presentation.
+keys and titles stay mutable presentation. Passing `--team-key` explicitly on
+an already-bound Wave adopts that team and replaces the old binding.
 
 ```bash
 lf pm init --wave designer --team-key DSG  # connect the wave to its Initiative + team
@@ -519,16 +520,18 @@ lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
 lf pm task done --id 1207... --pr "..."   # close a shipped task
 lf pm reteam --wave designer              # dry-run: what would move to the team
-lf pm reteam --wave designer --apply      # move settled open issues into the team
+lf pm reteam --wave designer --apply      # move open issues into the team
 lf pm sync --plan                         # compare without writing SQLite
 lf pm status                              # show linked waves and task counts
 ```
 
 `lf pm reteam` migrates a wave's existing issues into its own team once it's
-bound. It **defaults to a dry run** — naming every issue it would move, every one
-it defers, and the target team — and only mutates with `--apply`. It defers any
-issue whose Task has a live or in-review Session (a moved issue is safe: Linear
-keeps the issue id, so Session/PR/comment links survive), and leaves **completed
+bound. It moves each active Project onto the Wave team before moving its Issues.
+It **defaults to a dry run** — naming every Project and Issue it would move,
+every Issue it defers, and the target team — and only mutates with `--apply`. It defers an
+issue only while a Task body can write to its Session. Waiting-for-review,
+blocked, and failed Tasks move safely: Linear keeps the issue id, and Loopflow
+atomically reconciles the Session's new display identifier. It leaves **completed
 issues in the shared team as historical** — a team move renumbers the issue
 (`W2-155` becomes `PRD-<next>`, not `PRD-155`), and shipped PR/commit references
 to `W2-*` are immutable. Each moved issue gets a comment recording its prior
@@ -538,7 +541,9 @@ skipped. `lf pm doctor` flags issues still stranded in the old team.
 `lf pm` maps wave → Initiative, project → Project, and task → Issue. Linear owns
 project definitions and KRs in Project content. `lf pm sync` stores one local
 SQLite snapshot for fast CLI, agent, and app reads; it does not write planning
-files into the repo. `lf pm show` serves snapshots younger than one hour, tries
+files into the repo. Linear titles Projects as `<Wave> — <Project>` for its flat
+Projects view; Loopflow strips that presentation prefix and keeps the concise
+canonical slug (`Product — Loopflow API` remains `project:loopflow-api`). `lf pm show` serves snapshots younger than one hour, tries
 a five-second refresh for older snapshots, and refuses to silently serve one
 older than a week when Linear is unreachable. Use `--no-sync` for deterministic
 cache-only reads. Issue descriptions and comments are Markdown, which Linear

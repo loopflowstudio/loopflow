@@ -78,6 +78,62 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn rebind_task_issue_identifier(
+        &self,
+        issue_id: &str,
+        old_identifier: &str,
+        new_identifier: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let current = conn
+            .query_row(
+                "SELECT id, issue_identifier, status, process_lease_state
+                 FROM task_sessions WHERE issue_id=?1",
+                params![issue_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((session_id, current_identifier, status, lease_state)) = current else {
+            return Ok(false);
+        };
+        if current_identifier == new_identifier {
+            return Ok(false);
+        }
+        if current_identifier != old_identifier {
+            return Err(StoreError::InvalidData(format!(
+                "Task Session {session_id} identifies issue {issue_id} as {current_identifier}, not {old_identifier}"
+            )));
+        }
+        if matches!(status.as_str(), "starting" | "running")
+            || matches!(lease_state.as_deref(), Some("reserved" | "active"))
+        {
+            return Err(StoreError::InvalidData(format!(
+                "Task Session {session_id} has an active body; stop it before changing {old_identifier} to {new_identifier}"
+            )));
+        }
+        let changed = conn.execute(
+            "UPDATE task_sessions
+             SET issue_identifier=?3, updated_at=?4
+             WHERE issue_id=?1 AND issue_identifier=?2
+               AND status NOT IN ('starting', 'running')
+               AND COALESCE(process_lease_state, 'finished') NOT IN ('reserved', 'active')",
+            params![issue_id, old_identifier, new_identifier, now_unix()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "Task Session for {old_identifier} became active during its team migration"
+            )));
+        }
+        Ok(true)
+    }
+
     pub(crate) fn activate_task_process(
         &self,
         session: &TaskSession,

@@ -151,6 +151,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_pr_parent",
         sql: include_str!("migrations/0.11.007_task_pr_parent.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 8,
+        },
+        name: "interactive_handoffs",
+        sql: include_str!("migrations/0.11.008_interactive_handoffs.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -661,7 +670,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.007_task_pr_parent"
+            "0.11.008_interactive_handoffs"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -680,7 +689,8 @@ mod tests {
                 "0.11.004_task_pr_ci_state".to_string(),
                 "0.11.005_provider_accounts".to_string(),
                 "0.11.006_context_launch_work".to_string(),
-                "0.11.007_task_pr_parent".to_string()
+                "0.11.007_task_pr_parent".to_string(),
+                "0.11.008_interactive_handoffs".to_string()
             ]
         );
     }
@@ -1074,7 +1084,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.007_task_pr_parent"
+            "0.11.008_interactive_handoffs"
         );
     }
 

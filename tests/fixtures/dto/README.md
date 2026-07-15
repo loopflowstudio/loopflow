@@ -14,3 +14,7 @@ consume this wire.
 fact plus its evidence `receipts`, covering every `EvidenceKind`. Pinned in Rust
 (`memory_fact_fixture_round_trips_every_evidence_kind`) and Swift
 (`memoryFactFixturePreservesReceipts`).
+
+`interactive_handoff_attach.json` is the store-direct `lf handoff attach --json`
+shape. It carries durable identity and structured presentation instructions;
+terminal bytes are deliberately absent. Rust and Swift both round-trip it.

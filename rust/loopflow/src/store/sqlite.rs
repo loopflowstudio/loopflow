@@ -17,6 +17,7 @@ use crate::trace::{
 use crate::wave::Wave;
 
 mod child_sessions;
+mod interactive_handoffs;
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {

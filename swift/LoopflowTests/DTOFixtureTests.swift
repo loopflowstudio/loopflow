@@ -93,6 +93,23 @@ struct DTOFixtureTests {
         #expect(activity.source == .wave(id: "11111111-1111-4111-8111-111111111111"))
     }
 
+    @Test("interactive handoff attach fixture preserves presentation instructions")
+    func interactiveHandoffAttachFixtureRoundTrips() throws {
+        let data = try loadFixtureData("interactive_handoff_attach.json")
+        let attach = try JSONDecoder().decode(InteractiveHandoffAttach.self, from: data)
+
+        #expect(attach.sessionId == "ih_00000000000000000000000000000001")
+        #expect(attach.status == .attached)
+        #expect(attach.cwd == "/src/loopflow.interactive-handoff")
+        #expect(attach.host == "localhost")
+        #expect(attach.environment["LF_HOME"] == "/Users/jack/.lf")
+        #expect(attach.argv == ["tmux", "attach-session", "-t", "lf-task-interactive"])
+
+        let encoded = try JSONEncoder().encode(attach)
+        let decoded = try JSONDecoder().decode(InteractiveHandoffAttach.self, from: encoded)
+        #expect(decoded == attach)
+    }
+
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {
         let data = try loadFixtureData(name, sourceFile: sourceFile)
         let json = try JSONSerialization.jsonObject(with: data)

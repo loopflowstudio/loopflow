@@ -89,6 +89,23 @@ lf task wait INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
+Present one deliberate interactive child without inventing another parent
+lifecycle:
+
+```bash
+lf handoff attach ih_0123456789abcdef0123456789abcdef --json
+lf handoff complete ih_0123456789abcdef0123456789abcdef \
+  --summary "login complete; auth tests pass"
+lf handoff back ih_0123456789abcdef0123456789abcdef \
+  --summary "finish the review fixes headlessly"
+```
+
+`lf handoff open` records the prepared terminal beneath the owning Wave,
+Project Session, or Task Session. Every presentation reads the same
+store-backed attach descriptor; tmux or the vendor keeps the terminal bytes.
+The handoff references the existing body generation, so it cannot become a
+second process owner.
+
 The Linear task exists before its worktree. One durable Task Session retains
 that stable sibling worktree, directive, supervision state, and PR history
 through serial PRs, review, CI repair, provider failure, and explicit

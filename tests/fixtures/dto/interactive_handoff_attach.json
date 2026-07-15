@@ -1,0 +1,16 @@
+{
+  "session_id": "ih_00000000000000000000000000000001",
+  "status": "attached",
+  "cwd": "/src/loopflow.interactive-handoff",
+  "host": "localhost",
+  "environment": {
+    "LF_HOME": "/Users/jack/.lf",
+    "LF_TASK_SESSION_ID": "ts_00000000000000000000000000000002"
+  },
+  "argv": [
+    "tmux",
+    "attach-session",
+    "-t",
+    "lf-task-interactive"
+  ]
+}

@@ -179,6 +179,42 @@ parent merges. The two Tasks keep separate identities, worktrees, and workers.
 `lf task attach` exposes a writable prompt that records structured commands;
 terminal bytes never drive the provider directly.
 
+## Handing Interactive Work to a Human
+
+Create the durable Session after the runtime has prepared the provider-backed
+terminal, then let any presentation read the same attach descriptor:
+
+```bash
+lf handoff open \
+  --parent task:ts_0123456789abcdef0123456789abcdef \
+  --home jack@local \
+  --cwd /src/loopflow.auth \
+  --provider codex \
+  --provider-session 0190abcd \
+  --generation 3 \
+  --reason "OAuth login requires a human" \
+  --env LF_HOME=/Users/jack/.lf \
+  --json \
+  -- tmux attach-session -t lf-auth-interactive
+
+lf handoff attach ih_0123456789abcdef0123456789abcdef --json
+lf handoff complete ih_0123456789abcdef0123456789abcdef \
+  --summary "login complete; auth tests pass"
+lf handoff back ih_0123456789abcdef0123456789abcdef \
+  --summary "finish the review fixes headlessly"
+```
+
+The shared store allows one unresolved handoff per Wave, Project Session, or
+Task Session. Repeating `open` returns that Session; repeating `attach` returns
+the same structured `{session_id,status,cwd,host,environment,argv}` descriptor.
+`complete`, `back`, and `fail` are terminal. The first terminal result wins and
+creates one wake for the same parent Session.
+
+This contract carries presentation instructions, not a terminal stream. tmux
+or the vendor owns terminal bytes. The handoff references the parent's existing
+body generation; it does not create a second process lease or generic Session
+catalog.
+
 ## Speaking to Waves
 
 Two wires, not one. The **thread** is the human surface: durable, replayed,

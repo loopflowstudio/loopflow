@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 
 pub mod commands;
@@ -246,6 +248,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
+    /// Durable interactive work handed from an agent to a human
+    Handoff {
+        #[command(subcommand)]
+        cmd: HandoffCommand,
+    },
     /// Internal: run one durable Task Session process generation
     #[command(name = "__task", hide = true)]
     TaskRunner {
@@ -483,6 +490,79 @@ pub enum RadioCommand {
         /// Channel prefix (default: the ambient channel — env, else worktree)
         channel: Option<String>,
         /// Emit heard frames as NDJSON instead of human lines
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HandoffCommand {
+    /// Open or return the parent's one unresolved interactive handoff
+    Open {
+        /// Parent reference: wave:<id>, project:<id>, or task:<id>
+        #[arg(long)]
+        parent: String,
+        /// Canonical execution Home, e.g. jack@local or ssh://jack@host
+        #[arg(long)]
+        home: String,
+        /// Absolute worktree/current directory on that Home
+        #[arg(long)]
+        cwd: PathBuf,
+        /// Provider that owns the resumed history
+        #[arg(long)]
+        provider: String,
+        /// Provider transcript/session id, when one exists
+        #[arg(long = "provider-session")]
+        provider_session: Option<String>,
+        /// Existing parent body generation being handed off
+        #[arg(long)]
+        generation: u32,
+        /// Why human interaction is required
+        #[arg(long)]
+        reason: String,
+        /// Required environment entry as KEY=VALUE (repeatable)
+        #[arg(long = "env")]
+        environment: Vec<String>,
+        /// Emit the durable Session as JSON
+        #[arg(long)]
+        json: bool,
+        /// Structured attach argv after `--`
+        #[arg(last = true, required = true)]
+        attach_argv: Vec<String>,
+    },
+    /// Show one durable handoff Session
+    Status {
+        session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record first attach and return its descriptor; never streams terminal bytes
+    Attach {
+        session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record successful completion
+    Complete {
+        session_id: String,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Hand unfinished work back to the parent agent
+    Back {
+        session_id: String,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record terminal interactive-body failure
+    Fail {
+        session_id: String,
+        #[arg(long)]
+        reason: String,
         #[arg(long)]
         json: bool,
     },
@@ -1776,6 +1856,70 @@ mod tests {
             "quota exhausted",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn cli_parses_interactive_handoff_contract() {
+        let open = Cli::try_parse_from([
+            "lf",
+            "handoff",
+            "open",
+            "--parent",
+            "task:ts_00000000000000000000000000000000",
+            "--home",
+            "jack@local",
+            "--cwd",
+            "/src/loopflow.task",
+            "--provider",
+            "codex",
+            "--provider-session",
+            "thread-1",
+            "--generation",
+            "3",
+            "--reason",
+            "OAuth login required",
+            "--env",
+            "LF_HOME=/tmp/lf",
+            "--json",
+            "--",
+            "tmux",
+            "attach-session",
+            "-t",
+            "lf-task-interactive",
+        ])
+        .expect("parse handoff open");
+        assert!(matches!(
+            open.command,
+            Some(Commands::Handoff {
+                cmd: HandoffCommand::Open {
+                    generation: 3,
+                    json: true,
+                    attach_argv,
+                    ..
+                }
+            }) if attach_argv == ["tmux", "attach-session", "-t", "lf-task-interactive"]
+        ));
+
+        let back = Cli::try_parse_from([
+            "lf",
+            "handoff",
+            "back",
+            "ih_00000000000000000000000000000000",
+            "--summary",
+            "finish the review fixes headlessly",
+            "--json",
+        ])
+        .expect("parse handoff back");
+        assert!(matches!(
+            back.command,
+            Some(Commands::Handoff {
+                cmd: HandoffCommand::Back {
+                    summary,
+                    json: true,
+                    ..
+                }
+            }) if summary == "finish the review fixes headlessly"
+        ));
     }
 
     #[test]

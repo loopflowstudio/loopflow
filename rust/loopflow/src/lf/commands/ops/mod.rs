@@ -393,6 +393,18 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
         }
         Ok(waves)
     };
+    // The one ambient-Wave rule for every PM arm: `--wave` wins, else
+    // `LF_WAVE_ID` (durable UUID → registry name, hand-set name as fallback).
+    // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
+    // --wave" behavior outside a managed process; a stale id is a loud error.
+    let ambient_wave = |explicit: Option<&str>| -> Result<Option<String>> {
+        use crate::engine::wave_context::WaveResolveError;
+        match crate::engine::wave_context::resolve_managed_wave_name_sync(explicit) {
+            Ok(name) => Ok(Some(name)),
+            Err(WaveResolveError::NoContext) => Ok(None),
+            Err(other) => Err(other.into()),
+        }
+    };
 
     match cmd {
         PmCommand::Init {
@@ -410,9 +422,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             let targets = if *all {
                 list_all_waves()?
             } else {
-                vec![wave
-                    .clone()
-                    .or_else(|| wave_flag.clone())
+                let explicit = wave.as_deref().or(wave_flag.as_deref());
+                vec![ambient_wave(explicit)?
                     .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?]
             };
             for wave in targets {
@@ -452,7 +463,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 crate::ops::pm::PmRefresh::Auto
             };
             let options = crate::ops::pm::PmShowOptions {
-                wave: wave.clone(),
+                wave: ambient_wave(wave.as_deref())?,
                 project: project.clone(),
                 refresh,
             };
@@ -470,7 +481,9 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
                 &repo_root,
-                &crate::ops::pm::PmStatusOptions { wave: wave.clone() },
+                &crate::ops::pm::PmStatusOptions {
+                    wave: ambient_wave(wave.as_deref())?,
+                },
                 progress,
             )?;
             if result.waves.is_empty() {
@@ -491,7 +504,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             let result = crate::ops::pm::pm_rename(
                 &repo_root,
                 &crate::ops::pm::PmRenameOptions {
-                    wave: wave.clone(),
+                    wave: ambient_wave(wave.as_deref())?,
                     title: title.clone(),
                 },
                 progress,
@@ -511,7 +524,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 let result = crate::ops::pm::pm_update(
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
-                        wave: wave.clone(),
+                        wave: ambient_wave(wave.as_deref())?,
                         project: Some(project.clone()),
                         id: None,
                         title: Some(title.clone()),
@@ -536,7 +549,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 let result = crate::ops::pm::pm_update(
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
-                        wave: wave.clone(),
+                        wave: ambient_wave(wave.as_deref())?,
                         project: project.clone(),
                         id: Some(id.clone()),
                         title: title.clone(),
@@ -552,7 +565,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 let result = crate::ops::pm::pm_update(
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
-                        wave: wave.clone(),
+                        wave: ambient_wave(wave.as_deref())?,
                         project: None,
                         id: Some(id.clone()),
                         title: None,
@@ -573,7 +586,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     &repo_root,
                     &crate::ops::pm::PmTaskMoveOptions {
                         id: id.clone(),
-                        wave: wave.clone(),
+                        wave: ambient_wave(wave.as_deref())?,
                         project: project.clone(),
                     },
                     progress,
@@ -615,7 +628,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     let result = crate::ops::pm::pm_project_archive(
                         &repo_root,
                         &crate::ops::pm::PmProjectArchiveOptions {
-                            wave: wave.clone(),
+                            wave: ambient_wave(wave.as_deref())?,
                             project: project.clone(),
                         },
                         progress,
@@ -630,7 +643,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             let result = crate::ops::pm::pm_project_write(
                 &repo_root,
                 &crate::ops::pm::PmProjectWriteOptions {
-                    wave,
+                    wave: ambient_wave(wave.as_deref())?,
                     project,
                     title,
                     definition,
@@ -659,7 +672,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             let result = crate::ops::pm::pm_sync(
                 &repo_root,
                 &crate::ops::pm::PmSyncOptions {
-                    wave: wave.clone(),
+                    wave: ambient_wave(wave.as_deref())?,
                     plan: *plan,
                 },
                 progress,
@@ -670,7 +683,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             let result = crate::ops::pm::pm_reteam(
                 &repo_root,
                 &crate::ops::pm::PmReteamOptions {
-                    wave: wave.clone(),
+                    wave: ambient_wave(wave.as_deref())?,
                     apply: *apply,
                 },
                 progress,

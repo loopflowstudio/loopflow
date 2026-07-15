@@ -11,8 +11,8 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}}
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -30,8 +30,8 @@ struct RegistryQueryTests {
     func allWavesDecode() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}}
         ]
         """
         let counter = CallCounter()
@@ -51,7 +51,7 @@ struct RegistryQueryTests {
     func statusMapsWork() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
           "loop_state":"turning",
           "projects":[{
             "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","krs":[{"text":"Fast loops","holds":false}]},
@@ -68,7 +68,8 @@ struct RegistryQueryTests {
             }]
           }],
           "runs":{"state":"ok","truncated":false,"items":[{"id":"span-1","run_id":"abc","process_id":"span-1","parent_process_id":null,"repo":"/src/loopflow","wave":"goals","label":"pm sync","status":"ok","started":100,"ended":110,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus"}]},
-          "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"review","reason":"PR is open","since":"2026-07-06T00:00:00Z","age_secs":7200}]}
+          "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"review","reason":"PR is open","since":"2026-07-06T00:00:00Z","age_secs":7200}]},
+          "home_runtime":{"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home":"jack@local"}}
         }
         """
         let query = RegistryQuery { args, _ in
@@ -96,11 +97,12 @@ struct RegistryQueryTests {
     func statusKeepsUnavailableEvidence() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
           "loop_state":null,
           "projects":[],
           "runs":{"state":"unavailable","reason":"run ledger unavailable: disk is gone"},
-          "attention":{"state":"ok","truncated":false,"items":[]}
+          "attention":{"state":"ok","truncated":false,"items":[]},
+          "home_runtime":{"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home":"jack@local"}}
         }
         """
         let query = RegistryQuery { _, _ in json }

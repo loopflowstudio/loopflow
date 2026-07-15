@@ -133,14 +133,14 @@ const MIGRATIONS: &[Migration] = &[
         name: "provider_accounts",
         sql: include_str!("migrations/0.11.005_provider_accounts.sql"),
     },
+    // Ordinal 6 belongs to an in-flight branch's `context_launch_work` migration
+    // (present in shared stores, not yet on main). Skipping to 7 keeps this
+    // migration's version string distinct so a store one branch migrated stays
+    // readable by the other.
     Migration {
         id: MigrationId {
             major: 0,
             minor: 11,
-            // Ordinal 6 belongs to an in-flight branch's `context_launch_work`
-            // migration (present in shared stores, not yet on main). Skipping to
-            // 7 keeps this migration's version string distinct so a store one
-            // branch migrated stays readable by the other.
             ordinal: 7,
         },
         name: "task_session_successors",

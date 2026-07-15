@@ -345,19 +345,26 @@ struct WavesView: View {
             )
             .id(waveSelectionId(wave))
         } else {
-            VStack(spacing: Spacing.md) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(Typography.heroTitle(28))
-                    .foregroundStyle(palette.textSecondary.opacity(0.5))
-                Text("Select a wave")
-                    .font(Typography.sectionTitle())
-                    .foregroundStyle(palette.text)
-                Text("Its live conversation opens here.")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            RoadmapView(
+                repoPath: roadmapRepoPath,
+                onOpenWave: openRoadmapWave
+            )
         }
+    }
+
+    private var roadmapRepoPath: String? {
+        if case .repo(let path) = selection { return path }
+        return nil
+    }
+
+    private func openRoadmapWave(_ snapshot: WaveSnapshot) {
+        guard let wave = allWaves.first(where: {
+            $0.id == snapshot.id
+                || ($0.name == snapshot.name
+                    && WaveOrigin.resolve($0.repo).normalizedFilePath
+                        == WaveOrigin.resolve(snapshot.repo).normalizedFilePath)
+        }) else { return }
+        selectedWaveId = waveSelectionId(wave)
     }
 
     /// On-disk repo root for the wave's state, where its

@@ -85,6 +85,53 @@ enum LocalWaveAgentLauncher {
         [lfPath, "stop", waveName]
     }
 
+    /// Start a filed Task through the same durable lifecycle command as the CLI.
+    /// `lf task run` owns Project-Session creation, worktree placement, and the
+    /// Task process; the app does not reproduce any of those decisions.
+    static func runTask(repoPath: String, issue: String) throws {
+        let origin = WaveOrigin.resolve(repoPath)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
+    }
+
+    /// Restart the existing Task Session without creating another worktree or
+    /// status record.
+    static func resumeTask(repoPath: String, issue: String) throws {
+        let origin = WaveOrigin.resolve(repoPath)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        try runChecked(taskResumeCommand(lfPath: lfPath, issue: issue), cwd: origin)
+    }
+
+    /// Queue the audited Task interrupt. The Task runner decides how the live
+    /// provider turn is stopped and records the receipt in the shared store.
+    static func interruptTask(repoPath: String, issue: String) throws {
+        let origin = WaveOrigin.resolve(repoPath)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
+    }
+
+    static func resolvedTaskAttachCommand(repoPath: String, issue: String) throws -> [String] {
+        let origin = WaveOrigin.resolve(repoPath)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        return taskAttachCommand(lfPath: lfPath, issue: issue)
+    }
+
+    static func taskRunCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "run", issue]
+    }
+
+    static func taskResumeCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "resume", issue]
+    }
+
+    static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "interrupt", issue]
+    }
+
+    static func taskAttachCommand(lfPath: String, issue: String) -> [String] {
+        [lfPath, "task", "attach", issue]
+    }
+
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`
     /// must be a PROBED address (`liveEndpoint`), never the raw pointer file:
     /// a SIGKILL or power loss leaves the file behind, and blocking on its

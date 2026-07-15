@@ -60,6 +60,24 @@ struct LocalWaveAgentLauncherTests {
         ])
     }
 
+    @Test("Task controls use the existing lifecycle verbs")
+    func taskControlCommandShapes() {
+        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
+
+        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
+            lf, "task", "run", "W2-131",
+        ])
+        #expect(LocalWaveAgentLauncher.taskResumeCommand(lfPath: lf, issue: "W2-131") == [
+            lf, "task", "resume", "W2-131",
+        ])
+        #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
+            lf, "task", "interrupt", "W2-131",
+        ])
+        #expect(LocalWaveAgentLauncher.taskAttachCommand(lfPath: lf, issue: "W2-131") == [
+            lf, "task", "attach", "W2-131",
+        ])
+    }
+
     // MARK: - Binary resolution + capability probe
 
     @Test("candidate order: bundled, PATH hits in order, dev-tree build last")

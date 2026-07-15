@@ -297,6 +297,45 @@ pub struct CiObservation {
     pub state: CiState,
     pub failing_checks: Vec<CiCheck>,
     pub observed_at: OffsetDateTime,
+    /// The failing-check set a `ci-fix` wake has already fired for at this head,
+    /// sorted. `None` until a wake fires. This is the dedup key: a wake is
+    /// warranted only when the current failing set differs from it, so a repeated
+    /// poll or a coalesced multi-check delivery never wakes a second body. The
+    /// marker rides this JSON column — absent on readings written before the wake
+    /// landed, hence `serde(default)` rather than a migration.
+    #[serde(default)]
+    pub woken_failure_set: Option<Vec<String>>,
+}
+
+impl CiObservation {
+    /// The current failing required checks by name, sorted — the dedup key's
+    /// content half. Empty unless `state` is `Failing`.
+    pub fn failure_set(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .failing_checks
+            .iter()
+            .map(|check| check.name.clone())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Whether this reading warrants a `ci-fix` wake: the head is failing and no
+    /// wake has fired for this exact failing set yet. `false` once a wake for the
+    /// same set is recorded (repeat poll / coalesced delivery) — the wake is
+    /// re-armed only when the head moves (a fresh reading) or the failing set
+    /// changes.
+    pub fn wake_warranted(&self) -> bool {
+        self.state == CiState::Failing
+            && self.woken_failure_set.as_deref() != Some(self.failure_set().as_slice())
+    }
+
+    /// Record that a wake fired for the current failing set, so the next reading
+    /// with the same `(head, failing set)` does not wake again.
+    pub fn mark_woken(&mut self) {
+        self.woken_failure_set = Some(self.failure_set());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1285,6 +1324,7 @@ mod tests {
                 url: None,
             }],
             observed_at: now,
+            woken_failure_set: None,
         };
         // Reading matches the current head: fresh.
         let current = open_pr("old-head", Some(observation.clone()));
@@ -1295,6 +1335,57 @@ mod tests {
         // Head has moved on: the stale reading never surfaces (and never wakes work).
         let moved = open_pr("new-head", Some(observation));
         assert!(moved.fresh_ci().is_none());
+    }
+
+    fn failing(head: &str, checks: &[&str], woken: Option<Vec<String>>) -> super::CiObservation {
+        super::CiObservation {
+            head_sha: head.to_string(),
+            state: super::CiState::Failing,
+            failing_checks: checks
+                .iter()
+                .map(|name| super::CiCheck {
+                    name: name.to_string(),
+                    url: None,
+                })
+                .collect(),
+            observed_at: time::OffsetDateTime::now_utc(),
+            woken_failure_set: woken,
+        }
+    }
+
+    #[test]
+    fn ci_wake_dedup_fires_once_per_head_and_failure_set() {
+        // A fresh failing reading warrants a wake.
+        let mut obs = failing("h1", &["build", "lint"], None);
+        assert!(obs.wake_warranted());
+        // The failing set is order-independent and deduplicated.
+        assert_eq!(
+            obs.failure_set(),
+            vec!["build".to_string(), "lint".to_string()]
+        );
+
+        // Once a wake fires, the same (head, set) does not wake again — a repeat
+        // poll or a coalesced multi-check delivery is absorbed.
+        obs.mark_woken();
+        assert!(!obs.wake_warranted());
+        let same_set_reordered = failing("h1", &["lint", "build"], obs.woken_failure_set.clone());
+        assert!(!same_set_reordered.wake_warranted());
+
+        // A changed failing set at the same head re-arms one new wake.
+        let new_check = failing(
+            "h1",
+            &["build", "lint", "audit"],
+            obs.woken_failure_set.clone(),
+        );
+        assert!(new_check.wake_warranted());
+
+        // A passing or pending reading never warrants a wake.
+        let mut green = obs.clone();
+        green.state = super::CiState::Passing;
+        assert!(!green.wake_warranted());
+        let mut pending = obs.clone();
+        pending.state = super::CiState::Pending;
+        assert!(!pending.wake_warranted());
     }
 
     #[test]

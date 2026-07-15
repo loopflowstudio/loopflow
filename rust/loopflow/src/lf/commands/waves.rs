@@ -2186,6 +2186,7 @@ mod tests {
                 })
                 .collect(),
             observed_at: time::OffsetDateTime::now_utc(),
+            woken_failure_set: None,
         }
     }
 

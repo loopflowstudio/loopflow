@@ -1769,6 +1769,7 @@ fn observe_required_checks(
     worktree: &Path,
     branch: &str,
     head_sha: Option<&str>,
+    prior: Option<&CiObservation>,
     now: time::OffsetDateTime,
 ) -> Option<CiObservation> {
     let head_sha = head_sha?.to_string();
@@ -1780,7 +1781,7 @@ fn observe_required_checks(
     } else {
         CiState::Passing
     };
-    Some(CiObservation {
+    let mut observation = CiObservation {
         head_sha,
         state,
         failing_checks: checks
@@ -1792,7 +1793,20 @@ fn observe_required_checks(
             })
             .collect(),
         observed_at: now,
-    })
+        woken_failure_set: None,
+    };
+    // Carry the dedup marker forward across reconciles: a wake already fired for
+    // this exact `(head, failing set)` must not fire again on the next poll. The
+    // marker only survives while both the head and the failing set are unchanged;
+    // a moved head or a changed failing set is a fresh reading that re-arms.
+    if let Some(prior) = prior {
+        if prior.head_sha == observation.head_sha
+            && prior.woken_failure_set.as_deref() == Some(observation.failure_set().as_slice())
+        {
+            observation.woken_failure_set = prior.woken_failure_set.clone();
+        }
+    }
+    Some(observation)
 }
 
 async fn reconcile_task_pr_with_authority(
@@ -1898,6 +1912,7 @@ async fn reconcile_task_pr_with_authority(
                 &session.worktree,
                 &pr.branch,
                 github_pr.head_sha.as_deref(),
+                pr.ci_observation.as_ref(),
                 now,
             );
             Some(TaskEventKind::PrOpened {

@@ -38,6 +38,27 @@ uv run python scripts/test.py --loopflow   # force the Loopflow UI suite on
 uv run python scripts/test.py --base HEAD~5  # diff against a different ref
 ```
 
+### Bounded and honest
+
+Every phase runs under a printed wall-clock budget (see
+`release/GATE_BUDGET.md`). A phase that overruns is killed—process group and
+all—and reported as `TIMEOUT <phase> (budget Ns)`, so **no phase can hang the
+gate**. The plan and summary print each phase's budget and elapsed time; on
+failure the phase log (and any `.xcresult`) is preserved under
+`.lf/tmp/gate/run-<pid>/<suite>/` for one-command repair without opening Xcode.
+
+The summary states **what each suite proves**. The `loopflow` suite compiles
+the app and UI-test runners; it does **not** run hosted UI behavior. That real
+run is a separately named **required host gate**—it never runs under `--all`
+because it needs a permissioned macOS host:
+
+```bash
+uv run python scripts/test.py --ui-host   # real hosted LoopflowUITests run
+```
+
+See `release/UI_HOST_GATE.md` for the maintained host, the capability it needs,
+and how a missing permission is reported (never silently skipped).
+
 Path → suite mapping:
 
 | Changed | Suite | Runs |
@@ -82,15 +103,27 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 
 ## Loopflow UI Tests
 
-Compile the macOS app and its signed test runners. Swift package tests already
-exercise the shared suites; UI-test execution additionally requires macOS UI
-automation permission on the host.
+Two levels, split on purpose:
+
+**Compile check** (`loopflow` suite, in `--all` and CI). Compiles the macOS app
+and its signed test runners. Swift package tests already exercise the shared
+suites un-hosted, so the only unique signal here is that the app target builds:
 
 ```bash
 cd swift
 xcodegen generate
 xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
 ```
+
+**Hosted run** (`ui-host` required gate, permissioned host only). Actually runs
+`LoopflowUITests`; needs macOS UI-automation permission. Never runs under
+`--all`—absence of the permission is a named failure, not a silent skip.
+
+```bash
+uv run python scripts/test.py --ui-host
+```
+
+See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 

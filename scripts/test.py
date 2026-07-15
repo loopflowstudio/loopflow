@@ -17,9 +17,14 @@ since they dominate wall-clock time.
 from __future__ import annotations
 
 import argparse
+import os
+import platform
 import shutil
+import signal
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -33,6 +38,31 @@ XCODE_LOCAL_SIGNING = [
     "DEVELOPMENT_TEAM=",
 ]
 XCODE_DERIVED_DATA = ".build/xcode-derived-data"
+
+# Failure artifacts (phase logs, xcresult bundles) land here so a worker can
+# repair the first red signal without reopening Xcode. Ignored (.lf/tmp/*).
+GATE_ARTIFACT_ROOT = REPO_ROOT / ".lf" / "tmp" / "gate"
+
+# Per-phase wall-clock budgets in seconds, keyed by Command.label. Generous
+# headroom over the measured real-run times in release/GATE_BUDGET.md: a
+# healthy phase never trips its budget, a hung one always does. No phase runs
+# unbounded — an unlisted label falls back to DEFAULT_BUDGET_S.
+PHASE_BUDGETS: dict[str, int] = {
+    "rustfmt": 120,
+    "clippy": 900,
+    "rust": 1200,
+    "python": 600,
+    "website": 900,
+    "swift": 1200,
+    "swift-boundaries": 120,
+    "xcodegen": 180,
+    "xcodebuild": 1200,
+    "e2e-smoke": 600,
+    "ui-host": 1200,
+}
+DEFAULT_BUDGET_S = 900
+# Grace between SIGTERM and SIGKILL when a phase overruns its budget.
+KILL_GRACE_S = 10
 
 
 # --- Changed files -------------------------------------------------------
@@ -118,6 +148,20 @@ class Suite:
     trigger_desc: str
     match: Callable[[list[str]], bool]
     build: Callable[[list[str]], list[Command]]
+    # What a PASS on this suite actually proves. Printed in the summary so the
+    # gate never over-claims (e.g. loopflow compiles the app; it does not run
+    # hosted UI). None => a pass means the suite's commands passed, nothing more.
+    proves: Optional[str] = None
+    # A required gate that runs only when named explicitly (never under --all),
+    # because it needs a permissioned host. Absence of that host is a failure,
+    # never a silent skip.
+    host_gate: bool = False
+    # Runs before the suite's commands. A returned string is an immediate,
+    # actionable failure (e.g. wrong platform, simulated capability gap).
+    precheck: Optional[Callable[[], Optional[str]]] = None
+    # Refines a raw command failure using its captured log — e.g. recognising a
+    # UI-runner bootstrap failure and naming the missing capability.
+    classify: Optional[Callable[[str], Optional[str]]] = None
 
 
 def _rust_commands(_changed: list[str]) -> list[Command]:
@@ -210,6 +254,92 @@ def _e2e_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
+# --- Required-host UI gate ----------------------------------------------
+#
+# The ordinary gate compiles the app but never runs a hosted UI test: the test
+# host launches the real app and needs macOS UI-automation permission, which a
+# headless/unpermissioned host lacks. Rather than silently skip UI behaviour,
+# the real run lives here as a separately named REQUIRED gate: it runs only when
+# invoked explicitly (`--ui-host`), never under `--all`, and its absence is a
+# failure that names the missing capability, not a silent pass.
+
+# Markers in xcodebuild output that mean the test *runner* failed to bootstrap
+# (a capability gap) rather than a test assertion failing (a real red).
+_UI_BOOTSTRAP_MARKERS = (
+    "Test runner never began executing",
+    "Failed to background test runner",
+    "Failed to load the test bundle",
+    "UI Testing Failure - App accessibility isn't loaded",
+    "The test runner exited with code",
+    "Timed out waiting",
+    "not permitted to send Apple events",
+    "not authorized to send Apple events",
+    "AutomationPermission",
+    "TCC",
+)
+
+_UI_CAPABILITY_HELP = (
+    "MISSING CAPABILITY: macOS UI-automation (Automation / Accessibility) "
+    "permission for the test runner.\n"
+    "NEXT ACTION: on the maintained UI host, grant the test runner Automation "
+    "and Accessibility permission (System Settings > Privacy & Security), then "
+    "re-run `uv run python scripts/test.py --ui-host`. "
+    "See release/UI_HOST_GATE.md."
+)
+
+
+def _ui_host_commands(_changed: list[str]) -> list[Command]:
+    swift_dir = REPO_ROOT / "swift"
+    xcresult = REPO_ROOT / XCODE_DERIVED_DATA / "ui-host.xcresult"
+    return [
+        Command(["xcodegen", "generate"], swift_dir, "xcodegen"),
+        Command(
+            [
+                "xcodebuild",
+                "test",
+                "-project",
+                "LoopflowSwift.xcodeproj",
+                "-scheme",
+                "LoopflowMac",
+                "-destination",
+                "platform=macOS",
+                "-derivedDataPath",
+                XCODE_DERIVED_DATA,
+                "-disableAutomaticPackageResolution",
+                "-only-testing:LoopflowUITests",
+                "-resultBundlePath",
+                str(xcresult),
+                *XCODE_LOCAL_SIGNING,
+            ],
+            swift_dir,
+            "ui-host",
+        ),
+    ]
+
+
+def _ui_host_precheck() -> Optional[str]:
+    """Fail fast before launching Xcode when the host obviously can't host the
+    UI run: wrong OS, or a simulated capability gap for the proof harness."""
+    if os.environ.get("LF_UI_HOST_SIMULATE_NO_PERMISSION"):
+        return _UI_CAPABILITY_HELP
+    if platform.system() != "Darwin":
+        return (
+            "MISSING CAPABILITY: the required UI host gate needs macOS; this "
+            f"host is {platform.system()}.\n"
+            "NEXT ACTION: run `uv run python scripts/test.py --ui-host` on the "
+            "maintained macOS UI host. See release/UI_HOST_GATE.md."
+        )
+    return None
+
+
+def _ui_host_classify(log_text: str) -> Optional[str]:
+    """Refine a ui-host failure: a runner-bootstrap failure is a capability gap,
+    not a red test. Return None to keep the raw failure (a genuine assertion)."""
+    if any(marker in log_text for marker in _UI_BOOTSTRAP_MARKERS):
+        return _UI_CAPABILITY_HELP
+    return None
+
+
 # Ordered fast -> slow. Slow suites are gated behind --all / their own flag.
 SUITES: list[Suite] = [
     Suite(
@@ -265,6 +395,21 @@ SUITES: list[Suite] = [
             or _touches_exact(c, "swift/project.yml")
         ),
         build=_loopflow_commands,
+        proves=(
+            "app + UI-test runners COMPILE (build-for-testing). Hosted UI "
+            "behaviour is NOT run here; the required `--ui-host` gate owns it."
+        ),
+    ),
+    Suite(
+        name="ui-host",
+        slow=True,
+        trigger_desc="never auto-selected; explicit --ui-host only",
+        match=lambda _c: False,
+        build=_ui_host_commands,
+        proves="hosted LoopflowUITests actually EXECUTE on a permissioned host.",
+        host_gate=True,
+        precheck=_ui_host_precheck,
+        classify=_ui_host_classify,
     ),
 ]
 
@@ -284,11 +429,18 @@ def build_plan(changed: list[str], run_all: bool, forced: set[str]) -> list[Plan
     plans: list[Plan] = []
     for suite in SUITES:
         matched = suite.match(changed)
-        if run_all:
-            plans.append(Plan(suite, True, "all suites (--all)", suite.build([])))
-            continue
         if suite.name in forced:
             plans.append(Plan(suite, True, f"forced (--{suite.name})", suite.build(changed)))
+            continue
+        if suite.host_gate:
+            # Required host gate: never auto-run (not even under --all); it
+            # needs a permissioned host and is named explicitly.
+            plans.append(
+                Plan(suite, False, f"required host gate (run --{suite.name} on its host)", [])
+            )
+            continue
+        if run_all:
+            plans.append(Plan(suite, True, "all suites (--all)", suite.build([])))
             continue
         if not matched:
             plans.append(Plan(suite, False, f"skipped (no {suite.trigger_desc} changes)", []))
@@ -313,6 +465,14 @@ def _fmt_cmd(cmd: Command) -> str:
     return prefix + " ".join(cmd.argv)
 
 
+def _budget_for(label: str) -> int:
+    return PHASE_BUDGETS.get(label, DEFAULT_BUDGET_S)
+
+
+def _plan_budget(plan: Plan) -> int:
+    return sum(_budget_for(cmd.label) for cmd in plan.commands)
+
+
 def print_plan(plans: list[Plan], changed: list[str]) -> None:
     print(f"Changed files: {len(changed)}")
     for path in changed:
@@ -321,59 +481,178 @@ def print_plan(plans: list[Plan], changed: list[str]) -> None:
     print("Plan:")
     for plan in plans:
         mark = "RUN " if plan.run else "SKIP"
-        print(f"  {mark} {plan.suite.name:<9} {plan.reason}")
+        budget = f"  [budget {_plan_budget(plan)}s]" if plan.run else ""
+        print(f"  {mark} {plan.suite.name:<9} {plan.reason}{budget}")
+        if plan.suite.proves:
+            print(f"         proves: {plan.suite.proves}")
         if plan.run:
             for cmd in plan.commands:
-                print(f"         $ {_fmt_cmd(cmd)}")
+                print(f"         $ {_fmt_cmd(cmd)}  (budget {_budget_for(cmd.label)}s)")
 
 
 # --- Running -------------------------------------------------------------
 
 
-def _run_suite(plan: Plan) -> bool:
+@dataclass
+class SuiteOutcome:
+    ok: bool
+    elapsed_s: float
+    # Actionable message when not ok (timeout, missing tool, classified gap).
+    failure: Optional[str] = None
+
+
+def _kill_group(proc: "subprocess.Popen[str]") -> None:
+    """SIGTERM the phase's whole process group, SIGKILL after a grace period.
+
+    A hung `xcodebuild` spawns a test-host child; killing only the parent leaves
+    the runner alive and the terminal wedged, so we signal the group.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=KILL_GRACE_S)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _run_command(cmd: Command, artifact_dir: Path) -> Optional[str]:
+    """Run one command bounded by its budget, streaming output live and teeing
+    it to a per-phase log. Return None on success or an actionable failure."""
+    budget = _budget_for(cmd.label)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    log_path = artifact_dir / f"{cmd.label}.log"
+    started = time.monotonic()
+    with open(log_path, "w") as logf:
+        try:
+            proc = subprocess.Popen(
+                cmd.argv,
+                cwd=cmd.cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # own process group for a clean group-kill
+                bufsize=1,
+                text=True,
+            )
+        except FileNotFoundError:
+            return (
+                f"MISSING TOOL: '{cmd.argv[0]}' is not installed on this host. "
+                f"Install it or run the {cmd.label} phase where it exists."
+            )
+
+        def _pump() -> None:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                logf.write(line)
+
+        pump = threading.Thread(target=_pump, daemon=True)
+        pump.start()
+        try:
+            proc.wait(timeout=budget)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc)
+            pump.join(timeout=5)
+            elapsed = time.monotonic() - started
+            return (
+                f"TIMEOUT: phase '{cmd.label}' exceeded its {budget}s budget "
+                f"(ran {elapsed:.0f}s) and was killed. No phase hangs the gate. "
+                f"Log: {log_path}"
+            )
+        pump.join(timeout=5)
+
+    if proc.returncode != 0:
+        if proc.returncode < 0:
+            reason = f"killed by signal {-proc.returncode}"
+        else:
+            reason = f"exit {proc.returncode}"
+        return f"FAILED ({cmd.label}, {reason}). Log: {log_path}"
+    return None
+
+
+def _run_suite(plan: Plan, artifact_root: Path) -> SuiteOutcome:
     bar = "=" * 72
     print(f"\n{bar}")
-    print(f" SUITE: {plan.suite.name}  ({plan.reason})")
+    print(f" SUITE: {plan.suite.name}  ({plan.reason})  [budget {_plan_budget(plan)}s]")
+    if plan.suite.proves:
+        print(f" proves: {plan.suite.proves}")
     print(bar, flush=True)
+    started = time.monotonic()
+    artifact_dir = artifact_root / plan.suite.name
+
+    if plan.suite.precheck is not None:
+        gap = plan.suite.precheck()
+        if gap is not None:
+            print(f"\n[{plan.suite.name}] {gap}", flush=True)
+            return SuiteOutcome(False, time.monotonic() - started, gap)
+
     for cmd in plan.commands:
-        print(f"$ {_fmt_cmd(cmd)}", flush=True)
-        result = subprocess.run(cmd.argv, cwd=cmd.cwd)
-        if result.returncode != 0:
-            print(
-                f"\n[{plan.suite.name}] command failed ({cmd.label}, exit {result.returncode})",
-                flush=True,
-            )
-            return False
-    return True
+        print(f"\n$ {_fmt_cmd(cmd)}  (budget {_budget_for(cmd.label)}s)", flush=True)
+        failure = _run_command(cmd, artifact_dir)
+        if failure is not None:
+            if plan.suite.classify is not None:
+                log_path = artifact_dir / f"{cmd.label}.log"
+                log_text = log_path.read_text() if log_path.exists() else ""
+                refined = plan.suite.classify(log_text)
+                if refined is not None:
+                    failure = refined
+            print(f"\n[{plan.suite.name}] {failure}", flush=True)
+            return SuiteOutcome(False, time.monotonic() - started, failure)
+    return SuiteOutcome(True, time.monotonic() - started)
 
 
 def run_plans(plans: list[Plan]) -> int:
-    results: dict[str, bool] = {}
+    artifact_root = GATE_ARTIFACT_ROOT / f"run-{os.getpid()}"
+    total_budget = sum(_plan_budget(p) for p in plans if p.run)
+    running = [p.suite.name for p in plans if p.run]
+    if running:
+        print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
+        print(f"Artifacts on failure: {artifact_root}")
+
+    outcomes: dict[str, SuiteOutcome] = {}
     for plan in plans:
         if plan.run:
-            results[plan.suite.name] = _run_suite(plan)
+            outcomes[plan.suite.name] = _run_suite(plan, artifact_root)
 
     print("\n" + "=" * 72)
     print(" SUMMARY")
     print("=" * 72)
     for plan in plans:
         if plan.run:
-            status = "PASS" if results[plan.suite.name] else "FAIL"
+            outcome = outcomes[plan.suite.name]
+            status = "PASS" if outcome.ok else "FAIL"
+            detail = f"{outcome.elapsed_s:.0f}s / {_plan_budget(plan)}s budget"
         else:
             status = "----"
-        detail = plan.reason if not plan.run else ""
+            detail = plan.reason
         print(f"  {status}  {plan.suite.name:<9} {detail}")
 
-    passed = [name for name, ok in results.items() if ok]
-    failed = [name for name, ok in results.items() if not ok]
+    passed = [name for name, o in outcomes.items() if o.ok]
+    failed = [(name, o) for name, o in outcomes.items() if not o.ok]
+    total_elapsed = sum(o.elapsed_s for o in outcomes.values())
     print()
-    if not results:
+    if not outcomes:
         print("No suites ran (nothing changed). Use --all to force the full matrix.")
         return 0
     if failed:
-        print(f"Result: FAIL ({len(passed)} passed, {len(failed)} failed: {', '.join(failed)})")
+        for name, outcome in failed:
+            print(f"[{name}] {outcome.failure}")
+        names = ", ".join(name for name, _ in failed)
+        print(
+            f"\nResult: FAIL ({len(passed)} passed, {len(failed)} failed: {names}) "
+            f"in {total_elapsed:.0f}s / {total_budget}s budget"
+        )
         return 1
-    print(f"Result: PASS ({len(passed)} suites)")
+    print(f"Result: PASS ({len(passed)} suites) in {total_elapsed:.0f}s / {total_budget}s budget")
     return 0
 
 
@@ -408,7 +687,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
-    forced = {suite.name for suite in SUITES if getattr(args, suite.name)}
+    forced = {suite.name for suite in SUITES if getattr(args, suite.name.replace("-", "_"))}
 
     base = _resolve_base(args.base)
     changed = changed_files(base)

@@ -174,6 +174,17 @@ const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $st
   }
 }"#;
 
+// Selects `identifier` back because Linear reassigns the issue number on a team
+// move (`W2-155` → `PRD-<next>`); the caller cannot predict the new value.
+const MOVE_ITEM_TO_TEAM_MUTATION: &str = r#"mutation MoveIssueToTeam($id: String!, $teamId: String!) {
+  issueUpdate(id: $id, input: { teamId: $teamId }) {
+    issue {
+      id
+      identifier
+    }
+  }
+}"#;
+
 const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
     nodes {
@@ -634,6 +645,35 @@ impl LinearClient {
         Ok(())
     }
 
+    /// Move an issue into another team and return its **new** identifier. The
+    /// issue UUID is preserved (Session/PR/comment ownership survives); only the
+    /// number changes, and Linear assigns it at move time, so we read it back.
+    pub async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
+        let response: IssueUpdateIdentifierData = self
+            .graphql(
+                MOVE_ITEM_TO_TEAM_MUTATION,
+                json!({
+                    "id": item_id,
+                    "teamId": team_id,
+                }),
+            )
+            .await?;
+        Ok(response.issue_update.issue.identifier)
+    }
+
+    /// The key (Task prefix) of a team by its id, e.g. `PRD` for the product
+    /// team. Errors if no team carries that id.
+    pub async fn team_key(&self, team_id: &str) -> PmResult<String> {
+        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+        response
+            .teams
+            .nodes
+            .into_iter()
+            .find(|team| team.id == team_id)
+            .map(|team| team.key)
+            .ok_or_else(|| PmError::Message(format!("no Linear team with id {team_id}")))
+    }
+
     pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
         let state_id = self.completed_state_id().await?;
         let _: Value = self
@@ -727,6 +767,22 @@ struct InitiativeCreateData {
 struct IssueCreateData {
     #[serde(rename = "issueCreate")]
     issue_create: IssuePayload,
+}
+
+#[derive(Deserialize)]
+struct IssueUpdateIdentifierData {
+    #[serde(rename = "issueUpdate")]
+    issue_update: IssueIdentifierPayload,
+}
+
+#[derive(Deserialize)]
+struct IssueIdentifierPayload {
+    issue: IssueIdentifierNode,
+}
+
+#[derive(Deserialize)]
+struct IssueIdentifierNode {
+    identifier: String,
 }
 
 #[derive(Deserialize)]
@@ -1246,6 +1302,50 @@ mod tests {
             .expect("query")
             .contains("projectArchive"));
         assert_eq!(archive["variables"]["id"], "project-1");
+    }
+
+    #[tokio::test]
+    async fn move_item_to_team_returns_the_reassigned_identifier() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "issueUpdate": { "issue": { "id": "issue-9", "identifier": "PRD-4" } } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-old".to_string()),
+            base_url,
+        );
+
+        let new_identifier = client
+            .move_item_to_team("issue-9", "team-prd")
+            .await
+            .expect("move succeeds");
+
+        assert_eq!(new_identifier, "PRD-4");
+        let requests = requests.lock().await;
+        let body: Value = serde_json::from_str(&requests[0].body).expect("move json");
+        assert!(body["query"]
+            .as_str()
+            .expect("query")
+            .contains("issueUpdate"));
+        assert_eq!(body["variables"]["id"], "issue-9");
+        assert_eq!(body["variables"]["teamId"], "team-prd");
+    }
+
+    #[tokio::test]
+    async fn team_key_resolves_the_prefix_for_a_team_id() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "teams": { "nodes": [
+                { "id": "team-w2", "name": "Wave 2", "key": "W2" },
+                { "id": "team-prd", "name": "Product", "key": "PRD" }
+            ] } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        assert_eq!(client.team_key("team-prd").await.expect("key"), "PRD");
     }
 
     #[tokio::test]

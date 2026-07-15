@@ -25,6 +25,7 @@ use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
 use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
+use crate::task::TaskSessionStatus;
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -131,6 +132,46 @@ pub struct PmSyncOptions {
 pub struct PmSyncResult {
     pub actions: Vec<String>,
     pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PmReteamOptions {
+    pub wave: Option<String>,
+    /// Execute the moves. Without it, `reteam` only prints the plan (dry run).
+    pub apply: bool,
+}
+
+/// One issue that moves into the wave's team. `new_identifier` is filled only
+/// after an applied move (Linear assigns the number then).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmReteamMove {
+    pub id: String,
+    pub old_identifier: String,
+    pub title: String,
+    pub new_identifier: Option<String>,
+}
+
+/// One open issue left in place to protect a live/in-review Task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmReteamDeferral {
+    pub identifier: String,
+    pub title: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmReteamResult {
+    pub wave: String,
+    pub team_id: String,
+    pub team_key: String,
+    /// True when moves were executed; false for a dry run.
+    pub applied: bool,
+    pub moves: Vec<PmReteamMove>,
+    pub deferrals: Vec<PmReteamDeferral>,
+    /// Issues already carrying the target team key (skipped — idempotency).
+    pub already: usize,
+    /// Completed issues left in the shared team as historical.
+    pub historical: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +438,18 @@ impl PmClient {
     async fn move_item_to_project(&self, item_id: &str, project_id: &str) -> PmResult<()> {
         match self {
             Self::Linear(client) => client.move_item_to_project(item_id, project_id).await,
+        }
+    }
+
+    async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
+        match self {
+            Self::Linear(client) => client.move_item_to_team(item_id, team_id).await,
+        }
+    }
+
+    async fn team_key(&self, team_id: &str) -> PmResult<String> {
+        match self {
+            Self::Linear(client) => client.team_key(team_id).await,
         }
     }
 
@@ -1354,6 +1407,174 @@ async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<Pm
     }
 }
 
+// ── reteam ──────────────────────────────────────────────────────────
+
+/// How `reteam` treats one issue. Pure classification, so it is unit-tested
+/// without a live Linear.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReteamClass {
+    /// Completed → leave in the shared team as historical (shipped references to
+    /// `W2-N` are immutable; renumbering them buys nothing).
+    Historical,
+    /// Already carries the target team key → skip (idempotency key).
+    Already,
+    /// A non-terminal Task Session owns it → defer to protect live/in-review work.
+    Defer(String),
+    /// Open, settled, not yet in the team → move.
+    Move,
+}
+
+/// An issue moves only if it is open, not already in the target team, and has no
+/// non-terminal Session. `is_terminal()` is `Completed | Abandoned`, so every
+/// other Session state (running, waiting, blocked, failed, …) defers — the
+/// conservative "protect anything active or in-review" rule.
+fn classify_reteam_item(
+    item: &PmItem,
+    team_key: &str,
+    session_status: Option<TaskSessionStatus>,
+) -> ReteamClass {
+    if item.completed {
+        return ReteamClass::Historical;
+    }
+    if identifier_has_team_prefix(&item.identifier, team_key) {
+        return ReteamClass::Already;
+    }
+    match session_status {
+        Some(status) if !status.is_terminal() => ReteamClass::Defer(status.as_str().to_string()),
+        _ => ReteamClass::Move,
+    }
+}
+
+/// Whether an identifier already belongs to the team keyed by `team_key`. The
+/// trailing `-` guards against a prefix collision (`PRD-` must not match a
+/// `PRODUCT-1` identifier).
+fn identifier_has_team_prefix(identifier: &str, team_key: &str) -> bool {
+    let prefix = format!("{}-", team_key.trim().to_ascii_uppercase());
+    identifier.trim().to_ascii_uppercase().starts_with(&prefix)
+}
+
+pub fn pm_reteam(
+    repo: &Path,
+    options: &PmReteamOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmReteamResult> {
+    block_on_pm(pm_reteam_async(repo, options, progress))
+}
+
+async fn pm_reteam_async(
+    repo: &Path,
+    options: &PmReteamOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmReteamResult> {
+    let wave = resolve_wave(options.wave.as_deref())?;
+    let provider = resolve_provider(repo, &wave)?;
+    let team_id = read_team(repo, &wave, provider).ok_or_else(|| {
+        OpsError::Message(format!(
+            "wave/{wave}/GOAL.md has no `pm.{}`. \
+             Run `lf pm init --wave {wave} --team-key <KEY>` to bind its team first.",
+            provider.team_key()
+        ))
+    })?;
+    let initiative = read_initiative(repo, &wave, provider).ok_or_else(|| {
+        OpsError::Message(format!(
+            "wave/{wave}/GOAL.md has no `pm.{}`. \
+             Run `lf pm init --wave {wave}` to connect its Linear Initiative.",
+            provider.initiative_key()
+        ))
+    })?;
+
+    let client = build_client(repo, provider, Some(team_id.clone())).await?;
+    let team_key = client.team_key(&team_id).await.map_err(pm_to_ops)?;
+
+    progress.status(&format!(
+        "listing wave/{wave} issues under {provider} Initiative {initiative}"
+    ));
+    let projects = client.list_projects(&initiative).await.map_err(pm_to_ops)?;
+
+    let store = open_store(&storage_config_from_env()?)
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to open task registry: {err}")))?;
+
+    let mut moves = Vec::new();
+    let mut deferrals = Vec::new();
+    let mut already = 0usize;
+    let mut historical = 0usize;
+
+    for project in &projects {
+        let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
+        for item in items {
+            // Look up the protecting Session by the issue's stable UUID.
+            let session_status = store
+                .get_task_session_by_issue(&item.id)
+                .await
+                .map_err(|err| OpsError::Message(format!("failed to read task registry: {err}")))?
+                .map(|session| session.status);
+            match classify_reteam_item(&item, &team_key, session_status) {
+                ReteamClass::Historical => historical += 1,
+                ReteamClass::Already => already += 1,
+                ReteamClass::Defer(reason) => deferrals.push(PmReteamDeferral {
+                    identifier: item.identifier,
+                    title: item.name,
+                    reason,
+                }),
+                ReteamClass::Move => moves.push(PmReteamMove {
+                    id: item.id,
+                    old_identifier: item.identifier,
+                    title: item.name,
+                    new_identifier: None,
+                }),
+            }
+        }
+    }
+
+    if options.apply {
+        for mv in &mut moves {
+            progress.status(&format!(
+                "moving {} into team {team_key}",
+                mv.old_identifier
+            ));
+            let new_identifier = client
+                .move_item_to_team(&mv.id, &team_id)
+                .await
+                .map_err(pm_to_ops)?;
+            // Traceability: the number cannot be carried, so record where it came
+            // from. The UUID (and thus every Session/PR/comment link) is intact.
+            client
+                .comment(
+                    &mv.id,
+                    &format!(
+                        "Reteamed by loopflow: was {}, now {new_identifier}. \
+                         Linear reassigns the number on a team move; the issue id is unchanged.",
+                        mv.old_identifier
+                    ),
+                )
+                .await
+                .map_err(pm_to_ops)?;
+            mv.new_identifier = Some(new_identifier);
+        }
+        if !moves.is_empty() {
+            // Refresh the snapshot so cached identifiers reflect the new prefixes.
+            let ctx = PmContext {
+                client,
+                provider,
+                initiative,
+            };
+            refresh_pm_snapshot(repo, &wave, &ctx).await?;
+        }
+    }
+
+    Ok(PmReteamResult {
+        wave,
+        team_id,
+        team_key,
+        applied: options.apply,
+        moves,
+        deferrals,
+        already,
+        historical,
+    })
+}
+
 // ── sync / doctor ──────────────────────────────────────────────────
 
 pub fn pm_sync(
@@ -1483,6 +1704,24 @@ async fn pm_sync_async(
                 diagnostics.push(format!(
                     "Linear Project `{}` ({}) in wave/{wave} has no open tasks",
                     project.name, project.id
+                ));
+            }
+        }
+        // Stranded issues: a team-bound wave whose open issues still carry a
+        // foreign prefix are `reteam` candidates not yet moved.
+        if let Some(team_id) = read_team(repo, wave, provider) {
+            let team_key = client.team_key(&team_id).await.map_err(pm_to_ops)?;
+            let stranded = snapshot
+                .items
+                .iter()
+                .filter(|item| {
+                    !item.completed && !identifier_has_team_prefix(&item.identifier, &team_key)
+                })
+                .count();
+            if stranded > 0 {
+                diagnostics.push(format!(
+                    "wave/{wave} has {stranded} open issue(s) not in team {team_key}; \
+                     run `lf pm reteam --wave {wave}` to move the settled ones"
                 ));
             }
         }
@@ -2058,6 +2297,85 @@ mod tests {
         assert_eq!(default_team_key("infrastructure"), "INF");
         assert_eq!(default_team_key("intelligence"), "INT");
         assert_eq!(default_team_key("x"), "LF");
+    }
+
+    fn reteam_item(identifier: &str, completed: bool) -> PmItem {
+        PmItem {
+            id: format!("uuid-of-{identifier}"),
+            identifier: identifier.to_string(),
+            name: format!("Task {identifier}"),
+            description: String::new(),
+            rank: 0,
+            completed,
+            project: None,
+            assignee: None,
+        }
+    }
+
+    #[test]
+    fn identifier_prefix_needs_the_trailing_dash() {
+        assert!(identifier_has_team_prefix("PRD-4", "PRD"));
+        assert!(identifier_has_team_prefix("prd-4", "prd"));
+        // A shared leading substring must not false-match.
+        assert!(!identifier_has_team_prefix("PRODUCT-1", "PRD"));
+        assert!(!identifier_has_team_prefix("W2-155", "PRD"));
+    }
+
+    #[test]
+    fn reteam_classifies_move_defer_leave_and_skip() {
+        // Completed → historical, regardless of team.
+        assert_eq!(
+            classify_reteam_item(&reteam_item("W2-1", true), "PRD", None),
+            ReteamClass::Historical
+        );
+        // Already in the target team → skip (idempotency).
+        assert_eq!(
+            classify_reteam_item(&reteam_item("PRD-7", false), "PRD", None),
+            ReteamClass::Already
+        );
+        // Open with a running Session → defer with the status as reason.
+        assert_eq!(
+            classify_reteam_item(
+                &reteam_item("W2-2", false),
+                "PRD",
+                Some(TaskSessionStatus::Running)
+            ),
+            ReteamClass::Defer("running".to_string())
+        );
+        // Open with a terminal Session → move (work is over).
+        assert_eq!(
+            classify_reteam_item(
+                &reteam_item("W2-3", false),
+                "PRD",
+                Some(TaskSessionStatus::Completed)
+            ),
+            ReteamClass::Move
+        );
+        // Open with no Session → move.
+        assert_eq!(
+            classify_reteam_item(&reteam_item("W2-4", false), "PRD", None),
+            ReteamClass::Move
+        );
+    }
+
+    #[test]
+    fn reteam_defers_every_non_terminal_session_state() {
+        for status in [
+            TaskSessionStatus::Created,
+            TaskSessionStatus::Starting,
+            TaskSessionStatus::Running,
+            TaskSessionStatus::Waiting,
+            TaskSessionStatus::Blocked,
+            TaskSessionStatus::Failed,
+        ] {
+            assert!(
+                matches!(
+                    classify_reteam_item(&reteam_item("W2-9", false), "PRD", Some(status)),
+                    ReteamClass::Defer(_)
+                ),
+                "{status:?} must defer"
+            );
+        }
     }
 
     #[test]

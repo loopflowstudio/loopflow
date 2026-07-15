@@ -980,6 +980,15 @@ pub enum PmCommand {
     },
     /// Compare Linear with local wave bindings
     Doctor,
+    /// Move a wave's existing settled issues into its own Linear team
+    Reteam {
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Execute the moves; without it, `reteam` only prints the plan (dry run)
+        #[arg(long)]
+        apply: bool,
+    },
     /// Refresh the local PM snapshot from Linear
     Sync {
         /// Wave name (all linked waves if omitted)
@@ -1751,6 +1760,28 @@ mod tests {
 
         assert_eq!(team_key.as_deref(), Some("PRD"));
         assert_eq!(team_name.as_deref(), Some("Product"));
+    }
+
+    #[test]
+    fn pm_reteam_defaults_to_dry_run() {
+        let cli = Cli::try_parse_from(["lf", "pm", "reteam", "--wave", "product"]).expect("parse");
+        let Some(Commands::Pm {
+            cmd: PmCommand::Reteam { wave, apply },
+        }) = cli.command
+        else {
+            panic!("expected pm reteam command");
+        };
+        assert_eq!(wave.as_deref(), Some("product"));
+        assert!(!apply);
+
+        let cli = Cli::try_parse_from(["lf", "pm", "reteam", "--apply"]).expect("parse apply");
+        let Some(Commands::Pm {
+            cmd: PmCommand::Reteam { apply, .. },
+        }) = cli.command
+        else {
+            panic!("expected pm reteam command");
+        };
+        assert!(apply);
     }
 
     #[test]

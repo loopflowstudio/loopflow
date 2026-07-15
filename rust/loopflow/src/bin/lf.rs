@@ -1189,6 +1189,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Pm { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
             }
+            Some(Commands::Home { cmd }) => {
+                in_repo_runtime(&args, |repo| loopflow::lf::commands::home::run(cmd, repo))
+            }
             Some(Commands::SyncSkills { yes, no_prune }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune)
             }),

@@ -184,6 +184,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: PmCommand,
     },
+    /// A Wave's execution Home: resolve, probe, and start it on its Home
+    Home {
+        #[command(subcommand)]
+        cmd: HomeCommand,
+    },
     /// Compile loopflow skills into your home vendor Skills directories.
     #[command(name = "sync-skills", hide = true)]
     SyncSkills {
@@ -1078,7 +1083,33 @@ pub enum PmTaskCommand {
     },
 }
 
-#[derive(Subcommand, Debug)]
+/// `lf home` — the shared Home control path a conductor surface drives.
+#[derive(Debug, Subcommand)]
+pub enum HomeCommand {
+    /// Probe a Wave's Home for liveness and the one contextual action.
+    ///
+    /// Prints the Home address, its state (unreachable/stopped/running/unknown)
+    /// with the evidence, the attach endpoint when running, and the action to
+    /// offer. `--json` emits the `HomeRuntimeDto` a UI consumes.
+    Probe {
+        /// Wave name; defaults to the ambient wave.
+        wave: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Idempotently start a Wave on its configured Home and return the attach
+    /// identity. Safe to repeat: an already-running Home is returned as-is rather
+    /// than launched twice. Targets the Home, not the machine running this
+    /// command.
+    Start {
+        /// Wave name; defaults to the ambient wave.
+        wave: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum AuthCommand {
     /// Show authentication status for local credentials
     Status {

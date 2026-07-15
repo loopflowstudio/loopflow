@@ -12,7 +12,12 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveStatusSnapshot.self, from: data)
 
-        #expect(detail.wave.home == .ssh(host: "mini-heart", repo: "src/loopflow"))
+        #expect(detail.wave.home.address == "ssh://jack@mini-heart")
+        #expect(detail.wave.home.owner == "jack")
+        #expect(detail.wave.home.location == .ssh(host: "mini-heart", port: nil))
+        // The Home runtime evidence carries the state and the one contextual action.
+        #expect(detail.homeRuntime.state == .running)
+        #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))
         #expect(detail.projects[0].project.slug == "release-feedback")
         #expect(detail.projects[0].tasks.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.projects[0].tasks[0].prs.compactMap(\.publication?.github?.number) == [912])

@@ -55,7 +55,7 @@ pub struct Credentials {
 /// the forwarded `GH_TOKEN` over HTTPS, so agent forwarding is dead weight that
 /// would hand the caller's whole SSH identity to the remote.
 pub fn run(
-    host: &str,
+    dest: &str,
     repo: Option<&str>,
     secret_names: &[String],
     forward_agent: bool,
@@ -63,19 +63,26 @@ pub fn run(
 ) -> anyhow::Result<()> {
     if cmd.is_empty() {
         return Err(anyhow!(
-            "lf ssh needs a command after `--`, e.g. `lf ssh {host} -- lf pr open`"
+            "lf ssh needs a command after `--`, e.g. `lf ssh {dest} -- lf pr open`"
         ));
     }
-    run_with_env(host, repo, secret_names, forward_agent, cmd, &[])
+    run_with_env(dest, None, repo, secret_names, forward_agent, cmd, &[])
 }
 
-/// Run a Wave-home-routed `lf` command on `host`, exporting `LF_HOME_ROUTED=1`
-/// so the remote `lf` runs the command locally instead of routing it back to
-/// its own home — the single break in the forward loop. Reuses the same
-/// credential-forwarding preamble as `lf ssh`; no new transport or secret path.
-pub fn run_routed(host: &str, repo: Option<&str>, cmd: &[String]) -> anyhow::Result<()> {
+/// Run a Wave-home-routed `lf` command on `dest` (an `owner@host` destination)
+/// with an optional `port`, exporting `LF_HOME_ROUTED=1` so the remote `lf` runs
+/// the command locally instead of routing it back to its own home — the single
+/// break in the forward loop. Reuses the same credential-forwarding preamble as
+/// `lf ssh`; no new transport or secret path.
+pub fn run_routed(
+    dest: &str,
+    port: Option<u16>,
+    repo: Option<&str>,
+    cmd: &[String],
+) -> anyhow::Result<()> {
     run_with_env(
-        host,
+        dest,
+        port,
         repo,
         &[],
         false,
@@ -84,8 +91,46 @@ pub fn run_routed(host: &str, repo: Option<&str>, cmd: &[String]) -> anyhow::Res
     )
 }
 
+/// Run a routed `lf` command on `dest`/`port` and capture its stdout, used by
+/// the Home probe to read a remote `lf status --json` over the same SSH and
+/// credential machinery. On a transport failure returns [`SshCaptureError`] so
+/// the caller can classify unreachable distinctly from a command that ran but
+/// answered unexpectedly.
+pub fn capture_routed(
+    dest: &str,
+    port: Option<u16>,
+    cmd: &[String],
+) -> Result<String, SshCaptureError> {
+    let repo = DEFAULT_REPO;
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
+    let credentials = runtime
+        .block_on(resolve_credentials(&[]))
+        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
+    let preamble = build_preamble(
+        &credentials,
+        dest,
+        repo,
+        cmd,
+        &[(crate::engine::wave_home::HOME_ROUTED_ENV, "1")],
+    );
+    run_ssh_capture(dest, port, &preamble)
+}
+
+/// Why a captured SSH command did not yield usable stdout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshCaptureError {
+    /// The SSH transport failed (unreachable host, refused auth, timeout).
+    Unreachable(String),
+    /// The remote command ran but exited nonzero.
+    Command { code: i32, stderr: String },
+    /// A local failure before ssh (runtime, credential resolution).
+    Local(String),
+}
+
 fn run_with_env(
-    host: &str,
+    dest: &str,
+    port: Option<u16>,
     repo: Option<&str>,
     secret_names: &[String],
     forward_agent: bool,
@@ -95,8 +140,8 @@ fn run_with_env(
     let repo = repo.unwrap_or(DEFAULT_REPO);
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     let credentials = runtime.block_on(resolve_credentials(secret_names))?;
-    let preamble = build_preamble(&credentials, host, repo, cmd, extra_env);
-    run_ssh(host, forward_agent, &preamble)
+    let preamble = build_preamble(&credentials, dest, repo, cmd, extra_env);
+    run_ssh(dest, port, forward_agent, &preamble)
 }
 
 /// Resolve the credential bundle from local sources. Auth tokens that aren't
@@ -317,10 +362,14 @@ enum SshOutcome {
 /// `BatchMode=yes` is the primary hang killer: it refuses every interactive
 /// prompt (password, passphrase, unknown host key) rather than blocking on the
 /// tty forever. The timeouts bound the connect handshake and a stalled session.
-fn ssh_args(host: &str, forward_agent: bool) -> Vec<String> {
+fn ssh_args(dest: &str, port: Option<u16>, forward_agent: bool) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if forward_agent {
         args.push("-A".to_string());
+    }
+    if let Some(port) = port {
+        args.push("-p".to_string());
+        args.push(port.to_string());
     }
     args.push("-o".to_string());
     args.push("BatchMode=yes".to_string());
@@ -330,7 +379,7 @@ fn ssh_args(host: &str, forward_agent: bool) -> Vec<String> {
     args.push(format!("ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECS}"));
     args.push("-o".to_string());
     args.push(format!("ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}"));
-    args.push(host.to_string());
+    args.push(dest.to_string());
     args.push("bash -s".to_string());
     args
 }
@@ -359,9 +408,14 @@ fn connection_error(host: &str) -> anyhow::Error {
 /// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
 /// propagating the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
 /// so an unreachable or misconfigured host fails fast instead of hanging.
-fn run_ssh(host: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
+fn run_ssh(
+    dest: &str,
+    port: Option<u16>,
+    forward_agent: bool,
+    preamble: &str,
+) -> anyhow::Result<()> {
     let mut child = Command::new("ssh")
-        .args(ssh_args(host, forward_agent))
+        .args(ssh_args(dest, port, forward_agent))
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -378,8 +432,45 @@ fn run_ssh(host: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
     let status = child.wait().context("ssh did not complete")?;
     match classify_exit(status.code()) {
         SshOutcome::Success => Ok(()),
-        SshOutcome::ConnectionFailure => Err(connection_error(host)),
+        SshOutcome::ConnectionFailure => Err(connection_error(dest)),
         SshOutcome::CommandFailure(code) => std::process::exit(code),
+    }
+}
+
+/// Like [`run_ssh`] but captures stdout (the preamble on stdin, stdout to a
+/// buffer, stderr still inherited so ssh's own diagnostics stay visible).
+/// Classifies transport failure vs. a nonzero remote command so the Home probe
+/// can tell "unreachable" from "answered oddly".
+fn run_ssh_capture(
+    dest: &str,
+    port: Option<u16>,
+    preamble: &str,
+) -> Result<String, SshCaptureError> {
+    let mut child = Command::new("ssh")
+        .args(ssh_args(dest, port, false))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| SshCaptureError::Local(format!("failed to spawn ssh: {error}")))?;
+
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| SshCaptureError::Local("ssh stdin unavailable".to_string()))?
+        .write_all(preamble.as_bytes())
+        .map_err(|error| SshCaptureError::Local(format!("failed to write preamble: {error}")))?;
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| SshCaptureError::Local(format!("ssh did not complete: {error}")))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    match classify_exit(output.status.code()) {
+        SshOutcome::Success => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+        SshOutcome::ConnectionFailure => Err(SshCaptureError::Unreachable(
+            connection_error(dest).to_string(),
+        )),
+        SshOutcome::CommandFailure(code) => Err(SshCaptureError::Command { code, stderr }),
     }
 }
 
@@ -476,23 +567,31 @@ mod tests {
 
     #[test]
     fn ssh_args_bound_the_connection() {
-        let args = ssh_args("mini-heart", false);
+        let args = ssh_args("jack@mini-heart", None, false);
         // Primary hang killer: never block on an interactive prompt.
         assert!(args.iter().any(|a| a == "BatchMode=yes"));
         // Connect handshake and stalled-session bounds.
         assert!(args.iter().any(|a| a == "ConnectTimeout=10"));
         assert!(args.iter().any(|a| a == "ServerAliveInterval=10"));
         assert!(args.iter().any(|a| a == "ServerAliveCountMax=3"));
-        // Still targets the host and runs the piped preamble.
-        assert!(args.iter().any(|a| a == "mini-heart"));
+        // Still targets the destination and runs the piped preamble.
+        assert!(args.iter().any(|a| a == "jack@mini-heart"));
         assert_eq!(args.last().unwrap(), "bash -s");
-        // Agent forwarding stays opt-out.
+        // Agent forwarding stays opt-out; no -p without an explicit port.
         assert!(!args.iter().any(|a| a == "-A"));
+        assert!(!args.iter().any(|a| a == "-p"));
+    }
+
+    #[test]
+    fn ssh_args_pass_an_explicit_port() {
+        let args = ssh_args("jack@host", Some(2222), false);
+        let p = args.iter().position(|a| a == "-p").expect("-p present");
+        assert_eq!(args[p + 1], "2222");
     }
 
     #[test]
     fn ssh_args_opt_in_agent_forwarding() {
-        let args = ssh_args("host", true);
+        let args = ssh_args("host", None, true);
         assert_eq!(args.first().unwrap(), "-A");
     }
 

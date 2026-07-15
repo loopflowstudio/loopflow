@@ -12,7 +12,11 @@
     "endpoint": "127.0.0.1:7777",
     "created_at": "2026-07-01T00:00:00Z",
     "parent_wave_id": null,
-    "home": {"kind": "ssh", "host": "mini-heart", "repo": "src/loopflow"}
+    "home": {
+      "address": "ssh://jack@mini-heart",
+      "owner": "jack",
+      "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+    }
   },
   "loop_state": "idle",
   "projects": [
@@ -157,5 +161,16 @@
         "age_secs": 7200
       }
     ]
+  },
+  "home_runtime": {
+    "home": {
+      "address": "ssh://jack@mini-heart",
+      "owner": "jack",
+      "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+    },
+    "state": "running",
+    "reason": "resident is serving on the Home",
+    "endpoint": "127.0.0.1:7777",
+    "action": {"kind": "attach", "endpoint": "127.0.0.1:7777"}
   }
 }

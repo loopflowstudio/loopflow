@@ -195,8 +195,36 @@ separate Tasks and name the Project each advances.
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident loop |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
+| `home` | The Wave's execution Home — a user-owned address (default: the current user's local machine) |
 
 The resident loop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
+
+### Home
+
+A Wave's **Home** is where its work executes — an *owner* plus a *location*, not a
+host alias or a local/remote flag. Author it in `GOAL.md` frontmatter:
+
+```yaml
+home: jack@local              # canonical local (the default when omitted)
+home: ssh://jack@mini.local   # remote over SSH
+home: ssh://jack@10.0.0.5:22  # IPv4 + explicit port
+home: ssh://jack@[2001:db8::1] # bracketed IPv6
+home: jack@mini.local         # shorthand → ssh://jack@mini.local
+```
+
+The owner is required and is distinct from credentials — those keep riding SSH
+and Doppler. A public IP, a private/Tailscale DNS name, and a public host all use
+the same `ssh://` location; whether it answers is *operational evidence*, not part
+of the address. Project and Task launches inherit the Home, and repo/PR/release/PM
+commands run in a remote-home Wave forward there over `lf ssh`.
+
+Resolve and act on a Wave's Home:
+
+```bash
+lf home probe <wave>   # reachable? stopped? running? — with the reason and next action
+lf home start <wave>   # idempotently start (or attach to) the Wave on its Home
+lf status <wave>       # includes the Home address and probed runtime evidence
+```
 
 ---
 

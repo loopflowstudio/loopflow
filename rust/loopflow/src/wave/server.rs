@@ -114,13 +114,14 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 use tokio::sync::{broadcast, watch};
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
-use crate::wave::runtime::{InboxItem, WaveRuntime};
+use crate::wave::runtime::{InboxItem, TurnBroadcast, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
@@ -615,13 +616,15 @@ fn first_line(content: &str) -> Option<String> {
 
 /// The served mind's thread as SSE: the loop state, the thread on connect
 /// (open turn included, status `running`), then live frames — `state` on every
-/// transition, `turn` ids repeating by design (every frame replaces the
-/// client's state for that id, so an in-progress turn updates in place and its
-/// terminal frame lands under the same id), `memory` on every curation
-/// (live-only; the file is the durable state), and `memory-add` for replayable
-/// facts. Snapshot and subscription are atomic in the runtime (broadcasts
-/// share the append lock), so no live frame is ever older than the replayed
-/// snapshot.
+/// transition; `turn` (whole turn, replace-by-id) when a turn opens or
+/// finalizes, with `turn-delta` (one increment, absorb-by-id) for in-turn
+/// growth so a per-token turn does not re-serialize whole each frame; `resync`
+/// when the turn broadcast lagged (the client reconnects for a fresh atomic
+/// snapshot); `memory` on every curation (live-only; the file is the durable
+/// state); and `memory-add` for replayable facts. Snapshot and subscription are
+/// atomic in the runtime (broadcasts share the append lock), so no live frame is
+/// ever older than the replayed snapshot, and the client's delta reconstruction
+/// picks up exactly where the snapshot's open turn left off.
 ///
 /// There is no channel scoping. Agent-to-agent broadcast is the bus — a table,
 /// polled from a cursor, with no server in the path (`crate::wave::bus`).
@@ -672,11 +675,11 @@ async fn events_handler(
             )
             .chain(inbox_replay),
     );
-    // The frame's wire JSON was serialized once at the send site. Lagged:
-    // the client fell behind; it resyncs from /conversation.
-    let live_turns = live_stream(sub.turn_rx, |frame| {
-        Event::default().event("turn").data(frame.json.as_str())
-    });
+    // Whole turns ride `turn` frames, in-turn growth rides `turn-delta` frames,
+    // and a lag emits an explicit `resync` (never a silent drop — see
+    // `turn_event_stream`). The frame's wire JSON was serialized once at the
+    // send site.
+    let live_turns = turn_event_stream(sub.turn_rx);
     // Lagged: fine — the next transition carries the current state.
     let live_states = live_stream(sub.state_rx, |s| state_event(&s));
     let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
@@ -723,6 +726,42 @@ where
     BroadcastStream::new(rx).filter_map(move |res| {
         let out = res.ok().map(|value| Ok(to_event(value)));
         async move { out }
+    })
+}
+
+/// The live turn substream: whole turns as `turn` frames (replace-by-id),
+/// in-turn increments as `turn-delta` frames (absorb-by-id). Unlike the other
+/// live streams this one must NOT silently drop on lag: a client grows its open
+/// turn from deltas, so a swallowed increment leaves its reconstruction
+/// permanently short a fragment — a silently corrupt transcript. Instead a lag
+/// emits an explicit `resync` frame and ends the substream; the client
+/// reconnects to `/events` for a fresh atomic snapshot
+/// ([`WaveRuntime::subscribe_with_snapshot`]), the only resync with no
+/// snapshot-vs-stream cursor race. Whole frames at turn open and finalize
+/// re-baseline the reconstruction for free between resyncs.
+fn turn_event_stream(
+    rx: broadcast::Receiver<TurnBroadcast>,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
+    stream::unfold(Some(BroadcastStream::new(rx)), |state| async move {
+        let mut inner = state?;
+        match inner.next().await {
+            Some(Ok(TurnBroadcast::Whole(frame))) => Some((
+                Ok(Event::default().event("turn").data(frame.json.as_str())),
+                Some(inner),
+            )),
+            Some(Ok(TurnBroadcast::Delta(frame))) => Some((
+                Ok(Event::default()
+                    .event("turn-delta")
+                    .data(frame.json.as_str())),
+                Some(inner),
+            )),
+            // Lag: signal an explicit resync, then end the substream (state
+            // `None`) so the next poll returns nothing and the client reconnects.
+            Some(Err(BroadcastStreamRecvError::Lagged(_))) => {
+                Some((Ok(Event::default().event("resync").data("reconnect")), None))
+            }
+            None => None,
+        }
     })
 }
 

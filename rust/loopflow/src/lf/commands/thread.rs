@@ -19,12 +19,13 @@
 //! and turn boundaries stay out of chat.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use anyhow::Result;
 
 use crate::chat::turns::{
-    ChatRole, ChatTurn, ChildActivityKind, ChildActivitySubject, ChildControlActivity,
+    ChatRole, ChatTurn, ChildActivityKind, ChildActivitySubject, ChildControlActivity, TurnDelta,
 };
 use crate::chat::types::Lifecycle;
 use crate::lf::commands::chat::{resolve_target, CliContext};
@@ -70,7 +71,16 @@ pub(crate) async fn follow(wave: Option<&str>) -> Result<()> {
             let mut saw_frame = false;
             let result = stream_events(endpoint, "", &mut |frame| {
                 saw_frame = true;
+                // A `resync` means the live turn stream lagged; drop the
+                // connection so the reconnect below replays a fresh whole-turn
+                // snapshot the reconstruction resumes from.
+                let resync = frame.event == "resync";
                 renderer.render(frame);
+                if resync {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
             })
             .await;
             if let Err(err) = result {
@@ -108,12 +118,19 @@ struct TurnProgress {
 #[derive(Debug)]
 struct Renderer {
     turns: HashMap<String, TurnProgress>,
+    /// Open turns reconstructed from `turn`/`turn-delta` frames, keyed by id.
+    /// A whole `turn` frame (re)baselines an entry; each `turn-delta` absorbs
+    /// one increment into it through the same rule the listener folds with, so
+    /// the reconstruction matches the served turn without the whole turn
+    /// crossing the wire per token.
+    open: HashMap<String, ChatTurn>,
 }
 
 impl Renderer {
     fn new() -> Self {
         Self {
             turns: HashMap::new(),
+            open: HashMap::new(),
         }
     }
 
@@ -138,7 +155,34 @@ impl Renderer {
                         ellipsize(&frame.data, 80)
                     )];
                 };
+                // Re-baseline the reconstruction: the whole turn is authoritative.
+                self.open.insert(turn.id.clone(), turn.clone());
                 self.turn_lines(&turn)
+            }
+            "turn-delta" => {
+                let Ok(delta) = serde_json::from_str::<TurnDelta>(&frame.data) else {
+                    return vec![format!(
+                        "(unparseable turn-delta frame: {})",
+                        ellipsize(&frame.data, 80)
+                    )];
+                };
+                // Grow the reconstructed open turn, then render as if a whole
+                // turn arrived. No open turn for this id means we missed its
+                // opening (a gap the server heals with `resync`); nothing to show.
+                let Some(turn) = self.open.get_mut(&delta.turn_id) else {
+                    return Vec::new();
+                };
+                turn.absorb_item(delta.item);
+                let turn = turn.clone();
+                self.turn_lines(&turn)
+            }
+            // The live turn stream lagged; our open-turn reconstructions may
+            // have a gap. Drop them so the reconnect's whole-turn replay
+            // rebuilds cleanly. Per-turn print progress stays, so nothing already
+            // shown reprints.
+            "resync" => {
+                self.open.clear();
+                Vec::new()
             }
             _ => Vec::new(),
         }
@@ -257,6 +301,72 @@ mod tests {
              \"directive_version\":null,\"command_id\":null,\"effect\":null,\"source\":null,\
              \"decision_id\":null,\"options\":[]}}}}"
         )
+    }
+
+    fn turn_delta_json(turn_id: &str, item: &str) -> String {
+        format!("{{\"turn_id\":\"{turn_id}\",\"item\":{item}}}")
+    }
+
+    fn stream_message_item(id: &str, text: &str) -> String {
+        format!("{{\"type\":\"message\",\"id\":\"{id}\",\"text\":\"{text}\",\"phase\":\"stream\"}}")
+    }
+
+    /// The wire the server actually sends now: a whole `turn` frame opens the
+    /// turn, then `turn-delta` increments grow it — and the reader renders the
+    /// wave's speech from the deltas without a whole turn per token. A `resync`
+    /// drops the reconstruction so the reconnect's whole-turn replay resumes it.
+    #[test]
+    fn turn_delta_frames_render_growth_and_resync_drops_reconstruction() {
+        let mut renderer = Renderer::new();
+
+        // The turn opens as a whole (empty, running) frame — no prose yet.
+        assert!(renderer
+            .lines_for(&Frame {
+                event: "turn".into(),
+                data: turn_json("turn-1", "assistant", "", "running", "[]"),
+            })
+            .is_empty());
+
+        // Prose increments render as the wave speaking; nothing else on the wire.
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "turn-delta".into(),
+                data: turn_delta_json(
+                    "turn-1",
+                    &stream_message_item("text-0", "I fixed the parser.")
+                ),
+            }),
+            vec!["wave › I fixed the parser."]
+        );
+
+        // A tool increment stays out of the conversation, exactly like a whole turn.
+        assert!(renderer
+            .lines_for(&Frame {
+                event: "turn-delta".into(),
+                data: turn_delta_json(
+                    "turn-1",
+                    "{\"type\":\"tool\",\"id\":\"t-1\",\"name\":\"Bash\",\"status\":\"completed\",\"input\":null,\"output\":null}",
+                ),
+            })
+            .is_empty());
+
+        // A resync drops the reconstruction: a further delta is quiet until the
+        // reconnect replays the whole turn.
+        assert!(renderer
+            .lines_for(&Frame {
+                event: "resync".into(),
+                data: "reconnect".into(),
+            })
+            .is_empty());
+        assert!(
+            renderer
+                .lines_for(&Frame {
+                    event: "turn-delta".into(),
+                    data: turn_delta_json("turn-1", &stream_message_item("text-1", "more")),
+                })
+                .is_empty(),
+            "no reconstruction survives a resync; the whole-turn replay rebuilds it"
+        );
     }
 
     #[test]
@@ -551,7 +661,10 @@ mod tests {
         let sink = seen.clone();
         let endpoint = addr.to_string();
         let task = tokio::spawn(async move {
-            let mut on_frame = |frame: Frame| sink.lock().unwrap().push(frame);
+            let mut on_frame = |frame: Frame| {
+                sink.lock().unwrap().push(frame);
+                ControlFlow::Continue(())
+            };
             let _ = stream_events(&endpoint, "", &mut on_frame).await;
         });
 

@@ -24,6 +24,7 @@
 //! `LoopState::Failed` over the wire and exits nonzero — the listener's
 //! supervisor owns the respawn ladder.
 
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -177,7 +178,7 @@ fn resolve_attachment(
 pub async fn follow_inbox(endpoint: String, inbox_tx: mpsc::UnboundedSender<InboxItem>) {
     let result = stream_events(&endpoint, "?inbox=true", &mut |frame| {
         if frame.event != "inbox" {
-            return;
+            return ControlFlow::Continue(());
         }
         match serde_json::from_str::<InboxFrame>(&frame.data) {
             Ok(frame) => {
@@ -187,6 +188,7 @@ pub async fn follow_inbox(endpoint: String, inbox_tx: mpsc::UnboundedSender<Inbo
                 tracing::warn!(error = %err, data = frame.data, "unparseable inbox frame; dropped")
             }
         }
+        ControlFlow::Continue(())
     })
     .await;
     match result {

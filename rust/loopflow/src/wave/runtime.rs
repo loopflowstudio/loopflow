@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio::sync::broadcast;
 
-use crate::chat::turns::{ChatRole, ChatTurn};
+use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::project_session::ProjectObservation;
@@ -100,10 +100,12 @@ pub fn channel_role(wave: &str, channel: &str) -> Option<ChannelRole> {
     matches_prefix(channel, &family).then_some(ChannelRole::Child)
 }
 
-/// One live turn frame: the turn plus its wire JSON, serialized ONCE at the
-/// send site so N subscribers share one serialization instead of performing
-/// N (the delta-granular wire — sending increments instead of whole turns —
-/// stays future work).
+/// One whole-turn frame: the turn plus its wire JSON, serialized ONCE at the
+/// send site so N subscribers share one serialization instead of performing N.
+/// Sent at the events that are naturally O(1) per turn — a turn opening, a
+/// body-session update, and finalization — where the whole turn is small or the
+/// authoritative re-baseline is worth the bytes. In-turn growth rides
+/// [`TurnDeltaFrame`] instead.
 #[derive(Debug)]
 pub struct TurnFrame {
     pub turn: ChatTurn,
@@ -115,6 +117,52 @@ impl TurnFrame {
     fn share(turn: ChatTurn) -> Arc<Self> {
         let json = serde_json::to_string(&turn).expect("ChatTurn serializes to JSON");
         Arc::new(Self { turn, json })
+    }
+}
+
+/// One live-turn increment: a [`TurnDelta`] plus its wire JSON, serialized ONCE
+/// at the send site (the same Arc-share as [`TurnFrame`]). Broadcast on every
+/// non-finalizing content delta so the wire carries O(fragment) per token
+/// instead of the whole accumulated turn.
+#[derive(Debug)]
+pub struct TurnDeltaFrame {
+    pub delta: TurnDelta,
+    /// The increment as `/events` `turn-delta`-frame JSON.
+    pub json: String,
+}
+
+impl TurnDeltaFrame {
+    fn share(turn_id: String, item: ConversationItem) -> Arc<Self> {
+        let delta = TurnDelta { turn_id, item };
+        let json = serde_json::to_string(&delta).expect("TurnDelta serializes to JSON");
+        Arc::new(Self { delta, json })
+    }
+}
+
+/// What the live turn broadcast carries: either a whole turn (the client
+/// replaces by id) or one increment to an open turn (the client absorbs by id).
+/// One broadcast channel carries both so their order — and the lag counter that
+/// guards reconstruction — stays single.
+#[derive(Debug, Clone)]
+pub enum TurnBroadcast {
+    Whole(Arc<TurnFrame>),
+    Delta(Arc<TurnDeltaFrame>),
+}
+
+#[cfg(test)]
+impl TurnBroadcast {
+    fn expect_whole(&self) -> &ChatTurn {
+        match self {
+            Self::Whole(frame) => &frame.turn,
+            Self::Delta(_) => panic!("expected a whole-turn frame, got a delta"),
+        }
+    }
+
+    fn expect_delta(&self) -> &TurnDelta {
+        match self {
+            Self::Delta(frame) => &frame.delta,
+            Self::Whole(_) => panic!("expected a delta frame, got a whole turn"),
+        }
     }
 }
 
@@ -145,10 +193,10 @@ pub enum InboxItem {
 #[derive(Debug)]
 pub struct Subscription {
     pub turns: Vec<ChatTurn>,
-    /// Live turn frames ride as `Arc<TurnFrame>`s: the broadcast clones once
-    /// per subscriber, so N subscribers share one allocation — and one JSON
-    /// serialization — per frame instead of N.
-    pub turn_rx: broadcast::Receiver<Arc<TurnFrame>>,
+    /// Live turn frames ride as [`TurnBroadcast`] (whole or delta), each an
+    /// `Arc`: the broadcast clones once per subscriber, so N subscribers share
+    /// one allocation — and one JSON serialization — per frame instead of N.
+    pub turn_rx: broadcast::Receiver<TurnBroadcast>,
     pub state: LoopState,
     pub state_rx: broadcast::Receiver<LoopState>,
     pub playhead: Option<PlayheadView>,
@@ -231,11 +279,11 @@ pub struct WaveRuntime {
     /// Journal + materialized thread + loop state, behind one lock so their
     /// orders never diverge.
     inner: Mutex<Inner>,
-    /// Fans turn frames out to live SSE subscribers: open-turn snapshots as a
-    /// turn grows, then the terminal turn under the same id. Frames are
-    /// `Arc`-shared so a delta costs one clone (and one serialization) total,
-    /// not one per subscriber.
-    turn_tx: broadcast::Sender<Arc<TurnFrame>>,
+    /// Fans turn frames out to live SSE subscribers: a whole frame when a turn
+    /// opens / updates its body session / finalizes, and a delta frame for each
+    /// in-turn content increment. Frames are `Arc`-shared so a delta costs one
+    /// clone (and one serialization) total, not one per subscriber.
+    turn_tx: broadcast::Sender<TurnBroadcast>,
     /// Fans loop-state transitions out to live SSE subscribers (the composer
     /// keys its verb off this).
     state_tx: broadcast::Sender<LoopState>,
@@ -545,7 +593,9 @@ impl WaveRuntime {
                 .filter(|body| body.body_id == body_id)
             {
                 body.session_id = Some(session_id.to_string());
-                let _ = self.turn_tx.send(TurnFrame::share(open.turn.clone()));
+                let _ = self
+                    .turn_tx
+                    .send(TurnBroadcast::Whole(TurnFrame::share(open.turn.clone())));
             }
         }
         Ok(view)
@@ -618,7 +668,7 @@ impl WaveRuntime {
     }
 
     /// Live turn frames (no snapshot).
-    pub fn subscribe_turns(&self) -> broadcast::Receiver<Arc<TurnFrame>> {
+    pub fn subscribe_turns(&self) -> broadcast::Receiver<TurnBroadcast> {
         self.turn_tx.subscribe()
     }
 
@@ -845,8 +895,11 @@ impl WaveRuntime {
             inner.last_assistant_turn_id = Some(turn.id.clone());
         }
         inner.thread.push(turn.clone());
-        // A send error just means no live subscribers — the store has it.
-        let _ = self.turn_tx.send(TurnFrame::share(turn.clone()));
+        // A send error just means no live subscribers — the store has it. The
+        // finalized whole turn re-baselines any client that grew it from deltas.
+        let _ = self
+            .turn_tx
+            .send(TurnBroadcast::Whole(TurnFrame::share(turn.clone())));
         turn
     }
 
@@ -1003,12 +1056,14 @@ impl WaveRuntime {
 
     // -- The resident wire fold (same lock discipline as everything above) --
     //
-    // Every content delta (opened / text / item) re-broadcasts the open-turn
-    // snapshot under the same id. No debounce: deltas are item-granular from
-    // the vendor stream (one per completed item, not per token), so the
-    // natural rate is well under any flood threshold, and a suppressed
-    // trailing frame would leave subscribers stale through a long tool call.
-    // A throttle earns its place with the part-grained wire, not before.
+    // A turn opening broadcasts the (small) whole turn; each subsequent content
+    // increment broadcasts one `turn-delta` frame carrying just the item, and
+    // finalization broadcasts the whole terminal turn as a re-baseline. The
+    // provider stream is per-token, so re-serializing the whole accumulated turn
+    // per increment was O(prose²) on the wire (68.6 MB to deliver 3.1 KB of
+    // prose); a delta is O(fragment). Subscribers reconstruct through the same
+    // `absorb_item` rule the listener folds with, so their open turn is
+    // byte-identical to this one.
 
     /// Apply one ordered wire delta from the resident (`POST
     /// /resident/deltas`). Malformed sequences — deltas for a turn that isn't
@@ -1143,7 +1198,9 @@ impl WaveRuntime {
             body,
             activity: None,
         };
-        let _ = self.turn_tx.send(TurnFrame::share(open.clone()));
+        let _ = self
+            .turn_tx
+            .send(TurnBroadcast::Whole(TurnFrame::share(open.clone())));
         inner.open = Some(OpenTurn {
             turn: open,
             usage: Usage::empty(),
@@ -1187,17 +1244,18 @@ impl WaveRuntime {
 
     /// Journal a `TurnItem` for the open turn, grow the open-turn snapshot
     /// through the one shared rule (`ChatTurn::absorb_item` — the same call
-    /// the journal fold makes), and re-broadcast it so live subscribers watch
-    /// the turn in progress.
+    /// the journal fold makes), and broadcast the increment alone (a
+    /// `turn-delta` frame) so live subscribers grow the turn without the whole
+    /// accumulated turn crossing the wire each token.
     fn append_turn_item_locked(&self, inner: &mut Inner, item: ConversationItem) {
         let open = &mut inner.open.as_mut().expect("checked by callers").turn;
         let turn_id = open.id.clone();
         open.absorb_item(item.clone());
-        let frame = TurnFrame::share(open.clone());
+        let frame = TurnDeltaFrame::share(turn_id.clone(), item.clone());
         inner
             .journal
             .append(|_| EventKind::TurnItem { turn_id, item });
-        let _ = self.turn_tx.send(frame);
+        let _ = self.turn_tx.send(TurnBroadcast::Delta(frame));
     }
 
     fn resident_turn_usage(
@@ -1580,7 +1638,11 @@ mod tests {
         rt.deliver(MessageOp::Message, "message 5".into())
             .expect("live user turn");
         assert_eq!(
-            sub.turn_rx.try_recv().expect("live frame").turn.text,
+            sub.turn_rx
+                .try_recv()
+                .expect("live frame")
+                .expect_whole()
+                .text,
             "message 5",
             "the limit applies only to replay"
         );
@@ -1913,37 +1975,68 @@ mod tests {
         let mut frames = sub.turn_rx;
         let mut states = sub.state_rx;
 
-        // The turn opens empty and running, then the text lands in a second
-        // frame under the same id.
+        // The turn opens empty and running as a WHOLE frame; content then
+        // arrives as increments (`turn-delta`), never the re-serialized turn.
+        // A subscriber reconstructs the open turn by absorbing each delta onto
+        // the opened whole — so we keep a running reconstruction and assert it
+        // matches the terminal turn byte for byte at the end.
         rt.apply_resident_delta(d_opened(&[]));
-        let opened = frames.try_recv().expect("opened frame").turn.clone();
+        let opened = frames
+            .try_recv()
+            .expect("opened frame")
+            .expect_whole()
+            .clone();
         assert_eq!(opened.status, Lifecycle::Running);
         assert_eq!(opened.text, "");
-        rt.apply_resident_delta(d_text("thinking"));
-        let grown = frames.try_recv().expect("text frame");
-        assert_eq!(grown.turn.id, opened.id);
-        assert_eq!(grown.turn.text, "thinking");
-        assert_eq!(grown.turn.status, Lifecycle::Running);
+        let mut reconstruction = opened.clone();
 
-        // Mid-turn, the open turn rides the snapshot after the thread.
+        rt.apply_resident_delta(d_text("thinking"));
+        let text_delta = frames
+            .try_recv()
+            .expect("text delta")
+            .expect_delta()
+            .clone();
+        assert_eq!(text_delta.turn_id, opened.id);
+        reconstruction.absorb_item(text_delta.item);
+        assert_eq!(reconstruction.text, "thinking");
+
+        // Mid-turn, the open turn rides the snapshot after the thread — the
+        // listener still holds the whole turn even though the wire sent a delta.
         let mid = rt.thread_snapshot();
         assert_eq!(mid.len(), 1);
         assert_eq!(mid[0].id, opened.id);
         assert_eq!(mid[0].status, Lifecycle::Running);
+        assert_eq!(mid[0].text, "thinking");
 
-        // An item delta grows the same snapshot.
+        // An item delta grows the reconstruction the same way.
         rt.apply_resident_delta(d_tool());
-        let with_item = frames.try_recv().expect("item frame");
-        assert_eq!(with_item.turn.id, opened.id);
-        assert_eq!(with_item.turn.items.len(), 1);
-        assert_eq!(with_item.turn.text, "thinking");
+        let item_delta = frames
+            .try_recv()
+            .expect("item delta")
+            .expect_delta()
+            .clone();
+        assert_eq!(item_delta.turn_id, opened.id);
+        reconstruction.absorb_item(item_delta.item);
+        assert_eq!(reconstruction.items.len(), 1);
+        assert_eq!(reconstruction.text, "thinking");
 
-        // Finalization replaces the running turn under the same id.
+        // Finalization replaces the running turn under the same id — a WHOLE
+        // frame that re-baselines the reconstruction.
         rt.apply_resident_delta(d_usage(10, 5));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-        let terminal = frames.try_recv().expect("terminal frame");
-        assert_eq!(terminal.turn.id, opened.id);
-        assert_eq!(terminal.turn.status, Lifecycle::Completed);
+        let terminal = frames
+            .try_recv()
+            .expect("terminal frame")
+            .expect_whole()
+            .clone();
+        assert_eq!(terminal.id, opened.id);
+        assert_eq!(terminal.status, Lifecycle::Completed);
+
+        // Reconstruction identity: growing from deltas yields the same prose and
+        // items the listener finalized. (Status differs — the terminal WHOLE
+        // frame carries it; that is exactly the re-baseline's job.)
+        assert_eq!(reconstruction.text, terminal.text);
+        assert_eq!(reconstruction.items, terminal.items);
 
         // No stale running turn remains anywhere.
         let after = rt.thread_snapshot();
@@ -1971,7 +2064,7 @@ mod tests {
 
         rt.apply_resident_delta(d_opened(&[]));
         let opened = frames.try_recv().expect("opened frame");
-        assert!(opened.turn.items.is_empty());
+        assert!(opened.expect_whole().items.is_empty());
 
         rt.apply_resident_delta(d_thought("empty", "  \n\t"));
         assert!(frames.try_recv().is_err(), "empty thought emits no frame");
@@ -1979,9 +2072,8 @@ mod tests {
 
         rt.apply_resident_delta(d_thought("real", "checking the retry"));
         let grown = frames.try_recv().expect("real thought frame");
-        assert_eq!(grown.turn.items.len(), 1);
         assert!(matches!(
-            &grown.turn.items[0],
+            &grown.expect_delta().item,
             ConversationItem::Thought { id, text }
                 if id == "real" && text == "checking the retry"
         ));

@@ -38,7 +38,7 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::Lifecycle;
 use crate::wave::journal::MessageOp;
 use crate::wave::registry::process_alive;
-use crate::wave::runtime::{InboxItem, TurnFrame, WaveRuntime};
+use crate::wave::runtime::{InboxItem, TurnBroadcast, WaveRuntime};
 use crate::wave::server::ResidentDoor;
 use crate::wave::state::LoopState;
 
@@ -141,7 +141,7 @@ pub struct Supervisor {
     config: SupervisorConfig,
     inbox_rx: broadcast::Receiver<InboxItem>,
     state_rx: broadcast::Receiver<LoopState>,
-    turn_rx: broadcast::Receiver<Arc<TurnFrame>>,
+    turn_rx: broadcast::Receiver<TurnBroadcast>,
     /// Attach signals from the listener's door (see [`SupervisorHandle`]).
     /// The paired sender is kept alive by `handle`, so `recv` never closes.
     attach_rx: mpsc::UnboundedReceiver<u32>,
@@ -240,8 +240,10 @@ impl Supervisor {
                     }
                 }
                 turn = self.turn_rx.recv() => {
-                    if let Ok(turn) = turn {
-                        self.on_turn_frame(&turn.turn);
+                    // Only whole frames carry a terminal turn; in-turn deltas
+                    // never complete a turn, so they can't reset the ladder.
+                    if let Ok(TurnBroadcast::Whole(frame)) = turn {
+                        self.on_turn_frame(&frame.turn);
                     }
                 }
                 _ = sleep_until_opt(self.interrupt_at), if self.interrupt_at.is_some() => {

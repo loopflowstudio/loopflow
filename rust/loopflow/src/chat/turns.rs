@@ -135,6 +135,23 @@ pub struct ChatTurn {
     pub activity: Option<ChildControlActivity>,
 }
 
+/// One live increment to an open turn: the `turn-delta` SSE frame. The listener
+/// broadcasts one per non-finalizing content delta instead of re-serializing the
+/// whole `ChatTurn` (see `crate::wave::runtime` — that whole-turn-per-token
+/// re-broadcast was O(prose²) on the wire). The client applies it with
+/// [`ChatTurn::absorb_item`] against the turn named by `turn_id`, reconstructing
+/// exactly what the listener holds; the finalized whole `turn` frame then
+/// re-baselines it at turn close. Every field required — same DTO discipline as
+/// [`ChatTurn`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurnDelta {
+    /// The open turn this increment grows (`"turn-<n>"`).
+    pub turn_id: String,
+    /// The item to absorb — a stream `Message` fragment grows `text`, any other
+    /// item appends to `items`, exactly as the listener's fold does.
+    pub item: ConversationItem,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChatTurnError {
     #[error("child activity entries cannot also carry prose, items, or a provider body")]

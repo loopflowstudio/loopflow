@@ -14,6 +14,7 @@ const CORE_CATEGORIES: &[&str] = &["build", "govern", "ops"];
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
+    emit_build_provenance(&manifest_dir);
     let builtins_dir = manifest_dir.join("src/engine/builtins");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
@@ -82,6 +83,32 @@ fn main() {
     for entry in walkdir(&builtins_dir) {
         println!("cargo:rerun-if-changed={}", entry.display());
     }
+}
+
+fn emit_build_provenance(manifest_dir: &Path) {
+    let git_root = manifest_dir
+        .ancestors()
+        .find(|ancestor| ancestor.join(".git").exists());
+    let provenance = env::var("LOOPFLOW_BUILD_PROVENANCE").unwrap_or_else(|_| {
+        if git_root.is_some() {
+            "development".to_string()
+        } else {
+            "release".to_string()
+        }
+    });
+    if !matches!(provenance.as_str(), "development" | "release") {
+        panic!("LOOPFLOW_BUILD_PROVENANCE must be `development` or `release`, got `{provenance}`");
+    }
+    let source_root = git_root
+        .unwrap_or(manifest_dir)
+        .canonicalize()
+        .unwrap_or_else(|error| panic!("canonicalize Loopflow source root: {error}"));
+    println!("cargo:rustc-env=LOOPFLOW_BUILD_PROVENANCE={provenance}");
+    println!(
+        "cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}",
+        source_root.display()
+    );
+    println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
 }
 
 fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {

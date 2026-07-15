@@ -13,6 +13,7 @@ pub mod credential_socket;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
+#[cfg(any(target_os = "macos", test))]
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
@@ -29,7 +30,9 @@ use base64::Engine;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
-use secrecy::{ExposeSecret, SecretString};
+#[cfg(any(target_os = "macos", test))]
+use secrecy::ExposeSecret;
+use secrecy::SecretString;
 #[cfg(target_os = "macos")]
 use security_framework::item::{ItemClass, ItemSearchOptions};
 use serde::{Deserialize, Serialize};

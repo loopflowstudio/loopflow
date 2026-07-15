@@ -421,7 +421,9 @@ private struct WaveWorkInspector: View {
         .sheet(isPresented: $showsTaskWorkspace) {
             if let task {
                 TaskWorkspaceView(
-                    task: task,
+                    task: task.task,
+                    reference: task.reference,
+                    runtime: task.runtime,
                     repoPath: repoPath,
                     terminalStore: terminalStore
                 )

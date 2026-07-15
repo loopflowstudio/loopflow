@@ -73,6 +73,7 @@ final class TaskTerminalStore: ObservableObject {
 
 private enum TaskWorkspaceSection: String, CaseIterable, Identifiable {
     case changes = "Changes"
+    case agent = "Agent"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -86,7 +87,9 @@ private enum TaskPreviewMode: String, CaseIterable, Identifiable {
 }
 
 struct TaskWorkspaceView: View {
-    let task: WaveTaskWork
+    let task: TaskPlanningSnapshot
+    let reference: TaskReferenceSnapshot
+    let runtime: TaskRuntimeSnapshot?
     let repoPath: String
     @ObservedObject var terminalStore: TaskTerminalStore
 
@@ -99,11 +102,28 @@ struct TaskWorkspaceView: View {
     @State private var file: TaskFileSnapshot?
     @State private var error: String?
     @State private var loading = false
+    @State private var attachCommand: [String]?
+    @State private var agentError: String?
 
-    private var runtime: TaskRuntimeSnapshot? { task.runtime }
-    private var workspace: TaskWorkspaceSnapshot? { task.reference.workspace }
+    init(
+        task: TaskPlanningSnapshot,
+        reference: TaskReferenceSnapshot,
+        runtime: TaskRuntimeSnapshot?,
+        repoPath: String,
+        terminalStore: TaskTerminalStore,
+        opensAgent: Bool = false
+    ) {
+        self.task = task
+        self.reference = reference
+        self.runtime = runtime
+        self.repoPath = repoPath
+        self.terminalStore = terminalStore
+        _section = State(initialValue: opensAgent ? .agent : .changes)
+    }
+
+    private var workspace: TaskWorkspaceSnapshot? { reference.workspace }
     private var previewIdentity: String {
-        "\(task.task.identifier)|\(selectedPath ?? "")|\(previewMode.rawValue)"
+        "\(task.identifier)|\(selectedPath ?? "")|\(previewMode.rawValue)"
     }
 
     var body: some View {
@@ -114,10 +134,12 @@ struct TaskWorkspaceView: View {
                 switch section {
                 case .changes:
                     changesView
+                case .agent:
+                    agentView
                 case .terminal:
                     TaskTerminalWorkspaceView(
                         taskSessionId: runtime.sessionId,
-                        issueIdentifier: task.task.identifier,
+                        issueIdentifier: task.identifier,
                         worktree: workspace.worktree,
                         store: terminalStore
                     )
@@ -132,14 +154,15 @@ struct TaskWorkspaceView: View {
         }
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
-        .task(id: task.runtime?.sessionId) { await loadChanges() }
+        .task(id: runtime?.sessionId) { await loadChanges() }
+        .task(id: "agent:\(runtime?.sessionId ?? "none")") { await prepareAgentAttach() }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
     private var header: some View {
         HStack(spacing: Spacing.md) {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text("\(task.task.identifier) · \(task.task.name)")
+                Text("\(task.identifier) · \(task.name)")
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
                 if let workspace {
@@ -210,6 +233,39 @@ struct TaskWorkspaceView: View {
             }
             .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    @ViewBuilder
+    private var agentView: some View {
+        if !canAttachToAgent {
+            ContentUnavailableView(
+                "Task agent is not running",
+                systemImage: "bolt.slash",
+                description: Text("Resume the Task Session from the roadmap before attaching.")
+            )
+        } else if let attachCommand, let workspace, let runtime {
+            GhosttyTerminalView(
+                workingDirectory: workspace.worktree,
+                argv: attachCommand,
+                sessionId: "task-agent-\(runtime.sessionId)"
+            )
+            .id(runtime.sessionId)
+            .background(LoopflowPalette.dark.background)
+        } else if let agentError {
+            ContentUnavailableView(
+                "Task agent unavailable",
+                systemImage: "exclamationmark.triangle",
+                description: Text(agentError)
+            )
+        } else {
+            ProgressView("Preparing Task agent…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var canAttachToAgent: Bool {
+        guard let runtime, runtime.processAlive else { return false }
+        return runtime.status == .starting || runtime.status == .running
     }
 
     private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {
@@ -283,7 +339,7 @@ struct TaskWorkspaceView: View {
         defer { loading = false }
         do {
             let next = try await RegistryQueryLocal.shared.taskChanges(
-                issue: task.task.identifier,
+                issue: task.identifier,
                 cwd: repoPath
             )
             changes = next
@@ -305,13 +361,13 @@ struct TaskWorkspaceView: View {
             switch previewMode {
             case .diff:
                 diff = try await RegistryQueryLocal.shared.taskDiff(
-                    issue: task.task.identifier,
+                    issue: task.identifier,
                     path: selectedPath,
                     cwd: repoPath
                 )
             case .file:
                 file = try await RegistryQueryLocal.shared.taskFile(
-                    issue: task.task.identifier,
+                    issue: task.identifier,
                     path: selectedPath,
                     cwd: repoPath
                 )
@@ -319,6 +375,28 @@ struct TaskWorkspaceView: View {
             error = nil
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func prepareAgentAttach() async {
+        guard canAttachToAgent else {
+            attachCommand = nil
+            agentError = nil
+            return
+        }
+        let repoPath = repoPath
+        let issue = task.identifier
+        do {
+            attachCommand = try await Task.detached(priority: .userInitiated) {
+                try LocalWaveAgentLauncher.resolvedTaskAttachCommand(
+                    repoPath: repoPath,
+                    issue: issue
+                )
+            }.value
+            agentError = nil
+        } catch {
+            agentError = error.localizedDescription
         }
     }
 

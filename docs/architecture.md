@@ -83,8 +83,20 @@ Important paths:
 
 SQLite coordinates Wave identity, PM snapshots, Project and Task Sessions,
 ordered Task PRs, commands, directives, event ledgers, provider credentials,
-and traces. Callers open it directly. The default path is
+and traces. Callers open it directly. Installed release builds share
 `~/.lf/loopflow.db`; set `LF_DB_PATH` to use another path.
+
+Builds made from a source checkout use
+`~/.lf-dev/worktrees/<source-identity>/loopflow.db`, so branches cannot migrate
+one another's development store. They refuse `~/.lf/loopflow.db` even when it
+arrives through `LF_DB_PATH`; `LF_ALLOW_PRODUCTION_DB_FROM_DEV=1` is the
+break-glass override. Release packaging stamps its provenance explicitly.
+
+Session runners carry their pinned binary and store through the internal
+`LF_CONTROL_BIN`, `LF_CONTROL_HOME`, and `LF_CONTROL_DB_PATH` variables. Provider
+agents do not inherit `LF_BIN`, `LF_HOME`, `LF_DB_PATH`, or the break-glass flag.
+Before an existing on-disk database advances, SQLite writes an atomic backup
+named for the previously applied migration.
 
 A Task PR persists evidence, not a mutable state label. No publication evidence
 means Working. A publication request without a GitHub receipt means Publishing;

@@ -255,6 +255,10 @@ cost, and outcome evidence. An exec is one `lf` process; nested execs share a
 trace. `lf trace` accepts an exec id and leaves killed processes open instead
 of hiding them.
 
+`lf doctor` also prints the binary's build provenance, the resolved database
+path, and the latest known and applied migrations. Those fields still print
+when the database is too new or came from a divergent development build.
+
 ## Measuring Codebase Weight
 
 ```bash

@@ -100,10 +100,16 @@ class StageError(RuntimeError):
     """A build or install stage failed."""
 
 
-def _stream_process(cmd: list[str], label: str, cwd: Path | None = None) -> int:
+def _stream_process(
+    cmd: list[str],
+    label: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -115,8 +121,13 @@ def _stream_process(cmd: list[str], label: str, cwd: Path | None = None) -> int:
     return proc.returncode
 
 
-def _run_or_raise(cmd: list[str], label: str, cwd: Path | None = None) -> None:
-    code = _stream_process(cmd, label, cwd=cwd)
+def _run_or_raise(
+    cmd: list[str],
+    label: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
+    code = _stream_process(cmd, label, cwd=cwd, env=env)
     if code != 0:
         raise StageError(f"{label} exited {code}")
 
@@ -164,7 +175,12 @@ def _refresh_default_branch(repo: Path = ROOT) -> None:
 
 def _build_binaries() -> None:
     typer.echo("Building lf (cargo release)...")
-    _run_or_raise(["cargo", "build", "-p", "loopflow", "--release"], "cargo", cwd=ROOT)
+    _run_or_raise(
+        ["cargo", "build", "-p", "loopflow", "--release"],
+        "cargo",
+        cwd=ROOT,
+        env={**os.environ, "LOOPFLOW_BUILD_PROVENANCE": "release"},
+    )
 
 
 def _build_cli_binaries() -> None:
@@ -173,6 +189,7 @@ def _build_cli_binaries() -> None:
         ["cargo", "build", "--release", "-p", "loopflow", "--bin", "lf"],
         "cargo",
         cwd=ROOT,
+        env={**os.environ, "LOOPFLOW_BUILD_PROVENANCE": "release"},
     )
 
 

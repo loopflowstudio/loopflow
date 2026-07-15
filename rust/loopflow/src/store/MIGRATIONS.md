@@ -14,6 +14,11 @@ SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a
 migration that leaves a dangling reference rolls back as one unit.
 
+Before advancing an existing on-disk database, the runner takes a SQLite backup
+inside the same exclusive transaction and publishes it atomically beside the
+database. The filename carries the previously applied migration, so at least the
+previous schema generation remains available.
+
 ## The one rule
 
 **A shipped migration is never edited, renamed, or deleted.** Databases in the
@@ -59,7 +64,7 @@ before anything is cut. Same script, both paths.
 | --- | --- |
 | Behind the chain | applies the missing tail and continues |
 | Pre-namespace `001_initial` stamp | adopted as `0.10.001_initial` — same bytes, no data moved |
-| Carries an unknown id | *upgrade lf* — it was written by a newer Loopflow |
+| Carries an unknown id | reports the unknown and latest-known ids — a newer release or a divergent local build wrote it |
 | Skipped a migration, or drifted from the chain's schema | *delete loopflow.db and rerun* |
 
 ## Why there is no separate "schema change without a migration" check

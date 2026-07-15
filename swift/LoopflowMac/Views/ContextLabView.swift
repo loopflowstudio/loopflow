@@ -82,8 +82,9 @@ struct ContextLabView: View {
     @State private var savedViews: [ContextLabSavedView]
 
     init(initialRepoPath: String?, route: ContextLabRoute? = nil) {
-        self.initialRepoPath = initialRepoPath
-        let path = (route?.query.repoPaths.first ?? initialRepoPath).map(WaveOrigin.resolve) ?? ""
+        let resolvedInitialPath = initialRepoPath.map(WaveOrigin.resolve)
+        self.initialRepoPath = resolvedInitialPath
+        let path = (route?.query.repoPaths.first ?? resolvedInitialPath).map(WaveOrigin.resolve) ?? ""
         _repoPath = State(initialValue: path)
         _repoDraft = State(initialValue: path)
         if let route {
@@ -599,6 +600,7 @@ struct ContextLabView: View {
             Button("Refine source…") { refinementEvidence = evidence }
                 .buttonStyle(DarkButtonStyle())
                 .disabled(!canRefine(evidence, in: snapshot.query))
+                .opacity(canRefine(evidence, in: snapshot.query) ? 1 : 0.4)
                 .help(refinementHelp(evidence, in: snapshot.query))
         }
     }

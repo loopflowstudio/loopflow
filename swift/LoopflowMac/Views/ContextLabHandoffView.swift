@@ -25,6 +25,7 @@ struct TraceEvidenceView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Trace evidence")
                         .font(Typography.heroTitle(24))
+                        .foregroundStyle(palette.text)
                     Text("\(shortTrace(address.runId)) / \(shortTrace(address.launchId)) / \(shortTrace(address.turnId))")
                         .font(Typography.code(10))
                         .foregroundStyle(palette.textSecondary)
@@ -51,6 +52,7 @@ struct TraceEvidenceView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
         .task { await load() }
     }
@@ -84,7 +86,9 @@ struct TraceEvidenceView: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(Spacing.xl)
                 }
+                .background(palette.background)
             }
+            .background(palette.background)
         } else {
             ContentUnavailableView(
                 "Artifact missing",

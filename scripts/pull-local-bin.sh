@@ -62,4 +62,5 @@ while [[ $# -gt 0 ]]; do
 done
 
 repo="$(git -C "$repo" rev-parse --show-toplevel)"
-exec uv run --with typer python "$repo/scripts/install.py" refresh "${args[@]}"
+# bash 3.2 (macOS) treats an empty array as unbound under set -u
+exec uv run --with typer python "$repo/scripts/install.py" refresh ${args[@]+"${args[@]}"}

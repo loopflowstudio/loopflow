@@ -292,6 +292,15 @@ pub fn aggregate(
     assets: Vec<ContextAssetRow>,
 ) -> ContextLabSnapshot {
     launches.sort_by_key(|launch| (launch.started_at, launch.id.clone()));
+    let assembled_turns = turns
+        .iter()
+        .filter(|turn| turn.context_coverage == "assembled")
+        .map(|turn| turn.id.as_str())
+        .collect::<HashSet<_>>();
+    let assets = assets
+        .into_iter()
+        .filter(|row| assembled_turns.contains(row.turn_id.as_str()))
+        .collect::<Vec<_>>();
     let launch_by_id = launches
         .iter()
         .map(|launch| (launch.id.as_str(), launch))
@@ -1079,6 +1088,15 @@ mod tests {
                 "b",
                 40,
             ),
+            asset(
+                "turn-b",
+                0,
+                ContextAssetKind::UserMessage,
+                "steering message",
+                None,
+                "c",
+                7,
+            ),
         ];
 
         let snapshot = aggregate(query, launches, turns, assets);
@@ -1107,6 +1125,7 @@ mod tests {
             ["AGENTS.md", "implement"]
         );
         assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
+        assert!(snapshot.sessions[0].turns[1].assets.is_empty());
     }
 
     #[test]

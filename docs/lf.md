@@ -5,13 +5,14 @@ title: lf Command Reference
 
 # lf Command Reference
 
-`lf` launches prompts and operates durable Waves, Projects, and Tasks. Prompt
-commands assemble context for Claude, Codex, Gemini, or OpenCode; lifecycle and
-repository commands use the same CLI.
+`lf` opens or focuses Loopflow.app. Named commands launch prompts and operate
+durable Waves, Projects, and Tasks.
 
 ## Basic Usage
 
 ```bash
+lf                                 # open or focus Loopflow.app
+lf desktop                         # explicit alias
 lf <skill>                        # run a skill file
 lf <skill>: args                  # run with arguments
 lf <namespace>/<skill>            # run a namespaced skill (e.g. gstack/office-hours)

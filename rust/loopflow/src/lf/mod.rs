@@ -6,7 +6,7 @@ pub mod output;
 
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf")]
-#[command(about = "Run skills and flows with coding agents")]
+#[command(about = "Open Loopflow or run its CLI")]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
@@ -133,6 +133,8 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
+    /// Open or focus Loopflow.app
+    Desktop,
     /// Pull request lifecycle
     Pr {
         #[command(subcommand)]

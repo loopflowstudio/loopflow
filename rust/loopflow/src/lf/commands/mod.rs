@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod chat;
 pub mod context;
+pub mod desktop;
 pub mod doctor;
 #[cfg(test)]
 pub(crate) mod fixtures;

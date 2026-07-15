@@ -393,6 +393,11 @@ curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/i
 
 Or grab the desktop app: download [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg) and drag **Loopflow** to Applications. The app bundles `lf`.
 
+```bash
+lf              # open or focus Loopflow.app
+lf desktop      # explicit alias
+```
+
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
 `install.sh` downloads the `lf` binary. Run `lf init` to connect coding agents and preferences.

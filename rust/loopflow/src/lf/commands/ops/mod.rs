@@ -752,6 +752,18 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         }
     );
 
+    if !result.project_moves.is_empty() {
+        println!("  {verb} Project(s) ({}):", result.project_moves.len());
+        for pm in &result.project_moves {
+            let from = if pm.from_teams.is_empty() {
+                "no team".to_string()
+            } else {
+                format!("team(s) [{}]", pm.from_teams.join(", "))
+            };
+            println!("    {}  (from {from})", pm.name);
+        }
+    }
+
     if result.moves.is_empty() {
         println!("  {verb}: none");
     } else {

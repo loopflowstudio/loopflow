@@ -159,6 +159,16 @@ pub struct PmReteamDeferral {
     pub reason: String,
 }
 
+/// One Project pulled onto the wave's team. Projects keep their id and slug on a
+/// team move (Linear only renumbers issues), so there is no new identifier to
+/// carry — `from_teams` records where it came from for the plan output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmReteamProjectMove {
+    pub id: String,
+    pub name: String,
+    pub from_teams: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamResult {
     pub wave: String,
@@ -166,6 +176,8 @@ pub struct PmReteamResult {
     pub team_key: String,
     /// True when moves were executed; false for a dry run.
     pub applied: bool,
+    /// Projects re-teamed onto the wave's team (moved ahead of their issues).
+    pub project_moves: Vec<PmReteamProjectMove>,
     pub moves: Vec<PmReteamMove>,
     pub deferrals: Vec<PmReteamDeferral>,
     /// Issues already carrying the target team key (skipped — idempotency).
@@ -447,6 +459,12 @@ impl PmClient {
     async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
         match self {
             Self::Linear(client) => client.move_item_to_team(item_id, team_id).await,
+        }
+    }
+
+    async fn move_project_to_team(&self, project_id: &str, team_id: &str) -> PmResult<()> {
+        match self {
+            Self::Linear(client) => client.move_project_to_team(project_id, team_id).await,
         }
     }
 
@@ -1509,12 +1527,23 @@ async fn pm_reteam_async(
         .await
         .map_err(|err| OpsError::Message(format!("failed to open task registry: {err}")))?;
 
+    let mut project_moves = Vec::new();
     let mut moves = Vec::new();
     let mut deferrals = Vec::new();
     let mut already = 0usize;
     let mut historical = 0usize;
 
     for project in &projects {
+        // A Project stranded on a foreign team is moved onto the wave's team. A
+        // Project whose teams already include it is left alone (idempotent). An
+        // unresolved team set (`None`, older snapshot) is skipped, never guessed.
+        if project_off_team(&team_id, project.team_ids.as_deref()) {
+            project_moves.push(PmReteamProjectMove {
+                id: project.id.clone(),
+                name: project.name.clone(),
+                from_teams: project.team_ids.clone().unwrap_or_default(),
+            });
+        }
         let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
         for item in items {
             // Look up the protecting Session by the issue's stable UUID.
@@ -1542,6 +1571,18 @@ async fn pm_reteam_async(
     }
 
     if options.apply {
+        // Projects first: a Project must own the team before its issues land there
+        // cleanly. `teamIds` is a set, so this pulls it off the shared team.
+        for pm in &project_moves {
+            progress.status(&format!(
+                "moving Project `{}` onto team {team_key}",
+                pm.name
+            ));
+            client
+                .move_project_to_team(&pm.id, &team_id)
+                .await
+                .map_err(pm_to_ops)?;
+        }
         for mv in &mut moves {
             progress.status(&format!(
                 "moving {} into team {team_key}",
@@ -1566,8 +1607,9 @@ async fn pm_reteam_async(
                 .map_err(pm_to_ops)?;
             mv.new_identifier = Some(new_identifier);
         }
-        if !moves.is_empty() {
-            // Refresh the snapshot so cached identifiers reflect the new prefixes.
+        if !project_moves.is_empty() || !moves.is_empty() {
+            // Refresh the snapshot so cached identifiers and Project teams reflect
+            // the moves.
             let ctx = PmContext {
                 client,
                 provider,
@@ -1582,6 +1624,7 @@ async fn pm_reteam_async(
         team_id,
         team_key,
         applied: options.apply,
+        project_moves,
         moves,
         deferrals,
         already,

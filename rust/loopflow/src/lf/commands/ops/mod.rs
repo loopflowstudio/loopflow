@@ -399,7 +399,14 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             wave,
             wave_flag,
             all,
+            team_key,
+            team_name,
         } => {
+            if *all && (team_key.is_some() || team_name.is_some()) {
+                return Err(anyhow!(
+                    "--team-key/--team-name apply to one wave; omit them with --all so each wave keys off its own name"
+                ));
+            }
             let targets = if *all {
                 list_all_waves()?
             } else {
@@ -411,16 +418,21 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             for wave in targets {
                 let result = crate::ops::pm::pm_init(
                     &repo_root,
-                    &crate::ops::pm::PmInitOptions { wave: Some(wave) },
+                    &crate::ops::pm::PmInitOptions {
+                        wave: Some(wave),
+                        team_key: team_key.clone(),
+                        team_name: team_name.clone(),
+                    },
                     progress,
                 )?;
-                let state = if result.created {
-                    "created"
-                } else {
-                    "already linked"
+                let initiative_state = if result.created { "created" } else { "linked" };
+                let team_state = match (&result.team_key, result.team_created) {
+                    (Some(key), true) => format!(", team {} created ({key}-*)", result.team_id),
+                    (Some(key), false) => format!(", team {} adopted ({key}-*)", result.team_id),
+                    (None, _) => format!(", team {} linked", result.team_id),
                 };
                 println!(
-                    "{}: Linear Initiative {} ({state})",
+                    "{}: Linear Initiative {} ({initiative_state}){team_state}",
                     result.wave, result.initiative_id
                 );
             }

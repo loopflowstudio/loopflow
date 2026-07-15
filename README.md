@@ -424,22 +424,28 @@ lf auth disconnect github
 Linear refreshes OAuth automatically before expiry. Connections created before
 this release may need one `lf auth linear` reconnect to record their PKCE client ID.
 
-Planning lives in Linear. Pin a wave to its Linear Initiative in
-`wave/<name>/GOAL.md` frontmatter — `lf pm init` writes this for you:
+Planning lives in Linear. Pin a wave to its Linear Initiative and its own team
+in `wave/<name>/GOAL.md` frontmatter — `lf pm init` writes both for you:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
 pm:
   provider: linear
   linear_initiative: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
+  linear_team: 2d1f0a77-8b3e-4c9a-9f21-6e5d4c3b2a10
 ```
 
 When no id is pinned, `lf pm init` links one exact Initiative-title match,
-creates one when none exists, and fails on duplicates. The persisted id keeps
-later reads stable across title changes and machines.
+creates one when none exists, and fails on duplicates. It also adopts or creates
+the wave's Linear **team** — the team key becomes each Task's prefix, so every
+wave owns its own identifiers (`PRD-1`, `INF-1`, `INT-1`) instead of sharing one.
+`--team-key` sets the prefix; a conflicting key or reused name is refused with a
+recovery action rather than guessed. Both ids are stable provider identity;
+keys and titles stay mutable presentation.
 
 ```bash
-lf pm init --wave designer                # connect the wave to its Initiative
+lf pm init --wave designer --team-key DSG  # connect the wave to its Initiative + team
+lf pm init --wave designer                 # same, defaulting the team key from the name
 lf pm sync --wave designer                # refresh the local SQLite snapshot
 lf pm show --wave designer                # read; refresh when the snapshot is stale
 lf pm show --wave designer --no-sync      # cache-only read for agents and apps

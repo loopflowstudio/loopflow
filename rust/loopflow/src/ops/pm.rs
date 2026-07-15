@@ -19,6 +19,7 @@ use crate::ops::util::resolve_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
+    TeamBinding,
 };
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
@@ -30,6 +31,10 @@ use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
 #[derive(Debug, Clone, Default)]
 pub struct PmInitOptions {
     pub wave: Option<String>,
+    /// Team key (Task prefix, e.g. `PRD`). Defaults to one derived from the wave.
+    pub team_key: Option<String>,
+    /// Team display name. Defaults to the title-cased wave name.
+    pub team_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +42,12 @@ pub struct PmInitResult {
     pub wave: String,
     pub initiative_id: String,
     pub created: bool,
+    /// Stable id of the wave's team (owns the Task prefix).
+    pub team_id: String,
+    /// The team's key, when this run resolved it (`None` on a full no-op re-init).
+    pub team_key: Option<String>,
+    /// Whether this run created the team (vs. adopted an existing one).
+    pub team_created: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -291,6 +302,12 @@ impl PmClient {
         }
     }
 
+    async fn ensure_team(&self, name: &str, key: &str) -> PmResult<TeamBinding> {
+        match self {
+            Self::Linear(client) => client.ensure_team(name, key).await,
+        }
+    }
+
     async fn rename_wave(&self, initiative_id: &str, name: &str) -> PmResult<()> {
         match self {
             Self::Linear(client) => client.rename_wave(initiative_id, name).await,
@@ -438,6 +455,25 @@ fn read_initiative(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<
     Some(initiative).filter(|initiative| !initiative.trim().is_empty())
 }
 
+/// The team id bound to a wave in GOAL.md, if any (`pm.linear_team`).
+fn read_team(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
+    let pm = read_wave_pm_config(repo, wave)?;
+    let team = match provider {
+        PmProviderKind::Linear => pm.linear_team,
+    }?;
+    Some(team).filter(|team| !team.trim().is_empty())
+}
+
+/// The team a wave's PM client should act in: its own `pm.linear_team` binding,
+/// falling back to the machine-global `config.linear.team` for waves not yet
+/// bound (keeps unmigrated waves working on the shared team). Reads follow
+/// Initiative → Project → Issue and ignore the team, so an unbound wave still
+/// syncs its existing issues; the team only steers *creation*.
+fn resolve_team(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
+    read_team(repo, wave, provider)
+        .or_else(|| load_config_or_default(Some(repo)).linear.team.clone())
+}
+
 /// Whether a wave has a Linear Initiative pinned for its resolved provider.
 fn wave_has_pm_initiative(repo: &Path, wave: &str) -> bool {
     resolve_provider(repo, wave)
@@ -445,14 +481,14 @@ fn wave_has_pm_initiative(repo: &Path, wave: &str) -> bool {
         .is_some_and(|provider| read_initiative(repo, wave, provider).is_some())
 }
 
-async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<PmClient> {
-    let config = load_config_or_default(Some(repo));
+async fn build_client(
+    _repo: &Path,
+    provider: PmProviderKind,
+    team: Option<String>,
+) -> OpsResult<PmClient> {
     let token = resolve_pm_token(provider).await?;
     match provider {
-        PmProviderKind::Linear => Ok(PmClient::Linear(LinearClient::new(
-            token,
-            config.linear.team.clone(),
-        ))),
+        PmProviderKind::Linear => Ok(PmClient::Linear(LinearClient::new(token, team))),
     }
 }
 
@@ -465,7 +501,7 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
             provider.initiative_key()
         ))
     })?;
-    let client = build_client(repo, provider).await?;
+    let client = build_client(repo, provider, resolve_team(repo, wave, provider)).await?;
     Ok(PmContext {
         client,
         provider,
@@ -818,48 +854,89 @@ async fn pm_init_async(
 
     let provider = resolve_provider(repo, &wave)?;
     let existing_initiative = read_initiative(repo, &wave, provider);
-    let binding_missing = existing_initiative.is_none();
-    if let Some(existing) = existing_initiative.as_ref() {
+    let existing_team = read_team(repo, &wave, provider);
+
+    // Full no-op fast path: both bindings present, no network touch.
+    if let (Some(initiative_id), Some(team_id)) =
+        (existing_initiative.as_ref(), existing_team.as_ref())
+    {
         progress.status(&format!(
-            "wave/{wave} already linked to {provider} Linear Initiative {existing}"
+            "wave/{wave} already linked to {provider} Initiative {initiative_id} and team {team_id}"
         ));
         return Ok(PmInitResult {
             wave,
-            initiative_id: existing.clone(),
+            initiative_id: initiative_id.clone(),
             created: false,
+            team_id: team_id.clone(),
+            team_key: None,
+            team_created: false,
         });
     }
 
     let summary = wave_summary(repo, &wave)?;
-    let client = build_client(repo, provider).await?;
     let title = title_case(&wave);
-    progress.status(&format!(
-        "looking for {provider} Linear Initiative `{title}`"
-    ));
-    let existing = matching_wave_id(&client.list_waves().await.map_err(pm_to_ops)?, &title)?;
-    let (initiative_id, created) = match existing {
-        Some(id) => {
-            progress.status(&format!(
-                "linking wave/{wave} to existing {provider} Linear Initiative {id}"
-            ));
-            (id, false)
-        }
+    let client = build_client(repo, provider, resolve_team(repo, &wave, provider)).await?;
+
+    // Initiative: keep an existing binding, else find or create it.
+    let initiative_missing = existing_initiative.is_none();
+    let (initiative_id, created) = match existing_initiative {
+        Some(id) => (id, false),
         None => {
             progress.status(&format!(
-                "creating {provider} Linear Initiative for wave/{wave}"
+                "looking for {provider} Linear Initiative `{title}`"
             ));
-            (
-                client
-                    .create_wave(&title, &summary)
-                    .await
-                    .map_err(pm_to_ops)?,
-                true,
-            )
+            match matching_wave_id(&client.list_waves().await.map_err(pm_to_ops)?, &title)? {
+                Some(id) => {
+                    progress.status(&format!(
+                        "linking wave/{wave} to existing {provider} Initiative {id}"
+                    ));
+                    (id, false)
+                }
+                None => {
+                    progress.status(&format!("creating {provider} Initiative for wave/{wave}"));
+                    (
+                        client
+                            .create_wave(&title, &summary)
+                            .await
+                            .map_err(pm_to_ops)?,
+                        true,
+                    )
+                }
+            }
         }
     };
-    write_initiative_to_goal(repo, &wave, provider, &initiative_id)?;
+    if initiative_missing {
+        write_initiative_to_goal(repo, &wave, provider, &initiative_id)?;
+    }
 
-    if binding_missing {
+    // Team: keep an existing binding, else adopt or create the requested one.
+    let team_missing = existing_team.is_none();
+    let (team_id, team_key, team_created) = match existing_team {
+        Some(id) => (id, None, false),
+        None => {
+            let name = options.team_name.clone().unwrap_or_else(|| title.clone());
+            let key = options
+                .team_key
+                .clone()
+                .unwrap_or_else(|| default_team_key(&wave));
+            progress.status(&format!(
+                "resolving {provider} team `{name}` (key {key}) for wave/{wave}"
+            ));
+            let team = client.ensure_team(&name, &key).await.map_err(pm_to_ops)?;
+            progress.status(&format!(
+                "{} {provider} team {} (key {})",
+                if team.created { "created" } else { "adopted" },
+                team.id,
+                team.key
+            ));
+            (team.id, Some(team.key), team.created)
+        }
+    };
+    if team_missing {
+        write_team_to_goal(repo, &wave, provider, &team_id)?;
+    }
+
+    if initiative_missing || team_missing {
         let _ = crate::ops::commit_workflow(
             repo,
             &crate::ops::CommitOptions {
@@ -875,6 +952,9 @@ async fn pm_init_async(
         wave,
         initiative_id,
         created,
+        team_id,
+        team_key,
+        team_created,
     })
 }
 
@@ -1299,6 +1379,7 @@ async fn pm_sync_async(
 
     let mut linked_initiative_ids = BTreeSet::new();
     let mut provider_by_kind = BTreeMap::new();
+    let mut team_owner: BTreeMap<String, String> = BTreeMap::new();
     for wave in &all_waves {
         let provider = resolve_provider(repo, wave)?;
         provider_by_kind.insert(provider.as_str().to_string(), provider);
@@ -1307,6 +1388,22 @@ async fn pm_sync_async(
         } else {
             diagnostics.push(format!("wave/{wave} has no Linear Initiative"));
         }
+        // Every wave should own its own team so Task prefixes stay wave-scoped.
+        match read_team(repo, wave, provider) {
+            None => diagnostics.push(format!(
+                "wave/{wave} has no `pm.{}`; run `lf pm init --wave {wave} --team-key <KEY>` \
+                 so its Tasks get their own prefix",
+                provider.team_key()
+            )),
+            Some(team_id) => {
+                if let Some(other) = team_owner.insert(team_id.clone(), wave.to_string()) {
+                    diagnostics.push(format!(
+                        "wave/{wave} and wave/{other} share Linear team {team_id}; \
+                         one team per wave keeps Task prefixes distinct"
+                    ));
+                }
+            }
+        }
     }
 
     let provider = provider_by_kind
@@ -1314,7 +1411,9 @@ async fn pm_sync_async(
         .next()
         .copied()
         .unwrap_or(PmProviderKind::Linear);
-    let client = build_client(repo, provider).await?;
+    // Machine-wide diff over many waves; reads follow Initiative → Project →
+    // Issue and are team-agnostic, so no per-wave team is resolved here.
+    let client = build_client(repo, provider, None).await?;
     progress.status(&format!(
         "checking {provider} Linear Initiatives and Projects"
     ));
@@ -1637,6 +1736,49 @@ fn write_initiative_to_goal(
     .map_err(OpsError::Message)
 }
 
+fn write_team_to_goal(
+    repo: &Path,
+    wave: &str,
+    provider: PmProviderKind,
+    team_id: &str,
+) -> OpsResult<()> {
+    update_wave_goal_config(repo, wave, |map| {
+        let pm_key = serde_yaml_ng::Value::String("pm".to_string());
+        let mut pm_map = map
+            .get(&pm_key)
+            .and_then(serde_yaml_ng::Value::as_mapping)
+            .cloned()
+            .unwrap_or_default();
+        pm_map.insert(
+            serde_yaml_ng::Value::String("provider".to_string()),
+            serde_yaml_ng::Value::String(provider.as_str().to_string()),
+        );
+        pm_map.insert(
+            serde_yaml_ng::Value::String(provider.team_key().to_string()),
+            serde_yaml_ng::Value::String(team_id.to_string()),
+        );
+        map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
+        Ok(())
+    })
+    .map_err(OpsError::Message)
+}
+
+/// A default team key (Task prefix) derived from the wave name: the first three
+/// alphanumeric characters, uppercased. `--team-key` overrides it.
+fn default_team_key(wave: &str) -> String {
+    let key: String = wave
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(3)
+        .collect::<String>()
+        .to_ascii_uppercase();
+    if key.len() >= 2 {
+        key
+    } else {
+        "LF".to_string()
+    }
+}
+
 fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
     Ok(crate::engine::wave_config::read_wave_summary(repo, wave)?)
 }
@@ -1864,6 +2006,58 @@ mod tests {
         let pm = read_wave_pm_config(repo.path(), "product").expect("pm config");
         assert_eq!(pm.provider.as_deref(), Some("linear"));
         assert_eq!(pm.linear_initiative.as_deref(), Some("initiative-1"));
+    }
+
+    #[test]
+    fn team_write_persists_alongside_the_initiative_binding() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "product",
+            "pm:\n  provider: linear\n  linear_initiative: \"initiative-1\"\n",
+        );
+
+        write_team_to_goal(repo.path(), "product", PmProviderKind::Linear, "team-prd")
+            .expect("write team");
+
+        let pm = read_wave_pm_config(repo.path(), "product").expect("pm config");
+        // Both bindings coexist; the team write never disturbs the Initiative.
+        assert_eq!(pm.linear_initiative.as_deref(), Some("initiative-1"));
+        assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
+        assert_eq!(
+            read_team(repo.path(), "product", PmProviderKind::Linear).as_deref(),
+            Some("team-prd")
+        );
+    }
+
+    #[test]
+    fn resolve_team_prefers_wave_binding_over_config() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "product",
+            "pm:\n  provider: linear\n  linear_team: \"team-prd\"\n",
+        );
+
+        // A wave with its own binding ignores any global fallback.
+        assert_eq!(
+            resolve_team(repo.path(), "product", PmProviderKind::Linear).as_deref(),
+            Some("team-prd")
+        );
+        // An unbound wave has no team here (no global config in the temp repo),
+        // which is safe: reads are team-agnostic and only creation needs one.
+        assert_eq!(
+            resolve_team(repo.path(), "unbound", PmProviderKind::Linear),
+            None
+        );
+    }
+
+    #[test]
+    fn default_team_key_derives_from_wave_name() {
+        assert_eq!(default_team_key("product"), "PRO");
+        assert_eq!(default_team_key("infrastructure"), "INF");
+        assert_eq!(default_team_key("intelligence"), "INT");
+        assert_eq!(default_team_key("x"), "LF");
     }
 
     #[test]

@@ -918,7 +918,7 @@ pub enum CronCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect a wave to a Linear Initiative
+    /// Connect a wave to its Linear Initiative and team (Task prefix)
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -928,6 +928,12 @@ pub enum PmCommand {
         /// Initialize all waves under wave/
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
+        /// Team key = Task prefix (e.g. PRD). Defaults from the wave name.
+        #[arg(long = "team-key")]
+        team_key: Option<String>,
+        /// Team display name. Defaults to the title-cased wave name.
+        #[arg(long = "team-name")]
+        team_name: Option<String>,
     },
     /// Read the wave's local Project and task snapshot
     Show {
@@ -1244,6 +1250,7 @@ mod tests {
                     wave,
                     wave_flag,
                     all,
+                    ..
                 },
         }) = cli.command
         else {
@@ -1623,6 +1630,8 @@ mod tests {
                     wave,
                     wave_flag,
                     all,
+                    team_key,
+                    team_name,
                 },
         }) = cli.command
         else {
@@ -1632,6 +1641,38 @@ mod tests {
         assert_eq!(wave, None);
         assert_eq!(wave_flag, None);
         assert!(all);
+        assert_eq!(team_key, None);
+        assert_eq!(team_name, None);
+    }
+
+    #[test]
+    fn pm_init_accepts_team_key_and_name() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "pm",
+            "init",
+            "--wave",
+            "product",
+            "--team-key",
+            "PRD",
+            "--team-name",
+            "Product",
+        ])
+        .expect("parse");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Init {
+                    team_key,
+                    team_name,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(team_key.as_deref(), Some("PRD"));
+        assert_eq!(team_name.as_deref(), Some("Product"));
     }
 
     #[test]

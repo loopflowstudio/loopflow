@@ -25,6 +25,23 @@ impl PmProviderKind {
             Self::Linear => "linear_initiative",
         }
     }
+
+    /// GOAL.md frontmatter key binding a wave to its provider team — the team
+    /// whose key prefixes every Task identifier (`PRD-*`, `INF-*`, …).
+    pub fn team_key(self) -> &'static str {
+        match self {
+            Self::Linear => "linear_team",
+        }
+    }
+}
+
+/// The result of adopting or creating a provider team for a wave. The stable
+/// `id` owns identity; `key` is mutable presentation (the Task prefix).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamBinding {
+    pub id: String,
+    pub key: String,
+    pub created: bool,
 }
 
 impl std::fmt::Display for PmProviderKind {

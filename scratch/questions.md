@@ -1,8 +1,10 @@
 # Assumptions
 
-- The first serial PR ends at the durable local-first transcript and repeated
-  failure roll-up. Inline typed references remain a follow-up because they need
-  navigation and preview contracts beyond the chat store boundary.
-- The existing durable POST response is the send acknowledgement for this
-  slice: the server returns immediately after journaling and remains independent
-  of agent startup and trace capture. Offline queuing is explicitly excluded.
+- PR #934 remains the first serial slice. Typed references and send-state proof
+  begin only after it lands and Loopflow rotates the Task branch.
+- Evidence references mean explicit commit hashes and repo-relative file/line
+  paths. They resolve against the Wave origin repository without adding a trace
+  or transcript store.
+- The existing durable POST response is the acceptance boundary: the server
+  returns the journaled user turn independently of agent startup and trace
+  capture. Offline queuing remains excluded.

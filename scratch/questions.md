@@ -34,11 +34,16 @@
   Task Session, moved Wave, or changed worktree path after the sheet opened.
   The resulting Task workspace opens the terminal that actually owns the fresh
   refinement process rather than the inactive Task agent tab.
-- Fresh canonical operating-guide capture is no longer an open question. The
-  production ledger contains five naturally captured turns across four sessions
-  for `/Users/jack/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md` at
+- Fresh canonical operating-guide capture is no longer an open question, but it
+  has since become historical. The July 15 gate read found 12 naturally
+  captured launches for
+  `/Users/jack/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md` at
   effective hash `130b91c3afb3afa7897e22cb85068a1714ab6431469dee3392eda10eb8bdd4fe`;
-  the current-file hash is identical and the revision is editable.
+  the current file now resolves to effective hash
+  `5e41e69b4778d251e86914721e649636e4e3ad814c8e6017b789c69d82decdb8`.
+  Context Lab correctly leaves the captured row read-only and excludes it as a
+  match from the current-file cohort. Do not revive the earlier editable claim
+  without a fresh natural capture.
 - The research-state filters are now explicit atomic launch predicates.
   `steered_only` requires a captured steer turn. `current_revision_only` keeps a
   launch when at least one resolvable file-backed instruction revision matches

@@ -325,23 +325,34 @@ points and non-zero observation spans within 2× of one another. Missing windows
 single-time populations, imbalanced spans, and imbalanced mixes each render a
 concrete unavailability reason. No wire field has a serde or Swift default.
 
-A fresh branch-binary read of the production 30-day ledger reconciled 55
-sessions, 128 launches, 136 turns, and 1,014,654 attributed tokens; the aggregate
-root and sum of its children both equal 1,014,654. The observed-steering cohort
+A final branch-binary read of the production 30-day ledger reconciled 55
+sessions, 131 launches, 139 turns, and 1,053,450 attributed tokens; the aggregate
+root and sum of its children both equal 1,053,450. The observed-steering cohort
 contained two sessions, three launches, 11 turns, eight steer turns, and 31,318
-attributed tokens. The current-file-instruction cohort contained two sessions,
-two launches, two turns, and 17,508 attributed tokens. Across all 242 revision
-evidence rows, provider/model bucket counts summed to each revision's exposed
-launch count and every row carried first and last observation timestamps. These
-are moving reader snapshots, not intervention or causal-comparison results.
+attributed tokens. The current-file-instruction cohort contained three sessions,
+three launches, three turns, and 30,982 attributed tokens. Across all 245
+revision evidence rows, provider/model bucket counts summed to each revision's
+exposed-launch count and every row carried first and last observation timestamps.
 
-Checks passed: `cargo fmt --all -- --check`; `cargo clippy -p loopflow
---all-targets -- -D warnings`; 71 context-filtered Rust tests; migration-chain
-validation through `0.11.006_context_launch_work`; Swift multiplatform boundary
-validation; the full 119-test Swift suite; and focused Context Lab (eight), DTO
-fixture (five), and RegistryQuery (15) suites. `swift test` rebuilt LoopflowMac;
-the separate Xcode build-for-testing was not repeated because this slice changes
-only package-compiled models, query construction, and the existing Lab view.
+The moving ledger also exercised the negative current-file case. The captured
+`LOOPFLOW.md` revision now has 12 exposed launches and 13,980 attributed tokens,
+but the canonical file's effective hash has changed. It remains visible as
+historical evidence and does not count as a matching current revision. The
+current-file cohort instead qualifies through the naturally captured current
+`.lf/skills/compress.md` revision. None of this is presented as an intervention
+or causal-comparison result.
+
+The final proportional gate ran
+`uv run python scripts/test.py --base bdc22c8aa --loopflow`: Rust formatting,
+clippy with warnings denied, and 1,332 Rust tests passed; the website ran 59
+tests with three skips; Swift ran 119 tests across 22 suites; the multiplatform
+boundary check passed; and LoopflowMac plus its UI-test runner completed
+`xcodebuild build-for-testing` (**TEST BUILD SUCCEEDED**). Migration-chain
+validation also passed through `0.11.006_context_launch_work`, and
+`git diff --check` was clean. Python and E2E were not selected because this
+slice changes neither surface; the full-matrix gate recorded in the preceding
+pass remains the baseline for those paths. The hosted UI gate remains unavailable
+in this headless environment.
 
 The real Intelligence Task launch, source edit, Task diff, lifecycle, backlink,
 and natural post-edit revision remain unclaimed and blocked exactly as before.

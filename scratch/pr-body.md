@@ -28,11 +28,14 @@ cargo run -q -p loopflow --bin lf -- \
   context --days 30 --repo "$PWD" --current-revision-only --json
 ```
 
-On the July 15 live Loopflow ledger, 54 sessions, 127 launches, and 135 turns
-produced 1,003,087 attributed tokens. The aggregate root and sum of its children
-both equal 1,003,087; eight provider-total-only turns remain visible only in
-coverage. The current `LOOPFLOW.md` revision has eight exposed launches, 9,320
-tokens, and distinct smooth, high-context, and recent representative sessions.
+On the July 15 live Loopflow ledger, 55 sessions, 131 launches, and 139 turns
+produced 1,053,450 attributed tokens. The aggregate root and sum of its children
+both equal 1,053,450; eight provider-total-only turns remain visible only in
+coverage. **Observed steering only** reduces that population to two sessions,
+three launches, 11 turns, and 31,318 tokens. **Contains current file
+instruction** returns three sessions, three launches, three turns, and 30,982
+tokens. The captured `LOOPFLOW.md` revision is now historical and is correctly
+excluded as a matching revision rather than mislabeled current.
 
 ## Intent
 
@@ -62,6 +65,10 @@ historical trace.
 - Keep prompt and conversation bodies closed until **Open trace**.
 - Build flame identity as context kind → canonical source → content revision,
   with provider-total-only capture excluded from attributed geometry.
+- Treat observed steering and current-file identity as launch predicates, then
+  keep each qualifying launch whole so every snapshot still reconciles.
+- Block revision comparison when capture, provider/model mix, or non-zero
+  observation spans are materially imbalanced.
 - Select representative evidence from distinct outer sessions, falling back to
   the next-best session for each role rather than duplicating or dropping it.
 - Refresh source and Task identity before refinement, then rehash canonical and
@@ -78,4 +85,5 @@ historical trace.
   so this review did not claim a refinement launch, source diff, backlink, or
   natural post-edit revision.
 - Hosted UI and installed-app keyboard walkthrough proof; the headless gate ran
-  the full test matrix and Mac build-for-testing instead.
+  the full matrix at the gated base, then proportional Rust, website, Swift,
+  and Mac build-for-testing checks for this slice instead.

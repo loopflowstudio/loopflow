@@ -18,3 +18,9 @@ fact plus its evidence `receipts`, covering every `EvidenceKind`. Pinned in Rust
 `interactive_handoff_attach.json` is the store-direct `lf handoff attach --json`
 shape. It carries durable identity and structured presentation instructions;
 terminal bytes are deliberately absent. Rust and Swift both round-trip it.
+
+`task_attention_states.json` pins the Rust-owned desktop attention fold for
+live advancing, live human wait, dead dirty, dead authored commits, clean
+backlog, completed, stale active intent, and unavailable local evidence. Rust
+and Swift decode the same Task rows; consumers never reconstruct the signal
+from process flags.

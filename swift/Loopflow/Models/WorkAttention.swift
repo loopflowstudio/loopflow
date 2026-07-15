@@ -1,16 +1,16 @@
 import Foundation
 
 /// The NOW lens: the live-and-stuck frontier across every Wave, grouped by who
-/// must move next. A pure projection over the one `lf roadmap` read — the same
-/// shared fields the ROADMAP tree renders, re-shaped into a flat, cross-wave,
-/// attention-grouped list. It invents no session state; if the CLI ever wants
-/// the same flat view it reuses `nowGroup(for:)` verbatim.
+/// must move next. A display grouping over the Rust-owned attention signal in
+/// the one `lf roadmap` read, re-shaped into a flat, cross-wave list. It
+/// invents no Session or process state.
 public enum NowGroup: String, CaseIterable, Sendable, Hashable {
     case readyForReview
     case needsInput
     case working
     case stopped
     case failed
+    case unknown
 
     public var title: String {
         switch self {
@@ -19,38 +19,39 @@ public enum NowGroup: String, CaseIterable, Sendable, Hashable {
         case .working: "Working"
         case .stopped: "Stopped"
         case .failed: "Failed"
+        case .unknown: "Unknown"
         }
     }
 }
 
 /// Which NOW group a Task belongs to, or `nil` when it is not a NOW row.
 ///
-/// NOW is the frontier of live-or-stuck work: it excludes Tasks nobody has
-/// started (`runtime == nil` — those are Available in ROADMAP) and terminal
-/// Sessions (completed/abandoned — those are done). The order of the checks is
-/// the priority: a Task with an open PR reads as *Ready for review* even though
-/// its Session is idle, because the PR is the thing waiting on a human.
+/// Rust owns whether the row is advancing, needs attention, is quiet, or could
+/// not be proven. Swift only gives red rows a useful reading group; it never
+/// reconstructs the attention level from status and process flags.
 public func nowGroup(for task: RoadmapTask) -> NowGroup? {
-    if task.task.completed { return nil }
-    guard let runtime = task.runtime else { return nil }
-    if runtime.status == .completed || runtime.status == .abandoned { return nil }
-
-    if let pr = task.activePr, pr.phase != .merged, pr.phase != .abandoned {
-        return .readyForReview
-    }
-    switch task.nextMove.owner {
-    case .review: return .readyForReview
-    case .human: return .needsInput
-    default: break
-    }
-    if runtime.status == .failed { return .failed }
-    if runtime.processAlive && (runtime.status == .starting || runtime.status == .running) {
+    switch task.attention.level {
+    case .green:
         return .working
+    case .black:
+        return nil
+    case .unknown:
+        return .unknown
+    case .red:
+        switch task.attention.nextOwner {
+        case .review, .ci: return .readyForReview
+        case .human: return .needsInput
+        default: break
+        }
+        if task.attention.sessionStatus == .failed { return .failed }
+        return .stopped
     }
-    // A Session that exists, is non-terminal, but is not advancing itself: a
-    // dead or idle process the user can resume. A dead process is not a dead
-    // task — the row stays actionable and says why it stopped.
-    return .stopped
+}
+
+/// The row's spoken contract uses the exact shared reason rendered by the CLI.
+public func taskAttentionAccessibilityLabel(_ task: RoadmapTask) -> String {
+    "\(task.task.identifier), \(task.task.name). \(task.attention.level.rawValue). "
+        + "\(task.attention.reason). Next owner: \(task.attention.nextOwner.rawValue)."
 }
 
 /// One flat NOW row: a Task lifted out of the tree, carrying its Wave and

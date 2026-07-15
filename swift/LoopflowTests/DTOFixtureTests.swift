@@ -40,6 +40,8 @@ struct DTOFixtureTests {
         #expect(detail.attention.items[0].owner == .review)
         #expect(detail.attention.items[0].reason == "waiting for review")
         #expect(detail.attention.items[0].ageSeconds == 7200)
+        #expect(detail.projects[0].tasks[0].attention.level == .red)
+        #expect(detail.projects[0].tasks[0].attention.reason == "waiting for review")
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -53,6 +55,7 @@ struct DTOFixtureTests {
         #expect(product.wave.name == "product")
         let project = try #require(product.projects.items.first)
         #expect(project.tasks.map(\.section) == [.now, .needsAttention, .available, .later])
+        #expect(project.tasks.map(\.attention.level) == [.green, .red, .black, .black])
         #expect(project.tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
         #expect(project.tasks[2].reference.workspace == nil)
         #expect(project.tasks[2].reference.issueUrl == nil)

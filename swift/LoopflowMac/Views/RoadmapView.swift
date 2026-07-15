@@ -17,24 +17,16 @@ enum RoadmapTaskAction: Equatable {
     }
 }
 
-/// Pick the one contextual Task action from the roadmap's durable plan plus
-/// runtime evidence. Section and status stay owned by `lf roadmap`; this only
-/// maps that shared truth onto existing lifecycle verbs.
+/// Pick the one contextual Task action from Rust's legal-control projection.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
-    guard !task.task.completed else { return nil }
-    guard let runtime = task.runtime else { return .run }
-    if runtime.status == .completed || runtime.status == .abandoned {
-        return nil
-    }
-    if runtime.processAlive && (runtime.status == .starting || runtime.status == .running) {
-        return .attach
-    }
-    return .resume
+    if task.attention.controls.contains(.start) { return .run }
+    if task.attention.controls.contains(.attach) { return .attach }
+    if task.attention.controls.contains(.resume) { return .resume }
+    return nil
 }
 
 func roadmapTaskCanInterrupt(_ task: RoadmapTask) -> Bool {
-    guard let runtime = task.runtime, runtime.processAlive else { return false }
-    return runtime.status == .starting || runtime.status == .running
+    task.attention.controls.contains(.interrupt)
 }
 
 private struct RoadmapTaskSelection: Identifiable {
@@ -122,6 +114,7 @@ struct RoadmapView: View {
                 task: selection.task.task,
                 reference: selection.task.reference,
                 runtime: selection.task.runtime,
+                attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
                 opensAgent: true
@@ -668,10 +661,11 @@ private struct RoadmapTaskRow: View {
                         .font(Typography.caption(9).weight(.semibold))
                         .foregroundStyle(task.section.color)
                 }
-                Text(task.nextMove.reason)
+                Text(task.attention.reason)
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(2)
+                    .accessibilityLabel(taskAttentionAccessibilityLabel(task))
                 WorkChannelChips(task: task)
                 TaskActionCluster(
                     task: task,
@@ -690,25 +684,40 @@ private struct RoadmapTaskRow: View {
     }
 }
 
-/// The three orthogonal facts every work row carries, on independent channels,
-/// never collapsed into one status word: PM completion, Session status, and
-/// process liveness. `runtime == nil` means no Session — an Available Task,
-/// distinct from a dead process.
+/// The shared attention fold plus its orthogonal raw facts: PM completion,
+/// Session status, and process liveness. `runtime == nil` means no Session — an
+/// Available Task, distinct from a dead process.
 private struct WorkChannelChips: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
+            channel("Attention", task.attention.level.rawValue, task.attention.level.color)
             channel("PM", task.task.completed ? "done" : "open",
                     task.task.completed ? Color.statusSuccess : palette.textSecondary)
             if let runtime = task.runtime {
                 channel("Session", runtime.status.rawValue, sessionColor(runtime.status))
-                channel("Process", runtime.processAlive ? "alive" : "dead",
-                        runtime.processAlive ? Color.statusSuccess : Color.statusNeutral)
+                processChannel
             } else {
                 channel("Session", "none", palette.textSecondary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var processChannel: some View {
+        switch task.attention.process.state {
+        case .observed:
+            let alive = task.attention.process.alive == true
+            channel("Process", alive ? "alive" : "dead",
+                    alive ? Color.statusSuccess : Color.statusNeutral)
+        case .notExpected:
+            channel("Process", "not expected", palette.textSecondary)
+        case .notApplicable:
+            channel("Process", "none", palette.textSecondary)
+        case .unavailable:
+            channel("Process", "unknown", Color.statusWarning)
         }
     }
 
@@ -819,6 +828,7 @@ private struct NowSectionView: View {
         case .working: .statusSuccess
         case .stopped: .statusNeutral
         case .failed: .statusError
+        case .unknown: .statusWarning
         }
     }
 }
@@ -856,10 +866,11 @@ private struct NowRowView: View {
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
             }
-            Text(task.nextMove.reason)
+            Text(task.attention.reason)
                 .font(Typography.caption(10))
                 .foregroundStyle(palette.textSecondary)
                 .lineLimit(2)
+                .accessibilityLabel(taskAttentionAccessibilityLabel(task))
             WorkChannelChips(task: task)
             TaskActionCluster(
                 task: task,
@@ -897,6 +908,17 @@ private extension RoadmapSection {
         case .needsAttention: .statusWarning
         case .available: .statusInfo
         case .later: .statusNeutral
+        }
+    }
+}
+
+private extension TaskAttentionLevel {
+    var color: Color {
+        switch self {
+        case .green: .statusSuccess
+        case .red: .statusError
+        case .black: .statusNeutral
+        case .unknown: .statusWarning
         }
     }
 }

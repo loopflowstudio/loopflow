@@ -90,6 +90,7 @@ struct TaskWorkspaceView: View {
     let task: TaskPlanningSnapshot
     let reference: TaskReferenceSnapshot
     let runtime: TaskRuntimeSnapshot?
+    let attention: TaskAttentionSnapshot
     let repoPath: String
     @ObservedObject var terminalStore: TaskTerminalStore
 
@@ -109,6 +110,7 @@ struct TaskWorkspaceView: View {
         task: TaskPlanningSnapshot,
         reference: TaskReferenceSnapshot,
         runtime: TaskRuntimeSnapshot?,
+        attention: TaskAttentionSnapshot,
         repoPath: String,
         terminalStore: TaskTerminalStore,
         opensAgent: Bool = false
@@ -116,6 +118,7 @@ struct TaskWorkspaceView: View {
         self.task = task
         self.reference = reference
         self.runtime = runtime
+        self.attention = attention
         self.repoPath = repoPath
         self.terminalStore = terminalStore
         _section = State(initialValue: opensAgent ? .agent : .changes)
@@ -264,8 +267,7 @@ struct TaskWorkspaceView: View {
     }
 
     private var canAttachToAgent: Bool {
-        guard let runtime, runtime.processAlive else { return false }
-        return runtime.status == .starting || runtime.status == .running
+        attention.controls.contains(.attach)
     }
 
     private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {

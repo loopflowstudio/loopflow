@@ -6,8 +6,8 @@ import Testing
 
 @Suite("Roadmap controls")
 struct RoadmapViewTests {
-    @Test("Task actions come from the shared roadmap runtime evidence")
-    func taskActionsFollowRuntimeEvidence() throws {
+    @Test("Task actions come from the shared attention controls")
+    func taskActionsFollowAttentionControls() throws {
         let snapshot = try loadRoadmapFixture()
         let project = try #require(snapshot.waves.first?.projects.items.first)
         let tasks = project.tasks

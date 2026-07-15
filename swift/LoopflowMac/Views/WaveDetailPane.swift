@@ -423,7 +423,7 @@ private struct WaveWorkInspector: View {
                 details(
                     directive: task.directive,
                     status: task.runtime?.status.rawValue ?? "unstarted",
-                    reason: task.nextMove.reason,
+                    reason: task.attention.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
                     prs: task.prs
@@ -444,6 +444,7 @@ private struct WaveWorkInspector: View {
                     task: task.task,
                     reference: task.reference,
                     runtime: task.runtime,
+                    attention: task.attention,
                     repoPath: repoPath,
                     terminalStore: terminalStore
                 )

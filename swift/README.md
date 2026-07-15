@@ -26,6 +26,9 @@ reads Projects, Tasks, decisions, PR delivery, and attention from
 Start, resume, attach, or interrupt a Task from the roadmap. Open its worktree
 in Warp, or attach to the running Task agent in the workspace sheet beside its
 changed files, per-file patches, current contents, and embedded shells.
+The attention chip and spoken row use the same `lf roadmap` reason: green is a
+live advancing body, red is a human handoff or local recovery, black is settled
+or unstarted, and unknown means the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.

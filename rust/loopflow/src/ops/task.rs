@@ -1752,6 +1752,17 @@ pub(crate) async fn reconcile_task_pr(
     reconcile_task_pr_with_authority(store, session, None).await
 }
 
+/// Wake a Task sleeping on an open PR into a `ci-fix` turn. Thin re-export of the
+/// shared child-launch path so supervisors (the project loop) can trigger the
+/// wake without reaching into `ops::child`. Gated by `ci_fix_restart_bar`; a
+/// no-op unless the active PR's current head warrants it.
+pub(crate) async fn wake_task_ci_fix(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<bool> {
+    super::child::wake_task_ci_fix(store, session).await
+}
+
 pub(crate) async fn reconcile_task_pr_for_lease(
     store: &SharedStore,
     session: &mut TaskSession,

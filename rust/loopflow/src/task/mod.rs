@@ -572,6 +572,23 @@ pub enum PmWritebackState {
     },
 }
 
+/// Freshness of the last GitHub observation behind a Task's PR state. GitHub is
+/// a reconciliation input, not the store of record: when a bounded remote read
+/// fails (quota, network, or a GitHub error), the cached Task/PR row stands and
+/// the freshness degrades rather than erroring the control command. This is
+/// transient runtime state — recomputed each reconcile, never persisted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[serde(tag = "freshness", rename_all = "snake_case")]
+pub enum Observation {
+    /// The cached PR state reflects a successful remote read, or no remote read
+    /// was required — an unpublished working PR has no number to observe.
+    #[default]
+    Fresh,
+    /// A bounded remote read failed; the cached PR state is preserved and
+    /// `reason` names the degraded cause for the operator.
+    Degraded { reason: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSession {
     pub id: TaskSessionId,
@@ -618,6 +635,10 @@ pub struct TaskSession {
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    /// Freshness of the most recent PR observation. Transient: set by reconcile,
+    /// never persisted (the store maps columns explicitly and skips it).
+    #[serde(skip)]
+    pub observation: Observation,
 }
 
 impl TaskSession {
@@ -1120,6 +1141,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::Fresh,
         }
     }
 

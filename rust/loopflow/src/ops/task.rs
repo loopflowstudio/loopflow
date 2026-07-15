@@ -34,8 +34,9 @@ use crate::session_context::{
 };
 use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::task::{
-    AfterMerge, CiCheck, CiObservation, CiState, GithubPr, PmWritebackOperation, PmWritebackState,
-    PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionStatus,
+    AfterMerge, CiCheck, CiObservation, CiState, GithubPr, Observation, PmWritebackOperation,
+    PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession,
+    TaskSessionStatus,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -142,6 +143,10 @@ pub struct TaskSessionSnapshot {
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
+    /// Freshness of the PR state against GitHub as of this read. `Degraded`
+    /// means a bounded remote read failed and the PR fields are cached, not
+    /// freshly confirmed.
+    pub observation: Observation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -269,8 +274,24 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
             .await
             .map_err(|error| task_error(error.to_string()))?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-        let live =
-            crate::ops::pr::current_or_merged_pr_for_branch(&session.worktree, &parent.branch)?;
+        // GitHub is a reconciliation input, not the store of record. Read the
+        // parent's persisted PR by number and fall back to the cached row when the
+        // read 404s or degrades, so stack placement survives a GitHub outage
+        // rather than erroring the control command that triggered it.
+        let live = match parent.github().map(|github| github.number) {
+            Some(number) => {
+                match crate::ops::pr::observe_pr_by_number(
+                    &session.worktree,
+                    number,
+                    &parent.branch,
+                ) {
+                    crate::ops::pr::PrObservation::Fresh(info) => Some(info),
+                    crate::ops::pr::PrObservation::NotFound
+                    | crate::ops::pr::PrObservation::Degraded { .. } => None,
+                }
+            }
+            None => None,
+        };
         let merged = parent.merge_commit.is_some()
             || live.as_ref().is_some_and(|info| info.state == "merged");
         let closed = parent.abandoned_at.is_some()
@@ -667,6 +688,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::Fresh,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
@@ -2109,11 +2131,32 @@ async fn reconcile_task_pr_with_authority(
     else {
         return Ok(None);
     };
-    let Some(github_pr) =
-        crate::ops::pr::current_or_merged_pr_for_branch(&session.worktree, &pr.branch)?
-    else {
+    // GitHub is a reconciliation input, not the Task's store of record. Read the
+    // one persisted PR by number (a single bounded REST call, never `gh pr
+    // list`); an unpublished working PR has no number and is not read remotely.
+    // A quota/network/GitHub failure degrades observation freshness and keeps the
+    // cached row rather than erroring the control command that triggered reconcile.
+    let Some(number) = pr.github().map(|github| github.number) else {
+        session.observation = Observation::Fresh;
         return Ok(Some(pr));
     };
+    let github_pr =
+        match crate::ops::pr::observe_pr_by_number(&session.worktree, number, &pr.branch) {
+            crate::ops::pr::PrObservation::Fresh(info) => {
+                session.observation = Observation::Fresh;
+                info
+            }
+            crate::ops::pr::PrObservation::NotFound => {
+                // The PR ref was deleted remotely; a merge (if any) is already
+                // persisted. Keep the cached settled/working state.
+                session.observation = Observation::Fresh;
+                return Ok(Some(pr));
+            }
+            crate::ops::pr::PrObservation::Degraded { reason } => {
+                session.observation = Observation::Degraded { reason };
+                return Ok(Some(pr));
+            }
+        };
     let number = u32::try_from(github_pr.number).map_err(|_| {
         task_error(format!(
             "pull request #{} exceeds supported range",
@@ -2925,6 +2968,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             latest_event,
             created_at: session.created_at,
             updated_at: session.updated_at,
+            observation: session.observation,
         })
     })
 }
@@ -3642,10 +3686,10 @@ mod tests {
         _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
         diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
         next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
-        reconcile_process_liveness, recover_stalled_task_body, refuse_dirty_between_prs,
-        refuse_if_canonical_ahead, resolve_task_flow, resolve_upstream_base,
-        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
+        refuse_dirty_between_prs, refuse_if_canonical_ahead, resolve_task_flow,
+        resolve_upstream_base, task_recovery_adoption, verify_task_pr_range_with_authority,
+        RotateOptions, TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -3660,8 +3704,8 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
-        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, Observation, PmWritebackState, PrPhase, PrPublication, TaskEventKind,
+        TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
     use loopflow_test_support::TestRepo;
@@ -3751,6 +3795,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::Fresh,
         };
 
         // LF_CONTROL_BIN names a real, existing binary (the historical pin);
@@ -3939,6 +3984,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::Fresh,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
@@ -4444,6 +4490,69 @@ mod tests {
         let prs = store.task_prs(&session.id).await.expect("read PR history");
         assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(prs[0].phase(), PrPhase::Merged);
+    }
+
+    #[tokio::test]
+    async fn reconcile_degrades_and_preserves_cache_when_the_github_read_fails() {
+        // A published PR whose remote can't be read (TestRepo's origin is a local
+        // bare repo, not GitHub, so the read cannot resolve) must not error
+        // reconcile: the cached row stands and freshness degrades. This is what
+        // keeps follow-up/steer/status usable during a quota or network outage —
+        // each funnels through reconcile, which previously `?`-failed on the read.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, mut session, mut pr) = rotation_task(&repo, branch, &base).await;
+        pr.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 914,
+                url: "https://example.com/pr/914".to_string(),
+                head_sha: None,
+            }),
+        });
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&pr).await.expect("publish PR");
+
+        let observed = reconcile_task_pr(&store, &mut session)
+            .await
+            .expect("reconcile does not error on a failed GitHub read")
+            .expect("the cached PR is preserved");
+
+        // Cache stands: still Open, no merge fabricated from a failed read.
+        assert_eq!(observed.phase(), PrPhase::Open);
+        assert_eq!(observed.merge_commit, None);
+        match &session.observation {
+            Observation::Degraded { reason } => assert!(!reason.is_empty()),
+            Observation::Fresh => panic!("a failed GitHub read must degrade freshness"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reconcile_skips_the_remote_read_for_an_unpublished_working_pr() {
+        // A working PR has no persisted number; reconcile must neither enumerate
+        // nor read remotely. Proof: a read here WOULD fail (no GitHub origin), yet
+        // freshness stays Fresh — the read never happens.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        let (_home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
+        assert!(pr.github().is_none(), "fixture PR is unpublished");
+
+        let observed = reconcile_task_pr(&store, &mut session)
+            .await
+            .expect("reconcile succeeds")
+            .expect("working PR preserved");
+
+        assert_eq!(observed.phase(), PrPhase::Working);
+        assert_eq!(session.observation, Observation::Fresh);
     }
 
     #[test]
@@ -5036,6 +5145,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::Fresh,
         };
 
         let mut pr = TaskPr {

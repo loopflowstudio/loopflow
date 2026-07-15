@@ -645,6 +645,9 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
                 placement,
             );
         }
+        if let loopflow::task::Observation::Degraded { reason } = &snapshot.observation {
+            println!("  PR observation: degraded — {reason} (showing cached state)");
+        }
     }
     Ok(())
 }

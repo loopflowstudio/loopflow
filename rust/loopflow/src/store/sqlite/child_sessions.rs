@@ -3684,6 +3684,9 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
+        // Freshness is transient runtime state; a loaded row starts Fresh and
+        // reconcile recomputes it against GitHub.
+        observation: crate::task::Observation::Fresh,
     })
 }
 

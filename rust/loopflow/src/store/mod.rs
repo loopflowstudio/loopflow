@@ -1082,6 +1082,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::Fresh,
         }
     }
 

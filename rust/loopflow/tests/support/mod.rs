@@ -310,6 +310,7 @@ pub fn register_task(
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        observation: loopflow::task::Observation::Fresh,
     };
     let pr = TaskPr {
         id: TaskPrId::new(),

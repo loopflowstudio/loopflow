@@ -1044,6 +1044,7 @@ mod tests {
             agent: "claude".to_string(),
             provider: "claude".to_string(),
             provider_session_id: active.then(|| "thread-task".to_string()),
+            observation: crate::task::Observation::Fresh,
             latest_process: active.then_some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,

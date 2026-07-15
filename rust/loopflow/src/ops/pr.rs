@@ -28,7 +28,7 @@ pub struct PrResult {
     pub updated: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrInfo {
     pub url: String,
     pub number: u64,
@@ -346,62 +346,149 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
     Ok(None)
 }
 
-pub(crate) fn current_or_merged_pr_for_branch(
-    repo: &Path,
-    branch: &str,
-) -> OpsResult<Option<PrInfo>> {
+/// The outcome of a bounded, single-PR remote observation. GitHub is a
+/// reconciliation input, never the Task's store of record: a transport, quota,
+/// or network failure must leave the cached Task/PR row standing rather than
+/// erroring the control command that triggered the read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PrObservation {
+    /// The remote confirmed the PR's current state.
+    Fresh(PrInfo),
+    /// The PR number 404s — its ref was deleted remotely. The caller keeps its
+    /// cached settled/working state; the merge (if any) is already persisted.
+    NotFound,
+    /// A quota, network, or GitHub failure. `reason` is human-facing; the caller
+    /// preserves its cached state and surfaces the reason as degraded freshness.
+    Degraded { reason: String },
+}
+
+/// One `TaskPr.publication.github` PR read via a single bounded REST call — no
+/// enumeration. Task reconcile always holds a persisted PR number, so it never
+/// needs `gh pr list`; an unpublished working PR has no number and is not read
+/// remotely at all. A transport/quota/network failure returns `Degraded` rather
+/// than erroring, so local Task control survives a GitHub outage.
+pub(crate) fn observe_pr_by_number(repo: &Path, number: u32, branch: &str) -> PrObservation {
     if !gh_available() {
-        return Ok(None);
+        return PrObservation::Degraded {
+            reason: "gh CLI not found".to_string(),
+        };
     }
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("list")
-        .arg("--head")
-        .arg(branch)
-        .arg("--state")
-        .arg("all")
-        .arg("--json")
-        .arg("url,state,isDraft,number,mergeCommit,headRefOid")
+    let Some((owner, name)) = crate::engine::worktrees::github_repo_nwo(repo) else {
+        return PrObservation::Degraded {
+            reason: "could not resolve GitHub owner/repo from the origin remote".to_string(),
+        };
+    };
+    let endpoint = format!("repos/{owner}/{name}/pulls/{number}");
+    let output = match Command::new("gh")
         .current_dir(repo)
-        .output()?;
+        .args([
+            "api",
+            "-H",
+            "Accept: application/vnd.github+json",
+            &endpoint,
+        ])
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return PrObservation::Degraded {
+                reason: format!("failed to invoke gh while reading PR #{number}: {error}"),
+            }
+        }
+    };
     if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("gh pr list --head {branch} --state all"),
-            stderr: stderr_from_output(&output),
-        });
+        let stderr = stderr_from_output(&output);
+        if is_missing_pr(&stderr) {
+            return PrObservation::NotFound;
+        }
+        return PrObservation::Degraded {
+            reason: classify_pr_read_failure(number, &stderr),
+        };
     }
-    let list: Vec<GhPr> = serde_json::from_slice(&output.stdout).map_err(|error| {
-        OpsError::Message(format!("failed to parse gh pr list output: {error}"))
-    })?;
-    Ok(select_reconcile_pr(list).map(|pr| PrInfo {
-        url: pr.url,
-        number: pr.number,
-        state: if pr.is_draft {
+    match serde_json::from_slice::<GhRestPr>(&output.stdout) {
+        Ok(pr) => PrObservation::Fresh(pr.into_info(branch)),
+        Err(error) => PrObservation::Degraded {
+            reason: format!("failed to parse gh api response for PR #{number}: {error}"),
+        },
+    }
+}
+
+/// A 404 from `gh api` means the PR ref no longer exists — distinct from a
+/// quota/network failure, and not something to retry or treat as degraded.
+fn is_missing_pr(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("http 404") || lower.contains("not found")
+}
+
+/// Turn a failed `gh api` read into a concise, human-facing degraded reason. The
+/// quota case is called out by name because it is the recurring dogfood failure
+/// (a shared 5000/hr GraphQL+REST budget draining to zero).
+fn classify_pr_read_failure(number: u32, stderr: &str) -> String {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("rate limit") || lower.contains("rate-limit") {
+        format!("GitHub API rate limit exhausted while reading PR #{number}")
+    } else if lower.contains("could not resolve host")
+        || lower.contains("network is unreachable")
+        || lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("connection refused")
+    {
+        format!("network failure while reading PR #{number}")
+    } else {
+        format!(
+            "GitHub read for PR #{number} failed: {}",
+            stderr.lines().next().unwrap_or("").trim()
+        )
+    }
+}
+
+/// GitHub's REST shape for a single pull request. Not a wire DTO — this
+/// deserializes an external API response, mirroring the tolerance of `GhPr`.
+#[derive(Debug, Deserialize)]
+struct GhRestPr {
+    #[serde(default)]
+    merged: bool,
+    state: String,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default, rename = "merge_commit_sha")]
+    merge_commit_sha: Option<String>,
+    number: u64,
+    #[serde(rename = "html_url")]
+    html_url: String,
+    head: GhRestHead,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhRestHead {
+    #[serde(default)]
+    sha: Option<String>,
+}
+
+impl GhRestPr {
+    fn into_info(self, branch: &str) -> PrInfo {
+        // REST reports only open|closed; a merged PR is closed + merged:true.
+        let state = if self.merged {
+            "merged".to_string()
+        } else if self.state.eq_ignore_ascii_case("closed") {
+            "closed".to_string()
+        } else if self.draft {
             "draft".to_string()
         } else {
-            pr.state.to_ascii_lowercase()
-        },
-        branch: branch.to_string(),
-        merge_commit: pr.merge_commit.map(|commit| commit.oid),
-        head_sha: pr.head_ref_oid,
-    }))
-}
-
-/// A branch can carry several PRs — a merged one plus a stray open/draft or
-/// closed sibling left behind by a land. The merged PR is the branch's truth;
-/// reconcile must observe it. Rank **merged > open/draft > closed**, newest as
-/// the tiebreak within a rank, so an out-of-band merge is never hidden by a
-/// noisier sibling.
-fn select_reconcile_pr(prs: Vec<GhPr>) -> Option<GhPr> {
-    prs.into_iter()
-        .max_by_key(|pr| (reconcile_rank(pr), pr.number))
-}
-
-fn reconcile_rank(pr: &GhPr) -> u8 {
-    match pr.state.to_ascii_uppercase().as_str() {
-        "MERGED" => 3,
-        "CLOSED" => 1,
-        _ => 2, // open, including drafts
+            "open".to_string()
+        };
+        PrInfo {
+            url: self.html_url,
+            number: self.number,
+            state,
+            branch: branch.to_string(),
+            merge_commit: if self.merged {
+                self.merge_commit_sha
+            } else {
+                None
+            },
+            head_sha: self.head.sha,
+        }
     }
 }
 
@@ -1039,20 +1126,9 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhCheck, GhPr,
-        MergeGateReading, PrCopy, RequiredChecks,
+        classify_pr_read_failure, is_missing_pr, parse_generated_pr_copy, pr_number_from_url,
+        GhCheck, GhRestHead, GhRestPr, MergeGateReading, PrCopy, RequiredChecks,
     };
-
-    fn gh_pr(number: u64, state: &str, is_draft: bool) -> GhPr {
-        GhPr {
-            url: format!("https://example.com/pr/{number}"),
-            state: state.to_string(),
-            is_draft,
-            number,
-            merge_commit: None,
-            head_ref_oid: None,
-        }
-    }
 
     fn check(name: &str, bucket: &str) -> GhCheck {
         GhCheck {
@@ -1062,31 +1138,60 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reconcile_prefers_the_merged_pr_over_a_newer_sibling() {
-        // A land left a newer empty draft (#909) beside the merged PR (#905).
-        let picked =
-            select_reconcile_pr(vec![gh_pr(909, "OPEN", true), gh_pr(905, "MERGED", false)])
-                .expect("a PR is selected");
-        assert_eq!(picked.number, 905);
-        assert_eq!(picked.state, "MERGED");
+    fn rest_pr(state: &str, merged: bool, draft: bool) -> GhRestPr {
+        GhRestPr {
+            merged,
+            state: state.to_string(),
+            draft,
+            merge_commit_sha: merged.then(|| "deadbeef".to_string()),
+            number: 905,
+            html_url: "https://github.com/loopflowstudio/loopflow/pull/905".to_string(),
+            head: GhRestHead {
+                sha: Some("headsha".to_string()),
+            },
+        }
     }
 
     #[test]
-    fn reconcile_prefers_open_over_closed_and_newest_within_a_rank() {
+    fn rest_merged_pr_maps_to_merged_state_with_commit_and_head() {
+        // REST reports a merged PR as closed+merged:true; reconcile needs "merged"
+        // and the head sha (the merged branch tip, carried forward on rotation).
+        let info = rest_pr("closed", true, false).into_info("jack/task-1");
+        assert_eq!(info.state, "merged");
+        assert_eq!(info.merge_commit.as_deref(), Some("deadbeef"));
+        assert_eq!(info.head_sha.as_deref(), Some("headsha"));
+        assert_eq!(info.branch, "jack/task-1");
+    }
+
+    #[test]
+    fn rest_open_and_draft_and_closed_states_map_through() {
+        assert_eq!(rest_pr("open", false, false).into_info("b").state, "open");
+        assert_eq!(rest_pr("open", false, true).into_info("b").state, "draft");
         assert_eq!(
-            select_reconcile_pr(vec![gh_pr(20, "CLOSED", false), gh_pr(10, "OPEN", false)])
-                .unwrap()
-                .number,
-            10
+            rest_pr("closed", false, false).into_info("b").state,
+            "closed"
         );
-        assert_eq!(
-            select_reconcile_pr(vec![gh_pr(10, "OPEN", false), gh_pr(20, "OPEN", true)])
-                .unwrap()
-                .number,
-            20
+        // A non-merged PR never carries a merge commit.
+        assert!(rest_pr("closed", false, false)
+            .into_info("b")
+            .merge_commit
+            .is_none());
+    }
+
+    #[test]
+    fn rate_limit_stderr_classifies_as_a_named_quota_degradation() {
+        let reason = classify_pr_read_failure(
+            905,
+            "gh: API rate limit already exceeded for user ID 37011 (HTTP 403)",
         );
-        assert!(select_reconcile_pr(vec![]).is_none());
+        assert!(reason.contains("rate limit"), "reason was: {reason}");
+        assert!(reason.contains("#905"));
+    }
+
+    #[test]
+    fn missing_pr_stderr_is_detected_but_a_5xx_is_not() {
+        assert!(is_missing_pr("gh: Not Found (HTTP 404)"));
+        assert!(!is_missing_pr("gh: Internal Server Error (HTTP 500)"));
     }
 
     #[test]

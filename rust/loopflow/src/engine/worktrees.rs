@@ -266,7 +266,7 @@ fn upstream_branch(worktree: &Path) -> Option<String> {
 }
 
 /// Parse GitHub owner/repo from the origin remote URL.
-fn github_repo_nwo(repo: &Path) -> Option<(String, String)> {
+pub(crate) fn github_repo_nwo(repo: &Path) -> Option<(String, String)> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)

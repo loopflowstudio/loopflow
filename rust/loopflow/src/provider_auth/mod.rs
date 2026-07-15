@@ -16,6 +16,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -246,7 +247,7 @@ pub struct ProviderAuthSnapshot {
 
 pub struct AuthFlowHandle {
     pub response: AuthFlowResponse,
-    monitor: JoinHandle<Result<(), AuthError>>,
+    monitor: AuthMonitor,
 }
 
 impl std::fmt::Debug for AuthFlowHandle {
@@ -259,16 +260,46 @@ impl std::fmt::Debug for AuthFlowHandle {
 
 impl AuthFlowHandle {
     fn new(response: AuthFlowResponse, monitor: JoinHandle<Result<(), AuthError>>) -> Self {
-        Self { response, monitor }
+        Self {
+            response,
+            monitor: AuthMonitor::new(monitor),
+        }
     }
 
     pub async fn wait(self) -> Result<(), AuthError> {
-        self.monitor
+        self.monitor.wait(self.response.provider).await
+    }
+}
+
+struct AuthMonitor {
+    task: Option<JoinHandle<Result<(), AuthError>>>,
+}
+
+impl AuthMonitor {
+    fn new(task: JoinHandle<Result<(), AuthError>>) -> Self {
+        Self { task: Some(task) }
+    }
+
+    async fn wait(mut self, provider: Provider) -> Result<(), AuthError> {
+        let result = self
+            .task
+            .as_mut()
+            .expect("auth monitor task should exist")
             .await
             .map_err(|error| AuthError::CommandFailed {
-                provider: self.response.provider,
+                provider,
                 message: format!("auth monitor task failed: {error}"),
-            })?
+            });
+        self.task.take();
+        result?
+    }
+}
+
+impl Drop for AuthMonitor {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
     }
 }
 
@@ -856,13 +887,7 @@ impl ProviderAuthService {
         let store_for_task = self.store.clone();
 
         let lifecycle = tokio::spawn(async move {
-            let monitor_result = match monitor.await {
-                Ok(result) => result,
-                Err(err) => Err(AuthError::CommandFailed {
-                    provider,
-                    message: format!("auth monitor task failed: {err}"),
-                }),
-            };
+            let monitor_result = monitor.wait(provider).await;
 
             match monitor_result {
                 Ok(()) => match broker_for_task.check_status().await {
@@ -1560,6 +1585,49 @@ struct AuthFlowBuilder {
     verification_uri_complete: Option<String>,
     user_code: Option<String>,
     expires_in: Option<u64>,
+    expects_user_code: bool,
+}
+
+struct AuthProcessGroup {
+    pid: Arc<AtomicU32>,
+}
+
+impl AuthProcessGroup {
+    fn new(pid: Option<u32>) -> Self {
+        let pid = Arc::new(AtomicU32::new(pid.unwrap_or(0)));
+        let interrupt_pid = Arc::clone(&pid);
+        crate::engine::agent::register_interrupt_cleanup(move || {
+            let pid = interrupt_pid.swap(0, Ordering::AcqRel);
+            if pid != 0 {
+                kill_auth_process_group(pid);
+            }
+        });
+        Self { pid }
+    }
+
+    fn complete(&self) {
+        self.pid.store(0, Ordering::Release);
+    }
+}
+
+impl Drop for AuthProcessGroup {
+    fn drop(&mut self) {
+        let pid = self.pid.swap(0, Ordering::AcqRel);
+        if pid != 0 {
+            kill_auth_process_group(pid);
+        }
+    }
+}
+
+fn kill_auth_process_group(pid: u32) {
+    #[cfg(unix)]
+    // SAFETY: the auth command is spawned into a fresh process group whose id
+    // is its pid; a negative pid targets that group and no Loopflow process.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+    #[cfg(not(unix))]
+    crate::engine::platform::kill_process(pid);
 }
 
 async fn start_auth_command(
@@ -1568,9 +1636,13 @@ async fn start_auth_command(
     mut command: Command,
     mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder),
 ) -> Result<AuthFlowHandle, AuthError> {
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    command.stdin(Stdio::null());
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -1588,6 +1660,7 @@ async fn start_auth_command(
         }
     };
 
+    let process_group = AuthProcessGroup::new(child.id());
     let stdout = child
         .stdout
         .take()
@@ -1614,6 +1687,7 @@ async fn start_auth_command(
         if started_at.elapsed() >= AUTH_URL_TIMEOUT {
             let _ = child.kill().await;
             let _ = child.wait().await;
+            drop(process_group);
             let _ = stdout_task.await;
             let _ = stderr_task.await;
             return Err(AuthError::MissingVerificationUrl {
@@ -1630,11 +1704,13 @@ async fn start_auth_command(
                 let monitor = tokio::spawn(async move {
                     let _ = stdout_task.await;
                     let _ = stderr_task.await;
+                    process_group.complete();
                     command_exit_result(provider, status)
                 });
                 return Ok(AuthFlowHandle::new(response, monitor));
             }
 
+            drop(process_group);
             let _ = stdout_task.await;
             let _ = stderr_task.await;
             return Err(AuthError::CommandFailed {
@@ -1654,6 +1730,7 @@ async fn start_auth_command(
                     })?;
                     let _ = stdout_task.await;
                     let _ = stderr_task.await;
+                    process_group.complete();
                     command_exit_result(provider, status)
                 });
                 return Ok(AuthFlowHandle::new(response, monitor));
@@ -1713,17 +1790,29 @@ fn parse_github_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
 }
 
 fn parse_generic_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
-    if let Some(url) = extract_url(line) {
+    let url = extract_url(line);
+    if let Some(url) = &url {
         if builder.verification_uri_complete.is_none() {
             builder.verification_uri_complete = Some(url.clone());
         }
         if builder.verification_uri.is_none() {
-            builder.verification_uri = Some(strip_query(&url).to_string());
+            builder.verification_uri = Some(strip_query(url).to_string());
+        }
+        if builder.user_code.is_none() {
+            builder.user_code = extract_user_code_from_url(url);
         }
     }
 
     if builder.user_code.is_none() {
-        builder.user_code = extract_user_code(line);
+        let text = url
+            .as_deref()
+            .map_or_else(|| line.to_string(), |url| line.replacen(url, "", 1));
+        let asks_for_code = text.to_ascii_lowercase().contains("code");
+        if asks_for_code || builder.expects_user_code {
+            builder.user_code = extract_user_code(&text);
+        }
+        builder.expects_user_code =
+            builder.user_code.is_none() && (builder.expects_user_code || asks_for_code);
     }
 
     if builder.expires_in.is_none() {
@@ -1745,7 +1834,7 @@ fn build_flow_response(provider: Provider, builder: &AuthFlowBuilder) -> Option<
     if user_code.is_none() {
         user_code = verification_uri_complete
             .as_deref()
-            .and_then(extract_user_code);
+            .and_then(extract_user_code_from_url);
     }
 
     if verification_uri_complete.is_none() {
@@ -1790,6 +1879,15 @@ fn extract_user_code(line: &str) -> Option<String> {
         .captures(line)
         .and_then(|capture| capture.get(1))
         .map(|value| value.as_str().to_ascii_uppercase())
+}
+
+fn extract_user_code_from_url(url: &str) -> Option<String> {
+    Url::parse(url)
+        .ok()?
+        .query_pairs()
+        .find_map(|(name, value)| {
+            (name == "user_code" && !value.trim().is_empty()).then(|| value.to_ascii_uppercase())
+        })
 }
 
 fn extract_expires_in(line: &str) -> Option<u64> {
@@ -3127,6 +3225,58 @@ mod tests {
     }
 
     #[test]
+    fn claude_callback_url_does_not_invent_a_user_code() {
+        let mut builder = AuthFlowBuilder::default();
+        parse_generic_auth_line(
+            "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&code_challenge=challenge&state=state",
+            &mut builder,
+        );
+
+        let response = build_flow_response(Provider::Claude, &builder).expect("response");
+        assert_eq!(
+            response.verification_uri,
+            "https://claude.com/cai/oauth/authorize"
+        );
+        assert_eq!(response.user_code, None);
+    }
+
+    #[tokio::test]
+    async fn cancelling_auth_wait_kills_the_provider_process_group() {
+        let tmp = tempdir().expect("tempdir");
+        let pid_path = tmp.path().join("auth.pid");
+        let mut command = Command::new("sh");
+        command.env("AUTH_PID_PATH", &pid_path).args([
+            "-c",
+            "echo $$ > \"$AUTH_PID_PATH\"; echo https://example.com/oauth/authorize; sleep 30",
+        ]);
+
+        let handle = start_auth_command(Provider::Claude, "sh", command, parse_generic_auth_line)
+            .await
+            .expect("start fake auth command");
+        let pid: i32 = fs::read_to_string(pid_path)
+            .expect("read auth pid")
+            .trim()
+            .parse()
+            .expect("parse auth pid");
+        let wait = tokio::spawn(handle.wait());
+        tokio::task::yield_now().await;
+        wait.abort();
+        let _ = wait.await;
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                // SAFETY: signal 0 is an existence probe and uses no pointers.
+                if unsafe { libc::kill(pid, 0) } != 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("auth process should exit when its handle is dropped");
+    }
+
+    #[test]
     fn generic_parser_handles_ansi_wrapped_url_and_variable_user_code() {
         let mut builder = AuthFlowBuilder::default();
         let code_line = "Enter this one-time code \u{1b}[90m(expires in 15 minutes)\u{1b}[0m\n\u{1b}[94m1XH6-DG19Y\u{1b}[0m";
@@ -3232,10 +3382,9 @@ mod tests {
         let client = Arc::new(CredentialSocketClient::new(socket_path));
         let handle = socket_auth_flow_handle(Provider::GitHub, response, client);
 
-        tokio::time::timeout(Duration::from_secs(3), handle.monitor)
+        tokio::time::timeout(Duration::from_secs(3), handle.wait())
             .await
             .expect("monitor should complete")
-            .expect("monitor task should join")
             .expect("credential should eventually be detected");
 
         server.join().expect("server join");

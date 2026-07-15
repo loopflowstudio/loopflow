@@ -164,6 +164,25 @@ Plus the ten-dogfood-PR field proof from the contract: over real Task PRs,
 GitHub's range, `lf task changes`, and `base_commit` agree with zero manual
 commit dropping.
 
+## Status
+
+- **PR1 (this branch) — Gap A shipped.** `verify_task_pr_range` +
+  `verify_task_pr_range_with_authority` (`ops/task.rs`) enforce the `M == B`
+  parity proof, wired into `ops/land.rs::prepare_pr` before the first push.
+  Contamination (`M < B`) and divergence refuse before any GitHub side effect,
+  naming foreign commits/files + the `git rebase --onto` recovery. Stale/
+  squash-merged bases (`B < M`) heal forward via a new dedicated
+  `heal_task_pr_base` store write (base_commit is optimistic-identity in the
+  generic update, so healing needs its own keyed write). No-remote falls back to
+  local `<default>`. Six unit tests cover all five Proof scenarios (parity,
+  contamination-refuse, stale-heal, squash-heal, no-remote, rotated
+  continuation).
+- **PR2 (next serial) — Gap B, placement guards.** In `task_run` placement +
+  the rotation path: explicit no-remote fallback (skip fetch, record local
+  `<default>`), and the ahead-of-upstream control-plane stop before placement.
+  This stops contamination at the source; PR1 is the durable publication
+  backstop.
+
 ## Exclusions
 
 - No new stack/PR-state model — consume `TaskPr {base_commit, sequence,

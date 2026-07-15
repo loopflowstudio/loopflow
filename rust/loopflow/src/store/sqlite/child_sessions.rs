@@ -616,6 +616,33 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if heal_task_pr_base(&conn, pr)? == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn heal_task_pr_base_for_lease(
+        &self,
+        pr: &TaskPr,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_child_write_lease(
+            &transaction,
+            &ChildRef::Task(pr.task_session_id.clone()),
+            lease,
+        )?;
+        if heal_task_pr_base(&transaction, pr)? == 0 {
+            return Err(StoreError::NotFound);
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn task_prs(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(
@@ -3038,6 +3065,25 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             github.and_then(|github| github.head_sha.as_deref()),
             task_pr_ci_json(pr)?,
             pr.parent_pr_id.as_ref().map(TaskPrId::as_str),
+        ],
+    )
+    .map_err(StoreError::from)
+}
+
+/// Move a Task PR's `base_commit` range anchor forward. `base_commit` is part of
+/// `update_task_pr`'s optimistic identity, so healing it needs a dedicated write
+/// keyed on the row's true identity (id + session + sequence).
+fn heal_task_pr_base(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
+    validate_task_pr(pr)?;
+    conn.execute(
+        "UPDATE task_prs SET base_commit=?4, updated_at=?5
+         WHERE id=?1 AND task_session_id=?2 AND sequence=?3",
+        params![
+            pr.id.as_str(),
+            pr.task_session_id.as_str(),
+            i64::from(pr.sequence),
+            pr.base_commit,
+            pr.updated_at.unix_timestamp(),
         ],
     )
     .map_err(StoreError::from)

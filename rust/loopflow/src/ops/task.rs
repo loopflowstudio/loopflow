@@ -1091,6 +1091,145 @@ pub(crate) fn request_task_pr_publication(
     })
 }
 
+/// Whether the repository has at least one configured git remote.
+fn has_remote(repo: &Path) -> OpsResult<bool> {
+    Ok(!git_output(repo, &["remote"])?.trim().is_empty())
+}
+
+/// Prove the active Task PR's range contains only Task-authored work before any
+/// GitHub side effect. A worktree with no Task Session is a no-op — plain,
+/// non-Task PRs are unaffected.
+///
+/// Let `B` = recorded `base_commit`, `O` = `origin/<default>` tip (or local
+/// `<default>` when the repo has no remote), `H` = `HEAD`, and
+/// `M = merge-base(O, H)`. The parity invariant is `M == B`, which guarantees
+/// GitHub's range (`M..H`) equals the recorded range (`B..H`) equals
+/// `lf task changes`:
+/// - `M == B` — parity holds; publish.
+/// - `M` ancestor of `B` — the recorded base itself carries commits absent from
+///   `O` (inherited foreign ancestry, the #877/#882 shape). Refuse before any
+///   push, naming the foreign commits/files and the safe rebase.
+/// - `B` ancestor of `M` — `O` advanced past a stale or squash-merged base. Safe:
+///   heal `base_commit → M` so the durable evidence and `lf task changes` stay
+///   truthful, then publish the minimal `M..H` range.
+/// - divergent — ambiguous ancestry; refuse.
+///
+/// Empty-range and dirty-worktree checks stay with `request_task_pr_publication`,
+/// which runs after the publication path commits pending work; this gate proves
+/// committed ancestry only, so it can run before the first push.
+pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let Some(store) = open_existing_store().await.map(Arc::new) else {
+            return Ok(());
+        };
+        let Some((session, lease)) = task_for_worktree(&store, &repo).await? else {
+            return Ok(());
+        };
+        verify_task_pr_range_with_authority(&store, &session, lease.as_ref(), &repo).await
+    })
+}
+
+/// Core parity proof. Takes the store + session explicitly so it can be
+/// exercised in tests without a live LF_HOME (mirrors `ensure_working_pr`).
+async fn verify_task_pr_range_with_authority(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: Option<&ChildWriteLease>,
+    repo: &Path,
+) -> OpsResult<()> {
+    let mut pr = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .ok_or_else(|| {
+            task_error(format!(
+                "Task {} has no active PR",
+                session.launch.issue.identifier
+            ))
+        })?;
+    let branch =
+        current_branch(repo)?.ok_or_else(|| task_error("Task worktree is not on a branch"))?;
+    if pr.branch != branch {
+        return Err(task_error(format!(
+            "Task {} active PR expects branch {:?}, but the worktree is on {:?}",
+            session.launch.issue.identifier, pr.branch, branch
+        )));
+    }
+
+    let default_branch = get_default_branch(repo)?;
+    let base_ref = if has_remote(repo)? {
+        fetch(repo, "origin", &default_branch).map_err(|error| {
+            task_error(format!(
+                "failed to fetch {default_branch} before publish: {error}"
+            ))
+        })?;
+        format!("origin/{default_branch}")
+    } else {
+        format!("refs/heads/{default_branch}")
+    };
+
+    let upstream = rev_parse(repo, &base_ref)
+        .map_err(|error| task_error(format!("failed to resolve {base_ref}: {error}")))?;
+    let head = rev_parse(repo, "HEAD")
+        .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
+    let base = pr.base_commit.clone();
+    let identifier = &session.launch.issue.identifier;
+    let short = |sha: &str| sha.chars().take(12).collect::<String>();
+
+    let merge_base = crate::engine::git::merge_base(repo, &upstream, &head).map_err(|_| {
+        task_error(format!(
+            "Task {identifier} branch {branch:?} shares no history with {base_ref}; \
+             re-cut the branch from {base_ref} before publishing"
+        ))
+    })?;
+
+    if merge_base == base {
+        // Parity holds: the GitHub range is exactly base_commit..HEAD.
+        return Ok(());
+    }
+
+    if crate::engine::git::is_ancestor(repo, &merge_base, &base)? {
+        // M < B: the recorded base carries commits not on the upstream — the
+        // foreign ancestry that contaminated #877/#882. Refuse before push.
+        let range = format!("{merge_base}..{base}");
+        let commits = git_output(repo, &["log", "--oneline", "--no-decorate", &range])?;
+        let files = git_output(repo, &["diff", "--name-only", &range])?;
+        let commits = commits.trim();
+        let files = files.trim();
+        return Err(task_error(format!(
+            "Task {identifier} PR range is contaminated: recorded base {} carries commit(s) \
+             not on {base_ref}, which would leak into the PR:\n{commits}\naffecting files:\n{files}\n\
+             Refused before any push. Recover with:\n  git rebase --onto {base_ref} {} {branch}",
+            short(&base),
+            short(&base),
+        )));
+    }
+
+    if crate::engine::git::is_ancestor(repo, &base, &merge_base)? {
+        // B < M: the upstream advanced past a stale or squash-merged base.
+        // Heal the recorded base to the true fork point so lf task changes and
+        // the durable evidence report the minimal M..HEAD range.
+        pr.base_commit = merge_base.clone();
+        pr.updated_at = time::OffsetDateTime::now_utc();
+        match lease {
+            Some(lease) => store.heal_task_pr_base_for_lease(&pr, lease).await,
+            None => store.heal_task_pr_base(&pr).await,
+        }
+        .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
+        return Ok(());
+    }
+
+    // Neither is an ancestor of the other: genuinely ambiguous ancestry.
+    Err(task_error(format!(
+        "Task {identifier} PR base {} and {base_ref} have diverged with no common lineage at \
+         the recorded base. Refused before any push. Re-cut the branch from {base_ref} or run \
+         git rebase --onto {base_ref} {} {branch}",
+        short(&base),
+        short(&base),
+    )))
+}
+
 pub(crate) fn attach_task_github_pr(
     repo: &Path,
     github_pr: Option<&crate::ops::pr::PrInfo>,
@@ -2932,8 +3071,8 @@ mod tests {
     use super::{
         _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
         diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
-        parse_pr_slug, parse_workspace_slug, project_context, resolve_task_flow, RotateOptions,
-        TaskControlResult, TaskWorkspace,
+        parse_pr_slug, parse_workspace_slug, project_context, resolve_task_flow,
+        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
     use crate::id::WaveId;
@@ -3431,5 +3570,193 @@ mod tests {
                 .expect("create outside symlink");
             assert!(file_snapshot(workspace, "outside-link").is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn verify_passes_when_range_matches_the_recorded_base() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha(); // origin/main
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "task work\n");
+        repo.stage_all();
+        repo.commit("task commit");
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
+
+        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect("clean range verifies");
+    }
+
+    #[tokio::test]
+    async fn verify_refuses_a_base_carrying_a_foreign_commit() {
+        // The #877/#882 shape: the branch was cut from a local main that carried
+        // an unpushed commit, so the recorded base itself is off-origin.
+        let repo = TestRepo::new();
+        // Advance local main ahead of origin with a foreign commit; never push it.
+        repo.create_file("foreign.txt", "not this task's work\n");
+        repo.stage_all();
+        repo.commit("foreign canonical-main commit");
+        let contaminated_base = repo.head_sha();
+
+        let branch = "jack/contaminated";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "task work\n");
+        repo.stage_all();
+        repo.commit("task commit");
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
+
+        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect_err("contaminated base must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("contaminated"),
+            "expected contamination refusal, got: {message}"
+        );
+        assert!(
+            message.contains("foreign canonical-main commit"),
+            "refusal must name the foreign commit, got: {message}"
+        );
+        assert!(
+            message.contains("rebase --onto"),
+            "refusal must print the recovery action, got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_heals_a_stale_base_after_origin_advances() {
+        let repo = TestRepo::new();
+        let stale_base = repo.head_sha(); // origin/main at placement time
+
+        // origin advances: land a commit on main and push it.
+        repo.create_file("upstream.txt", "landed upstream\n");
+        repo.stage_all();
+        repo.commit("upstream advance");
+        repo.push();
+        let advanced = repo.head_sha();
+
+        // The Task branch already sits on the advanced origin (e.g. after an
+        // lf pr open rebase), but the recorded base is still the pre-advance sha.
+        let branch = "jack/stale-base";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "task work\n");
+        repo.stage_all();
+        repo.commit("task commit");
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &stale_base).await;
+
+        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect("stale-but-compatible base verifies");
+
+        let healed = store
+            .active_task_pr(&session.id)
+            .await
+            .expect("read active PR")
+            .expect("active PR exists");
+        assert_eq!(
+            healed.base_commit, advanced,
+            "the stale base should heal forward to the current fork point"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_falls_back_to_local_main_without_a_remote() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        // Drop the remote entirely: placement fell back to local main.
+        git(repo.path(), &["remote", "remove", "origin"]);
+
+        let branch = "jack/no-remote";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "task work\n");
+        repo.stage_all();
+        repo.commit("task commit");
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
+
+        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect("no-remote repo verifies against local main");
+    }
+
+    #[tokio::test]
+    async fn verify_heals_across_a_squash_merged_parent() {
+        let repo = TestRepo::new();
+        let stale_base = repo.head_sha(); // origin/main before the parent landed
+
+        // A parent PR squash-merges into main: its commits collapse into one new
+        // commit S whose parent is the pre-parent tip. origin advances to S.
+        repo.create_file("parent.txt", "parent PR work\n");
+        repo.stage_all();
+        repo.commit("squashed parent PR");
+        repo.push();
+        let squash = repo.head_sha();
+
+        // The continuing PR sits on the squash commit but still records the
+        // pre-squash base — the shape that must open only the new work.
+        let branch = "jack/after-squash";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "follow-up work\n");
+        repo.stage_all();
+        repo.commit("follow-up commit");
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &stale_base).await;
+
+        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect("squash-merged parent verifies");
+
+        let healed = store
+            .active_task_pr(&session.id)
+            .await
+            .expect("read active PR")
+            .expect("active PR exists");
+        assert_eq!(
+            healed.base_commit, squash,
+            "the base should heal to the squash commit so the range is minimal"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_passes_for_a_rotated_continuation_pr() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, mut session, mut first) =
+            rotation_task(&repo, first_branch, &base).await;
+        first.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: Some("follow-up".to_string()),
+            github: Some(GithubPr {
+                number: 938,
+                url: "https://example.com/pr/938".to_string(),
+                head_sha: None,
+            }),
+        });
+        first.merge_commit = Some("merge-938".to_string());
+        first.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&first, None)
+            .await
+            .expect("settle first PR");
+
+        // Rotation cuts PR2 from fetched origin/main; its recorded base is the
+        // fork point, so parity holds by construction.
+        let second = ensure_working_pr(&store, &mut session)
+            .await
+            .expect("rotate PR")
+            .expect("working PR");
+        assert_eq!(second.sequence, 2);
+        repo.create_file("second.txt", "second PR work\n");
+        repo.stage_all();
+        repo.commit("second PR commit");
+
+        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect("rotated continuation PR verifies");
     }
 }

@@ -662,6 +662,7 @@ mod tests {
                 "op": "update",
                 "content": "Rewritten.\n",
                 "summary": null,
+                "receipts": [],
             }))
             .send()
             .await
@@ -675,7 +676,7 @@ mod tests {
         // An empty add is refused; a real one echoes and leaves MEMORY.md alone.
         let empty = client
             .post(format!("{base}/memory"))
-            .json(&serde_json::json!({ "op": "add", "content": "  ", "summary": null }))
+            .json(&serde_json::json!({ "op": "add", "content": "  ", "summary": null, "receipts": [] }))
             .send()
             .await
             .unwrap();
@@ -683,7 +684,7 @@ mod tests {
 
         let body: serde_json::Value = client
             .post(format!("{base}/memory"))
-            .json(&serde_json::json!({ "op": "add", "content": "one fact", "summary": null }))
+            .json(&serde_json::json!({ "op": "add", "content": "one fact", "summary": null, "receipts": [] }))
             .send()
             .await
             .unwrap()

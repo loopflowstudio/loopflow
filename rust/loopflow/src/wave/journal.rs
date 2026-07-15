@@ -35,6 +35,7 @@ use time::OffsetDateTime;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project_session::ProjectObservation;
+use crate::receipt::Receipt;
 use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
@@ -253,6 +254,14 @@ pub enum EventKind {
     /// replayable delta until the next `MemoryUpdated`.
     MemoryAdded {
         fact: String,
+        /// Evidence receipts binding the fact to the raw records that justify
+        /// it. `#[serde(default)]` is deliberate replayed-log evolution: a
+        /// `MemoryAdded` row written before receipts existed lacks the field,
+        /// and `read_events` stops the whole fold on the first parse error — so
+        /// an absent list must decode as empty, not truncate the journal. The
+        /// `Receipt` type itself stays default-free as a wire DTO.
+        #[serde(default)]
+        receipts: Vec<Receipt>,
     },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
@@ -520,7 +529,7 @@ impl Narrator {
             EventKind::MemoryUpdated { summary } => {
                 info(format!("memory curated: {}", ellipsize(summary, 70)))
             }
-            EventKind::MemoryAdded { fact } => {
+            EventKind::MemoryAdded { fact, .. } => {
                 info(format!("memory added: {}", ellipsize(fact, 70)))
             }
             EventKind::ServerStarted { pid, endpoint } => {
@@ -761,6 +770,34 @@ pub struct ThreadFold {
     pub memory_adds: Vec<String>,
 }
 
+/// One curated memory fact with its evidence receipts. Wire type for
+/// `lf memory log --json`: both fields required, no serde defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryFact {
+    pub fact: String,
+    pub receipts: Vec<Receipt>,
+}
+
+/// The curated facts (with receipts) live in the current replayable delta —
+/// every `MemoryAdded` since the last `MemoryUpdated` checkpoint, oldest first.
+/// This is the receipt-bearing view behind `lf memory log --json`; the plain
+/// `memory_adds` fold above drops receipts because the live stream never needed
+/// them.
+pub fn memory_facts(events: &[Event]) -> Vec<MemoryFact> {
+    let mut facts = Vec::new();
+    for event in events {
+        match &event.kind {
+            EventKind::MemoryAdded { fact, receipts } => facts.push(MemoryFact {
+                fact: fact.clone(),
+                receipts: receipts.clone(),
+            }),
+            EventKind::MemoryUpdated { .. } => facts.clear(),
+            _ => {}
+        }
+    }
+    facts
+}
+
 /// Materialize a historical `ChannelOpened` event during journal replay.
 fn legacy_channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
     let mut turn = ChatTurn::user(
@@ -986,7 +1023,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 turns.push(run_completed_turn(event, run_id, *outcome, summary));
             }
-            EventKind::MemoryAdded { fact } => {
+            EventKind::MemoryAdded { fact, .. } => {
                 memory_adds.push(fact.clone());
             }
             EventKind::MemoryUpdated { .. } => {
@@ -1052,6 +1089,90 @@ fn mark_consumed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receipt::EvidenceKind;
+
+    #[test]
+    fn memory_fact_fixture_round_trips_every_evidence_kind() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/receipt.json"
+        ));
+        let fact: MemoryFact = serde_json::from_str(fixture).expect("decode receipt fixture");
+        let kinds: Vec<EvidenceKind> = fact.receipts.iter().map(|r| r.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EvidenceKind::ChatTurn,
+                EvidenceKind::WorkerReport,
+                EvidenceKind::Trace,
+                EvidenceKind::Pm,
+                EvidenceKind::Pr,
+            ],
+        );
+        // A PR reference keeps its `@sha` and its wave differs from the others —
+        // the cross-wave case doctor detects downstream.
+        let pr = fact.receipts.last().expect("pr receipt");
+        assert_eq!(pr.reference, "loopflow/loopflow#912@abc1234");
+        assert_eq!(pr.wave, "auditability");
+
+        let reencoded = serde_json::to_string(&fact).expect("serialize");
+        let decoded: MemoryFact = serde_json::from_str(&reencoded).expect("re-decode");
+        assert_eq!(fact, decoded);
+    }
+
+    #[test]
+    fn memory_facts_keep_receipts_and_reset_at_each_checkpoint() {
+        let events = vec![
+            Event {
+                v: FORMAT_VERSION,
+                seq: 1,
+                at: OffsetDateTime::UNIX_EPOCH,
+                kind: EventKind::MemoryAdded {
+                    fact: "pre-checkpoint fact".into(),
+                    receipts: vec![Receipt::new(EvidenceKind::ChatTurn, "turn-1", "ship")],
+                },
+            },
+            Event {
+                v: FORMAT_VERSION,
+                seq: 2,
+                at: OffsetDateTime::UNIX_EPOCH,
+                kind: EventKind::MemoryUpdated {
+                    summary: "compiled".into(),
+                },
+            },
+            Event {
+                v: FORMAT_VERSION,
+                seq: 3,
+                at: OffsetDateTime::UNIX_EPOCH,
+                kind: EventKind::MemoryAdded {
+                    fact: "post-checkpoint fact".into(),
+                    receipts: vec![Receipt::new(EvidenceKind::Pr, "o/r#5", "ship")],
+                },
+            },
+        ];
+        let facts = memory_facts(&events);
+        assert_eq!(facts.len(), 1, "the checkpoint cleared the earlier delta");
+        assert_eq!(facts[0].fact, "post-checkpoint fact");
+        assert_eq!(
+            facts[0].receipts,
+            vec![Receipt::new(EvidenceKind::Pr, "o/r#5", "ship")]
+        );
+    }
+
+    /// A `MemoryAdded` row written before receipts existed decodes with an empty
+    /// list, so `read_events` never truncates an old journal at the first fact.
+    #[test]
+    fn legacy_memory_added_without_receipts_decodes_empty() {
+        let line = r#"{"v":1,"seq":4,"at":"2026-07-04T00:00:00Z","kind":{"type":"memory_added","fact":"legacy fact"}}"#;
+        let event: Event = serde_json::from_str(line).expect("decode legacy MemoryAdded");
+        match event.kind {
+            EventKind::MemoryAdded { fact, receipts } => {
+                assert_eq!(fact, "legacy fact");
+                assert!(receipts.is_empty());
+            }
+            other => panic!("expected MemoryAdded, got {other:?}"),
+        }
+    }
 
     fn open_tmp() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1224,6 +1345,7 @@ mod tests {
             },
             EventKind::MemoryAdded {
                 fact: "learned a fact".into(),
+                receipts: Vec::new(),
             },
             EventKind::ServerStarted {
                 pid: 4242,
@@ -1568,6 +1690,7 @@ mod tests {
 
         let n = render(EventKind::MemoryAdded {
             fact: "workers report through the memory stream".into(),
+            receipts: Vec::new(),
         });
         assert_eq!(
             n.line,

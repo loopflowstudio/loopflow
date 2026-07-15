@@ -12,6 +12,7 @@ pub mod ops;
 pub mod pm;
 pub mod project_session;
 pub mod provider_auth;
+pub mod receipt;
 pub mod repository;
 pub mod security;
 pub mod session_context;

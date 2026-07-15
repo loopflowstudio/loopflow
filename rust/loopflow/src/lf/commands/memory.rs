@@ -15,7 +15,8 @@ use anyhow::{anyhow, Result};
 
 use crate::lf::commands::chat::{get_json, post_json, resolve_target, CliContext, ResolvedWave};
 use crate::lf::{MemoryCommand, WaveTargetArgs};
-use crate::wave::journal::{fold_thread, journal_path, read_events};
+use crate::receipt::Receipt;
+use crate::wave::journal::{fold_thread, journal_path, memory_facts, read_events, MemoryFact};
 use crate::wave::memory::Memory;
 
 pub fn run(cmd: Option<&MemoryCommand>, default_target: &WaveTargetArgs) -> Result<()> {
@@ -34,7 +35,7 @@ pub(crate) async fn run_with_context(
     match cmd {
         None => show(context, default_target).await,
         Some(MemoryCommand::Show { target }) => show(context, target).await,
-        Some(MemoryCommand::Log { target }) => log(context, target).await,
+        Some(MemoryCommand::Log { json, target }) => log(context, target, *json).await,
         Some(MemoryCommand::Update { summary, target }) => {
             // Resolve before touching stdin so a no-wave drop never blocks.
             let Some(resolved) = resolve(context, target).await? else {
@@ -43,16 +44,28 @@ pub(crate) async fn run_with_context(
             };
             let mut content = String::new();
             std::io::stdin().read_to_string(&mut content)?;
-            let summary = write_memory(&resolved, "update", &content, summary.as_deref()).await?;
+            let summary =
+                write_memory(&resolved, "update", &content, summary.as_deref(), &[]).await?;
             println!("memory updated for wave '{}': {summary}", resolved.name);
             Ok(())
         }
-        Some(MemoryCommand::Add { fact, target }) => {
+        Some(MemoryCommand::Add {
+            fact,
+            receipts,
+            target,
+        }) => {
             let Some(resolved) = resolve(context, target).await? else {
                 drop_note();
                 return Ok(());
             };
-            let summary = write_memory(&resolved, "add", fact, None).await?;
+            // Parse at the CLI boundary so a bad `--receipt` is a user error the
+            // author sees, and stamp each with the claim's own wave.
+            let parsed = receipts
+                .iter()
+                .map(|token| Receipt::parse(token, &resolved.name))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|err| anyhow!("{err}"))?;
+            let summary = write_memory(&resolved, "add", fact, None, &parsed).await?;
             println!("memory fact added for wave '{}': {summary}", resolved.name);
             Ok(())
         }
@@ -91,13 +104,18 @@ async fn show(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
 }
 
 /// Reads are not publishes: no wave context is an error, not a drop.
-async fn log(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
+async fn log(context: &CliContext, target: &WaveTargetArgs, json: bool) -> Result<()> {
     let resolved = resolve(context, target).await?.ok_or_else(|| {
         anyhow!(
             "cannot resolve a target wave: no LF_WAVE_ID in env and \
              not inside a wave worktree — pass --wave <name>"
         )
     })?;
+    if json {
+        let facts = read_memory_facts(&resolved)?;
+        println!("{}", serde_json::to_string_pretty(&facts)?);
+        return Ok(());
+    }
     for fact in read_memory_log(&resolved).await? {
         println!("{fact}");
     }
@@ -146,6 +164,23 @@ pub(crate) async fn read_memory_log(resolved: &ResolvedWave) -> Result<Vec<Strin
     Ok(fold_thread(&events).memory_adds)
 }
 
+/// Facts with their evidence receipts, oldest to newest — the receipt-bearing
+/// view behind `lf memory log --json`. Receipts live only in the journal (the
+/// live `/memory/log` stream carries prose alone), so this reads the origin
+/// journal directly. A live server appends to that same file under its lock, so
+/// the read is current whether or not a server is running.
+pub(crate) fn read_memory_facts(resolved: &ResolvedWave) -> Result<Vec<MemoryFact>> {
+    let root = resolved.repo_root.as_deref().ok_or_else(|| {
+        anyhow!(
+            "wave '{}' has no local wave directory; receipts are journaled locally, \
+             so `--json` needs the wave's worktree",
+            resolved.name
+        )
+    })?;
+    let events = read_events(&journal_path(root, &resolved.name));
+    Ok(memory_facts(&events))
+}
+
 /// Write through the live server (the sole holder of MEMORY.md's pen).
 /// Returns the summary the server journaled. No live server is an error —
 /// there is deliberately no offline write path.
@@ -154,12 +189,18 @@ pub(crate) async fn write_memory(
     op: &str,
     content: &str,
     summary: Option<&str>,
+    receipts: &[Receipt],
 ) -> Result<String> {
     let endpoint = resolved.require_endpoint()?;
     let body = post_json(
         &endpoint,
         "/memory",
-        &serde_json::json!({ "op": op, "content": content, "summary": summary }),
+        &serde_json::json!({
+            "op": op,
+            "content": content,
+            "summary": summary,
+            "receipts": receipts,
+        }),
     )
     .await?;
     Ok(body["summary"].as_str().unwrap_or_default().to_string())
@@ -197,7 +238,7 @@ mod tests {
         let (addr, _runtime, _inbox) = boot_server(origin, "ship").await;
         let target = resolved("ship", Some(addr), None);
 
-        let summary = write_memory(&target, "update", "# Ship\n\nfold is truth\n", None)
+        let summary = write_memory(&target, "update", "# Ship\n\nfold is truth\n", None, &[])
             .await
             .expect("update");
         assert_eq!(summary, "# Ship", "summary defaults to the first line");
@@ -207,7 +248,7 @@ mod tests {
             "the ORIGIN file is the one replaced"
         );
 
-        let summary = write_memory(&target, "add", "workers report via lf radio pub", None)
+        let summary = write_memory(&target, "add", "workers report via lf radio pub", None, &[])
             .await
             .expect("add");
         assert_eq!(summary, "workers report via lf radio pub");
@@ -229,7 +270,8 @@ mod tests {
                     summary: "# Ship".to_string()
                 },
                 EventKind::MemoryAdded {
-                    fact: "workers report via lf radio pub".to_string()
+                    fact: "workers report via lf radio pub".to_string(),
+                    receipts: Vec::new(),
                 },
             ]
         );
@@ -240,8 +282,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path();
         let (addr, runtime, _inbox) = boot_server(origin, "ship").await;
-        runtime.append_memory("first").expect("append");
-        runtime.append_memory("second").expect("append");
+        runtime.append_memory("first", vec![]).expect("append");
+        runtime.append_memory("second", vec![]).expect("append");
 
         let facts = read_memory_log(&resolved("ship", Some(addr), None))
             .await
@@ -256,18 +298,58 @@ mod tests {
         {
             let runtime =
                 WaveRuntime::open("ship".to_string(), origin.to_path_buf()).expect("runtime");
-            runtime.append_memory("offline first").expect("append");
-            runtime.append_memory("offline second").expect("append");
+            runtime
+                .append_memory("offline first", vec![])
+                .expect("append");
+            runtime
+                .append_memory("offline second", vec![])
+                .expect("append");
             runtime
                 .update_memory("# Ship\n\ncompiled\n", "compiled")
                 .expect("update");
-            runtime.append_memory("after update").expect("append");
+            runtime
+                .append_memory("after update", vec![])
+                .expect("append");
         }
 
         let facts = read_memory_log(&resolved("ship", None, Some(origin)))
             .await
             .expect("read log");
         assert_eq!(facts, vec!["after update".to_string()]);
+    }
+
+    /// End to end: `add --receipt` writes through the live server, the receipt is
+    /// journaled with the fact, and `read_memory_facts` reads it back — the
+    /// authoring-and-drill path the whole task rests on.
+    #[tokio::test]
+    async fn add_writes_receipts_that_the_json_view_reads_back() {
+        use crate::receipt::{EvidenceKind, Receipt};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path();
+        let (addr, _runtime, _inbox) = boot_server(origin, "ship").await;
+        // A local wave is both served and on disk: the receipt view reads the
+        // journal even while the server holds the pen.
+        let target = resolved("ship", Some(addr), Some(origin));
+
+        let receipts = vec![
+            Receipt::new(EvidenceKind::ChatTurn, "turn-3", "ship"),
+            Receipt::new(EvidenceKind::Pr, "loopflow/loopflow#912@abc1234", "ship"),
+        ];
+        write_memory(
+            &target,
+            "add",
+            "workers report via the stream",
+            None,
+            &receipts,
+        )
+        .await
+        .expect("add with receipts");
+
+        let facts = read_memory_facts(&target).expect("read facts");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].fact, "workers report via the stream");
+        assert_eq!(facts[0].receipts, receipts);
     }
 
     /// `show` works with no server at all: a direct read of the origin file.
@@ -314,6 +396,7 @@ mod tests {
             &context,
             Some(&MemoryCommand::Add {
                 fact: "dropped fact".to_string(),
+                receipts: Vec::new(),
                 target: WaveTargetArgs::default(),
             }),
             &WaveTargetArgs::default(),
@@ -347,6 +430,7 @@ mod tests {
             "update",
             "x",
             None,
+            &[],
         )
         .await
         .expect_err("no server");

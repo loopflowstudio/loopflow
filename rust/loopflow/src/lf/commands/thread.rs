@@ -654,7 +654,10 @@ mod tests {
             .deliver(crate::wave::journal::MessageOp::Message, "replayed".into())
             .expect("user turn");
         runtime
-            .append_memory("workers report via lf radio pub with full useful detail")
+            .append_memory(
+                "workers report via lf radio pub with full useful detail",
+                vec![],
+            )
             .unwrap();
 
         let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
@@ -683,7 +686,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         runtime
-            .append_memory("a fact published after subscribe")
+            .append_memory("a fact published after subscribe", vec![])
             .unwrap();
         for _ in 0..200 {
             if seen

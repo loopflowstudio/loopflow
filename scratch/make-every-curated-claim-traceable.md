@@ -162,19 +162,28 @@ proof ("every *new* retained fact ... carries a receipt").
 
 ## Serial PRs (one worktree, ordered branches)
 
-- **PR1 — Receipt contract + memory-fact receipts, end to end.** `Receipt`/
-  `EvidenceKind` DTO + fixture (Rust+Swift). `MemoryAdded.receipts`,
-  `lf memory add --receipt`, `lf memory log --json`, `lf receipt show` resolver.
-  Doctor: memory sweep (missing/orphaned/cross-wave/inaccessible) with legacy
-  grace. Proof: fact with a chat_turn receipt survives land+restart and
-  `lf receipt show` opens it; doctor zero orphans. **This is the smallest
-  vertical slice that proves the whole contract on one curation kind.**
-- **PR2 — Report + KR/Project claim receipts.** `ClaimCited` journal event, PM
+- **PR1 — Receipt contract + memory-fact authoring/storage/read (LANDED shape).**
+  `Receipt`/`EvidenceKind`/`MemoryFact` DTO + `receipt.json` fixture, round-trip
+  pinned in Rust and Swift. `MemoryAdded { fact, receipts }` (serde-default
+  vector = replayed-log evolution, so old journals never truncate). Authoring:
+  `lf memory add --receipt kind:ref` (repeatable, parsed at the CLI boundary,
+  wave-stamped). Read: `lf memory log --json` folds the journal into
+  `[{fact, receipts}]`. Proven end to end by
+  `add_writes_receipts_that_the_json_view_reads_back` (client → server → journal
+  → read-back). **Ships the receipt type and one full curation kind's authoring
+  + durable storage + data surface + cross-language mirror.**
+- **PR2 (next, `receipt-resolver-doctor`) — Drill + validation.** `lf receipt
+  show <kind:ref>` resolving each kind to its canonical local record (chat_turn→
+  journal turn, worker_report→`run_events`, trace→`agent_turns`, pm→snapshot
+  item, pr→URL). Doctor memory sweep (missing/orphaned/cross-wave/inaccessible)
+  with legacy grace. This is what makes stored receipts *openable* and *checked*.
+- **PR3 — Report + KR/Project claim receipts.** `ClaimCited` journal event, PM
   snapshot overlay projecting `receipts` onto `PmKr`/`PmShowResult`,
   `lf pm cite`/`lf memory cite`, `lf pm doctor` orphaned-claim checks, migration
   grace for existing KRs.
-- **PR3 — Shared render affordance (Mac/iOS/chat).** Mirror `Receipt` in Swift;
-  source affordance + drill on memory facts, KR proofs, and report turns.
+- **PR4 — Shared render affordance (Mac/iOS/chat).** Source affordance + drill on
+  memory facts, KR proofs, and report turns, over the Swift `Receipt` mirror
+  landed in PR1.
 
 ## Exclusions
 

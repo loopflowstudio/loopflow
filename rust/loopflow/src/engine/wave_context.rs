@@ -818,8 +818,8 @@ mod tests {
         runtime
             .update_memory("# Goals\n\ncompiled\n", "compiled")
             .expect("update");
-        runtime.append_memory("oldest").expect("append");
-        runtime.append_memory("newest").expect("append");
+        runtime.append_memory("oldest", vec![]).expect("append");
+        runtime.append_memory("newest", vec![]).expect("append");
 
         let memory = gather_wave_memory(tmp.path(), "goals").expect("memory");
         assert_eq!(memory, "- newest\n- oldest\n\n# Goals\n\ncompiled");

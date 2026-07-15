@@ -535,6 +535,9 @@ pub enum MemoryCommand {
     },
     /// Print memory facts added since the last update
     Log {
+        /// Emit facts with their evidence receipts as JSON
+        #[arg(long)]
+        json: bool,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
@@ -550,6 +553,11 @@ pub enum MemoryCommand {
     Add {
         /// The fact to publish
         fact: String,
+        /// Evidence receipt binding the fact to its raw record, written as
+        /// `kind:reference` (e.g. `chat_turn:turn-3`, `run:<run_id>`,
+        /// `pr:owner/repo#N`). Repeatable for many-to-one evidence.
+        #[arg(long = "receipt")]
+        receipts: Vec<String>,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
@@ -2046,16 +2054,32 @@ mod tests {
         };
         assert_eq!(summary.as_deref(), Some("learned"));
 
-        let cli =
-            Cli::try_parse_from(["lf", "memory", "add", "one fact", "--parent"]).expect("parse");
+        let cli = Cli::try_parse_from([
+            "lf",
+            "memory",
+            "add",
+            "one fact",
+            "--receipt",
+            "chat_turn:turn-3",
+            "--receipt",
+            "run:run-9",
+            "--parent",
+        ])
+        .expect("parse");
         let Some(Commands::Memory {
-            cmd: Some(MemoryCommand::Add { fact, target }),
+            cmd:
+                Some(MemoryCommand::Add {
+                    fact,
+                    receipts,
+                    target,
+                }),
             ..
         }) = cli.command
         else {
             panic!("expected memory add");
         };
         assert_eq!(fact, "one fact");
+        assert_eq!(receipts, vec!["chat_turn:turn-3", "run:run-9"]);
         assert!(target.parent);
     }
 

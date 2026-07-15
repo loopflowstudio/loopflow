@@ -73,6 +73,19 @@ impl ProjectSessionStatus {
     pub fn is_process_active(self) -> bool {
         matches!(self, Self::Starting | Self::Running)
     }
+
+    /// Coarsen durable intent to the shared shape the body projection reads, so
+    /// one `observe` serves Project and Task Sessions alike.
+    pub fn body_intent(self) -> crate::child_session::BodyIntent {
+        use crate::child_session::BodyIntent;
+        match self {
+            Self::Created | Self::Starting | Self::Running => BodyIntent::Active,
+            Self::Waiting => BodyIntent::Waiting,
+            Self::Blocked => BodyIntent::Blocked,
+            Self::Failed => BodyIntent::Failed,
+            Self::Completed | Self::Abandoned => BodyIntent::Terminal,
+        }
+    }
 }
 
 impl FromStr for ProjectSessionStatus {

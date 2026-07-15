@@ -115,16 +115,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([SkillRunEntry].self, from: stdout)
     }
 
-    /// Filed PM tasks for one wave. Active runs remain a separate registry
-    /// query; callers subtract running task ids/titles to render backlog. App
-    /// reads stay cache-only so a stale snapshot cannot put Linear on the UI
-    /// refresh path.
-    public func backlog(wave: String, cwd: String?) async throws -> [BacklogItem] {
-        let stdout = try await run(["pm", "show", "--wave", wave, "--json", "--no-sync"], cwd)
-        let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
-        return snapshot.items.filter { !$0.completed }
-    }
-
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
     /// rendering off the network; explicit and scheduled syncs refresh SQLite.
     public func plan(wave: String, objective: String, cwd: String?) async throws -> WavePlan {
@@ -196,10 +186,9 @@ private struct PmShowSnapshot: Decodable {
     let project: String?
     let syncedAt: Int64
     let projects: [PmProjectSnapshot]
-    let items: [BacklogItem]
 
     enum CodingKeys: String, CodingKey {
-        case wave, provider, initiative, project, projects, items
+        case wave, provider, initiative, project, projects
         case syncedAt = "synced_at"
     }
 }
@@ -227,16 +216,6 @@ private struct PmProjectSnapshot: Decodable {
 private struct PmKrSnapshot: Decodable {
     let text: String
     let holds: Bool
-}
-
-public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
-    public let id: String
-    public let name: String
-    public let description: String
-    public let rank: UInt32
-    public let completed: Bool
-    public let project: String?
-    public let assignee: String?
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)

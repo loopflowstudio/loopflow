@@ -1,10 +1,27 @@
 # W2-156 — status, blockers & control-plane defects
 
-## RESOLVED (2026-07-15): the control-plane store recovered
+## RECURRING BLOCKER (2026-07-15): shared control-plane store re-bricked by a Context Lab in-flight migration
 
-The shared `~/.lf/loopflow.db` was rebuilt onto `0.11.004_task_pr_ci_state`
-(product's, on main) — the divergent `context_launch_work` row is gone and `lf`
-store commands work again. Directive v2 was acknowledged; PR2 build resumed.
+The store recovered once (rebuilt onto `0.11.004_task_pr_ci_state`), then broke
+**again**: it now carries `0.11.006_context_launch_work`, unknown to the product
+`lf` (latest known `0.11.005_provider_accounts`). Context Lab renumbered its
+migration (0.11.004 → 0.11.006) but its worker **still applies that unmerged
+migration to the shared `~/.lf/loopflow.db`**, so every non-Context-Lab `lf`
+(release, product) rejects the store and `lf task acknowledge` / `lf pm` / land
+fail.
+
+**Renumbering is not the fix — it just moves the collision.** The root cause is a
+wave running its in-flight schema against the *shared* ledger. The durable fix is
+**dev-store isolation**: point in-development builds at `LF_HOME=~/.lf-dev` (or
+per-wave stores) so a wave's unmerged migrations never touch the real control
+plane. Until that lands, any wave dogfooding a schema change bricks `lf` for every
+other wave on the machine. Not a W2-156 code change; recorded for the owner of the
+control-plane store isolation (the `lf store: isolate dev and release control-plane
+stores` line of work, #908).
+
+Impact on W2-156: `cargo` tests (temp DBs) are unaffected, so slice 2 code is
+buildable, but the PR cannot be acknowledged/landed via `lf` while the store is
+bricked. Do not repair the shared store from here (recovery context).
 
 ## PR2 progress (branch ci-fix-wake)
 

@@ -109,10 +109,17 @@ bounded-latency reconcile cron over unsupervised waiting Tasks; retry-cap /
 non-convergence records beyond the failure-set dedup; non-required checks never
 wake.
 
-## BLOCKER (2026-07-15): control-plane store bricked — see scratch/questions.md
+## Status (2026-07-15)
 
-PR2 cannot be landed until the shared `~/.lf/loopflow.db` migration collision is
-recovered (a cross-wave `0.11.004` clash). Implementation + `cargo` tests are
-computable (temp DBs); `lf` store ops are not. Details and recovery in
-`scratch/questions.md`.
+- **Slice 1 shipped** (`529b19888`): the `(head, failure_set)` dedup key on
+  `CiObservation` (`woken_failure_set` + `wake_warranted()` + `mark_woken()` +
+  reconcile carry-forward), tested. Slices 2–3 remain (see this doc's Mechanism).
+- **Recurring control-plane blocker (not W2-156's to fix):** a Context Lab worker
+  keeps migrating the shared `~/.lf/loopflow.db` with its *unmerged* migration
+  (first `0.11.004_context_launch_work`, now renumbered to `0.11.006`), bricking
+  the release/product `lf` each time. Renumbering is not the fix — **dev-store
+  isolation** (`LF_HOME=~/.lf-dev`) is, so a wave's in-flight schema never touches
+  the real ledger. `cargo` tests (temp DBs) are unaffected and slice 2 code is
+  buildable; `lf` store ops (acknowledge / land) are blocked while the shared store
+  carries an unknown migration. Details in `scratch/questions.md`.
 </content>

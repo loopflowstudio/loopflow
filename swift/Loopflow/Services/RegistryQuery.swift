@@ -224,6 +224,37 @@ public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
 
 /// One `lf ls` row / the `wave` field of `lf status`. Mirrors Rust
+/// `WaveHomeDto` (`engine/wave_home.rs`) — a Wave's execution home: `local` or
+/// one SSH target. Lets the app distinguish a local Wave from a remote-home one
+/// without owning transport.
+enum WaveHome: Decodable, Equatable {
+    case local
+    case ssh(host: String, repo: String?)
+
+    enum CodingKeys: String, CodingKey {
+        case kind, host, repo
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .kind) {
+        case "local":
+            self = .local
+        case "ssh":
+            self = .ssh(
+                host: try container.decode(String.self, forKey: .host),
+                repo: try container.decodeIfPresent(String.self, forKey: .repo)
+            )
+        case let other:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription: "unknown wave home kind \(other)"
+            )
+        }
+    }
+}
+
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
 struct WaveSnapshot: Decodable {
@@ -239,9 +270,10 @@ struct WaveSnapshot: Decodable {
     let endpoint: String?
     let createdAt: String?
     let parentWaveId: String?
+    let home: WaveHome
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, paused, goal, repo, live, endpoint
+        case id, name, status, paused, goal, repo, live, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"

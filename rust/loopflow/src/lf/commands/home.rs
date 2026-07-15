@@ -21,7 +21,11 @@ use crate::lf::Commands;
 ///
 /// Returns `Some(result)` when the command was handled remotely (the caller
 /// must not also run it locally), or `None` to fall through to local dispatch.
-pub fn route(command: &Commands, wave: Option<&str>, args: &[String]) -> Option<anyhow::Result<()>> {
+pub fn route(
+    command: &Commands,
+    wave: Option<&str>,
+    args: &[String],
+) -> Option<anyhow::Result<()>> {
     if !is_routable(command) {
         return None;
     }

@@ -1024,10 +1024,8 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     // Inherit the Wave's execution home so this Task's routed shipping commands
     // (`lf commit`, `lf pr open`) target the same host as its Wave.
     let wave_home = match owning_wave(store, session).await {
-        Ok(wave) => {
-            crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name())
-                .to_string()
-        }
+        Ok(wave) => crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name())
+            .to_string(),
         Err(_) => crate::engine::wave_home::WaveHome::Local.to_string(),
     };
     let environment = [

@@ -147,6 +147,19 @@ impl From<&WaveHome> for WaveHomeDto {
     }
 }
 
+impl fmt::Display for WaveHomeDto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Local => write!(f, "local"),
+            Self::Ssh {
+                host,
+                repo: Some(repo),
+            } => write!(f, "ssh://{host}/{repo}"),
+            Self::Ssh { host, repo: None } => write!(f, "ssh://{host}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

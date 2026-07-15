@@ -12,6 +12,7 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveStatusSnapshot.self, from: data)
 
+        #expect(detail.wave.home == .ssh(host: "mini-heart", repo: "src/loopflow"))
         #expect(detail.projects[0].project.slug == "release-feedback")
         #expect(detail.projects[0].tasks.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.projects[0].tasks[0].prs.compactMap(\.publication?.github?.number) == [912])

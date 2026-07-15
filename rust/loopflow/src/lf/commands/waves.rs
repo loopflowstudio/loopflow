@@ -1013,7 +1013,7 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  ENDPOINT{reset}",
+        "{bold}{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  ENDPOINT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
@@ -1021,15 +1021,17 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
         live = "LIVE",
         tasks = "TASKS",
         projects = "PROJECTS",
+        home = "HOME",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {endpoint}",
+            "{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
             status = wave.status,
             live = if wave.live { "yes" } else { "no" },
             tasks = wave.active_tasks,
             projects = wave.active_projects,
+            home = truncate(&wave.home.to_string(), 16),
             endpoint = wave.endpoint.as_deref().unwrap_or("-"),
         );
     }
@@ -1051,6 +1053,7 @@ fn print_status(status: &WaveDetailSnapshot) {
             .unwrap_or_default(),
     );
     println!("  goal      {}", wave.goal);
+    println!("  home      {}", wave.home);
     println!(
         "  endpoint  {}",
         wave.endpoint.as_deref().unwrap_or("(stopped)")

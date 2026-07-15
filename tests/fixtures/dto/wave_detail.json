@@ -11,7 +11,8 @@
     "live": true,
     "endpoint": "127.0.0.1:7777",
     "created_at": "2026-07-01T00:00:00Z",
-    "parent_wave_id": null
+    "parent_wave_id": null,
+    "home": {"kind": "ssh", "host": "mini-heart", "repo": "src/loopflow"}
   },
   "loop_state": "idle",
   "projects": [

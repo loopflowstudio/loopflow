@@ -431,6 +431,144 @@ impl Store {
         run_sqlite(&self.sqlite, |store| store.list_provider_tokens()).await
     }
 
+    pub async fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
+        let account = account.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_provider_account(&account)
+        })
+        .await
+    }
+
+    pub async fn get_provider_account(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<Option<ProviderAccount>> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_provider_account(&provider, &account_id)
+        })
+        .await
+    }
+
+    pub async fn list_provider_accounts(
+        &self,
+        provider: Option<&str>,
+    ) -> StoreResult<Vec<ProviderAccount>> {
+        let provider = provider.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_provider_accounts(provider.as_deref())
+        })
+        .await
+    }
+
+    pub async fn delete_provider_account(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.delete_provider_account(&provider, &account_id)
+        })
+        .await
+    }
+
+    pub async fn set_preferred_provider_account(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_preferred_provider_account(&provider, &account_id)
+        })
+        .await
+    }
+
+    pub async fn set_provider_account_enabled(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        enabled: bool,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_provider_account_enabled(&provider, &account_id, enabled)
+        })
+        .await
+    }
+
+    pub async fn reset_provider_account_health(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reset_provider_account_health(&provider, &account_id)
+        })
+        .await
+    }
+
+    pub async fn record_provider_account_health(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        utilization_percent: Option<u8>,
+        cooldown_until: Option<i64>,
+        cooldown_reason: Option<&str>,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        let cooldown_reason = cooldown_reason.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_provider_account_health(
+                &provider,
+                &account_id,
+                utilization_percent,
+                cooldown_until,
+                cooldown_reason.as_deref(),
+            )
+        })
+        .await
+    }
+
+    pub async fn select_provider_account(
+        &self,
+        provider: &str,
+        candidates: &[ProviderAccountId],
+        provider_session_id: Option<&str>,
+    ) -> StoreResult<Option<ProviderAccountSelection>> {
+        let provider = provider.to_string();
+        let candidates = candidates.to_vec();
+        let provider_session_id = provider_session_id.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.select_provider_account(&provider, &candidates, provider_session_id.as_deref())
+        })
+        .await
+    }
+
+    pub async fn pin_provider_session_account(
+        &self,
+        provider: &str,
+        provider_session_id: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let provider_session_id = provider_session_id.to_string();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.pin_provider_session_account(&provider, &provider_session_id, &account_id)
+        })
+        .await
+    }
+
     pub async fn health_check(&self) -> StoreResult<()> {
         run_sqlite(&self.sqlite, |store| store.health_check()).await
     }
@@ -481,6 +619,65 @@ pub struct ProviderToken {
     pub credential_type: CredentialType,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct ProviderAccountId(String);
+
+impl ProviderAccountId {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let value = value.trim();
+        if value.is_empty() || value.len() > 63 {
+            return Err("account id must be 1-63 characters".to_string());
+        }
+        let mut chars = value.chars();
+        let first = chars
+            .next()
+            .expect("non-empty account id has a first character");
+        if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+            return Err("account id must start with a lowercase letter or number".to_string());
+        }
+        if !chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
+        {
+            return Err(
+                "account id may contain lowercase letters, numbers, '-' and '_'".to_string(),
+            );
+        }
+        Ok(Self(value.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ProviderAccountId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderAccount {
+    pub provider: String,
+    pub account_id: ProviderAccountId,
+    pub home: Option<PathBuf>,
+    pub login: Option<String>,
+    pub enabled: bool,
+    pub preferred: bool,
+    pub utilization_percent: Option<u8>,
+    pub cooldown_until: Option<i64>,
+    pub cooldown_reason: Option<String>,
+    pub last_selected_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderAccountSelection {
+    pub account: ProviderAccount,
+    pub resume_requested_session: bool,
+}
+
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
@@ -514,7 +711,7 @@ mod tests {
     use super::sqlite::SqliteStore;
     use super::{
         default_lf_home_dir_for, guard_development_database, open_store, select_store_env_value,
-        PmSnapshotRow, RunEventRow, StorageConfig,
+        PmSnapshotRow, ProviderAccount, ProviderAccountId, RunEventRow, StorageConfig,
     };
     use crate::build_info::BuildProvenance;
     use crate::child_session::{
@@ -2377,6 +2574,155 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    fn provider_account(provider: &str, account_id: &str, utilization: u8) -> ProviderAccount {
+        ProviderAccount {
+            provider: provider.to_string(),
+            account_id: ProviderAccountId::parse(account_id).unwrap(),
+            home: Some(PathBuf::from(format!("/accounts/{provider}/{account_id}"))),
+            login: Some(format!("{account_id}@example.com")),
+            enabled: true,
+            preferred: false,
+            utilization_percent: Some(utilization),
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_accounts_select_by_health_and_pin_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let primary = provider_account("claude", "primary", 80);
+        let reserve = provider_account("claude", "reserve", 20);
+        store.upsert_provider_account(&primary).await.unwrap();
+        store.upsert_provider_account(&reserve).await.unwrap();
+        store
+            .set_preferred_provider_account("claude", &primary.account_id)
+            .await
+            .unwrap();
+
+        let candidates = vec![primary.account_id.clone(), reserve.account_id.clone()];
+        let selected = store
+            .select_provider_account("claude", &candidates, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.account.account_id, reserve.account_id);
+        assert!(!selected.resume_requested_session);
+
+        store
+            .record_provider_account_health("claude", &reserve.account_id, Some(80), None, None)
+            .await
+            .unwrap();
+        let preferred = store
+            .select_provider_account("claude", &candidates, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(preferred.account.account_id, primary.account_id);
+
+        store
+            .pin_provider_session_account("claude", "session-primary", &primary.account_id)
+            .await
+            .unwrap();
+        let resumed = store
+            .select_provider_account("claude", &candidates, Some("session-primary"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.account.account_id, primary.account_id);
+        assert!(resumed.resume_requested_session);
+
+        store
+            .record_provider_account_health(
+                "claude",
+                &primary.account_id,
+                Some(100),
+                Some(OffsetDateTime::now_utc().unix_timestamp() + 3600),
+                Some("rate limit reached"),
+            )
+            .await
+            .unwrap();
+        let switched = store
+            .select_provider_account("claude", &candidates, Some("session-primary"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(switched.account.account_id, reserve.account_id);
+        assert!(!switched.resume_requested_session);
+
+        store
+            .record_provider_account_health(
+                "claude",
+                &primary.account_id,
+                Some(100),
+                Some(OffsetDateTime::now_utc().unix_timestamp() - 1),
+                Some("expired rate limit"),
+            )
+            .await
+            .unwrap();
+        let cooldown_expired = store
+            .select_provider_account("claude", &candidates, Some("session-primary"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cooldown_expired.account.account_id, primary.account_id);
+        assert!(cooldown_expired.resume_requested_session);
+
+        store
+            .reset_provider_account_health("claude", &primary.account_id)
+            .await
+            .unwrap();
+        let reset = store
+            .get_provider_account("claude", &primary.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reset.utilization_percent, None);
+        assert_eq!(reset.cooldown_until, None);
+    }
+
+    #[tokio::test]
+    async fn concurrent_provider_account_selection_reserves_distinct_accounts() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = StorageConfig::sqlite(dir.path().join("registry.db"));
+        let left_store = Arc::new(open_store(&config).await.unwrap());
+        let right_store = Arc::new(open_store(&config).await.unwrap());
+        let first = provider_account("codex", "first", 0);
+        let second = provider_account("codex", "second", 0);
+        left_store.upsert_provider_account(&first).await.unwrap();
+        left_store.upsert_provider_account(&second).await.unwrap();
+        let candidates = vec![first.account_id.clone(), second.account_id.clone()];
+
+        let left_candidates = candidates.clone();
+        let left = tokio::spawn(async move {
+            left_store
+                .select_provider_account("codex", &left_candidates, None)
+                .await
+                .unwrap()
+                .unwrap()
+                .account
+                .account_id
+        });
+        let right = tokio::spawn(async move {
+            right_store
+                .select_provider_account("codex", &candidates, None)
+                .await
+                .unwrap()
+                .unwrap()
+                .account
+                .account_id
+        });
+
+        let (left, right) = tokio::join!(left, right);
+        assert_ne!(left.unwrap(), right.unwrap());
     }
 
     #[tokio::test]

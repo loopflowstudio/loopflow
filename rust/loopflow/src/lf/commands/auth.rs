@@ -6,10 +6,17 @@ use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
-use crate::provider_auth::{
-    no_event_sink, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
+use crate::provider_account::{
+    account_profile_path, ensure_account_profile, new_account, open_account_store,
+    parse_account_id, remove_account_profile,
 };
-use crate::store::{open_store, CredentialType, ProviderToken, SharedStore};
+use crate::provider_auth::{
+    disconnect_provider_account_auth, no_event_sink, provider_account_auth_status,
+    start_provider_account_auth, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
+};
+use crate::store::{
+    open_store, CredentialType, ProviderAccount, ProviderToken, SharedStore, StoreError,
+};
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -22,9 +29,24 @@ pub fn run(cmd: &AuthCommand) -> Result<()> {
 async fn run_async(cmd: &AuthCommand) -> Result<()> {
     match cmd {
         AuthCommand::Status { provider } => status(provider.as_deref()).await,
-        AuthCommand::Disconnect { provider } => disconnect(provider).await,
+        AuthCommand::Disconnect { provider, account } => match account {
+            Some(account) => disconnect_account(provider, account).await,
+            None => disconnect(provider).await,
+        },
         AuthCommand::Configure { provider } => configure(provider).await,
-        AuthCommand::Connect { provider } => connect(provider).await,
+        AuthCommand::Connect { provider, account } => match account {
+            Some(account) => connect_account(provider, account).await,
+            None => connect(provider).await,
+        },
+        AuthCommand::Accounts { provider } => accounts(provider.as_deref()).await,
+        AuthCommand::Use { provider, account } => use_account(provider, account).await,
+        AuthCommand::Enable { provider, account } => {
+            set_account_enabled(provider, account, true).await
+        }
+        AuthCommand::Disable { provider, account } => {
+            set_account_enabled(provider, account, false).await
+        }
+        AuthCommand::Reset { provider, account } => reset_account(provider, account).await,
         AuthCommand::External(args) => {
             let provider = args
                 .first()
@@ -75,6 +97,87 @@ async fn connect(raw_provider: &str) -> Result<()> {
     wait_for_active_status(&service, provider, flow.expires_in).await
 }
 
+async fn connect_account(raw_provider: &str, raw_account: &str) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let account_id = parse_account_id(raw_account)?;
+    let profile = ensure_account_profile(provider, &account_id)?;
+    let handle = start_provider_account_auth(provider, profile.clone()).await?;
+    let flow = handle.response.clone();
+    let verification_url = flow
+        .verification_uri_complete
+        .clone()
+        .unwrap_or_else(|| flow.verification_uri.clone());
+    println!(
+        "Connecting {} account '{}'...",
+        provider.display_name(),
+        account_id
+    );
+    println!("If the browser does not open, visit:\n{verification_url}");
+    if let Some(user_code) = &flow.user_code {
+        println!("Enter code: {user_code}");
+    }
+    open_url(&verification_url);
+    tokio::time::timeout(AUTH_STATUS_POLL_TIMEOUT, handle.wait())
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "timed out waiting for {} account '{}' browser confirmation",
+                provider.display_name(),
+                account_id
+            )
+        })??;
+
+    let status = provider_account_auth_status(provider, profile.clone()).await?;
+    let login = match status {
+        AuthStatus::Active { login } => login,
+        other => {
+            return Err(anyhow!(
+                "{} account '{}' finished login with status {}",
+                provider.display_name(),
+                account_id,
+                other.as_str()
+            ))
+        }
+    };
+    let store = open_account_store().await?;
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
+    let existing = accounts
+        .iter()
+        .find(|account| account.account_id == account_id);
+    let preferred = existing
+        .map(|account| account.preferred)
+        .unwrap_or_else(|| !accounts.iter().any(|account| account.preferred));
+    let mut account = existing.cloned().unwrap_or_else(|| {
+        new_account(
+            provider,
+            account_id.clone(),
+            profile.clone(),
+            login.clone(),
+            preferred,
+        )
+    });
+    account.home = Some(profile);
+    account.login = login;
+    account.enabled = true;
+    account.preferred = preferred;
+    account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
+    store.upsert_provider_account(&account).await?;
+    if preferred {
+        store
+            .set_preferred_provider_account(provider.as_str(), &account_id)
+            .await?;
+    }
+    println!(
+        "Connected {} account '{}'{}",
+        provider.display_name(),
+        account_id,
+        preferred.then_some(" (preferred)").unwrap_or_default()
+    );
+    Ok(())
+}
+
 async fn disconnect(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
@@ -86,6 +189,156 @@ async fn disconnect(raw_provider: &str) -> Result<()> {
         println!("Updated {}", format_snapshot(&snapshot));
     }
     Ok(())
+}
+
+async fn disconnect_account(raw_provider: &str, raw_account: &str) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let account_id = parse_account_id(raw_account)?;
+    let store = open_account_store().await?;
+    let account = store
+        .get_provider_account(provider.as_str(), &account_id)
+        .await?
+        .ok_or_else(|| anyhow!("unknown {} account '{}'", provider, account_id))?;
+    if let Some(profile) = account.home.as_deref() {
+        let expected_profile = account_profile_path(provider, &account_id)?;
+        if profile != expected_profile {
+            return Err(anyhow!(
+                "refusing to remove unexpected {} account profile {}",
+                provider.display_name(),
+                profile.display()
+            ));
+        }
+        disconnect_provider_account_auth(provider, expected_profile.clone()).await?;
+        remove_account_profile(&expected_profile)?;
+    }
+    store
+        .delete_provider_account(provider.as_str(), &account_id)
+        .await?;
+    println!(
+        "Disconnected {} account '{}'",
+        provider.display_name(),
+        account_id
+    );
+    Ok(())
+}
+
+async fn accounts(raw_provider: Option<&str>) -> Result<()> {
+    let provider = raw_provider.map(parse_managed_provider).transpose()?;
+    let store = open_account_store().await?;
+    let accounts = store
+        .list_provider_accounts(provider.map(Provider::as_str))
+        .await?;
+    let accounts: Vec<_> = accounts
+        .into_iter()
+        .filter(|account| account.home.is_some())
+        .collect();
+    if accounts.is_empty() {
+        println!("No managed OAuth accounts");
+        return Ok(());
+    }
+    for account in accounts {
+        println!("{}", format_account(&account));
+    }
+    Ok(())
+}
+
+async fn use_account(raw_provider: &str, raw_account: &str) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let account_id = parse_account_id(raw_account)?;
+    let store = open_account_store().await?;
+    store
+        .set_preferred_provider_account(provider.as_str(), &account_id)
+        .await
+        .map_err(|error| account_store_error(provider, &account_id.to_string(), error))?;
+    println!(
+        "Preferred {} account '{}'",
+        provider.display_name(),
+        account_id
+    );
+    Ok(())
+}
+
+async fn set_account_enabled(raw_provider: &str, raw_account: &str, enabled: bool) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let account_id = parse_account_id(raw_account)?;
+    let store = open_account_store().await?;
+    store
+        .set_provider_account_enabled(provider.as_str(), &account_id, enabled)
+        .await
+        .map_err(|error| account_store_error(provider, &account_id.to_string(), error))?;
+    println!(
+        "{} {} account '{}'",
+        if enabled { "Enabled" } else { "Disabled" },
+        provider.display_name(),
+        account_id
+    );
+    Ok(())
+}
+
+async fn reset_account(raw_provider: &str, raw_account: &str) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let account_id = parse_account_id(raw_account)?;
+    let store = open_account_store().await?;
+    store
+        .reset_provider_account_health(provider.as_str(), &account_id)
+        .await
+        .map_err(|error| account_store_error(provider, &account_id.to_string(), error))?;
+    println!(
+        "Reset {} account '{}' usage state",
+        provider.display_name(),
+        account_id
+    );
+    Ok(())
+}
+
+fn account_store_error(provider: Provider, account: &str, error: StoreError) -> anyhow::Error {
+    match error {
+        StoreError::NotFound => anyhow!("unknown {} account '{}'", provider, account),
+        other => anyhow!(other),
+    }
+}
+
+fn parse_managed_provider(raw: &str) -> Result<Provider> {
+    let provider = parse_provider(raw)?;
+    if matches!(provider, Provider::Claude | Provider::Codex) {
+        Ok(provider)
+    } else {
+        Err(anyhow!(
+            "managed OAuth accounts support Claude and Codex only"
+        ))
+    }
+}
+
+fn format_account(account: &ProviderAccount) -> String {
+    let mut details = Vec::new();
+    if account.preferred {
+        details.push("preferred".to_string());
+    }
+    if !account.enabled {
+        details.push("disabled".to_string());
+    }
+    if let Some(utilization) = account.utilization_percent {
+        details.push(format!("{utilization}% used"));
+    }
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    if let Some(cooldown_until) = account.cooldown_until.filter(|until| *until > now) {
+        details.push(format!(
+            "cooling for {}",
+            format_relative_delta(cooldown_until - now)
+        ));
+    }
+    if let Some(login) = &account.login {
+        details.push(login.clone());
+    }
+    if details.is_empty() {
+        details.push("ready".to_string());
+    }
+    format!(
+        "{:<12} {:<16} {}",
+        account.provider,
+        account.account_id,
+        details.join(" · ")
+    )
 }
 
 async fn configure(raw_provider: &str) -> Result<()> {
@@ -269,9 +522,35 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
-    use crate::store::CredentialType;
+    use crate::store::{CredentialType, ProviderAccount, ProviderAccountId};
 
-    use super::{format_relative_delta, format_snapshot};
+    use super::{format_account, format_relative_delta, format_snapshot};
+
+    #[test]
+    fn format_account_shows_routing_state() {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let rendered = format_account(&ProviderAccount {
+            provider: "claude".to_string(),
+            account_id: ProviderAccountId::parse("primary").unwrap(),
+            home: None,
+            login: Some("operator@example.com".to_string()),
+            enabled: true,
+            preferred: true,
+            utilization_percent: Some(72),
+            cooldown_until: Some(now + 3_600),
+            cooldown_reason: Some("five_hour".to_string()),
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        });
+
+        assert!(rendered.contains("claude"));
+        assert!(rendered.contains("primary"));
+        assert!(rendered.contains("preferred"));
+        assert!(rendered.contains("72% used"));
+        assert!(rendered.contains("cooling for"));
+        assert!(rendered.contains("operator@example.com"));
+    }
 
     #[test]
     fn format_snapshot_shows_login_and_expiry() {

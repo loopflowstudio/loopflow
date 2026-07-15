@@ -1,12 +1,15 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{params, Connection, OptionalExtension, ToSql};
+use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
 use crate::id::WaveId;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
-use crate::store::{BusMessage, PmSnapshotRow, RunEventRow, StoreError, StoreResult};
+use crate::store::{
+    BusMessage, PmSnapshotRow, ProviderAccount, ProviderAccountId, ProviderAccountSelection,
+    RunEventRow, StoreError, StoreResult,
+};
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
     ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
@@ -150,6 +153,39 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
         updated_at,
         credential_type: super::CredentialType::from_db(&ct),
     })
+}
+
+fn read_provider_account(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<ProviderAccount>> {
+    let provider = row.get(0)?;
+    let account_id = row.get::<_, String>(1)?;
+    let home = row
+        .get::<_, Option<String>>(2)?
+        .map(std::path::PathBuf::from);
+    let login = row.get(3)?;
+    let enabled = row.get(4)?;
+    let preferred = row.get(5)?;
+    let utilization_percent = row.get(6)?;
+    let cooldown_until = row.get(7)?;
+    let cooldown_reason = row.get(8)?;
+    let last_selected_at = row.get(9)?;
+    let created_at = row.get(10)?;
+    let updated_at = row.get(11)?;
+    Ok(ProviderAccountId::parse(&account_id)
+        .map_err(StoreError::InvalidData)
+        .map(|account_id| ProviderAccount {
+            provider,
+            account_id,
+            home,
+            login,
+            enabled,
+            preferred,
+            utilization_percent,
+            cooldown_until,
+            cooldown_reason,
+            last_selected_at,
+            created_at,
+            updated_at,
+        }))
 }
 
 impl SqliteStore {
@@ -377,6 +413,327 @@ impl SqliteStore {
             tokens.push(decrypt_token_row(row?)?);
         }
         Ok(tokens)
+    }
+
+    // -- Provider accounts -----------------------------------------------------
+
+    pub fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_accounts (
+                provider, account_id, home, login, enabled, preferred,
+                utilization_percent, cooldown_until, cooldown_reason,
+                last_selected_at, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(provider, account_id) DO UPDATE SET
+                home = excluded.home,
+                login = excluded.login,
+                enabled = excluded.enabled,
+                preferred = excluded.preferred,
+                utilization_percent = excluded.utilization_percent,
+                cooldown_until = excluded.cooldown_until,
+                cooldown_reason = excluded.cooldown_reason,
+                last_selected_at = excluded.last_selected_at,
+                updated_at = excluded.updated_at",
+            params![
+                account.provider,
+                account.account_id.as_str(),
+                account
+                    .home
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
+                account.login,
+                account.enabled,
+                account.preferred,
+                account.utilization_percent,
+                account.cooldown_until,
+                account.cooldown_reason,
+                account.last_selected_at,
+                account.created_at,
+                account.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_provider_account(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<Option<ProviderAccount>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT provider, account_id, home, login, enabled, preferred,
+                    utilization_percent, cooldown_until, cooldown_reason,
+                    last_selected_at, created_at, updated_at
+             FROM provider_accounts
+             WHERE provider = ?1 AND account_id = ?2",
+        )?;
+        statement
+            .query_row(
+                params![provider, account_id.as_str()],
+                read_provider_account,
+            )
+            .optional()?
+            .transpose()
+    }
+
+    pub fn list_provider_accounts(
+        &self,
+        provider: Option<&str>,
+    ) -> StoreResult<Vec<ProviderAccount>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let sql = match provider {
+            Some(_) => {
+                "SELECT provider, account_id, home, login, enabled, preferred,
+                        utilization_percent, cooldown_until, cooldown_reason,
+                        last_selected_at, created_at, updated_at
+                 FROM provider_accounts
+                 WHERE provider = ?1
+                 ORDER BY provider, preferred DESC, account_id"
+            }
+            None => {
+                "SELECT provider, account_id, home, login, enabled, preferred,
+                        utilization_percent, cooldown_until, cooldown_reason,
+                        last_selected_at, created_at, updated_at
+                 FROM provider_accounts
+                 ORDER BY provider, preferred DESC, account_id"
+            }
+        };
+        let mut statement = conn.prepare(sql)?;
+        let mut accounts = Vec::new();
+        match provider {
+            Some(provider) => {
+                let rows = statement.query_map([provider], read_provider_account)?;
+                for row in rows {
+                    accounts.push(row??);
+                }
+            }
+            None => {
+                let rows = statement.query_map([], read_provider_account)?;
+                for row in rows {
+                    accounts.push(row??);
+                }
+            }
+        }
+        Ok(accounts)
+    }
+
+    pub fn delete_provider_account(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "DELETE FROM provider_accounts WHERE provider = ?1 AND account_id = ?2",
+            params![provider, account_id.as_str()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn set_preferred_provider_account(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let exists = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM provider_accounts
+                WHERE provider = ?1 AND account_id = ?2
+             )",
+            params![provider, account_id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !exists {
+            return Err(StoreError::NotFound);
+        }
+        transaction.execute(
+            "UPDATE provider_accounts SET preferred = 0, updated_at = ?2 WHERE provider = ?1",
+            params![provider, now_unix()],
+        )?;
+        transaction.execute(
+            "UPDATE provider_accounts
+             SET preferred = 1, updated_at = ?3
+             WHERE provider = ?1 AND account_id = ?2",
+            params![provider, account_id.as_str(), now_unix()],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn set_provider_account_enabled(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        enabled: bool,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts
+             SET enabled = ?3, updated_at = ?4
+             WHERE provider = ?1 AND account_id = ?2",
+            params![provider, account_id.as_str(), enabled, now_unix()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn reset_provider_account_health(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        self.record_provider_account_health(provider, account_id, None, None, None)
+    }
+
+    pub fn record_provider_account_health(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        utilization_percent: Option<u8>,
+        cooldown_until: Option<i64>,
+        cooldown_reason: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts
+             SET utilization_percent = ?3,
+                 cooldown_until = ?4,
+                 cooldown_reason = ?5,
+                 updated_at = ?6
+             WHERE provider = ?1 AND account_id = ?2",
+            params![
+                provider,
+                account_id.as_str(),
+                utilization_percent,
+                cooldown_until,
+                cooldown_reason,
+                now_unix(),
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn select_provider_account(
+        &self,
+        provider: &str,
+        candidates: &[ProviderAccountId],
+        provider_session_id: Option<&str>,
+    ) -> StoreResult<Option<ProviderAccountSelection>> {
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = now_unix();
+        let newest_selection = transaction.query_row(
+            "SELECT COALESCE(MAX(last_selected_at), 0)
+             FROM provider_accounts WHERE provider = ?1",
+            [provider],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let selection_time = now.max(newest_selection + 1);
+        let requested_account = match provider_session_id {
+            Some(session_id) => transaction
+                .query_row(
+                    "SELECT account_id FROM provider_session_accounts
+                     WHERE provider = ?1 AND provider_session_id = ?2",
+                    params![provider, session_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?,
+            None => None,
+        };
+
+        let mut statement = transaction.prepare(
+            "SELECT provider, account_id, home, login, enabled, preferred,
+                    utilization_percent, cooldown_until, cooldown_reason,
+                    last_selected_at, created_at, updated_at
+             FROM provider_accounts
+             WHERE provider = ?1
+             ORDER BY COALESCE(utilization_percent, 0), preferred DESC,
+                      COALESCE(last_selected_at, 0), account_id",
+        )?;
+        let rows = statement.query_map([provider], read_provider_account)?;
+        let candidate_ids = candidates
+            .iter()
+            .map(ProviderAccountId::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let mut available = Vec::new();
+        for row in rows {
+            let account = row??;
+            if candidate_ids.contains(account.account_id.as_str())
+                && account.enabled
+                && account.cooldown_until.is_none_or(|until| until <= now)
+            {
+                available.push(account);
+            }
+        }
+        drop(statement);
+
+        let resumed = requested_account.as_deref().and_then(|requested| {
+            available
+                .iter()
+                .position(|account| account.account_id.as_str() == requested)
+        });
+        let (mut account, resume_requested_session) = match resumed {
+            Some(index) => (available.remove(index), true),
+            None => match available.into_iter().next() {
+                Some(account) => (account, false),
+                None => {
+                    transaction.commit()?;
+                    return Ok(None);
+                }
+            },
+        };
+        transaction.execute(
+            "UPDATE provider_accounts
+             SET last_selected_at = ?3, updated_at = ?3
+             WHERE provider = ?1 AND account_id = ?2",
+            params![provider, account.account_id.as_str(), selection_time],
+        )?;
+        transaction.commit()?;
+        account.last_selected_at = Some(selection_time);
+        account.updated_at = selection_time;
+        Ok(Some(ProviderAccountSelection {
+            account,
+            resume_requested_session,
+        }))
+    }
+
+    pub fn pin_provider_session_account(
+        &self,
+        provider: &str,
+        provider_session_id: &str,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_session_accounts (
+                provider, provider_session_id, account_id, created_at
+             ) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(provider, provider_session_id) DO UPDATE SET
+                account_id = excluded.account_id,
+                created_at = excluded.created_at",
+            params![
+                provider,
+                provider_session_id,
+                account_id.as_str(),
+                now_unix()
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

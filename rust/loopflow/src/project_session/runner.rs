@@ -210,8 +210,9 @@ async fn run_project_session_inner(
                 let Some(event) = event else {
                     return finish_failed(&store, &mut session, lease, harness.as_mut(), "provider event stream closed").await;
                 };
-                if session.provider_session_id.is_none() {
-                    session.provider_session_id = harness.provider_session_id();
+                let provider_session_id = harness.provider_session_id();
+                if provider_session_id != session.provider_session_id {
+                    session.provider_session_id = provider_session_id;
                     if let Some(process) = &mut session.latest_process {
                         process.observe_provider(
                             &session.provider,

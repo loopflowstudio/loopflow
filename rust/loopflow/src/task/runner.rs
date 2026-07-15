@@ -105,9 +105,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         .await?;
     harness.start(&prepared.config).await?;
     session.provider = harness_name;
-    if let Some(provider_session_id) = harness.provider_session_id() {
-        session.provider_session_id = Some(provider_session_id);
-    }
+    session.provider_session_id = harness.provider_session_id();
     if let Some(process) = &mut session.latest_process {
         process.observe_provider(
             &session.provider,
@@ -222,18 +220,17 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                         "provider event stream closed",
                     ).await;
                 };
-                if session.provider_session_id.is_none() {
-                    if let Some(provider_session_id) = harness.provider_session_id() {
-                        session.provider_session_id = Some(provider_session_id);
-                        if let Some(process) = &mut session.latest_process {
-                            process.observe_provider(
-                                &session.provider,
-                                session.provider_session_id.clone(),
-                                harness.process_group_id(),
-                            );
-                        }
-                        store.update_task_session_for_lease(&session, lease).await?;
+                let provider_session_id = harness.provider_session_id();
+                if provider_session_id != session.provider_session_id {
+                    session.provider_session_id = provider_session_id;
+                    if let Some(process) = &mut session.latest_process {
+                        process.observe_provider(
+                            &session.provider,
+                            session.provider_session_id.clone(),
+                            harness.process_group_id(),
+                        );
                     }
+                    store.update_task_session_for_lease(&session, lease).await?;
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),

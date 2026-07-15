@@ -261,6 +261,15 @@ impl AuthFlowHandle {
     fn new(response: AuthFlowResponse, monitor: JoinHandle<Result<(), AuthError>>) -> Self {
         Self { response, monitor }
     }
+
+    pub async fn wait(self) -> Result<(), AuthError> {
+        self.monitor
+            .await
+            .map_err(|error| AuthError::CommandFailed {
+                provider: self.response.provider,
+                message: format!("auth monitor task failed: {error}"),
+            })?
+    }
 }
 
 #[derive(Debug, Error)]
@@ -1126,14 +1135,31 @@ impl AuthBroker for GhAuthBroker {
 
 #[derive(Debug, Clone)]
 pub struct ClaudeAuthBroker {
-    home_dir: PathBuf,
+    config_dir: PathBuf,
+    keychain_fallback: bool,
 }
 
 impl Default for ClaudeAuthBroker {
     fn default() -> Self {
         Self {
-            home_dir: home_dir_or_cwd(),
+            config_dir: home_dir_or_cwd().join(".claude"),
+            keychain_fallback: true,
         }
+    }
+}
+
+impl ClaudeAuthBroker {
+    fn for_profile(config_dir: PathBuf) -> Self {
+        Self {
+            config_dir,
+            keychain_fallback: false,
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new("claude");
+        command.env("CLAUDE_CONFIG_DIR", &self.config_dir);
+        command
     }
 }
 
@@ -1144,7 +1170,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = Command::new("claude");
+        let mut command = self.command();
         command.args(["auth", "login"]);
         command.env("BROWSER", "echo");
         command.env("CLAUDE_BROWSER", "echo");
@@ -1153,7 +1179,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let mut command = Command::new("claude");
+        let mut command = self.command();
         command.args(["auth", "status"]);
 
         match command.output().await {
@@ -1172,7 +1198,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = Command::new("claude");
+        let mut command = self.command();
         command.args(["auth", "logout"]);
 
         // Best-effort CLI logout; always clean up auth files regardless
@@ -1181,18 +1207,23 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
-        extract_claude_token(&self.home_dir)
+        extract_claude_token_from_config_dir(&self.config_dir).or_else(|| {
+            if self.keychain_fallback {
+                read_claude_keychain_token()
+            } else {
+                None
+            }
+        })
     }
 }
 
 impl ClaudeAuthBroker {
     fn remove_claude_auth_files(&self) -> Result<(), AuthError> {
-        let claude_dir = self.home_dir.join(".claude");
-        if !claude_dir.exists() {
+        if !self.config_dir.exists() {
             return Ok(());
         }
-        for name in &["auth.json", "session-cache"] {
-            let path = claude_dir.join(name);
+        for name in &[".credentials.json", "auth.json", "session-cache"] {
+            let path = self.config_dir.join(name);
             if path.exists() {
                 remove_path(&path)?;
             }
@@ -1203,13 +1234,36 @@ impl ClaudeAuthBroker {
 
 #[derive(Debug, Clone)]
 pub struct CodexAuthBroker {
-    home_dir: PathBuf,
+    codex_home: PathBuf,
+    force_file_store: bool,
 }
 
 impl Default for CodexAuthBroker {
     fn default() -> Self {
         Self {
-            home_dir: home_dir_or_cwd(),
+            codex_home: home_dir_or_cwd().join(".codex"),
+            force_file_store: false,
+        }
+    }
+}
+
+impl CodexAuthBroker {
+    fn for_profile(codex_home: PathBuf) -> Self {
+        Self {
+            codex_home,
+            force_file_store: true,
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new("codex");
+        command.env("CODEX_HOME", &self.codex_home);
+        command
+    }
+
+    fn add_file_store_override(&self, command: &mut Command) {
+        if self.force_file_store {
+            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
         }
     }
 }
@@ -1221,30 +1275,34 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = Command::new("codex");
+        let mut command = self.command();
+        self.add_file_store_override(&mut command);
         command.args(["login", "--device-auth"]);
 
         start_auth_command(Provider::Codex, "codex", command, parse_generic_auth_line).await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        Ok(if extract_codex_token(&self.home_dir).is_some() {
-            AuthStatus::Active { login: None }
-        } else {
-            AuthStatus::None
-        })
+        Ok(
+            if extract_codex_token_from_home(&self.codex_home).is_some() {
+                AuthStatus::Active { login: None }
+            } else {
+                AuthStatus::None
+            },
+        )
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = Command::new("codex");
+        let mut command = self.command();
+        self.add_file_store_override(&mut command);
         command.arg("logout");
 
         match command.output().await {
             Ok(output) if output.status.success() => Ok(()),
             Ok(_) | Err(_) => {
-                let codex_dir = self.home_dir.join(".codex");
-                if codex_dir.exists() {
-                    remove_path(&codex_dir)?;
+                let auth_path = self.codex_home.join("auth.json");
+                if auth_path.exists() {
+                    remove_path(&auth_path)?;
                 }
                 Ok(())
             }
@@ -1252,8 +1310,46 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
-        extract_codex_token(&self.home_dir)
+        extract_codex_token_from_home(&self.codex_home)
     }
+}
+
+fn provider_account_broker(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<Arc<dyn AuthBroker>, AuthError> {
+    match provider {
+        Provider::Claude => Ok(Arc::new(ClaudeAuthBroker::for_profile(provider_home))),
+        Provider::Codex => Ok(Arc::new(CodexAuthBroker::for_profile(provider_home))),
+        _ => Err(AuthError::UnsupportedProvider(provider.to_string())),
+    }
+}
+
+pub async fn start_provider_account_auth(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<AuthFlowHandle, AuthError> {
+    provider_account_broker(provider, provider_home)?
+        .start_auth()
+        .await
+}
+
+pub async fn provider_account_auth_status(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<AuthStatus, AuthError> {
+    provider_account_broker(provider, provider_home)?
+        .check_status()
+        .await
+}
+
+pub async fn disconnect_provider_account_auth(
+    provider: Provider,
+    provider_home: PathBuf,
+) -> Result<(), AuthError> {
+    provider_account_broker(provider, provider_home)?
+        .disconnect()
+        .await
 }
 
 #[derive(Debug, Clone)]
@@ -1754,16 +1850,24 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
 }
 
 pub(crate) fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
-    let cred_path = home_dir.join(".claude/.credentials.json");
-    if let Ok(content) = fs::read_to_string(cred_path) {
-        if let Some(token) = claude_token_from_credentials_json(&content) {
-            return Some(token);
-        }
+    let config_dir = home_dir.join(".claude");
+    if let Some(token) = extract_claude_token_from_config_dir(&config_dir) {
+        return Some(token);
     }
     // The file is absent on machines where Claude Code stashed its OAuth blob in
     // the macOS keychain (service "Claude Code-credentials", JSON under
     // `.claudeAiOauth`). Fall back to reading it there.
     read_claude_keychain_token()
+}
+
+fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderToken> {
+    let cred_path = config_dir.join(".credentials.json");
+    if let Ok(content) = fs::read_to_string(cred_path) {
+        if let Some(token) = claude_token_from_credentials_json(&content) {
+            return Some(token);
+        }
+    }
+    None
 }
 
 /// Parse a `.claude/.credentials.json` payload. The access token sits at the top
@@ -1818,7 +1922,11 @@ fn read_claude_keychain_token() -> Option<ProviderToken> {
 }
 
 fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
-    let auth_path = home_dir.join(".codex/auth.json");
+    extract_codex_token_from_home(&home_dir.join(".codex"))
+}
+
+fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
+    let auth_path = codex_home.join("auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     // Store OAuth access tokens only.
@@ -1850,6 +1958,22 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
         updated_at: now_unix(),
         credential_type: CredentialType::OAuth,
     })
+}
+
+pub(crate) fn extract_provider_account_access_token(
+    provider: Provider,
+    provider_home: &Path,
+) -> Option<String> {
+    let token = match provider {
+        Provider::Claude => extract_claude_token_from_config_dir(provider_home),
+        Provider::Codex => extract_codex_token_from_home(provider_home),
+        _ => None,
+    }?;
+    Some(token.access_token)
+}
+
+pub(crate) fn extract_codex_access_token(home_dir: &Path) -> Option<String> {
+    extract_codex_token(home_dir).map(|token| token.access_token)
 }
 
 /// Canonical key under which OpenCode stores credentials in auth.json.
@@ -2536,6 +2660,7 @@ pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     match env_name {
         "GH_TOKEN" => true,
         "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
+        "CODEX_ACCESS_TOKEN" => normalize_program_name(program) == "codex",
         "ANTHROPIC_API_KEY" => normalize_program_name(program) == "claude",
         "OPENAI_API_KEY" => normalize_program_name(program) == "codex",
         "OPENCODE_API_KEY" => normalize_program_name(program) == "opencode",
@@ -2584,7 +2709,9 @@ pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
         ("claude", CredentialType::ApiKey) => {
             Some(("ANTHROPIC_API_KEY".to_string(), token.access_token.clone()))
         }
-        ("codex", CredentialType::OAuth) => None, // Codex OAuth env injection unsupported
+        ("codex", CredentialType::OAuth) => {
+            Some(("CODEX_ACCESS_TOKEN".to_string(), token.access_token.clone()))
+        }
         ("codex", CredentialType::ApiKey) => {
             Some(("OPENAI_API_KEY".to_string(), token.access_token.clone()))
         }
@@ -2887,9 +3014,7 @@ mod tests {
         fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
         fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
 
-        let broker = ClaudeAuthBroker {
-            home_dir: temp.path().to_path_buf(),
-        };
+        let broker = ClaudeAuthBroker::for_profile(temp.path().join(".claude"));
         broker.disconnect().await.expect("disconnect");
 
         assert!(claude_dir.join("settings.json").exists());
@@ -3170,6 +3295,10 @@ mod tests {
         assert!(provider_env_allowed_for_program(
             "claude",
             "CLAUDE_CODE_OAUTH_TOKEN"
+        ));
+        assert!(provider_env_allowed_for_program(
+            "codex",
+            "CODEX_ACCESS_TOKEN"
         ));
         assert!(provider_env_allowed_for_program(
             "opencode",
@@ -3711,9 +3840,10 @@ mod tests {
     }
 
     #[test]
-    fn env_var_for_token_codex_oauth_returns_none() {
+    fn env_var_for_token_codex_oauth_returns_access_token() {
         let token = make_token("codex", CredentialType::OAuth);
-        assert!(env_var_for_token(&token).is_none());
+        let (name, _) = env_var_for_token(&token).expect("should produce env var");
+        assert_eq!(name, "CODEX_ACCESS_TOKEN");
     }
 
     #[test]
@@ -3762,7 +3892,7 @@ mod tests {
             .await
             .expect("upsert github oauth");
 
-        // Codex with OAuth (should produce no env var)
+        // Codex with OAuth uses the supported process-lifetime access token.
         store
             .upsert_provider_token(&make_token("codex", CredentialType::OAuth))
             .await
@@ -3773,6 +3903,7 @@ mod tests {
         assert!(vars.iter().any(|(n, _)| n == "ANTHROPIC_API_KEY"));
         assert!(vars.iter().any(|(n, _)| n == "GH_TOKEN"));
         assert!(!vars.iter().any(|(n, _)| n == "CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(vars.iter().any(|(n, _)| n == "CODEX_ACCESS_TOKEN"));
         assert!(!vars.iter().any(|(n, _)| n == "OPENAI_API_KEY"));
     }
 }

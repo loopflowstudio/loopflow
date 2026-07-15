@@ -124,6 +124,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_pr_ci_state",
         sql: include_str!("migrations/0.11.004_task_pr_ci_state.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 5,
+        },
+        name: "provider_accounts",
+        sql: include_str!("migrations/0.11.005_provider_accounts.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -634,7 +643,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.004_task_pr_ci_state"
+            "0.11.005_provider_accounts"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -650,7 +659,8 @@ mod tests {
                 "0.11.001_task_prs".to_string(),
                 "0.11.002_project_session_successors".to_string(),
                 "0.11.003_child_body_lease".to_string(),
-                "0.11.004_task_pr_ci_state".to_string()
+                "0.11.004_task_pr_ci_state".to_string(),
+                "0.11.005_provider_accounts".to_string()
             ]
         );
     }
@@ -1044,7 +1054,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.004_task_pr_ci_state"
+            "0.11.005_provider_accounts"
         );
     }
 

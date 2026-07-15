@@ -1175,6 +1175,9 @@ pub enum AuthCommand {
     Disconnect {
         /// Provider name
         provider: String,
+        /// Disconnect one managed OAuth account
+        #[arg(long)]
+        account: Option<String>,
     },
     /// Store an API key from the provider's environment variable
     Configure {
@@ -1185,7 +1188,23 @@ pub enum AuthCommand {
     Connect {
         /// Provider name
         provider: String,
+        /// Create or reconnect an isolated OAuth account profile
+        #[arg(long)]
+        account: Option<String>,
     },
+    /// List managed Claude and Codex OAuth accounts
+    Accounts {
+        /// Provider name (optional)
+        provider: Option<String>,
+    },
+    /// Prefer one account when healthy accounts have equal utilization
+    Use { provider: String, account: String },
+    /// Include an account in automatic routing
+    Enable { provider: String, account: String },
+    /// Exclude an account from automatic routing
+    Disable { provider: String, account: String },
+    /// Clear observed utilization and cooldown for an account
+    Reset { provider: String, account: String },
     /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1289,6 +1308,48 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn auth_help_exposes_managed_account_flows() {
+        let command = Cli::command();
+        let auth = command
+            .find_subcommand("auth")
+            .expect("auth subcommand exists");
+
+        for flow in [
+            "connect",
+            "accounts",
+            "use",
+            "enable",
+            "disable",
+            "reset",
+            "disconnect",
+        ] {
+            assert!(
+                auth.find_subcommand(flow).is_some(),
+                "auth help is missing {flow}"
+            );
+        }
+        for flow in ["connect", "disconnect"] {
+            let subcommand = auth.find_subcommand(flow).expect("auth flow exists");
+            assert!(subcommand
+                .get_arguments()
+                .any(|argument| argument.get_long() == Some("account")));
+        }
+    }
+
+    #[test]
+    fn auth_connect_accepts_managed_account_slug() {
+        let cli = Cli::try_parse_from(["lf", "auth", "connect", "claude", "--account", "primary"])
+            .expect("parse managed account login");
+
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Connect { provider, account }
+            }) if provider == "claude" && account.as_deref() == Some("primary")
+        ));
+    }
 
     #[test]
     fn pm_init_accepts_positional_wave() {

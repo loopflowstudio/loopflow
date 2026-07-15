@@ -125,6 +125,10 @@ destroys it; the next local start or reconnect resolves and forwards a fresh
 bundle. Automatic recovery after host restart requires a live local Loopflow
 agent to reconnect. The remote never reconstructs credentials alone.
 
+One-shot `lf` launches use the same router. They select an account for the
+process but do not create a resumable provider-session pin unless the vendor
+harness reports one.
+
 ## Constraints
 
 - OAuth accounts only; API-key routing is unchanged.

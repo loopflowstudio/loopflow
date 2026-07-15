@@ -11,6 +11,7 @@ pub mod lf;
 pub mod ops;
 pub mod pm;
 pub mod project_session;
+pub mod provider_account;
 pub mod provider_auth;
 pub mod receipt;
 pub mod repository;

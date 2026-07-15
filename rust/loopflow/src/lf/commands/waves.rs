@@ -2533,7 +2533,7 @@ mod tests {
         };
         let recovery_required = runtime
             .filter(|runtime| runtime.status.is_process_active())
-            .and_then(|runtime| Some(!runtime.process_alive));
+            .map(|runtime| !runtime.process_alive);
         let local_progress = LocalProgressEvidence {
             state: if runtime.is_some() {
                 LocalProgressEvidenceState::Observed

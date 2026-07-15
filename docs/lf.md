@@ -154,6 +154,8 @@ lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
 lf task acknowledge DES-123 --directive 2 --summary "the smaller parser path is active"
 lf task decide DES-123 DECISION_ID approve
 lf task wait DES-123
+lf task resume DES-123 --model codex --reason "Claude quota exhausted"
+lf project resume <linear-project-id> --model codex
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
@@ -162,9 +164,12 @@ playhead. A Project Session pursues one Linear Project's KRs without a worktree.
 Each Project has at most one current Session; terminal Sessions remain readable
 history and the next pursuit creates a successor. Every Task requires the
 current Project Session; `task start/run` ensures it before reserving the Task.
-The Task starts only after its Linear issue exists, owns one stable worktree and
-provider transcript, and remains resumable through serial PRs, review, and
-explicit completion.
+The Task starts only after its Linear issue exists and owns one stable worktree.
+Its provider process and transcript are a replaceable body generation: plain
+`resume` keeps compatible history; `resume --model <agent>` preserves the same
+Session, directive, worktree, and PR chain while selecting another provider.
+The Session remains resumable through serial PRs, review, and explicit
+completion.
 `lf task attach` exposes a writable prompt that records structured commands;
 terminal bytes never drive the provider directly.
 

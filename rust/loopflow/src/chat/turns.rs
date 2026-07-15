@@ -305,6 +305,14 @@ struct ActivityFields {
 fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
     match event {
         TaskEventKind::Started => activity(ChildActivityKind::StateChanged, "Task started", ""),
+        TaskEventKind::BodyHandedOff { handoff } => activity(
+            ChildActivityKind::StateChanged,
+            &format!(
+                "Task body handed off: {} → {}",
+                handoff.from_agent, handoff.to_agent
+            ),
+            &handoff.reason,
+        ),
         TaskEventKind::StatusChanged { to, reason, .. } => activity(
             ChildActivityKind::StateChanged,
             &format!("Task is {}", to.as_str()),
@@ -394,6 +402,14 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
         ProjectEventKind::Started => {
             activity(ChildActivityKind::StateChanged, "Project started", "")
         }
+        ProjectEventKind::BodyHandedOff { handoff } => activity(
+            ChildActivityKind::StateChanged,
+            &format!(
+                "Project body handed off: {} → {}",
+                handoff.from_agent, handoff.to_agent
+            ),
+            &handoff.reason,
+        ),
         ProjectEventKind::StatusChanged { to, reason, .. } => activity(
             ChildActivityKind::StateChanged,
             &format!("Project is {}", to.as_str()),

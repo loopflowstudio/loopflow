@@ -100,14 +100,35 @@ pub enum ObservationRecipient {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-/// Durable receipt for one child-process generation. The latest receipt stays
-/// on a Session after the process exits so recovery can reject stale runners
-/// and advance the generation monotonically.
+/// Durable receipt for one child-process write lease. `generation` is the
+/// monotonically increasing fencing token: only the current generation may
+/// act for the Session. The latest receipt stays after the process exits so a
+/// replacement body advances rather than assuming the old body's identity.
 pub struct ChildProcessGeneration {
     pub generation: u32,
     pub pid: Option<u32>,
     pub tmux_name: String,
     pub started_at: OffsetDateTime,
+}
+
+/// Requested replacement of the agent/provider body acting for a durable
+/// Project or Task Session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildBodyHandoffRequest {
+    pub agent: String,
+    pub provider: String,
+    pub reason: String,
+}
+
+/// Typed audit record for a body handoff. Session identity and durable work are
+/// intentionally absent: they do not change during this transition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildBodyHandoff {
+    pub from_agent: String,
+    pub to_agent: String,
+    pub from_provider: String,
+    pub to_provider: String,
+    pub reason: String,
 }
 
 /// The executable and store a Session runs against, pinned once when the

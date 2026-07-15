@@ -1974,8 +1974,34 @@ pub fn task_interrupt(issue: &str, replacement: Option<String>) -> OpsResult<Tas
     queue_command(issue, ChildCommandKind::Interrupt { replacement })
 }
 
-pub fn task_resume(issue: &str, message: Option<String>) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::Resume { message })
+pub fn task_resume(
+    issue: &str,
+    message: Option<String>,
+    model: Option<String>,
+    reason: Option<String>,
+) -> OpsResult<TaskControlResult> {
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
+        reconcile_process_liveness(&store, &mut session).await?;
+        let issue_id = session.launch.issue.identifier.clone();
+        let source = command_source(&session)?;
+        let result = super::child::resume_session(
+            &store,
+            super::child::ChildSession::Task(Box::new(session)),
+            source,
+            message,
+            model,
+            reason,
+        )
+        .await?;
+        Ok(task_control_result(issue_id, result))
+    })
 }
 
 pub fn task_receipt(

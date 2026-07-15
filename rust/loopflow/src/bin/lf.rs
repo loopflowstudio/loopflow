@@ -567,6 +567,22 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
     ))
 }
 
+fn format_child_body(
+    agent: &str,
+    provider: &str,
+    process: Option<&loopflow::child_session::ChildProcessGeneration>,
+) -> String {
+    process.map_or_else(
+        || format!("none; next agent {agent}, provider {provider}"),
+        |process| {
+            format!(
+                "generation {}; agent {agent}; provider {provider}",
+                process.generation
+            )
+        },
+    )
+}
+
 fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyhow::Result<()> {
     let snapshot = loopflow::ops::task::task_snapshot(session)?;
     if json {
@@ -584,12 +600,17 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
             .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
+        let body = format_child_body(
+            &session.agent,
+            &session.provider,
+            session.latest_process.as_ref(),
+        );
         println!(
-            "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            "{}  {}\n  session: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.launch.issue.identifier,
             session.status.as_str(),
-            session.provider,
             session.id,
+            body,
             session.worktree.display(),
             branch,
             pm_writeback,
@@ -642,12 +663,17 @@ fn print_project_session(
         let snapshot = loopflow::ops::project::project_snapshot(session)?;
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
+        let body = format_child_body(
+            &session.agent,
+            &session.provider,
+            session.latest_process.as_ref(),
+        );
         println!(
-            "{}  {}  {}\n  session: {}\n  iteration: {}\n  reason: {}",
+            "{}  {}\n  session: {}\n  body: {}\n  iteration: {}\n  reason: {}",
             session.launch.project.slug,
             session.status.as_str(),
-            session.provider,
             session.id,
+            body,
             session.iteration,
             session.status_reason,
         );
@@ -825,9 +851,16 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
         ProjectCommand::Resume {
             project_id,
             message,
+            model,
+            reason,
             json,
         } => {
-            let result = loopflow::ops::project::project_resume(project_id, message.clone())?;
+            let result = loopflow::ops::project::project_resume(
+                project_id,
+                message.clone(),
+                model.clone(),
+                reason.clone(),
+            )?;
             print_project_control(&result, *json)
         }
         ProjectCommand::Attach { project_id } => {
@@ -1052,9 +1085,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Resume {
             issue,
             message,
+            model,
+            reason,
             json,
         } => {
-            let result = loopflow::ops::task::task_resume(issue, message.clone())?;
+            let result = loopflow::ops::task::task_resume(
+                issue,
+                message.clone(),
+                model.clone(),
+                reason.clone(),
+            )?;
             print_task_control(&result, *json)
         }
         TaskCommand::Attach { issue } => {

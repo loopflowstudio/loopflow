@@ -55,7 +55,9 @@ lf task complete INF-124 --summary "investigation recorded"  # no PR needed
 
 The Wave stays directly steerable while several independent tasks run. Task
 events enter its inbox as typed observations and wake it once. Decision answers,
-review feedback, and CI repair resume the same Task Session and provider history.
+review feedback, and CI repair resume the same Task Session. Plain resume keeps
+compatible provider history; `lf task resume <id> --model <agent>` leases the
+next body generation to another provider without replacing the Session.
 
 Waves are independent by default. Humans steer a running Wave with `lf chat`;
 agents report on its bus with `lf radio pub --channel <name> "…"`, even while the

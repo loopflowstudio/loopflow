@@ -641,10 +641,14 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Resume the same Project Session and provider history
+    /// Resume the same Project Session, optionally handing its next body to another agent
     Resume {
         project_id: String,
         message: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, requires = "model")]
+        reason: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -801,10 +805,14 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Resume the same Task Session, worktree, and provider history
+    /// Resume the same Task Session, optionally handing its next body to another agent
     Resume {
         issue: String,
         message: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, requires = "model")]
+        reason: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1589,6 +1597,65 @@ mod tests {
                 },
             }) if command_id.starts_with("cc_") && timeout == "30s"
         ));
+    }
+
+    #[test]
+    fn task_and_project_resume_accept_audited_model_handoffs() {
+        let task = Cli::try_parse_from([
+            "lf",
+            "task",
+            "resume",
+            "W2-135",
+            "--model",
+            "codex",
+            "--reason",
+            "Claude quota exhausted",
+            "--json",
+        ])
+        .expect("parse Task body handoff");
+        assert!(matches!(
+            task.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Resume {
+                    issue,
+                    model: Some(model),
+                    reason: Some(reason),
+                    json: true,
+                    ..
+                }
+            }) if issue == "W2-135" && model == "codex" && reason == "Claude quota exhausted"
+        ));
+
+        let project = Cli::try_parse_from([
+            "lf",
+            "project",
+            "resume",
+            "loopflow-api",
+            "--model",
+            "claude:opus",
+        ])
+        .expect("parse Project body handoff");
+        assert!(matches!(
+            project.command,
+            Some(Commands::Project {
+                cmd: ProjectCommand::Resume {
+                    project_id,
+                    model: Some(model),
+                    reason: None,
+                    ..
+                }
+            }) if project_id == "loopflow-api" && model == "claude:opus"
+        ));
+
+        assert!(Cli::try_parse_from([
+            "lf",
+            "task",
+            "resume",
+            "W2-135",
+            "--reason",
+            "quota exhausted",
+        ])
+        .is_err());
     }
 
     #[test]

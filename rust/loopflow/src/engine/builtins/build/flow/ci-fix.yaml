@@ -1,0 +1,5 @@
+# One bounded ci-fix turn. The Task runner loads this instead of `task` when a
+# waiting Task's open PR has a fresh required-check failure on its current head:
+# reproduce the failure, make the smallest correct fix, push the same branch, and
+# return to waiting on the new head.
+- ci-fix

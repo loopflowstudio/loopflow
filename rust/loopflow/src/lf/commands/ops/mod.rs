@@ -666,8 +666,71 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             )?;
             print_pm_sync_result(&result);
         }
+        PmCommand::Reteam { wave, apply } => {
+            let result = crate::ops::pm::pm_reteam(
+                &repo_root,
+                &crate::ops::pm::PmReteamOptions {
+                    wave: wave.clone(),
+                    apply: *apply,
+                },
+                progress,
+            )?;
+            print_pm_reteam_result(&result);
+        }
     }
     Ok(())
+}
+
+fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
+    let verb = if result.applied { "moved" } else { "will move" };
+    println!(
+        "wave/{} → team {} ({}-*){}",
+        result.wave,
+        result.team_id,
+        result.team_key,
+        if result.applied {
+            ""
+        } else {
+            "  [dry run — pass --apply to execute]"
+        }
+    );
+
+    if result.moves.is_empty() {
+        println!("  {verb}: none");
+    } else {
+        println!("  {verb} ({}):", result.moves.len());
+        for mv in &result.moves {
+            match &mv.new_identifier {
+                Some(new_id) => println!("    {} → {new_id}  {}", mv.old_identifier, mv.title),
+                None => println!(
+                    "    {}  {}  (Linear assigns the new number at move time)",
+                    mv.old_identifier, mv.title
+                ),
+            }
+        }
+    }
+
+    if !result.deferrals.is_empty() {
+        println!(
+            "  deferred — protected active/in-review Session ({}):",
+            result.deferrals.len()
+        );
+        for deferral in &result.deferrals {
+            println!(
+                "    {}  {}  (Session {})",
+                deferral.identifier, deferral.title, deferral.reason
+            );
+        }
+    }
+    if result.already > 0 {
+        println!("  already in team: {} (skipped)", result.already);
+    }
+    if result.historical > 0 {
+        println!(
+            "  left as historical: {} completed issue(s) stay in the shared team",
+            result.historical
+        );
+    }
 }
 
 fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {

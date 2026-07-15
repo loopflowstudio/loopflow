@@ -9,11 +9,12 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
 }
 
 pub(crate) fn resolve_lf_binary() -> PathBuf {
-    if let Ok(path) = std::env::var("LF_BIN") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
+    if let Some(path) = select_binary_override(
+        crate::build_info::provenance(),
+        std::env::var_os(crate::store::CONTROL_BIN_ENV),
+        std::env::var_os("LF_BIN"),
+    ) {
+        return path;
     }
 
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
@@ -40,6 +41,23 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     }
 
     PathBuf::from("lf")
+}
+
+fn select_binary_override(
+    provenance: crate::build_info::BuildProvenance,
+    control: Option<std::ffi::OsString>,
+    ordinary: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let selected = if provenance.is_release() {
+        control.or(ordinary)
+    } else {
+        ordinary
+    }?;
+    if selected.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(selected))
+    }
 }
 
 /// Resolve the `lf` a Session will be pinned to: an absolute path that exists.
@@ -286,19 +304,71 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let inherited_context = ["LF_RUN_ID", "LF_PROCESS_ID", "LF_HOME", "LF_DB_PATH"]
+    let context = pinned_execution_context()?;
+    let inherited_context = ["LF_RUN_ID", "LF_PROCESS_ID"]
         .into_iter()
         .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
         .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
         .collect::<Vec<_>>();
-    let mut child_env = env.to_vec();
+    let mut child_env = env
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect::<Vec<_>>();
     child_env.extend(
         inherited_context
             .iter()
-            .map(|(key, value)| (*key, value.as_str())),
+            .map(|(key, value)| ((*key).to_string(), value.clone())),
     );
-    let shell_command = lf_session_shell_command(argv, &child_env);
+    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
+    let environment = child_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let shell_command = lf_session_shell_command(argv, &environment);
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
+}
+
+fn extend_session_control_context(
+    child_env: &mut Vec<(String, String)>,
+    context: &crate::child_session::ChildExecutionContext,
+    provenance: crate::build_info::BuildProvenance,
+) {
+    let pinned = [
+        (
+            crate::store::CONTROL_BIN_ENV,
+            context.lf_bin.to_string_lossy().to_string(),
+        ),
+        (
+            crate::store::CONTROL_HOME_ENV,
+            context.lf_home.to_string_lossy().to_string(),
+        ),
+        (
+            crate::store::CONTROL_DB_PATH_ENV,
+            context.db_path.to_string_lossy().to_string(),
+        ),
+    ];
+    for (key, value) in pinned {
+        if !child_env.iter().any(|(existing, _)| existing == key) {
+            child_env.push((key.to_string(), value));
+        }
+    }
+    if !provenance.is_release() {
+        for (ordinary, control) in [
+            ("LF_HOME", crate::store::CONTROL_HOME_ENV),
+            ("LF_DB_PATH", crate::store::CONTROL_DB_PATH_ENV),
+        ] {
+            if child_env.iter().any(|(existing, _)| existing == ordinary) {
+                continue;
+            }
+            let value = child_env
+                .iter()
+                .find(|(key, _)| key == control)
+                .map(|(_, value)| value.clone());
+            if let Some(value) = value {
+                child_env.push((ordinary.to_string(), value));
+            }
+        }
+    }
 }
 
 pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) -> String {
@@ -312,7 +382,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_HOME LF_DB_PATH";
+    let clear_context = "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -367,8 +437,56 @@ pub(crate) fn tmux_session_slug(value: &str) -> String {
 mod tests {
     use std::io::{BufRead, BufReader};
     use std::os::unix::process::CommandExt;
+    use std::path::PathBuf;
 
-    use super::{lf_session_shell_command, reap_child_process, tmux_installed};
+    use super::{
+        extend_session_control_context, lf_session_shell_command, reap_child_process,
+        select_binary_override, tmux_installed,
+    };
+    use crate::build_info::BuildProvenance;
+    use crate::child_session::ChildExecutionContext;
+
+    #[test]
+    fn development_ignores_stale_control_binary_override() {
+        assert_eq!(
+            select_binary_override(
+                BuildProvenance::Development,
+                Some("/production/lf".into()),
+                Some("/development/lf".into()),
+            ),
+            Some(PathBuf::from("/development/lf"))
+        );
+        assert_eq!(
+            select_binary_override(
+                BuildProvenance::Release,
+                Some("/production/lf".into()),
+                Some("/ambient/lf".into()),
+            ),
+            Some(PathBuf::from("/production/lf"))
+        );
+    }
+
+    #[test]
+    fn persisted_control_binary_wins_over_relaunching_callers_binary() {
+        let mut environment = vec![(
+            crate::store::CONTROL_BIN_ENV.to_string(),
+            "/persisted/lf".to_string(),
+        )];
+        let caller = ChildExecutionContext {
+            lf_bin: PathBuf::from("/caller/lf"),
+            lf_home: PathBuf::from("/caller/home"),
+            db_path: PathBuf::from("/caller/loopflow.db"),
+        };
+
+        extend_session_control_context(&mut environment, &caller, BuildProvenance::Release);
+
+        assert!(environment.iter().any(|(key, value)| {
+            key == crate::store::CONTROL_BIN_ENV && value == "/persisted/lf"
+        }));
+        assert!(!environment
+            .iter()
+            .any(|(key, value)| { key == crate::store::CONTROL_BIN_ENV && value == "/caller/lf" }));
+    }
 
     /// The probe must agree with whether tmux can actually be run. The previous
     /// `--version` probe disagreed on every machine that has tmux, which pinned
@@ -395,7 +513,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_HOME LF_DB_PATH; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
+            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
         );
     }
 
@@ -407,7 +525,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_HOME LF_DB_PATH; exec 'lf' 'wave' 'child'"
+            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
         );
     }
 
@@ -426,7 +544,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_HOME LF_DB_PATH; exec env 'LF_RUN_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
+            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
         );
     }
 

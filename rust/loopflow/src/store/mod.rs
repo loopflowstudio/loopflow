@@ -1,6 +1,7 @@
 //! Daemonless local persistence shared by `lf`, Waves, Projects, and Tasks.
 
-use std::path::{Component, PathBuf};
+use std::ffi::{OsStr, OsString};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::id::WaveId;
@@ -98,28 +99,43 @@ impl StorageConfig {
     }
 }
 
-/// A debug build's default home. An `lf` built from a worktree must not open the
-/// live ledger by accident: its schema is in flight, and applying an unreleased
-/// migration to the real registry is not something the operator asked for.
-///
-/// This is not hypothetical. While W2-130 was being tested, a `cargo test` run of
-/// this very branch applied its own unreleased migration to `~/.lf/loopflow.db` —
-/// the bug reproducing itself inside its own fix. An explicit `LF_HOME` or
-/// `LF_DB_PATH` still points a debug build wherever the operator says, including
-/// at the live store; only the *silent default* moves.
-#[cfg(debug_assertions)]
-const DEFAULT_HOME_DIR: &str = ".lf-dev";
-#[cfg(not(debug_assertions))]
-const DEFAULT_HOME_DIR: &str = ".lf";
+pub const CONTROL_BIN_ENV: &str = "LF_CONTROL_BIN";
+pub const CONTROL_HOME_ENV: &str = "LF_CONTROL_HOME";
+pub const CONTROL_DB_PATH_ENV: &str = "LF_CONTROL_DB_PATH";
+pub const DEV_PRODUCTION_DB_OPT_IN_ENV: &str = "LF_ALLOW_PRODUCTION_DB_FROM_DEV";
+
+fn machine_home_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn default_lf_home_dir() -> PathBuf {
+    default_lf_home_dir_for(
+        &machine_home_dir(),
+        crate::build_info::provenance(),
+        &crate::build_info::source_identity(),
+    )
+}
+
+fn default_lf_home_dir_for(
+    home: &Path,
+    provenance: crate::build_info::BuildProvenance,
+    source_identity: &str,
+) -> PathBuf {
+    if provenance.is_release() {
+        home.join(".lf")
+    } else {
+        home.join(".lf-dev/worktrees").join(source_identity)
+    }
+}
 
 pub(crate) fn lf_home_dir() -> PathBuf {
-    std::env::var_os("LF_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(DEFAULT_HOME_DIR)
-        })
+    select_store_env_value(
+        crate::build_info::provenance(),
+        std::env::var_os(CONTROL_HOME_ENV),
+        std::env::var_os("LF_HOME"),
+    )
+    .map(PathBuf::from)
+    .unwrap_or_else(default_lf_home_dir)
 }
 
 pub fn default_db_path() -> PathBuf {
@@ -127,9 +143,13 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
-    let candidate = std::env::var_os("LF_DB_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_db_path);
+    let candidate = select_store_env_value(
+        crate::build_info::provenance(),
+        std::env::var_os(CONTROL_DB_PATH_ENV),
+        std::env::var_os("LF_DB_PATH"),
+    )
+    .map(PathBuf::from)
+    .unwrap_or_else(default_db_path);
     let path = if candidate.is_absolute() {
         candidate
     } else {
@@ -146,10 +166,100 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
         }
         lf_home_dir().join(candidate)
     };
+    guard_development_database(
+        &path,
+        crate::build_info::provenance(),
+        std::env::var_os(DEV_PRODUCTION_DB_OPT_IN_ENV),
+        &machine_home_dir(),
+    )?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     Ok(path)
+}
+
+fn select_store_env_value(
+    provenance: crate::build_info::BuildProvenance,
+    control: Option<OsString>,
+    ordinary: Option<OsString>,
+) -> Option<OsString> {
+    if provenance.is_release() {
+        control.or(ordinary)
+    } else {
+        ordinary
+    }
+}
+
+fn guard_development_database(
+    path: &Path,
+    provenance: crate::build_info::BuildProvenance,
+    opt_in: Option<impl AsRef<OsStr>>,
+    home: &Path,
+) -> Result<(), std::io::Error> {
+    if provenance.is_release() || opt_in.as_ref().is_some_and(|value| value.as_ref() == "1") {
+        return Ok(());
+    }
+    let production = home.join(".lf/loopflow.db");
+    if !same_database_file(path, &production)? {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "development lf ({}) refuses production database {}; use a release lf or set {DEV_PRODUCTION_DB_OPT_IN_ENV}=1 to break glass",
+            crate::build_info::source_identity(),
+            production.display()
+        ),
+    ))
+}
+
+fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
+    if canonicalize_with_missing_tail(left)? == canonicalize_with_missing_tail(right)? {
+        return Ok(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        if let (Ok(left), Ok(right)) = (left.metadata(), right.metadata()) {
+            return Ok(left.dev() == right.dev() && left.ino() == right.ino());
+        }
+    }
+    Ok(false)
+}
+
+fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, std::io::Error> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut existing = absolute.as_path();
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        let name = existing.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "database path has no existing root",
+            )
+        })?;
+        missing.push(name.to_os_string());
+        existing = existing.parent().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "database path has no parent")
+        })?;
+    }
+    let mut resolved = existing.canonicalize()?;
+    for component in missing.into_iter().rev() {
+        if component == "." {
+            continue;
+        }
+        if component == ".." {
+            resolved.pop();
+        } else {
+            resolved.push(component);
+        }
+    }
+    Ok(resolved)
 }
 
 pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
@@ -388,14 +498,13 @@ pub async fn open_existing_store() -> Option<Store> {
     if !path.exists() {
         return None;
     }
-    // Opening validates the one live schema. An incompatible store is never
-    // repaired in place.
-    let conn = rusqlite::Connection::open(path).ok()?;
-    if let Err(err) = migrations::apply_sqlite(&conn) {
-        tracing::warn!(?path, %err, "local store is incompatible; delete it and rerun the command");
-        return None;
+    match open_store(&cfg).await {
+        Ok(store) => Some(store),
+        Err(err) => {
+            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
+            None
+        }
     }
-    open_store(&cfg).await.ok()
 }
 
 pub type SharedStore = Arc<Store>;
@@ -403,7 +512,11 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::sqlite::SqliteStore;
-    use super::{open_store, PmSnapshotRow, RunEventRow, StorageConfig};
+    use super::{
+        default_lf_home_dir_for, guard_development_database, open_store, select_store_env_value,
+        PmSnapshotRow, RunEventRow, StorageConfig,
+    };
+    use crate::build_info::BuildProvenance;
     use crate::child_session::{
         BoundaryResult, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandKind,
         ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState,
@@ -426,6 +539,118 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use time::OffsetDateTime;
+
+    #[test]
+    fn build_provenance_selects_separate_default_store_universes() {
+        let home = PathBuf::from("/home/operator");
+        assert_eq!(
+            default_lf_home_dir_for(&home, BuildProvenance::Release, "branch-a"),
+            home.join(".lf")
+        );
+        assert_eq!(
+            default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-a"),
+            home.join(".lf-dev/worktrees/branch-a")
+        );
+        assert_ne!(
+            default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-a"),
+            default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-b")
+        );
+    }
+
+    #[test]
+    fn release_prefers_control_store_while_development_ignores_it() {
+        let control = Some("/control".into());
+        let ordinary = Some("/ordinary".into());
+        assert_eq!(
+            select_store_env_value(BuildProvenance::Release, control.clone(), ordinary.clone()),
+            control
+        );
+        assert_eq!(
+            select_store_env_value(BuildProvenance::Development, control, ordinary.clone()),
+            ordinary
+        );
+    }
+
+    #[test]
+    fn development_production_gate_requires_exact_break_glass_value() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let production = home.join(".lf/loopflow.db");
+        assert!(guard_development_database(
+            &production,
+            BuildProvenance::Development,
+            None::<&str>,
+            home,
+        )
+        .is_err());
+        assert!(guard_development_database(
+            &production,
+            BuildProvenance::Development,
+            Some("true"),
+            home,
+        )
+        .is_err());
+        guard_development_database(&production, BuildProvenance::Development, Some("1"), home)
+            .unwrap();
+        guard_development_database(&production, BuildProvenance::Release, None::<&str>, home)
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn development_production_gate_resolves_symlink_aliases() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let production_home = home.join(".lf");
+        std::fs::create_dir_all(&production_home).unwrap();
+        let alias = directory.path().join("store-alias");
+        symlink(&production_home, &alias).unwrap();
+
+        assert!(guard_development_database(
+            &alias.join("loopflow.db"),
+            BuildProvenance::Development,
+            None::<&str>,
+            &home,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn development_production_gate_normalizes_missing_parent_components() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        std::fs::create_dir_all(home.join(".lf")).unwrap();
+
+        assert!(guard_development_database(
+            &home.join(".lf/new/../loopflow.db"),
+            BuildProvenance::Development,
+            None::<&str>,
+            &home,
+        )
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn development_production_gate_rejects_existing_hard_link_alias() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let production = home.join(".lf/loopflow.db");
+        std::fs::create_dir_all(production.parent().unwrap()).unwrap();
+        std::fs::write(&production, b"database").unwrap();
+        let alias = directory.path().join("alias.db");
+        std::fs::hard_link(&production, &alias).unwrap();
+
+        assert!(guard_development_database(
+            &alias,
+            BuildProvenance::Development,
+            None::<&str>,
+            &home,
+        )
+        .is_err());
+    }
 
     fn make_wave(repo: &str) -> Wave {
         let id = WaveId::new();

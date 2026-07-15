@@ -11,6 +11,7 @@ on:
         required: true
 
 env:
+  LOOPFLOW_BUILD_PROVENANCE: release
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:

@@ -158,6 +158,7 @@ impl Harness for ClaudeHarness {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
+        super::configure_vendor_tokio_env(&mut cmd)?;
 
         self.shutdown_requested.store(false, Ordering::SeqCst);
         self.interrupt_requested.store(false, Ordering::SeqCst);

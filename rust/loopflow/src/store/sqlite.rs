@@ -154,6 +154,7 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
 
 impl SqliteStore {
     pub fn new(path: &Path) -> StoreResult<Self> {
+        let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
                 StoreError::InvalidData(format!("failed to create db dir: {err}"))
@@ -165,7 +166,11 @@ impl SqliteStore {
             "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
         )?;
 
-        super::migrations::apply_sqlite(&conn)?;
+        if existing_database {
+            super::migrations::apply_sqlite_with_backup(&conn, path)?;
+        } else {
+            super::migrations::apply_sqlite(&conn)?;
+        }
         validate_run_events_schema(&conn)?;
         migrate_plaintext_provider_tokens(&mut conn)?;
 

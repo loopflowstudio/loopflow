@@ -8,6 +8,9 @@ on:
     - cron: "0 12 * * 0"
   workflow_dispatch:
 
+env:
+  LOOPFLOW_BUILD_PROVENANCE: release
+
 jobs:
   tag-check:
     runs-on: ubuntu-latest

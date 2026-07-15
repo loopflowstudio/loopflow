@@ -11,6 +11,7 @@ pub mod journal;
 pub mod lf;
 pub mod ops;
 pub mod pm;
+pub mod profile;
 pub mod project_session;
 pub mod provider_account;
 pub mod provider_auth;

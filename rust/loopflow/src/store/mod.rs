@@ -5,6 +5,11 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::id::WaveId;
+use crate::profile::{
+    ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount, RepoProfileRoute,
+};
+use crate::provider_auth::Provider;
+use crate::repository::RepoId;
 use crate::wave::Wave;
 mod child_sessions;
 mod interactive_handoffs;
@@ -570,6 +575,118 @@ impl Store {
         .await
     }
 
+    pub async fn upsert_profile(&self, profile: &Profile) -> StoreResult<()> {
+        let profile = profile.clone();
+        run_sqlite(&self.sqlite, move |store| store.upsert_profile(&profile)).await
+    }
+
+    pub async fn get_profile(&self, profile_id: &ProfileId) -> StoreResult<Option<Profile>> {
+        let profile_id = profile_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.get_profile(&profile_id)).await
+    }
+
+    pub async fn list_profiles(&self) -> StoreResult<Vec<Profile>> {
+        run_sqlite(&self.sqlite, |store| store.list_profiles()).await
+    }
+
+    pub async fn set_profile_provider_account(
+        &self,
+        mapping: &ProfileProviderAccount,
+    ) -> StoreResult<()> {
+        let mapping = mapping.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_profile_provider_account(&mapping)
+        })
+        .await
+    }
+
+    pub async fn profile_provider_account(
+        &self,
+        profile_id: &ProfileId,
+        provider: Provider,
+    ) -> StoreResult<Option<ProfileProviderAccount>> {
+        let profile_id = profile_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.profile_provider_account(&profile_id, provider)
+        })
+        .await
+    }
+
+    pub async fn list_profile_provider_accounts(
+        &self,
+        profile_id: Option<&ProfileId>,
+    ) -> StoreResult<Vec<ProfileProviderAccount>> {
+        let profile_id = profile_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_profile_provider_accounts(profile_id.as_ref())
+        })
+        .await
+    }
+
+    pub async fn upsert_chrome_profile_binding(
+        &self,
+        binding: &ChromeProfileBinding,
+    ) -> StoreResult<()> {
+        let binding = binding.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_chrome_profile_binding(&binding)
+        })
+        .await
+    }
+
+    pub async fn chrome_profile_binding(
+        &self,
+        profile_id: &ProfileId,
+        host_id: &HostId,
+    ) -> StoreResult<Option<ChromeProfileBinding>> {
+        let profile_id = profile_id.clone();
+        let host_id = host_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.chrome_profile_binding(&profile_id, &host_id)
+        })
+        .await
+    }
+
+    pub async fn set_repo_profile_route(&self, route: &RepoProfileRoute) -> StoreResult<()> {
+        let route = route.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_repo_profile_route(&route)
+        })
+        .await
+    }
+
+    pub async fn repo_profile_route(
+        &self,
+        repo_id: &RepoId,
+    ) -> StoreResult<Option<RepoProfileRoute>> {
+        let repo_id = repo_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.repo_profile_route(&repo_id)
+        })
+        .await
+    }
+
+    pub async fn pin_provider_session_route(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+        profile_id: &ProfileId,
+        account_id: &ProviderAccountId,
+    ) -> StoreResult<()> {
+        let provider_session_id = provider_session_id.to_string();
+        let profile_id = profile_id.clone();
+        let account_id = account_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.pin_provider_session_route(
+                provider,
+                &provider_session_id,
+                &profile_id,
+                &account_id,
+            )
+        })
+        .await
+    }
+
     pub async fn health_check(&self) -> StoreResult<()> {
         run_sqlite(&self.sqlite, |store| store.health_check()).await
     }
@@ -721,9 +838,15 @@ mod tests {
         ChildProcessGeneration, ChildRef, ObservationRecipient,
     };
     use crate::id::WaveId;
+    use crate::profile::{
+        ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
+        RepoProfileRoute,
+    };
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
+    use crate::provider_auth::Provider;
+    use crate::repository::RepoId;
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         ProjectLaunchReceipt, TaskLaunchReceipt,
@@ -2854,6 +2977,92 @@ mod tests {
             .unwrap();
         assert_eq!(reset.utilization_percent, None);
         assert_eq!(reset.cooldown_until, None);
+    }
+
+    #[tokio::test]
+    async fn profiles_bind_accounts_and_preserve_repo_backup_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let shared = provider_account("claude", "shared", 0);
+        store.upsert_provider_account(&shared).await.unwrap();
+
+        for id in ["jack", "loopflow-eng", "cadenza-eng"] {
+            let profile = Profile {
+                id: ProfileId::parse(id).unwrap(),
+                created_at: 1,
+                updated_at: 1,
+            };
+            store.upsert_profile(&profile).await.unwrap();
+        }
+        for id in ["jack", "cadenza-eng"] {
+            store
+                .set_profile_provider_account(&ProfileProviderAccount {
+                    profile_id: ProfileId::parse(id).unwrap(),
+                    provider: Provider::Claude,
+                    account_id: shared.account_id.clone(),
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .await
+                .unwrap();
+        }
+        store
+            .upsert_chrome_profile_binding(&ChromeProfileBinding {
+                profile_id: ProfileId::parse("jack").unwrap(),
+                host_id: HostId::parse("studio-mac").unwrap(),
+                chrome_directory: "Profile 7".to_string(),
+                google_email: EmailAddress::parse("jack@loopflow.studio").unwrap(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let route = RepoProfileRoute {
+            repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
+            default_profile: ProfileId::parse("jack").unwrap(),
+            backup_profiles: vec![
+                ProfileId::parse("loopflow-eng").unwrap(),
+                ProfileId::parse("cadenza-eng").unwrap(),
+            ],
+            created_at: 1,
+            updated_at: 1,
+        };
+        store.set_repo_profile_route(&route).await.unwrap();
+
+        assert_eq!(
+            store
+                .repo_profile_route(&route.repo_id)
+                .await
+                .unwrap()
+                .unwrap(),
+            route
+        );
+        assert_eq!(
+            store
+                .profile_provider_account(
+                    &ProfileId::parse("cadenza-eng").unwrap(),
+                    Provider::Claude,
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id,
+            shared.account_id
+        );
+        assert_eq!(
+            store
+                .chrome_profile_binding(
+                    &ProfileId::parse("jack").unwrap(),
+                    &HostId::parse("studio-mac").unwrap(),
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .chrome_directory,
+            "Profile 7"
+        );
     }
 
     #[tokio::test]

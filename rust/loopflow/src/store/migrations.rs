@@ -160,6 +160,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "interactive_handoffs",
         sql: include_str!("migrations/0.11.008_interactive_handoffs.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 9,
+        },
+        name: "profiles",
+        sql: include_str!("migrations/0.11.009_profiles.sql"),
+    },
 ];
 
 /// Databases written before release-scoped ids stamped the baseline under this
@@ -668,10 +677,7 @@ mod tests {
         assert!(conn
             .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, bool>(0))
             .unwrap());
-        assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            "0.11.008_interactive_handoffs"
-        );
+        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.009_profiles");
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
@@ -690,8 +696,73 @@ mod tests {
                 "0.11.005_provider_accounts".to_string(),
                 "0.11.006_context_launch_work".to_string(),
                 "0.11.007_task_pr_parent".to_string(),
-                "0.11.008_interactive_handoffs".to_string()
+                "0.11.008_interactive_handoffs".to_string(),
+                "0.11.009_profiles".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn profile_migration_preserves_accounts_and_session_pins() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, &MIGRATIONS[..8]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO provider_accounts (
+                provider, account_id, home, login, enabled, preferred,
+                utilization_percent, cooldown_until, cooldown_reason,
+                last_selected_at, created_at, updated_at
+             ) VALUES
+                ('claude', 'primary', '/accounts/claude/primary',
+                 'jack@example.com', 1, 1, 80, NULL, NULL, 5, 1, 5),
+                ('codex', 'primary', '/accounts/codex/primary',
+                 'jack@example.com', 1, 1, 20, NULL, NULL, 6, 1, 6);
+             INSERT INTO provider_session_accounts (
+                provider, provider_session_id, account_id, created_at
+             ) VALUES ('claude', 'session-1', 'primary', 7);",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM profiles WHERE profile_id = 'primary'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM profile_provider_accounts
+                 WHERE profile_id = 'primary'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT profile_id FROM provider_session_accounts
+                 WHERE provider_session_id = 'session-1'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "primary"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT utilization_percent FROM provider_accounts
+                 WHERE provider = 'claude' AND account_id = 'primary'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            80
         );
     }
 
@@ -1082,10 +1153,7 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&path).unwrap();
         apply_sqlite(&conn).unwrap();
-        assert_eq!(
-            latest_version_sqlite(&conn).unwrap(),
-            "0.11.008_interactive_handoffs"
-        );
+        assert_eq!(latest_version_sqlite(&conn).unwrap(), "0.11.009_profiles");
     }
 
     #[test]

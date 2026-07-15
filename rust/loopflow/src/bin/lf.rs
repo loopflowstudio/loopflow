@@ -1209,6 +1209,7 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Usage { json, days }) => {
                 loopflow::lf::commands::usage::run(*json, *days)
             }
+            Some(Commands::Top) => loopflow::lf::commands::top::run(),
             Some(Commands::Context {
                 days,
                 wave,
@@ -1313,7 +1314,8 @@ mod tests {
         let tables = arg_tables();
         for command in [
             ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task", "project",
-            "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
+            "flow", "skill", "chat", "memory", "usage", "top", "ls", "status", "runs", "trace",
+            "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
         }

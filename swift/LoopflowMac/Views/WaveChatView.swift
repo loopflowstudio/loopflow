@@ -3,7 +3,7 @@ import SwiftUI
 import Loopflow
 
 /// WaveChat: the live conversation with a running `lf wave <name>`. Discovers the
-/// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
+/// wave's chat server through its local `.wave-endpoint` pointer, replays + streams the
 /// thread over SSE, and posts messages back through the composer. The composer is
 /// verb-aware — Send while idle, Steer / Interrupt & Send / Interrupt while a turn
 /// runs — keyed off the streamed loop state. When the wave isn't running (no

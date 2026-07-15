@@ -12,7 +12,7 @@
 //! Wave: every Wave and Project operates from the same canonical checkout.
 //!
 //! Read path — reads only, the wave server stays the single writer:
-//! 1. live server: `GET /conversation` at the `wave/<name>/.wave-endpoint`
+//! 1. live server: `GET /conversation` at the Wave's local `.wave-endpoint`
 //!    discovery pointer (the same file `lf wave` publishes);
 //! 2. no live server: a read-only fold over the wave's journal
 //!    ([`crate::wave::journal::read_events`] — never truncates, never
@@ -305,7 +305,7 @@ fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
     (!scoped.is_empty()).then(|| scoped.join("\n\n"))
 }
 
-/// The `wave/<name>/.wave-endpoint` discovery pointer's contents, trimmed.
+/// The Wave's `.lf/journal/waves/<name>/.wave-endpoint` pointer, trimmed.
 /// Missing or empty pointer → `None`. Shared by every pointer reader (`lf
 /// chat` targeting and the ambient read here); the wave server owns writes.
 pub fn read_endpoint_pointer(origin: &Path, wave: &str) -> Option<String> {

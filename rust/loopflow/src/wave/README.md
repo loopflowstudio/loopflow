@@ -31,14 +31,15 @@ The origin repository holds the Wave's durable files:
 
 ```text
 .lf/journal/waves/<name>/journal.jsonl
+.lf/journal/waves/<name>/.wave-endpoint
+.lf/journal/waves/<name>/.wave-resident-token
 wave/<name>/MEMORY.md
-wave/<name>/.wave-endpoint
-wave/<name>/.wave-resident-token
 ```
 
 The journal rebuilds the thread, playhead, and loop state after restart. The
 endpoint and resident token exist only while the listener owns that boot and
-are removed on shutdown.
+are removed on shutdown. Loopflow excludes `.lf/journal/` through Git's local
+exclude file, so runtime state never requires a project `.gitignore` entry.
 
 The shared `~/.lf/loopflow.db` stores the Wave row, bus messages, and typed
 Project and Task observations. A Wave can still run when that store does not

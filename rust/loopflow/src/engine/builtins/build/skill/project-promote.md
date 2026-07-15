@@ -32,7 +32,8 @@ child's work.
    report to the parent with `lf radio pub --parent`.
 
 The command's mechanical postflight links the registry ancestry, launches the
-child residency, waits for `.wave-endpoint`, and sends the bootstrap message
-that starts this first pass. Do not launch a second wave process or impersonate
-the child from the promotion flow. The child's resulting report is the
-checkable proof that the new mind can speak across the boundary on purpose.
+child residency, waits for `.lf/journal/waves/<child>/.wave-endpoint`, and
+sends the bootstrap message that starts this first pass. Do not launch a second
+wave process or impersonate the child from the promotion flow. The child's
+resulting report is the checkable proof that the new mind can speak across the
+boundary on purpose.

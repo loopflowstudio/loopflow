@@ -15,6 +15,7 @@ pub mod ssh;
 pub mod sub;
 pub mod thread;
 pub mod tokens;
+pub mod top;
 pub mod usage;
 pub mod util;
 pub mod waves;

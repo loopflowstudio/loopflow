@@ -19,8 +19,6 @@ local-bin/
 .claude/worktrees/
 
 # Loopflow (generated)
-**/.wave-endpoint
-**/.wave-resident-token
 .lf/log/
 .lf/logs/
 .lf/prompts/

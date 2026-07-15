@@ -3,9 +3,10 @@
 //! Every endpoint reads or nudges [`WaveRuntime`]; none of them own logic. The
 //! timeline is served as-is, live events stream over SSE, and a POSTed message
 //! is journaled and broadcast to the resident's subscription. Discovery is a
-//! dumb pointer file, not a transport: `wave/<name>/.wave-endpoint` holds
-//! `127.0.0.1:<port>` and nothing else; `.wave-resident-token` beside it holds
-//! this boot's resident token (see [`crate::wave::wire`]).
+//! dumb pointer file, not a transport:
+//! `.lf/journal/waves/<name>/.wave-endpoint` holds `127.0.0.1:<port>` and
+//! nothing else; `.wave-resident-token` beside it holds this boot's resident
+//! token (see [`crate::wave::wire`]).
 //!
 //! This module is VENDOR-FREE: the loop lives in the resident process
 //! ([`crate::wave::resident`]), which publishes through the resident door
@@ -125,7 +126,7 @@ use crate::wave::wire::{
     PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
 };
 
-/// Basename of the discovery pointer under `wave/<name>/`.
+/// Basename of the discovery pointer in the wave's local state directory.
 pub const ENDPOINT_FILE: &str = ".wave-endpoint";
 
 /// The resident door's server-side state: this boot's token and the seat —
@@ -769,7 +770,7 @@ fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
 
 /// Path to the discovery pointer for a wave.
 pub fn endpoint_path(repo_root: &Path, wave: &str) -> PathBuf {
-    repo_root.join("wave").join(wave).join(ENDPOINT_FILE)
+    crate::wave::journal::wave_state_dir(repo_root, wave).join(ENDPOINT_FILE)
 }
 
 /// How long the boot-time probe waits for an existing endpoint to answer.
@@ -832,7 +833,7 @@ pub fn remove_endpoint(repo_root: &Path, wave: &str, own_addr: &str) {
 
 /// Path to the resident-token file for a wave (beside `.wave-endpoint`).
 pub fn resident_token_path(repo_root: &Path, wave: &str) -> PathBuf {
-    repo_root.join("wave").join(wave).join(RESIDENT_TOKEN_FILE)
+    crate::wave::journal::wave_state_dir(repo_root, wave).join(RESIDENT_TOKEN_FILE)
 }
 
 /// Publish this boot's resident token so the internal resident can present it
@@ -882,6 +883,11 @@ mod tests {
         write_endpoint(tmp.path(), "ship", addr).expect("write endpoint");
 
         let path = endpoint_path(tmp.path(), "ship");
+        assert_eq!(
+            path,
+            tmp.path().join(".lf/journal/waves/ship/.wave-endpoint")
+        );
+        assert!(!tmp.path().join("wave/ship/.wave-endpoint").exists());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "127.0.0.1:54321");
 
         remove_endpoint(tmp.path(), "ship", "127.0.0.1:54321");
@@ -912,6 +918,12 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         assert!(read_resident_token(tmp.path(), "ship").is_none());
         write_resident_token(tmp.path(), "ship", "tok-1").expect("write");
+        assert_eq!(
+            resident_token_path(tmp.path(), "ship"),
+            tmp.path()
+                .join(".lf/journal/waves/ship/.wave-resident-token")
+        );
+        assert!(!tmp.path().join("wave/ship/.wave-resident-token").exists());
         assert_eq!(
             read_resident_token(tmp.path(), "ship").as_deref(),
             Some("tok-1")

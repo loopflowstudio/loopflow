@@ -238,6 +238,7 @@ lf trace 66863649               # render the nested process tree
 lf trace 66863649 --json        # feed the Telemetry dashboard
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
+lf top                          # last-hour output throughput + live lf processes
 lf doctor                       # audit continuity, identity, lineage, coverage
 lf doctor --json                # machine-readable audit
 ```

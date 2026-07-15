@@ -1,11 +1,11 @@
 import Foundation
 
 // Live client for a wave's chat server. A running `lf wave <name>` publishes its
-// loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
-// consumes the unified `GET /events` SSE stream (turn + state + memory frames,
-// thread replay on connect), and posts messages back. When the pointer file is
-// absent or the server refuses the connection, the connection settles into
-// `.notRunning` and keeps polling so it attaches the moment the wave comes up.
+// loopback address to `.lf/journal/waves/<name>/.wave-endpoint`; this client
+// discovers it, consumes the unified `GET /events` SSE stream (turn + state +
+// memory frames, thread replay on connect), and posts messages back. When the
+// pointer file is absent or the server refuses the connection, the connection
+// settles into `.notRunning` and keeps polling so it attaches when the wave starts.
 
 public enum WaveChatError: Error, Sendable {
     case notRunning
@@ -13,7 +13,7 @@ public enum WaveChatError: Error, Sendable {
     case badEndpoint(String)
 }
 
-/// Reads the discovery pointer a running wave writes under its `wave/<name>/` dir.
+/// Reads the discovery pointer from a running wave's local state directory.
 ///
 /// Wave state lives at the wave's ORIGIN repo: a running wave publishes its
 /// endpoint to the main checkout even when Loopflow was pointed at a worktree,
@@ -25,7 +25,9 @@ public enum WaveEndpoint {
 
     public static func path(repoPath: String, waveName: String) -> URL {
         URL(fileURLWithPath: WaveOrigin.resolve(repoPath))
-            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent(".lf", isDirectory: true)
+            .appendingPathComponent("journal", isDirectory: true)
+            .appendingPathComponent("waves", isDirectory: true)
             .appendingPathComponent(waveName, isDirectory: true)
             .appendingPathComponent(fileName)
     }

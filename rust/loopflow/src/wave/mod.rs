@@ -38,7 +38,8 @@
 //! ([`runtime::WaveRuntime`]) is a fold of it, rebuilt on boot so a restart
 //! keeps the whole conversation. The journal is listener-owned persistence;
 //! the resident never touches journal files. The only coordination files are
-//! dumb discovery: `wave/<name>/.wave-endpoint` and, beside it, this boot's
+//! dumb discovery under the Wave's local `.lf/journal/waves/<name>/` state
+//! directory: `.wave-endpoint` and, beside it, this boot's
 //! `.wave-resident-token`.
 //!
 //! The listener also uses the local [`registry`] for a store-polling observer

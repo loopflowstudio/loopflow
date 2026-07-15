@@ -29,10 +29,11 @@
 //! The resident door is gated by a per-boot bearer token
 //! ([`RESIDENT_TOKEN_HEADER`]): the listener generates it at bind, passes it
 //! to a spawned resident via [`RESIDENT_TOKEN_ENV`], and writes it to
-//! `wave/<name>/.wave-resident-token` beside the endpoint pointer for
-//! the internal resident — the same filesystem-trust domain as the discovery
-//! file. This is a stopgap: when a remote Loop can hold the resident seat, the
-//! token becomes a credential the gatekeeper issues, not a file the repo trusts.
+//! `.lf/journal/waves/<name>/.wave-resident-token` beside the endpoint pointer
+//! for the internal resident — the same filesystem-trust domain as the
+//! discovery file. This is a stopgap: when a remote Loop can hold the resident
+//! seat, the token becomes a credential the gatekeeper issues, not a file the
+//! repo trusts.
 
 use serde::{Deserialize, Serialize};
 

@@ -271,6 +271,8 @@ pub enum Commands {
         #[arg(long, default_value_t = 30)]
         days: u32,
     },
+    /// Graph output-token throughput for the last hour and show running lf processes
+    Top,
     /// Inspect supplied agent context and its contributing assets
     Context {
         /// Window in days
@@ -1169,6 +1171,12 @@ mod tests {
         };
         assert_eq!(issue, "INF-123");
         assert!(json);
+    }
+
+    #[test]
+    fn top_is_a_first_class_machine_dashboard() {
+        let cli = Cli::try_parse_from(["lf", "top"]).expect("parse top");
+        assert!(matches!(cli.command, Some(Commands::Top)));
     }
 
     #[test]

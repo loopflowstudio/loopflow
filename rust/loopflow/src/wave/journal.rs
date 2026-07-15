@@ -263,15 +263,19 @@ pub enum EventKind {
     },
 }
 
-/// Path of a wave's journal: `.lf/journal/waves/<wave>/journal.jsonl` under
-/// the repo root.
-pub fn journal_path(repo_root: &Path, wave: &str) -> PathBuf {
+/// Directory for one wave's local state under the repo root.
+pub fn wave_state_dir(repo_root: &Path, wave: &str) -> PathBuf {
     repo_root
         .join(".lf")
         .join("journal")
         .join("waves")
         .join(wave)
-        .join("journal.jsonl")
+}
+
+/// Path of a wave's journal: `.lf/journal/waves/<wave>/journal.jsonl` under
+/// the repo root.
+pub fn journal_path(repo_root: &Path, wave: &str) -> PathBuf {
+    wave_state_dir(repo_root, wave).join("journal.jsonl")
 }
 
 /// Read a journal's events without becoming a writer.

@@ -151,7 +151,7 @@ fn resolve_attachment(
         .ok_or_else(|| {
             anyhow!(
                 "wave '{wave}' has no live listener (no {env} in env, no \
-                 wave/{wave}/{file}) — start one with `lf wave {wave}`",
+                 .lf/journal/waves/{wave}/{file}) — start one with `lf wave {wave}`",
                 env = WAVE_SERVER_ENDPOINT_ENV,
                 file = server::ENDPOINT_FILE,
             )
@@ -499,11 +499,15 @@ mod tests {
     #[test]
     fn wave_resident_requires_a_clean_main_checkout() {
         let repo = loopflow_test_support::TestRepo::new();
-        repo.create_file(".gitignore", "**/.wave-endpoint\n**/.wave-resident-token\n");
-        repo.stage_all();
-        repo.commit("ignore wave discovery files");
-        repo.create_file("wave/infrastructure/.wave-endpoint", "127.0.0.1:50123");
-        repo.create_file("wave/infrastructure/.wave-resident-token", "test-token");
+        repo.create_file(".git/info/exclude", ".lf/journal/\n");
+        repo.create_file(
+            ".lf/journal/waves/infrastructure/.wave-endpoint",
+            "127.0.0.1:50123",
+        );
+        repo.create_file(
+            ".lf/journal/waves/infrastructure/.wave-resident-token",
+            "test-token",
+        );
         assert_eq!(
             wave_main_checkout(repo.path()).expect("clean main"),
             std::fs::canonicalize(repo.path()).expect("canonical repo")

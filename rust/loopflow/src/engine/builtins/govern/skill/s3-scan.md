@@ -28,7 +28,8 @@ available token / cost usage so s3 can judge capacity from real signals.
 
 ## Workflow
 
-1. Read each member wave's live state: `wave/<name>/.wave-endpoint` (present = running), MEMORY.md, and its tmux sessions.
+1. Read each member wave's live state: `.lf/journal/waves/<name>/.wave-endpoint`
+   (present = running), MEMORY.md, and its tmux sessions.
 2. Read recent run history for throughput, completion times, and retries.
 3. Read token / cost usage data when available.
 4. Read algedonic history, repair chains, and escalation patterns.

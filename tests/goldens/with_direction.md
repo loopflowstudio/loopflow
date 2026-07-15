@@ -63,6 +63,10 @@ whenever the seed remains computable.
 A one-shot operation is a direct skill or flow run. Durable delegated work
 starts from an existing Linear task with `lf task run <issue-id>`.
 
+When work feels slow or stuck, run `lf top` before guessing. It shows recorded
+output-token throughput for the last hour and the currently running `lf`
+processes; use it as machine-health evidence, not as a lifecycle control.
+
 ## Speak
 
 Answer a human message in your turn text. Use `lf radio pub` for proactive progress,

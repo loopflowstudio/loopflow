@@ -2,7 +2,7 @@ import Foundation
 
 /// The repo a wave's on-disk state lives under.
 ///
-/// A running wave publishes `wave/<name>/.wave-endpoint` and its journal to the
+/// A running wave publishes its `.lf/journal/waves/<name>/` state to the
 /// ORIGIN repo — the main checkout — never to a worktree. Mirrors Rust
 /// `wave_origin` in `rust/loopflow/src/engine/wave_context.rs` (keep the two in
 /// skill): a path that is itself a working-tree root resolves to the parent of

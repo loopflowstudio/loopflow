@@ -21,7 +21,7 @@
 //!   endpoint pointer. A root Wave errors.
 //!
 //! # Endpoint resolution
-//! The local `wave/<name>/.wave-endpoint` discovery file names the listener. A
+//! The local `.lf/journal/waves/<name>/.wave-endpoint` file names the listener. A
 //! resolvable wave with no live server is a clear error — a dead wave's mail
 //! bounces, it doesn't vanish; queuing for offline waves is future work.
 //!

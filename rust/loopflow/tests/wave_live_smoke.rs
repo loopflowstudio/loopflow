@@ -79,7 +79,7 @@ async fn wave_two_process_live_smoke() {
         .spawn()
         .expect("spawn lf wave");
 
-    let endpoint_file = repo.join("wave/demo/.wave-endpoint");
+    let endpoint_file = repo.join(".lf/journal/waves/demo/.wave-endpoint");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let addr = loop {
         if let Some(addr) = std::fs::read_to_string(&endpoint_file)

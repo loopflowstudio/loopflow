@@ -136,6 +136,7 @@ Inspect exactly what an agent received and what Loopflow observed:
 
 ```bash
 lf runs
+lf top
 lf trace <run-id>
 lf trace <run-id> --events
 lf trace <run-id> --events --jsonl --launch <launch-id-prefix>

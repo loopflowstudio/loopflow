@@ -294,7 +294,7 @@ lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
-lf top                          # last-hour output throughput + live lf processes
+lf top                          # last-hour provider throughput + live sessions
 lf doctor                       # audit continuity, identity, lineage, coverage
 lf doctor --json                # machine-readable audit
 ```

@@ -72,9 +72,10 @@ Task with `--stack-on <parent-task>`. Do not rotate the parent Task onto a secon
 simultaneously open PR; its multi-PR history remains serial. The child binds to
 the parent's active PR at launch and never follows later serial PRs implicitly.
 
-When work feels slow or stuck, run `lf top` before guessing. It shows recorded
-output-token throughput for the last hour and the currently running `lf`
-processes; use it as machine-health evidence, not as a lifecycle control.
+When work feels slow or stuck, run `lf top` before guessing. It shows provider-
+reported output-token throughput for the last hour and the currently running
+`lf` and provider processes; use it as machine-health evidence, not as a
+lifecycle control.
 
 ## Speak
 

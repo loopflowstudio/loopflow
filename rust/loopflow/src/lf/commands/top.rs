@@ -1,9 +1,16 @@
-//! `lf top` — one-hour output throughput and live Loopflow processes.
+//! `lf top` — one-hour provider throughput and live Loopflow activity.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
+use serde_json::Value;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use crate::lf::commands::runs::{boundary_spans, own_spend, SpanDto};
 use crate::lf::output::{format_int, truncate};
@@ -13,26 +20,48 @@ const WINDOW_MINUTES: usize = 60;
 const BUCKET_SECONDS: i64 = 60;
 const GRAPH_HEIGHT: usize = 8;
 const PROCESS_COMMAND_WIDTH: usize = 88;
-const MAX_PROCESSES: usize = 20;
 
 #[derive(Debug, PartialEq)]
-struct LfProcess {
+struct RunningProcess {
     pid: u32,
     elapsed: String,
+    kind: ProcessKind,
     command: String,
+    workspace: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ProcessKind {
+    Lf,
+    Codex,
+    Claude,
+    Gemini,
+    OpenCode,
+}
+
+impl ProcessKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Lf => "lf",
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+            Self::Gemini => "gemini",
+            Self::OpenCode => "opencode",
+        }
+    }
 }
 
 pub fn run() -> Result<()> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("home directory unavailable"))?;
     // Boundary usage is cumulative within each process, so the hour needs the
     // earlier boundary to avoid charging a long-running process's history now.
-    let ledger_path = dirs::home_dir()
-        .ok_or_else(|| anyhow!("home directory unavailable"))?
-        .join(".lf/loopflow.db");
+    let ledger_path = home.join(".lf/loopflow.db");
     let events = read_run_events(&ledger_path)?;
     let spend = own_spend(&boundary_spans(&events));
-    let buckets = token_buckets(&spend, now);
-    let processes = running_lf_processes()?;
+    let (mut buckets, has_codex_activity) = codex_token_buckets(&codex_session_roots(&home), now);
+    add_ledger_tokens(&mut buckets, &spend, now, !has_codex_activity);
+    let processes = running_loopflow_processes()?;
 
     print!("{}", render_dashboard(&buckets, &processes));
     Ok(())
@@ -44,27 +73,159 @@ fn read_run_events(path: &Path) -> Result<Vec<RunEventRow>> {
         .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))
 }
 
-fn token_buckets(spend: &[SpanDto], now: i64) -> [u64; WINDOW_MINUTES] {
-    let mut buckets = [0_u64; WINDOW_MINUTES];
-    let start = now - WINDOW_MINUTES as i64 * BUCKET_SECONDS + 1;
+fn add_ledger_tokens(
+    buckets: &mut [u64; WINDOW_MINUTES],
+    spend: &[SpanDto],
+    now: i64,
+    include_codex: bool,
+) {
     for span in spend {
+        // Codex's session log reports incremental usage throughout a turn. Its
+        // terminal ledger receipt contains the same tokens and would count them
+        // twice here.
+        if !include_codex && span.provider.as_deref() == Some("codex") {
+            continue;
+        }
         let Some(recorded_at) = span.ended_at else {
             continue;
         };
-        if !(start..=now).contains(&recorded_at) {
+        let Some(index) = bucket_index(recorded_at, now) else {
             continue;
-        }
-        let index = ((recorded_at - start) / BUCKET_SECONDS) as usize;
+        };
         let output = span.output_tokens.unwrap_or(0).max(0) as u64;
         buckets[index] = buckets[index].saturating_add(output);
     }
-    buckets
 }
 
-fn render_dashboard(buckets: &[u64; WINDOW_MINUTES], processes: &[LfProcess]) -> String {
+fn codex_token_buckets(roots: &[PathBuf], now: i64) -> ([u64; WINDOW_MINUTES], bool) {
+    let mut buckets = [0_u64; WINDOW_MINUTES];
+    let mut has_activity = false;
+    let mut files = Vec::new();
+    for root in roots {
+        collect_recent_jsonl(root, now, &mut files);
+    }
+    for path in files {
+        has_activity |= add_codex_session_tokens(&mut buckets, &path, now);
+    }
+    (buckets, has_activity)
+}
+
+fn codex_session_roots(home: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![home.join(".codex/sessions")];
+    let accounts = home.join(".lf/accounts/codex");
+    let Ok(entries) = fs::read_dir(accounts) else {
+        return roots;
+    };
+    for entry in entries.flatten() {
+        let sessions = entry.path().join("sessions");
+        if sessions.is_dir() {
+            roots.push(sessions);
+        }
+    }
+    roots
+}
+
+fn collect_recent_jsonl(directory: &Path, now: i64, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let window_start = UNIX_EPOCH
+        + Duration::from_secs(
+            (now - WINDOW_MINUTES as i64 * BUCKET_SECONDS)
+                .max(0)
+                .try_into()
+                .unwrap_or(0),
+        );
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_recent_jsonl(&path, now, files);
+            continue;
+        }
+        if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let is_recent = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| modified >= window_start);
+        if is_recent {
+            files.push(path);
+        }
+    }
+}
+
+fn add_codex_session_tokens(buckets: &mut [u64; WINDOW_MINUTES], path: &Path, now: i64) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    let mut previous_total = None;
+    let mut has_activity = false;
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        if !line.contains("\"token_count\"") {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if record.get("type").and_then(Value::as_str) != Some("event_msg")
+            || record.pointer("/payload/type").and_then(Value::as_str) != Some("token_count")
+        {
+            continue;
+        }
+        let Some(total) = record
+            .pointer("/payload/info/total_token_usage/output_tokens")
+            .and_then(Value::as_u64)
+        else {
+            continue;
+        };
+        let delta = previous_total.map_or_else(
+            || {
+                record
+                    .pointer("/payload/info/last_token_usage/output_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(total)
+            },
+            |previous| {
+                if total >= previous {
+                    total - previous
+                } else {
+                    record
+                        .pointer("/payload/info/last_token_usage/output_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(total)
+                }
+            },
+        );
+        previous_total = Some(total);
+        let Some(timestamp) = record
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
+            .map(OffsetDateTime::unix_timestamp)
+        else {
+            continue;
+        };
+        let Some(index) = bucket_index(timestamp, now) else {
+            continue;
+        };
+        has_activity = true;
+        buckets[index] = buckets[index].saturating_add(delta);
+    }
+    has_activity
+}
+
+fn bucket_index(timestamp: i64, now: i64) -> Option<usize> {
+    let start = now - WINDOW_MINUTES as i64 * BUCKET_SECONDS + 1;
+    (start..=now)
+        .contains(&timestamp)
+        .then_some(((timestamp - start) / BUCKET_SECONDS) as usize)
+}
+
+fn render_dashboard(buckets: &[u64; WINDOW_MINUTES], processes: &[RunningProcess]) -> String {
     let mut output = String::new();
     output.push_str("LOOPFLOW THROUGHPUT · LAST 60 MINUTES\n");
-    output.push_str("recorded output tokens/s · one-minute completion buckets\n\n");
+    output.push_str("provider-reported output tokens/s · one-minute activity buckets\n\n");
     output.push_str(&render_graph(buckets));
     output.push('\n');
     output.push_str(&render_processes(processes));
@@ -118,7 +279,7 @@ fn format_rate(rate: f64) -> String {
     }
 }
 
-fn running_lf_processes() -> Result<Vec<LfProcess>> {
+fn running_loopflow_processes() -> Result<Vec<RunningProcess>> {
     let output = Command::new("ps")
         .args(["-axo", "pid=,etime=,command="])
         .output()
@@ -126,13 +287,18 @@ fn running_lf_processes() -> Result<Vec<LfProcess>> {
     if !output.status.success() {
         return Err(anyhow!("failed to inspect running processes with ps"));
     }
-    Ok(parse_processes(
-        &String::from_utf8_lossy(&output.stdout),
-        std::process::id(),
-    ))
+    let mut processes =
+        parse_processes(&String::from_utf8_lossy(&output.stdout), std::process::id());
+    let workspaces = process_workspaces(&processes);
+    for process in &mut processes {
+        if process.kind != ProcessKind::Lf {
+            process.workspace = workspaces.get(&process.pid).cloned();
+        }
+    }
+    Ok(processes)
 }
 
-fn parse_processes(output: &str, current_pid: u32) -> Vec<LfProcess> {
+fn parse_processes(output: &str, current_pid: u32) -> Vec<RunningProcess> {
     let mut processes = output
         .lines()
         .filter_map(|line| {
@@ -143,13 +309,16 @@ fn parse_processes(output: &str, current_pid: u32) -> Vec<LfProcess> {
             if command.is_empty() {
                 return None;
             }
-            if pid == current_pid || !is_lf_command(&command) {
+            let kind = process_kind(&command)?;
+            if pid == current_pid {
                 return None;
             }
-            Some(LfProcess {
+            Some(RunningProcess {
                 pid,
                 elapsed,
+                kind,
                 command,
+                workspace: None,
             })
         })
         .collect::<Vec<_>>();
@@ -157,13 +326,57 @@ fn parse_processes(output: &str, current_pid: u32) -> Vec<LfProcess> {
     processes
 }
 
-fn is_lf_command(command: &str) -> bool {
-    command.split_whitespace().next().is_some_and(|word| {
-        std::path::Path::new(word)
-            .file_name()
-            .and_then(|name| name.to_str())
-            == Some("lf")
-    })
+fn process_kind(command: &str) -> Option<ProcessKind> {
+    let executable = command
+        .split_whitespace()
+        .next()
+        .and_then(|word| Path::new(word).file_name())
+        .and_then(|name| name.to_str())?;
+    match executable {
+        "lf" => Some(ProcessKind::Lf),
+        "codex" => Some(ProcessKind::Codex),
+        "claude" => Some(ProcessKind::Claude),
+        "gemini" => Some(ProcessKind::Gemini),
+        "opencode" => Some(ProcessKind::OpenCode),
+        _ => None,
+    }
+}
+
+fn process_workspaces(processes: &[RunningProcess]) -> HashMap<u32, String> {
+    let pids = processes
+        .iter()
+        .filter(|process| process.kind != ProcessKind::Lf)
+        .map(|process| process.pid.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    if pids.is_empty() {
+        return HashMap::new();
+    }
+    let output = Command::new("lsof")
+        .args(["-a", "-p", &pids, "-d", "cwd", "-Fn"])
+        .output();
+    let Ok(output) = output else {
+        return HashMap::new();
+    };
+    if !output.status.success() {
+        return HashMap::new();
+    }
+    parse_lsof_workspaces(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_lsof_workspaces(output: &str) -> HashMap<u32, String> {
+    let mut workspaces = HashMap::new();
+    let mut pid = None;
+    for line in output.lines() {
+        if let Some(value) = line.strip_prefix('p') {
+            pid = value.parse::<u32>().ok();
+        } else if let (Some(pid), Some(path)) = (pid, line.strip_prefix('n')) {
+            if let Some(name) = Path::new(path).file_name().and_then(|name| name.to_str()) {
+                workspaces.insert(pid, name.to_string());
+            }
+        }
+    }
+    workspaces
 }
 
 fn elapsed_seconds(elapsed: &str) -> u64 {
@@ -187,27 +400,25 @@ fn elapsed_seconds(elapsed: &str) -> u64 {
     days.saturating_mul(86_400).saturating_add(clock_seconds)
 }
 
-fn render_processes(processes: &[LfProcess]) -> String {
+fn render_processes(processes: &[RunningProcess]) -> String {
     if processes.is_empty() {
-        return "RUNNING LF PROCESSES\nnone\n".to_string();
+        return "RUNNING LF + PROVIDER PROCESSES\nnone\n".to_string();
     }
 
-    let heading = if processes.len() > MAX_PROCESSES {
-        format!(
-            "RUNNING LF PROCESSES ({}; {MAX_PROCESSES} oldest shown)\n",
-            processes.len()
-        )
-    } else {
-        format!("RUNNING LF PROCESSES ({})\n", processes.len())
-    };
-    let mut output = heading;
-    output.push_str("     PID  ELAPSED       COMMAND\n");
-    for process in processes.iter().take(MAX_PROCESSES) {
+    let mut output = format!("RUNNING LF + PROVIDER PROCESSES ({})\n", processes.len());
+    output.push_str("     PID  ELAPSED       KIND      COMMAND / WORKTREE\n");
+    for process in processes {
+        let description = if process.kind == ProcessKind::Lf {
+            &process.command
+        } else {
+            process.workspace.as_deref().unwrap_or(process.kind.label())
+        };
         output.push_str(&format!(
-            "{:>8}  {:<12}  {}\n",
+            "{:>8}  {:<12}  {:<8}  {}\n",
             process.pid,
             process.elapsed,
-            truncate(&process.command, PROCESS_COMMAND_WIDTH),
+            process.kind.label(),
+            truncate(description, PROCESS_COMMAND_WIDTH),
         ));
     }
     output
@@ -216,13 +427,14 @@ fn render_processes(processes: &[LfProcess]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_processes, read_run_events, render_dashboard, token_buckets, LfProcess,
+        add_codex_session_tokens, add_ledger_tokens, codex_session_roots, parse_lsof_workspaces,
+        parse_processes, read_run_events, render_dashboard, ProcessKind, RunningProcess,
         WINDOW_MINUTES,
     };
     use crate::lf::commands::runs::SpanDto;
     use crate::store::{sqlite::SqliteStore, RunEventRow};
 
-    fn spend(recorded_at: i64, input: i64, output: i64, cache: i64) -> SpanDto {
+    fn spend(recorded_at: i64, output: i64, provider: &str) -> SpanDto {
         SpanDto {
             run_id: "run".to_string(),
             process_id: "process".to_string(),
@@ -237,12 +449,12 @@ mod tests {
             started_at: recorded_at,
             ended_at: Some(recorded_at),
             status: "completed".to_string(),
-            input_tokens: Some(input),
+            input_tokens: Some(0),
             output_tokens: Some(output),
-            cache_read_tokens: Some(cache),
+            cache_read_tokens: Some(0),
             cost_usd: None,
             duration_secs: None,
-            provider: Some("codex".to_string()),
+            provider: Some(provider.to_string()),
             model: None,
         }
     }
@@ -306,21 +518,62 @@ mod tests {
     }
 
     #[test]
-    fn buckets_last_hour_output_tokens() {
+    fn ledger_buckets_non_codex_completion_tokens() {
         let now = 10_000;
-        let buckets = token_buckets(
+        let mut buckets = [0; WINDOW_MINUTES];
+        add_ledger_tokens(
+            &mut buckets,
             &[
-                spend(now - 3_599, 60, 30, 1_000),
-                spend(now - 1, 120, 60, 2_000),
-                spend(now, 30, 30, 0),
-                spend(now - 3_600, 9_999, 9_999, 0),
+                spend(now - 3_599, 30, "claude"),
+                spend(now - 1, 60, "gemini"),
+                spend(now, 9_999, "codex"),
+                spend(now - 3_600, 9_999, "claude"),
             ],
             now,
+            false,
         );
 
         assert_eq!(buckets[0], 30);
+        assert_eq!(buckets[WINDOW_MINUTES - 1], 60);
+        assert_eq!(buckets.iter().sum::<u64>(), 90);
+    }
+
+    #[test]
+    fn codex_buckets_incremental_session_tokens() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"timestamp\":\"2026-07-15T22:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"output_tokens\":100},\"last_token_usage\":{\"output_tokens\":100}}}}\n",
+                "{\"timestamp\":\"2026-07-15T22:59:30Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"output_tokens\":160},\"last_token_usage\":{\"output_tokens\":60}}}}\n",
+                "{\"timestamp\":\"2026-07-15T23:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"output_tokens\":190},\"last_token_usage\":{\"output_tokens\":30}}}}\n"
+            ),
+        )
+        .unwrap();
+        let now = time::OffsetDateTime::parse(
+            "2026-07-15T23:00:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap()
+        .unix_timestamp();
+        let mut buckets = [0; WINDOW_MINUTES];
+
+        assert!(add_codex_session_tokens(&mut buckets, &path, now));
+
         assert_eq!(buckets[WINDOW_MINUTES - 1], 90);
-        assert_eq!(buckets.iter().sum::<u64>(), 120);
+        assert_eq!(buckets.iter().sum::<u64>(), 90);
+    }
+
+    #[test]
+    fn codex_roots_include_default_and_managed_accounts() {
+        let home = tempfile::tempdir().unwrap();
+        let managed = home.path().join(".lf/accounts/codex/engineering/sessions");
+        std::fs::create_dir_all(&managed).unwrap();
+
+        let roots = codex_session_roots(home.path());
+
+        assert_eq!(roots, vec![home.path().join(".codex/sessions"), managed]);
     }
 
     #[test]
@@ -329,43 +582,69 @@ mod tests {
         buckets[WINDOW_MINUTES - 1] = 120;
         let rendered = render_dashboard(
             &buckets,
-            &[LfProcess {
+            &[RunningProcess {
                 pid: 42,
                 elapsed: "01:12".to_string(),
+                kind: ProcessKind::Lf,
                 command: "lf __task ts_123 --generation 1".to_string(),
+                workspace: None,
             }],
         );
 
         assert!(rendered.contains("LOOPFLOW THROUGHPUT · LAST 60 MINUTES"));
-        assert!(rendered.contains("recorded output tokens/s"));
+        assert!(rendered.contains("provider-reported output tokens/s"));
         assert!(rendered
             .contains("total 120 tokens · avg 0.03 tok/s · peak 2.0 tok/s · current 2.0 tok/s"));
-        assert!(rendered.contains("RUNNING LF PROCESSES (1)"));
+        assert!(rendered.contains("RUNNING LF + PROVIDER PROCESSES (1)"));
         assert!(rendered.contains("42  01:12"));
         assert!(rendered.contains("lf __task ts_123 --generation 1"));
     }
 
     #[test]
-    fn process_snapshot_keeps_only_other_lf_commands() {
+    fn process_snapshot_keeps_lf_and_provider_commands() {
         let processes = parse_processes(
-            "  10  01:00 /usr/local/bin/lf wave infrastructure\n  11  00:01 /usr/bin/ps -axo pid=,etime=,command=\n  12  00:02 lf top\n  13  00:03 /bin/zsh -lc lf task run INF-1\n  14  02:00 lf __task ts_123\n",
+            "  10  01:00 /usr/local/bin/lf wave infrastructure\n  11  00:01 /usr/bin/ps -axo pid=,etime=,command=\n  12  00:02 lf top\n  13  00:03 /bin/zsh -lc lf task run INF-1\n  14  02:00 lf __task ts_123\n  15  03:00 /opt/codex app-server\n",
             12,
         );
 
         assert_eq!(
             processes,
             vec![
-                LfProcess {
+                RunningProcess {
+                    pid: 15,
+                    elapsed: "03:00".to_string(),
+                    kind: ProcessKind::Codex,
+                    command: "/opt/codex app-server".to_string(),
+                    workspace: None,
+                },
+                RunningProcess {
                     pid: 14,
                     elapsed: "02:00".to_string(),
+                    kind: ProcessKind::Lf,
                     command: "lf __task ts_123".to_string(),
+                    workspace: None,
                 },
-                LfProcess {
+                RunningProcess {
                     pid: 10,
                     elapsed: "01:00".to_string(),
+                    kind: ProcessKind::Lf,
                     command: "/usr/local/bin/lf wave infrastructure".to_string(),
+                    workspace: None,
                 },
             ]
         );
+    }
+
+    #[test]
+    fn process_workspaces_use_each_provider_cwd() {
+        let workspaces = parse_lsof_workspaces(
+            "p15\nfcwd\nn/Users/jack/src/loopflow.context-lab\np16\nfcwd\nn/Users/jack/src/manabot\n",
+        );
+
+        assert_eq!(
+            workspaces.get(&15).map(String::as_str),
+            Some("loopflow.context-lab")
+        );
+        assert_eq!(workspaces.get(&16).map(String::as_str), Some("manabot"));
     }
 }

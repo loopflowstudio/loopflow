@@ -17,6 +17,10 @@ use crate::child_session::{
 };
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
+use crate::interaction_review::{
+    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
+    InteractionReviewMessageAuthor,
+};
 use crate::project_session::ProjectSessionId;
 use crate::session_context::TaskLaunchReceipt;
 
@@ -784,6 +788,19 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    InteractionReviewRequested {
+        review: Box<InteractionReview>,
+    },
+    InteractionReviewMessage {
+        review_id: InteractionReviewId,
+        author: InteractionReviewMessageAuthor,
+        text: String,
+    },
+    InteractionReviewCompleted {
+        review_id: InteractionReviewId,
+        disposition: InteractionReviewDisposition,
+        outcome: String,
+    },
     PrStarted {
         pr_id: TaskPrId,
         sequence: u32,
@@ -817,6 +834,11 @@ impl TaskEventKind {
     pub fn is_project_observable(&self) -> bool {
         match self {
             Self::Started | Self::Progress { .. } => false,
+            Self::InteractionReviewMessage {
+                author: InteractionReviewMessageAuthor::Reviewer,
+                ..
+            }
+            | Self::InteractionReviewCompleted { .. } => false,
             Self::BodyLeaseChanged { process } => matches!(
                 process.state,
                 ChildLeaseState::Revoked | ChildLeaseState::Finished
@@ -833,7 +855,11 @@ impl TaskEventKind {
         self.is_project_observable()
             && !matches!(
                 self,
-                Self::DecisionRequested { .. } | Self::DecisionResolved { .. }
+                Self::DecisionRequested { .. }
+                    | Self::DecisionResolved { .. }
+                    | Self::InteractionReviewRequested { .. }
+                    | Self::InteractionReviewMessage { .. }
+                    | Self::InteractionReviewCompleted { .. }
             )
     }
 }

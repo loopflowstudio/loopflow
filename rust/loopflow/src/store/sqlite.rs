@@ -23,6 +23,7 @@ use crate::trace::{
 use crate::wave::Wave;
 
 mod child_sessions;
+mod interaction_reviews;
 mod interactive_handoffs;
 
 #[derive(Debug, Clone)]

@@ -14,6 +14,9 @@ use crate::engine::process::{
     tmux_session_slug,
 };
 use crate::id::WaveId;
+use crate::interaction_review::{
+    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
+};
 use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
@@ -941,6 +944,87 @@ pub fn project_request_decision(
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    })
+}
+
+pub fn project_review_message(
+    review_id: &str,
+    text: String,
+) -> OpsResult<crate::child_session::ChildCommand> {
+    let review_id = InteractionReviewId::parse(review_id)
+        .map_err(|error| project_error(format!("invalid interaction review: {error}")))?;
+    block_on_project(async move {
+        let store = project_store().await?;
+        let review = store
+            .get_interaction_review(&review_id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error(format!("interaction review {review_id} not found")))?;
+        let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
+            project_error("review messages must run inside the assigned Project Session")
+        })?;
+        if ambient != review.project_session_id.as_str() {
+            return Err(project_error(format!(
+                "Project Session {ambient} cannot conduct review {review_id} assigned to {}",
+                review.project_session_id
+            )));
+        }
+        let lease = project_write_lease_from_env().map_err(|error| {
+            project_error(format!("Project body has no write authority: {error}"))
+        })?;
+        store
+            .send_project_interaction_review_message(
+                &review_id,
+                &review.project_session_id,
+                &lease,
+                &text,
+            )
+            .await
+            .map_err(|error| project_error(error.to_string()))
+    })
+}
+
+pub fn project_review_complete(
+    review_id: &str,
+    disposition: &str,
+    outcome: String,
+) -> OpsResult<InteractionReview> {
+    let review_id = InteractionReviewId::parse(review_id)
+        .map_err(|error| project_error(format!("invalid interaction review: {error}")))?;
+    let disposition = disposition
+        .replace('-', "_")
+        .parse::<InteractionReviewDisposition>()
+        .map_err(|error| project_error(error.to_string()))?;
+    block_on_project(async move {
+        let store = project_store().await?;
+        let review = store
+            .get_interaction_review(&review_id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error(format!("interaction review {review_id} not found")))?;
+        let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
+            project_error("review completion must run inside the assigned Project Session")
+        })?;
+        if ambient != review.project_session_id.as_str() {
+            return Err(project_error(format!(
+                "Project Session {ambient} cannot complete review {review_id} assigned to {}",
+                review.project_session_id
+            )));
+        }
+        let lease = project_write_lease_from_env().map_err(|error| {
+            project_error(format!("Project body has no write authority: {error}"))
+        })?;
+        let (completed, _) = store
+            .complete_project_interaction_review(
+                &review_id,
+                &review.project_session_id,
+                &lease,
+                disposition,
+                &outcome,
+            )
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        Ok(completed)
     })
 }
 

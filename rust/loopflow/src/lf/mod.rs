@@ -707,6 +707,27 @@ pub enum MemoryCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ProjectReviewCommand {
+    /// Ask the reviewed Task a FIFO follow-up question
+    Message {
+        review_id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Complete the review with an explicit disposition and findings
+    Complete {
+        review_id: String,
+        #[arg(long, value_parser = ["approved", "changes-requested"])]
+        disposition: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
     /// Create a Linear Project first, then start its durable Project Session
     Start {
@@ -799,6 +820,11 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Conduct an interactive exercise assigned by a child Task
+    Review {
+        #[command(subcommand)]
+        command: ProjectReviewCommand,
+    },
     /// Wait without polling an LM
     Wait {
         project_id: String,
@@ -837,6 +863,17 @@ pub enum ProjectCommand {
         /// Parent wave (default: ambient wave)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskReviewCommand {
+    /// Reply to the reviewer without replacing the current Task direction
+    Reply {
+        review_id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -974,6 +1011,11 @@ pub enum TaskCommand {
         timeout: String,
         #[arg(long)]
         json: bool,
+    },
+    /// Continue the dialogue for the current interactive exercise
+    Review {
+        #[command(subcommand)]
+        command: TaskReviewCommand,
     },
     /// Wait without polling an LM
     Wait {
@@ -1956,6 +1998,59 @@ mod tests {
             }) if launch == "launch-1" && turn == "turn-1"
         ));
         assert!(Cli::try_parse_from(["lf", "trace", "run-1", "--content"]).is_err());
+    }
+
+    #[test]
+    fn interaction_review_dialogue_commands_parse() {
+        let project = Cli::try_parse_from([
+            "lf",
+            "project",
+            "review",
+            "complete",
+            "ir_review",
+            "--disposition",
+            "changes-requested",
+            "--outcome",
+            "Cover the empty state",
+        ])
+        .expect("parse Project review completion");
+        assert!(matches!(
+            project.command,
+            Some(Commands::Project {
+                cmd: ProjectCommand::Review {
+                    command: ProjectReviewCommand::Complete {
+                        review_id,
+                        disposition,
+                        outcome,
+                        ..
+                    }
+                }
+            }) if review_id == "ir_review"
+                && disposition == "changes-requested"
+                && outcome == "Cover the empty state"
+        ));
+
+        let task = Cli::try_parse_from([
+            "lf",
+            "task",
+            "review",
+            "reply",
+            "ir_review",
+            "The empty state is now visible",
+        ])
+        .expect("parse Task review reply");
+        assert!(matches!(
+            task.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Review {
+                    command: TaskReviewCommand::Reply {
+                        review_id,
+                        message,
+                        ..
+                    }
+                }
+            }) if review_id == "ir_review" && message == "The empty state is now visible"
+        ));
     }
 
     #[test]

@@ -1150,11 +1150,21 @@ async fn snapshot_projects(
         .collect::<Vec<_>>();
 
     for project_session in &project_sessions {
-        let index = project_index(
+        let Some(index) = session_project_index(
             &details,
             project_session.launch.project.id.as_str(),
             &project_session.launch.project.slug,
-        )?;
+            project_session.status.is_terminal(),
+            wave.name(),
+            &format!("Project Session {}", project_session.id),
+            &format!(
+                "lf project abandon {} --reason \"Project is absent from the current PM snapshot\"",
+                project_session.launch.project.slug
+            ),
+        )?
+        else {
+            continue;
+        };
         if details[index].runtime.is_some() {
             continue;
         }
@@ -1189,11 +1199,21 @@ async fn snapshot_projects(
     }
 
     for task_session in &task_sessions {
-        let project_index = project_index(
+        let Some(project_index) = session_project_index(
             &details,
             task_session.launch.project.id.as_str(),
             &task_session.launch.project.slug,
-        )?;
+            task_session.status.is_terminal(),
+            wave.name(),
+            &format!("Task Session {}", task_session.id),
+            &format!(
+                "lf task abandon {} --reason \"Project is absent from the current PM snapshot\"",
+                task_session.launch.issue.identifier
+            ),
+        )?
+        else {
+            continue;
+        };
         if details[project_index].tasks.iter().any(|task| {
             task.task.id == task_session.launch.issue.id.as_str()
                 || task.task.identifier == task_session.launch.issue.identifier
@@ -1228,15 +1248,39 @@ async fn snapshot_projects(
     Ok(details)
 }
 
+fn session_project_index(
+    projects: &[ProjectDetailSnapshot],
+    id: &str,
+    slug: &str,
+    terminal: bool,
+    wave: &str,
+    session: &str,
+    recovery: &str,
+) -> Result<Option<usize>> {
+    if let Some(index) = find_project_index(projects, id, slug) {
+        return Ok(Some(index));
+    }
+    if terminal {
+        return Ok(None);
+    }
+    Err(anyhow!(
+        "{session} references Project {slug} ({id}), which is absent from the current PM snapshot; run `lf pm sync --wave {wave}`. If the Project remains absent, settle the stale Session with `{recovery}`"
+    ))
+}
+
 fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Result<usize> {
-    projects
-        .iter()
-        .position(|project| project.project.id == id || project.project.slug == slug)
+    find_project_index(projects, id, slug)
         .ok_or_else(|| {
             anyhow!(
                 "Project {slug} ({id}) is not present in the current PM snapshot; run `lf pm sync` before reading the Wave work map"
             )
         })
+}
+
+fn find_project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Option<usize> {
+    projects
+        .iter()
+        .position(|project| project.project.id == id || project.project.slug == slug)
 }
 
 async fn snapshot_task_detail(
@@ -2190,7 +2234,13 @@ mod tests {
 
     use super::*;
     use crate::id::WaveId;
+    use crate::project_session::ProjectSessionId;
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+        ProjectLaunchReceipt, TaskLaunchReceipt,
+    };
     use crate::store::{open_store, PmSnapshotRow, StorageConfig};
+    use crate::task::{PmWritebackState, TaskLifecyclePhase, TaskLifecyclePlan, TaskSessionId};
 
     fn ci(state: CiState, failing: &[&str]) -> CiObservation {
         CiObservation {
@@ -2324,6 +2374,318 @@ mod tests {
             .expect_err("unknown Project must fail loudly");
 
         assert!(error.to_string().contains("lf pm sync"));
+    }
+
+    fn stored_project_session(
+        wave_id: &WaveId,
+        project_id: &str,
+        project_slug: &str,
+        status: ProjectSessionStatus,
+    ) -> ProjectSession {
+        let now = time::OffsetDateTime::now_utc();
+        ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(project_id).unwrap(),
+                    slug: project_slug.to_string(),
+                    name: project_slug.to_string(),
+                    prompt_context: "Definition".to_string(),
+                },
+                pm_snapshot_synced_at: 1,
+            },
+            wave_id: wave_id.clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status,
+            status_reason: status.as_str().to_string(),
+            status_at: now,
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn stored_task_session(
+        wave_id: &WaveId,
+        project_session_id: &ProjectSessionId,
+        project_id: &str,
+        project_slug: &str,
+        status: TaskSessionStatus,
+    ) -> TaskSession {
+        let now = time::OffsetDateTime::now_utc();
+        TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new("issue-134").unwrap(),
+                    identifier: "W2-134".to_string(),
+                    title: "Archived work".to_string(),
+                    description: String::new(),
+                },
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(project_id).unwrap(),
+                    slug: project_slug.to_string(),
+                    name: project_slug.to_string(),
+                    prompt_context: "Definition".to_string(),
+                },
+                pm_snapshot_synced_at: 1,
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave_id.clone(),
+            project_session_id: project_session_id.clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status,
+            status_reason: status.as_str().to_string(),
+            status_at: now,
+            worktree: "/tmp/archived-work".into(),
+            workspace_slug: "archived-work".to_string(),
+            lifecycle: TaskLifecyclePlan::headless("task"),
+            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            observation: crate::task::Observation::NotRequired,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn unobservable_liveness() -> TmuxLiveness {
+        TmuxLiveness {
+            installed: false,
+            live: std::collections::HashSet::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_sessions_for_an_absent_project_are_history_not_current_work() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .expect("open store"),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            dir.path().display().to_string(),
+        );
+        let project = stored_project_session(
+            wave.id(),
+            "project-performance-id",
+            "product-performance",
+            ProjectSessionStatus::Abandoned,
+        );
+        let task = stored_task_session(
+            wave.id(),
+            &project.id,
+            "project-performance-id",
+            "product-performance",
+            TaskSessionStatus::Completed,
+        );
+
+        let projects = snapshot_projects(
+            &store,
+            &wave,
+            vec![project],
+            vec![task],
+            CachedPmSnapshot::default(),
+            &unobservable_liveness(),
+            false,
+        )
+        .await
+        .expect("terminal history must not poison current status");
+
+        assert!(projects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn nonterminal_sessions_for_an_absent_project_fail_with_recovery_commands() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .expect("open store"),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            dir.path().display().to_string(),
+        );
+        let project = stored_project_session(
+            wave.id(),
+            "project-performance-id",
+            "product-performance",
+            ProjectSessionStatus::Waiting,
+        );
+
+        let project_error = snapshot_projects(
+            &store,
+            &wave,
+            vec![project.clone()],
+            Vec::new(),
+            CachedPmSnapshot::default(),
+            &unobservable_liveness(),
+            false,
+        )
+        .await
+        .expect_err("live missing Project must remain explicit");
+        let project_error = project_error.to_string();
+        assert!(project_error.contains(project.id.as_str()));
+        assert!(project_error.contains("lf pm sync --wave product"));
+        assert!(project_error.contains("lf project abandon product-performance"));
+
+        let task = stored_task_session(
+            wave.id(),
+            &project.id,
+            "project-performance-id",
+            "product-performance",
+            TaskSessionStatus::Waiting,
+        );
+        let task_error = snapshot_projects(
+            &store,
+            &wave,
+            Vec::new(),
+            vec![task.clone()],
+            CachedPmSnapshot::default(),
+            &unobservable_liveness(),
+            false,
+        )
+        .await
+        .expect_err("live Task under a missing Project must remain explicit");
+        let task_error = task_error.to_string();
+        assert!(task_error.contains(task.id.as_str()));
+        assert!(task_error.contains("lf pm sync --wave product"));
+        assert!(task_error.contains("lf task abandon W2-134"));
+    }
+
+    #[tokio::test]
+    async fn fresh_pm_snapshot_repairs_the_status_hierarchy_without_a_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = std::fs::canonicalize(dir.path()).expect("canonical repo");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .expect("open store"),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            repo.display().to_string(),
+        );
+        let project = stored_project_session(
+            wave.id(),
+            "project-performance-id",
+            "product-performance",
+            ProjectSessionStatus::Waiting,
+        );
+        store
+            .put_pm_snapshot(PmSnapshotRow {
+                repo: repo.display().to_string(),
+                wave: wave.name().to_string(),
+                provider: "linear".to_string(),
+                initiative: "initiative-1".to_string(),
+                synced_at: 1,
+                payload: serde_json::json!({"projects": [], "items": []}).to_string(),
+            })
+            .await
+            .expect("write stale snapshot");
+        let stale = read_pm_planning(&store, &wave)
+            .await
+            .expect("read stale planning")
+            .expect("snapshot present");
+        snapshot_projects(
+            &store,
+            &wave,
+            vec![project.clone()],
+            Vec::new(),
+            stale,
+            &unobservable_liveness(),
+            false,
+        )
+        .await
+        .expect_err("stale snapshot must expose the missing live Project");
+
+        store
+            .put_pm_snapshot(PmSnapshotRow {
+                repo: repo.display().to_string(),
+                wave: wave.name().to_string(),
+                provider: "linear".to_string(),
+                initiative: "initiative-1".to_string(),
+                synced_at: 2,
+                payload: serde_json::json!({
+                    "projects": [{
+                        "id": "project-performance-id",
+                        "slug": "product-performance",
+                        "name": "Product performance",
+                        "summary": "Keep the product fast",
+                        "definition": "Interactive surfaces stay responsive",
+                        "krs": [{"text": "Status loads immediately", "holds": false}],
+                        "initiative_ids": ["initiative-1"]
+                    }],
+                    "items": [{
+                        "id": "issue-261",
+                        "identifier": "W2-261",
+                        "url": null,
+                        "name": "Repair status",
+                        "description": "Restore current planning",
+                        "rank": 1,
+                        "completed": false,
+                        "project": "product-performance",
+                        "assignee": null
+                    }]
+                })
+                .to_string(),
+            })
+            .await
+            .expect("write refreshed snapshot");
+
+        let refreshed = read_pm_planning(&store, &wave)
+            .await
+            .expect("read refreshed planning")
+            .expect("snapshot present");
+        let projects = snapshot_projects(
+            &store,
+            &wave,
+            vec![project.clone()],
+            Vec::new(),
+            refreshed,
+            &unobservable_liveness(),
+            false,
+        )
+        .await
+        .expect("fresh snapshot must rebuild status without restarting the Session");
+
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].project.slug, "product-performance");
+        assert_eq!(projects[0].project.krs.len(), 1);
+        assert!(!projects[0].project.krs[0].holds);
+        assert_eq!(projects[0].tasks.len(), 1);
+        assert_eq!(projects[0].tasks[0].task.identifier, "W2-261");
+        assert!(!projects[0].tasks[0].task.completed);
+        assert_eq!(
+            projects[0]
+                .runtime
+                .as_ref()
+                .map(|runtime| runtime.session_id.as_str()),
+            Some(project.id.as_str())
+        );
     }
 
     #[tokio::test]

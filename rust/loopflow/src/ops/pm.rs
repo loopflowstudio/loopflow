@@ -2011,9 +2011,23 @@ async fn pm_reteam_async(
 
     if options.apply {
         ensure_reteam_apply_safe(&deferrals)?;
-        // Issues first: Linear refuses to remove a team from a Project while
-        // that team's issues still belong to it. Issue moves preserve their
-        // stable UUIDs, so a partial retry remains idempotent.
+        // Projects must include the destination team before their issues move;
+        // otherwise Linear silently detaches those issues from the Project.
+        // Preserve legacy teams for completed issue history.
+        for pm in &project_moves {
+            progress.status(&format!(
+                "moving Project `{}` onto team {team_key}",
+                pm.name
+            ));
+            let mut team_ids = pm.from_teams.clone();
+            if !team_ids.contains(&team_id) {
+                team_ids.push(team_id.clone());
+            }
+            client
+                .set_project_teams(&pm.id, &team_ids)
+                .await
+                .map_err(pm_to_ops)?;
+        }
         for mv in &mut moves {
             progress.status(&format!(
                 "moving {} into team {team_key}",
@@ -2052,20 +2066,6 @@ async fn pm_reteam_async(
                     })?,
             );
             mv.new_identifier = Some(new_identifier);
-        }
-        for pm in &project_moves {
-            progress.status(&format!(
-                "moving Project `{}` onto team {team_key}",
-                pm.name
-            ));
-            let mut team_ids = pm.from_teams.clone();
-            if !team_ids.contains(&team_id) {
-                team_ids.push(team_id.clone());
-            }
-            client
-                .set_project_teams(&pm.id, &team_ids)
-                .await
-                .map_err(pm_to_ops)?;
         }
         if !project_moves.is_empty() || !moves.is_empty() {
             // Refresh the snapshot so cached identifiers and Project teams reflect

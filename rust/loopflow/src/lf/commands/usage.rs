@@ -13,7 +13,7 @@ use crate::subscription::{poll_account, SubscriptionError};
 const REPO_WIDTH: usize = 32;
 const PROVIDER_WIDTH: usize = 12;
 const NUM_WIDTH: usize = 14;
-const SHARE_WIDTH: usize = 7;
+const SHARE_WIDTH: usize = 8;
 const ACCOUNT_WIDTH: usize = 30;
 const WINDOW_WIDTH: usize = 14;
 
@@ -100,7 +100,7 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
         let mut status = AccountStatus {
             provider: account.provider.clone(),
             label: account_label(account, &profiles),
-            plan: account.plan.clone(),
+            plan: None,
             windows: stored_windows
                 .iter()
                 .map(|row| AccountLimitWindow {
@@ -137,9 +137,14 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
             }
             None => {}
         }
-        if status.plan.is_none() {
-            status.plan = status.windows.iter().find_map(|window| window.plan.clone());
-        }
+        // The plan is what the provider reports (poll planType, claude's
+        // subscriptionType), never a hand-entered label; the stored lifecycle
+        // column is only a fallback for accounts never yet observed.
+        status.plan = status
+            .windows
+            .iter()
+            .find_map(|window| window.plan.clone())
+            .or_else(|| account.plan.clone());
         let cooling = account.cooldown_until.filter(|until| *until > now);
         if let Some(until) = cooling {
             let note = format!("cooling until {}", format_reset(until, now));
@@ -200,8 +205,8 @@ fn print_accounts(statuses: &[AccountStatus]) {
         provider = "PROVIDER",
         account = "ACCOUNT",
         plan = "PLAN",
-        session = "SESSION",
-        weekly = "WEEKLY",
+        session = "SESSION USED",
+        weekly = "WEEKLY USED",
     );
     for status in statuses {
         let mut note = status.note.clone().unwrap_or_default();
@@ -417,7 +422,11 @@ fn print_report(rows: &[UsageRow], days: u32) {
     print_row(&provider_lead("TOTAL"), grand.cells(grand_total), true);
 }
 
-const HEADINGS: [&str; 5] = ["INPUT", "OUTPUT", "CACHE READ", "TOTAL", "SHARE"];
+/// `% TOKENS` is each row's slice of all tokens in the window — a relative
+/// distribution across repos, deliberately not a subscription measure (a repo
+/// can burn through many subscriptions' worth; subscription state lives in
+/// the ACCOUNTS section, always as percent *used*).
+const HEADINGS: [&str; 5] = ["INPUT", "OUTPUT", "CACHE READ", "TOTAL", "% TOKENS"];
 
 fn repo_lead(repo: &str, provider: &str) -> String {
     format!("{repo:<REPO_WIDTH$}  {provider:<PROVIDER_WIDTH$}")

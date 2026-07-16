@@ -1,15 +1,17 @@
 import Foundation
 
 // Typed references inside a Wave Chat message body. A message can name a Task
-// (`W2-174`), a pull request (`PR #889`), and — reserved for later — a Project
-// or a piece of evidence. Detection is a pure function over the message string;
-// there is no new wire field or store. The Mac surface renders each detected
-// span as an inline link with a compact popover instead of dead text.
+// (`W2-174`), a pull request (`PR #889`), a Project (`project:wave-chat`), or a
+// piece of evidence (`evidence:run-abc123`). Task and PR use their natural
+// syntax; Project and evidence use an explicit authored prefix because they have
+// no unambiguous form in free prose. Detection is a pure function over the
+// message string; there is no new wire field or store. The Mac surface renders
+// each detected span as an inline link with a compact popover instead of dead
+// text.
 
-/// What kind of object a detected reference points at. `project` and `evidence`
-/// are reserved so the renderer's switch and any consumer stay total as detectors
-/// grow; only `task` and `pullRequest` are detected today (the ones the product
-/// contract's proof exercises).
+/// What kind of object a detected reference points at. All four kinds are
+/// detected: `task` and `pullRequest` from their natural syntax, `project` and
+/// `evidence` from an explicit `project:<slug>` / `evidence:<token>` prefix.
 public enum ChatReferenceKind: String, Sendable, Hashable, CaseIterable {
     case task
     case pullRequest
@@ -40,18 +42,31 @@ public struct ChatReferenceMatch: Sendable, Hashable {
 }
 
 /// Detect typed references in a Chat message body, ordered by position and
-/// non-overlapping. A Task reference is a Linear issue key; a PR reference is a
-/// GitHub-style `#number`, optionally prefixed by `PR`.
+/// non-overlapping.
+///
+/// Two kinds have natural syntax and are detected unprefixed: a Task reference is
+/// a Linear issue key (`W2-174`); a PR reference is a GitHub-style `#number`,
+/// optionally prefixed by `PR`. Projects and evidence have no unambiguous form in
+/// free prose, so they use the smallest authored contract — an explicit
+/// `project:<slug>` or `evidence:<token>` — rather than being excluded.
 public func parseChatReferences(in text: String) -> [ChatReferenceMatch] {
     // Cheap exit for the common case: nothing that could start a reference.
-    guard text.contains("-") || text.contains("#") else { return [] }
+    guard text.contains("-") || text.contains("#")
+        || text.contains("project:") || text.contains("evidence:") else { return [] }
 
-    var matches: [ChatReferenceMatch] = []
-    matches.append(contentsOf: taskReferences(in: text))
+    // Authored `project:` / `evidence:` refs are explicit, so they claim their
+    // range first — an `evidence:W2-174` token is one evidence reference, not an
+    // evidence reference wrapping a stray Task match.
+    var matches: [ChatReferenceMatch] = authoredReferences(in: text)
+    matches.append(contentsOf: taskReferences(in: text, excluding: matches))
     matches.append(contentsOf: pullRequestReferences(in: text, excluding: matches))
 
     matches.sort { $0.range.lowerBound < $1.range.lowerBound }
     return matches
+}
+
+private func overlaps(_ range: NSRange, _ claimed: [ChatReferenceMatch], in text: String) -> Bool {
+    claimed.contains { NSIntersectionRange(NSRange($0.range, in: text), range).length > 0 }
 }
 
 // MARK: - Task references (Linear issue keys)
@@ -68,12 +83,16 @@ private let taskKeyDenylist: Set<String> = [
 
 private let taskKeyRegex = try? NSRegularExpression(pattern: taskKeyPattern)
 
-private func taskReferences(in text: String) -> [ChatReferenceMatch] {
+private func taskReferences(
+    in text: String,
+    excluding taken: [ChatReferenceMatch]
+) -> [ChatReferenceMatch] {
     guard let regex = taskKeyRegex else { return [] }
     let ns = text as NSString
     let full = NSRange(location: 0, length: ns.length)
     var results: [ChatReferenceMatch] = []
     for match in regex.matches(in: text, range: full) {
+        if overlaps(match.range, taken, in: text) { continue }
         guard let teamRange = Range(match.range(at: 1), in: text),
               let wholeRange = Range(match.range, in: text) else { continue }
         let team = String(text[teamRange])
@@ -132,6 +151,62 @@ private func pullRequestReferences(
     collect(prPrefixedRegex)
     collect(bareHashRegex)
     return results
+}
+
+// MARK: - Authored Project / evidence references
+
+// The smallest authored contract for the two kinds with no natural syntax:
+// `project:<slug>` (kebab-case PM slug) and `evidence:<token>` (an opaque
+// commit / run / receipt / KR reference). The keyword is lowercase and must sit
+// at a word boundary so it isn't caught mid-identifier.
+private let projectPattern = "(?<![A-Za-z0-9])project:([a-z0-9][a-z0-9-]*)"
+private let evidencePattern = "(?<![A-Za-z0-9])evidence:([A-Za-z0-9][A-Za-z0-9._/-]*)"
+
+private let projectRegex = try? NSRegularExpression(pattern: projectPattern)
+private let evidenceRegex = try? NSRegularExpression(pattern: evidencePattern)
+
+private func authoredReferences(in text: String) -> [ChatReferenceMatch] {
+    let ns = text as NSString
+    let full = NSRange(location: 0, length: ns.length)
+    var candidates: [ChatReferenceMatch] = []
+
+    func collect(_ regex: NSRegularExpression?, kind: ChatReferenceKind) {
+        guard let regex else { return }
+        for match in regex.matches(in: text, range: full) {
+            guard let wholeRange = Range(match.range, in: text) else { continue }
+            candidates.append(ChatReferenceMatch(
+                range: wholeRange,
+                kind: kind,
+                identifier: ns.substring(with: match.range(at: 1)),
+                displayText: ns.substring(with: match.range)
+            ))
+        }
+    }
+
+    collect(projectRegex, kind: .project)
+    collect(evidenceRegex, kind: .evidence)
+
+    // The two syntaxes can share a span: `project:evidence:x` is a project
+    // whose slug is `evidence` and an evidence whose token is `x`, overlapping
+    // on `evidence`. Resolve by earliest start — the outer keyword claims the
+    // range, so `project:evidence:x` is one project reference and
+    // `evidence:project:foo` is one evidence reference — and on a tie the
+    // longer span wins. A later candidate touching any kept span is dropped, so
+    // authored references never overlap.
+    candidates.sort {
+        let a = NSRange($0.range, in: text)
+        let b = NSRange($1.range, in: text)
+        return a.location < b.location || (a.location == b.location && a.length > b.length)
+    }
+    var kept: [ChatReferenceMatch] = []
+    var claimed: [NSRange] = []
+    for candidate in candidates {
+        let range = NSRange(candidate.range, in: text)
+        if claimed.contains(where: { NSIntersectionRange($0, range).length > 0 }) { continue }
+        kept.append(candidate)
+        claimed.append(range)
+    }
+    return kept
 }
 
 // MARK: - External targets

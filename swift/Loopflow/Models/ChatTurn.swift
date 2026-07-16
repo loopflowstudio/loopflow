@@ -401,18 +401,24 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public var isInProgress: Bool { status == .running }
 
     /// Grow this turn by one increment, mirroring the listener's
-    /// `ChatTurn::absorb_item`: a stream `Message` fragment concatenates into
-    /// `text`, a non-stream `Message` joins newline-separated, and every other
-    /// item appends to `items`. The reader applies this to each `turn-delta`
-    /// frame so its open-turn reconstruction matches the served turn without the
-    /// whole turn crossing the wire per token.
+    /// `ChatTurn::absorb_item`: a `stream` fragment concatenates into `text`,
+    /// any other prose message joins newline-separated, and every other item
+    /// appends to `items`. The one exception is `commentary` — operational
+    /// narration the provider tagged as process, not conclusion — which stays a
+    /// discrete item so `turnPresentation` can curate it behind a disclosure.
+    /// The reader applies this to each `turn-delta` frame so its open-turn
+    /// reconstruction matches the served turn without the whole turn crossing
+    /// the wire per token.
     public func absorbing(_ item: ConversationItem) throws -> ChatTurn {
         var grownText = text
         var grownItems = items
         if case let .message(_, messageText, phase) = item {
-            if phase == "stream" {
+            switch phase {
+            case "stream":
                 grownText += messageText
-            } else {
+            case "commentary":
+                grownItems.append(item)
+            default:
                 if !grownText.isEmpty { grownText += "\n" }
                 grownText += messageText
             }

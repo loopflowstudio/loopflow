@@ -159,6 +159,63 @@ struct WaveChatTranscriptTests {
         #expect(view.prose == "Opened the PR.\n\nWaiting on CI.")
     }
 
+    /// Real Product Wave turn (journal turn-141): the harness tagged its process
+    /// narration `commentary` and its outcome `final_answer`. Curation surfaces
+    /// the outcome and folds the narration into steps; the raw prose keeps both.
+    @Test func commentaryFoldsIntoStepsAndFinalAnswerLeads() throws {
+        let structured = try turn(
+            id: "turn-141",
+            items: [
+                .message(
+                    id: "m0",
+                    text: "I’m using `wave_clarify` to finish the interrupted audit: verify the "
+                        + "product charter, project KRs, executable cadence, and live backlog.",
+                    phase: "commentary"
+                ),
+                .message(
+                    id: "m1",
+                    text: "The prior diagnosis holds: the charter describes a daily product "
+                        + "dogfood loop, but `crons: []` makes that cadence inert.",
+                    phase: "commentary"
+                ),
+                .message(
+                    id: "m2",
+                    text: "Clarification complete.\n\n- Activated the daily product wave cron "
+                        + "at 08:00.\n- Replaced `N/N` placeholders with 5/5 trials.",
+                    phase: "final_answer"
+                ),
+            ],
+            body: provenance(step: "wave_clarify")
+        )
+
+        let view = turnPresentation(structured)
+        #expect(view.conclusion.hasPrefix("Clarification complete."))
+        #expect(view.steps.count == 2)
+        #expect(view.hasSteps)
+        // Nothing is lost: the raw prose still carries the narration.
+        #expect(view.prose.contains("wave_clarify"))
+        #expect(view.prose.contains("Clarification complete."))
+    }
+
+    /// The honest boundary: a streaming turn arrives as one merged `turn.text`
+    /// blob (the wire folds every `stream` fragment together), so it cannot be
+    /// structurally split. It reads in full as its conclusion, with no steps.
+    @Test func streamingProseStaysWholeWithNoSteps() throws {
+        let streaming = try turn(
+            id: "turn-22979",
+            text: "I’m using `wave_mutate` to judge the accepted human controls. "
+                + "The receipts show both are incorporated. Product’s objective, "
+                + "portfolio, KRs, and memory remain unchanged.",
+            items: [command("c0", "lf pm show")],
+            body: provenance(step: "wave_mutate")
+        )
+
+        let view = turnPresentation(streaming)
+        #expect(view.conclusion == streaming.text)
+        #expect(view.steps.isEmpty)
+        #expect(!view.hasSteps)
+    }
+
     /// Decisions and reports are conversation; lifecycle churn is not.
     @Test func decisionsStayAndChurnGoes() {
         #expect(isConversational(childActivity(.decisionRequired)))

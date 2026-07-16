@@ -72,6 +72,98 @@ struct ChatReferenceTests {
         #expect(parseChatReferences(in: "path/to/#889abc").isEmpty)
     }
 
+    @Test("Detects an authored project:<slug> reference")
+    func detectsProjectReference() {
+        let matches = parseChatReferences(in: "advancing project:wave-chat this cycle")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .project)
+        #expect(matches.first?.identifier == "wave-chat")
+        #expect(matches.first?.displayText == "project:wave-chat")
+    }
+
+    @Test("Detects an authored evidence:<token> reference")
+    func detectsEvidenceReference() {
+        let matches = parseChatReferences(in: "see evidence:run-abc123 for the p95")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .evidence)
+        #expect(matches.first?.identifier == "run-abc123")
+        #expect(matches.first?.displayText == "evidence:run-abc123")
+    }
+
+    @Test("Project and evidence names without the authored prefix are left alone")
+    func unprefixedNamesNotLinked() {
+        // Real narration names these in prose with no identifier; only the
+        // authored form links, so bare words never become false references.
+        #expect(parseChatReferences(in: "the Loopflow API Project is alive").isEmpty)
+        #expect(parseChatReferences(in: "generation 2 is the evidence here").isEmpty)
+    }
+
+    @Test("All four kinds coexist in one message, ordered")
+    func allKindsOrdered() {
+        let matches = parseChatReferences(
+            in: "W2-174 lands as PR #889 under project:wave-chat, evidence:sha-9f2"
+        )
+        #expect(matches.map(\.kind) == [.task, .pullRequest, .project, .evidence])
+        #expect(matches.map(\.identifier) == ["W2-174", "889", "wave-chat", "sha-9f2"])
+    }
+
+    @Test("An authored token wins over a Task match nested inside it")
+    func authoredWinsOverNestedTask() {
+        // `evidence:W2-174` is one evidence reference, not evidence wrapping a
+        // stray W2-174 Task match; ranges never overlap.
+        let matches = parseChatReferences(in: "logged evidence:W2-174 for the run")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .evidence)
+        #expect(matches.first?.identifier == "W2-174")
+    }
+
+    @Test("project:evidence:x is one project reference, not an overlapping evidence match")
+    func projectEvidenceOverlapResolvesToOneProject() {
+        // `project:evidence:x` shares the `evidence` span: a project whose slug
+        // is `evidence` and an evidence whose token is `x`. The outer keyword
+        // (`project`, earliest start) claims the range; the evidence match is
+        // dropped, so the two never overlap.
+        let matches = parseChatReferences(in: "see project:evidence:x for detail")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .project)
+        #expect(matches.first?.identifier == "evidence")
+        #expect(matches.first?.displayText == "project:evidence")
+    }
+
+    @Test("evidence:project:foo is one evidence reference, not an overlapping project match")
+    func evidenceProjectOverlapResolvesToOneEvidence() {
+        // The symmetric case: the outer keyword is `evidence`, so it wins by
+        // earliest start. The nested `project:foo` match is dropped.
+        let matches = parseChatReferences(in: "see evidence:project:foo for detail")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .evidence)
+        #expect(matches.first?.identifier == "project")
+        #expect(matches.first?.displayText == "evidence:project")
+    }
+
+    @Test("Repeated authored keywords resolve without overlap")
+    func repeatedAuthoredKeywordsDoNotOverlap() {
+        // `project:project:foo` — the first `project:` claims `project:project`;
+        // the nested second `project:foo` overlaps and is dropped.
+        let matches = parseChatReferences(in: "see project:project:foo for detail")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .project)
+        #expect(matches.first?.identifier == "project")
+    }
+
+    @Test("All authored references across a message stay non-overlapping")
+    func authoredReferencesNonOverlapping() {
+        let matches = parseChatReferences(
+            in: "project:wave-chat added evidence:run-1 and evidence:run-2"
+        )
+        // project + two evidence, no overlap, ordered by position.
+        #expect(matches.map(\.kind) == [.project, .evidence, .evidence])
+        #expect(matches.map(\.identifier) == ["wave-chat", "run-1", "run-2"])
+        for pair in zip(matches, matches.dropFirst()) {
+            #expect(pair.0.range.upperBound <= pair.1.range.lowerBound)
+        }
+    }
+
     @Test("Plain prose with no references returns nothing quickly")
     func noReferences() {
         #expect(parseChatReferences(in: "The restarted Project Session is healthy.").isEmpty)

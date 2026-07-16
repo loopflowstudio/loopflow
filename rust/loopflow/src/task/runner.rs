@@ -1197,6 +1197,15 @@ async fn reconcile_interactive_rendezvous_at_birth(
     lease: &ChildWriteLease,
     flow: &mut Playhead,
 ) -> Result<bool> {
+    let review_owns_current_step = store
+        .interaction_review_at(
+            &session.id,
+            session.phase_epoch,
+            session.phase_iteration,
+            session.phase_cursor,
+        )
+        .await?
+        .is_some();
     let parent = InteractiveHandoffParent::Task(session.id.clone());
     match interactive_rendezvous::resolve(store, &parent, lease.generation).await? {
         Rendezvous::None => Ok(false),
@@ -1212,15 +1221,25 @@ async fn reconcile_interactive_rendezvous_at_birth(
             Ok(true)
         }
         Rendezvous::Resume { outcome, fresh } => {
-            resume_interactive_step(store, session, lease, flow, outcome, fresh).await
+            resume_interactive_step(
+                store,
+                session,
+                lease,
+                flow,
+                outcome,
+                fresh,
+                review_owns_current_step,
+            )
+            .await
         }
     }
 }
 
 /// Resolve a terminal interactive handoff at body birth. Completion advances the
-/// flow past work the human finished; hand-back resumes the same step; failure
-/// blocks the parent for an operator. Evidence is recorded once, on the
-/// generation that wins the wake claim (`fresh`).
+/// flow past work the human finished unless an InteractionReview owns the same
+/// step; a handoff can wake that review but cannot decide it. Hand-back resumes
+/// the same step, and failure blocks the parent for an operator. Evidence is
+/// recorded once, on the generation that wins the wake claim (`fresh`).
 async fn resume_interactive_step(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -1228,6 +1247,7 @@ async fn resume_interactive_step(
     flow: &mut Playhead,
     outcome: InteractiveHandoffOutcome,
     fresh: bool,
+    review_owns_current_step: bool,
 ) -> Result<bool> {
     if fresh {
         let detail = match &outcome {
@@ -1260,13 +1280,14 @@ async fn resume_interactive_step(
             .await?;
             Ok(true)
         }
-        InteractiveHandoffOutcome::Completed { .. } => {
+        InteractiveHandoffOutcome::Completed { .. } if !review_owns_current_step => {
             advance_past_interactive_step(flow, session)?;
             record_task_flow_position(session, flow)?;
             store.update_task_session_for_lease(session, lease).await?;
             Ok(false)
         }
-        InteractiveHandoffOutcome::HandedBack { .. } => Ok(false),
+        InteractiveHandoffOutcome::Completed { .. }
+        | InteractiveHandoffOutcome::HandedBack { .. } => Ok(false),
     }
 }
 
@@ -2829,6 +2850,59 @@ mod tests {
         assert!(!parked);
         assert_eq!(session.phase_cursor, 0);
         assert_eq!(session.phase_iteration, 0);
+        assert!(store
+            .get_interactive_handoff(&handoff.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .wake_claimed_at
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn completed_handoff_cannot_advance_past_interaction_review() {
+        let (_repo, store, mut session, lease, mut flow, prepared) =
+            prepared_gate_review(TaskLifecyclePlan::standard("task")).await;
+        let review = prepared.review.expect("demo requires human review");
+        let (handoff, _) = store
+            .open_interactive_handoff(task_handoff_request(&session, &lease))
+            .await
+            .unwrap();
+        store
+            .finish_interactive_handoff(
+                &handoff.id,
+                &crate::interactive_handoff::InteractiveHandoffOutcome::Completed {
+                    summary: "human finished the login".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let parked = super::reconcile_interactive_rendezvous_at_birth(
+            &store,
+            &mut session,
+            &lease,
+            &mut flow,
+        )
+        .await
+        .unwrap();
+
+        assert!(!parked);
+        assert_eq!(session.phase_cursor, review.step_index);
+        assert_eq!(session.phase_iteration, review.phase_iteration);
+        assert_eq!(
+            store
+                .interaction_review_at(
+                    &session.id,
+                    session.phase_epoch,
+                    session.phase_iteration,
+                    session.phase_cursor,
+                )
+                .await
+                .unwrap()
+                .map(|current| current.id),
+            Some(review.id)
+        );
         assert!(store
             .get_interactive_handoff(&handoff.id)
             .await

@@ -626,6 +626,22 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             pm_writeback,
             session.status_reason,
         );
+        // State the Task's parent-Project routing as fact: the historical owner
+        // and the live successor it routes to. No "terminal wake" warning — a
+        // broken chain is reported as a missing routing target, not a wake.
+        if snapshot.project_route_succeeded {
+            if let Some(routing) = &snapshot.routing_project_session_id {
+                println!(
+                    "  project: {} → routes to {}",
+                    session.project_session_id, routing,
+                );
+            }
+        } else if snapshot.routing_project_session_id.is_none() {
+            println!(
+                "  project: {} → no live successor; resume or restart the Project",
+                session.project_session_id,
+            );
+        }
         for pr in &snapshot.prs {
             let provider = pr
                 .github()

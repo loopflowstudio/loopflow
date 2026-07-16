@@ -127,6 +127,9 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let sessionId: String
     public let projectSessionId: String
+    /// The live Project Session this Task routes to (a successor when the
+    /// historical owner is terminal). Nil when the chain is broken.
+    public let routingProjectSessionId: String?
     public let status: TaskSessionStatus
     public let reason: String
     public let statusAt: String
@@ -138,6 +141,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
         case status, reason, provider, observation
         case sessionId = "session_id"
         case projectSessionId = "project_session_id"
+        case routingProjectSessionId = "routing_project_session_id"
         case statusAt = "status_at"
         case processAlive = "process_alive"
     }

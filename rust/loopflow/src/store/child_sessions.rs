@@ -724,7 +724,7 @@ impl Store {
         if kind.is_project_observable() {
             if let Some(session) = self.get_task_session(&session_id).await? {
                 if let Err(error) =
-                    crate::ops::project::wake_project_session(&session.project_session_id).await
+                    crate::ops::project::wake_task_project_route(self, &session).await
                 {
                     tracing::debug!(
                         %error,
@@ -780,7 +780,7 @@ impl Store {
         if kind.is_project_observable() {
             if let Some(session) = self.get_task_session(&session_id).await? {
                 if let Err(error) =
-                    crate::ops::project::wake_project_session(&session.project_session_id).await
+                    crate::ops::project::wake_task_project_route(self, &session).await
                 {
                     tracing::debug!(
                         %error,
@@ -1128,6 +1128,21 @@ impl Store {
         let recipient = recipient.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.pending_observations(&recipient)
+        })
+        .await
+    }
+
+    /// Undelivered Task observations addressed to any Project Session in the
+    /// chain for `project_id` — the successor plus its terminal predecessors.
+    /// The live successor consumes the whole chain; the outbox `recipient_id`
+    /// stays the historical owner, so this is routing, not rewriting.
+    pub async fn pending_project_observations_for_chain(
+        &self,
+        project_id: &str,
+    ) -> StoreResult<Vec<ObservationOutboxRow>> {
+        let project_id = project_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.pending_project_observations_for_chain(&project_id)
         })
         .await
     }

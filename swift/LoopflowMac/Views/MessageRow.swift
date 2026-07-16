@@ -19,6 +19,7 @@ struct MessageRow: View {
     let turn: ChatTurn
     let timestampLabel: String?
     let attemptFailure: AttemptFailurePresentation?
+    var references: ReferenceContext = .inert
 
     private var presentation: TurnPresentation {
         turnPresentation(turn)
@@ -50,11 +51,12 @@ struct MessageRow: View {
             if turn.role == .assistant {
                 assistantBody
             } else {
-                Text(turn.text)
-                    .font(Typography.body())
-                    .foregroundStyle(palette.text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                ReferenceTextView(
+                    text: turn.text,
+                    textColor: palette.text,
+                    references: references
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if turn.status == .failed {
@@ -80,7 +82,11 @@ struct MessageRow: View {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
                 case .text(let text):
-                    SelectableAssistantMessageTextView(text: text)
+                    ReferenceTextView(
+                        text: text,
+                        textColor: palette.text,
+                        references: references
+                    )
                 case .code(let language, let code):
                     CodeBlockView(language: language, content: code)
                 }

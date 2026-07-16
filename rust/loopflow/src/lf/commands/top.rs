@@ -635,6 +635,43 @@ mod tests {
         );
     }
 
+    // `lf top` is the machine-health view of the exact tree the OpenCode
+    // reaper manages: the `lf __resident` body, the `opencode serve` provider
+    // leader, and the descendants (MCP servers, model proxies) that live in the
+    // server's process group. The snapshot must keep the leader — that is the
+    // unit the reaper reaps, and showing it is accurate evidence of an orphan
+    // before a resident's boot sweep takes it down — and must filter the
+    // descendants, so the view never double-counts the tree as separate
+    // providers. After a reap the leader line disappears; this is the
+    // classification that keeps that honest.
+    #[test]
+    fn process_snapshot_classifies_the_opencode_tree_the_reaper_manages() {
+        let processes = parse_processes(
+            "  20  05:00 /usr/local/bin/lf __resident infrastructure\n  21  04:59 /usr/local/bin/opencode serve --port 33421\n  22  04:58 node /Users/jack/.opencode/mcp-servers/filesystem.js\n  23  04:57 /usr/bin/python -m opencode_proxy\n  24  00:01 /bin/ps -axo pid=,etime=,command=\n",
+            24,
+        );
+
+        assert_eq!(
+            processes,
+            vec![
+                RunningProcess {
+                    pid: 20,
+                    elapsed: "05:00".to_string(),
+                    kind: ProcessKind::Lf,
+                    command: "/usr/local/bin/lf __resident infrastructure".to_string(),
+                    workspace: None,
+                },
+                RunningProcess {
+                    pid: 21,
+                    elapsed: "04:59".to_string(),
+                    kind: ProcessKind::OpenCode,
+                    command: "/usr/local/bin/opencode serve --port 33421".to_string(),
+                    workspace: None,
+                },
+            ]
+        );
+    }
+
     #[test]
     fn process_workspaces_use_each_provider_cwd() {
         let workspaces = parse_lsof_workspaces(

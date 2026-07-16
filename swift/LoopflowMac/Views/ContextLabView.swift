@@ -174,7 +174,7 @@ struct ContextLabView: View {
                 center
                     .frame(minWidth: 600, maxWidth: .infinity)
                     .frame(maxHeight: .infinity)
-                evidenceRail
+                detailRail
                     .frame(minWidth: 270, idealWidth: 310, maxWidth: 360)
                     .frame(maxHeight: .infinity)
             }
@@ -184,7 +184,7 @@ struct ContextLabView: View {
         .task(id: refinementProjectScope) { await loadRefinementProjects() }
         .task(id: query) { await refresh() }
         .sheet(item: $traceRequest) { address in
-            TraceEvidenceView(address: address)
+            TraceView(address: address)
                 .frame(minWidth: 760, minHeight: 620)
         }
     }
@@ -509,7 +509,7 @@ struct ContextLabView: View {
                 ContentUnavailableView(
                     "Select a source",
                     systemImage: "doc.text.magnifyingglass",
-                    description: Text("Open main's current file beside its impression evidence.")
+                    description: Text("Select a source to open its current file and captured revisions.")
                 )
                 .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -573,7 +573,7 @@ struct ContextLabView: View {
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text(accessibilityLabel))
-                    .accessibilityHint(Text("Open main's current file and its revision evidence"))
+                    .accessibilityHint(Text("Open main's current file and revision details"))
                     Divider()
                 }
             }
@@ -581,17 +581,16 @@ struct ContextLabView: View {
         .background(palette.surface)
     }
 
-    private var evidenceRail: some View {
+    private var detailRail: some View {
         ScrollView {
             if let snapshot {
                 let matches = selectedEvidence(in: snapshot)
                 VStack(alignment: .leading, spacing: Spacing.lg) {
-                    railTitle("Evidence")
                     if matches.isEmpty {
                         ContentUnavailableView(
                             "Select a revision",
                             systemImage: "scope",
-                            description: Text("Choose a flame or table segment to inspect exact local evidence.")
+                            description: Text("Choose a flame or table segment to inspect a source revision.")
                         )
                     } else if matches.count == 1, let evidence = matches.first {
                         evidenceDetail(evidence, snapshot: snapshot)
@@ -858,7 +857,7 @@ struct ContextLabView: View {
                 "\(snapshot.aggregateRoot.attributedTokens) / \(optionalTokens(snapshot.totals.initialPromptTokens)) tokens"
             )
             evidenceMetric(
-                "Source evidence",
+                "Sources observed",
                 "\(coverage.sourceObservableAgentSessions) / \(snapshot.totals.agentSessions) agent sessions"
             )
             evidenceMetric("Conversations", "\(coverage.conversationsAvailable) / \(snapshot.totals.agentSessions)")
@@ -1258,7 +1257,7 @@ struct ContextLabView: View {
                 }
             }
             .pickerStyle(.menu)
-            .help("Remembered for refinement Tasks in this Wave; does not filter Context Lab evidence")
+            .help("Remembered for refinement Tasks in this Wave; does not filter Context Lab")
         } else if let project = refinementProjects.first {
             evidenceMetric("Refinement Project", project.title)
         } else if query.waves.count == 1 {

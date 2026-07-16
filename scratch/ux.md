@@ -629,6 +629,20 @@ W2-173 was superseded before implementation because its initial Task Session
 pinned a development-provenance `lf` that could not open the production store.
 W2-178 carries the unchanged work with the corrected execution context.
 
+### Context Lab trace vocabulary
+
+> The context lab also added an “evidence” as a frame on its traces which is
+> something I think I want to remove.
+
+> Simplify, simplify, simplify.
+
+Context Lab may use captured traces to calculate source measurements, but the
+surface should not make “Evidence” another object the user must learn. A trace
+opens as **Trace**, with System prompt, Task prompt, and Conversation as its
+three direct contents. Selecting a source revision shows its details in the
+existing rail without an “Evidence” heading. Provenance remains attached to the
+trace and revision data; it is not promoted into a separate product frame.
+
 ## Size check
 
 This design is larger than one Task: it changes the main Swift information

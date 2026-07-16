@@ -11,7 +11,7 @@ private enum TraceArtifactTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-struct TraceEvidenceView: View {
+struct TraceView: View {
     let address: TraceAddress
 
     @Environment(\.palette) private var palette
@@ -23,7 +23,7 @@ struct TraceEvidenceView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Trace evidence")
+                    Text("Trace")
                         .font(Typography.heroTitle(24))
                         .foregroundStyle(palette.text)
                     Text("\(shortTrace(address.runId)) / \(shortTrace(address.launchId)) / \(shortTrace(address.turnId))")

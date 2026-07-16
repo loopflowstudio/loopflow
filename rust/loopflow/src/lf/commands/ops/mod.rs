@@ -1716,34 +1716,133 @@ fn wt_ci(watch: bool, logs: bool) -> Result<()> {
         .status()?;
 
     if !status.success() && logs {
-        println!("\n--- Failed check logs ---\n");
-        let output = Command::new("gh")
-            .args([
-                "pr",
-                "view",
-                &branch,
-                "--json",
-                "statusCheckRollup",
-                "-q",
-                ".statusCheckRollup[] | select(.conclusion == \"FAILURE\" or .conclusion == \"failure\") | .detailsUrl",
-            ])
-            .current_dir(&repo_root)
-            .output()?;
-        if output.status.success() {
-            let urls = String::from_utf8_lossy(&output.stdout);
-            for url in urls.lines().filter(|line| !line.trim().is_empty()) {
-                let _ = Command::new("gh")
-                    .args(["run", "view", url])
-                    .current_dir(&repo_root)
-                    .status();
-            }
-        }
+        print_failed_check_logs(&repo_root, &branch)?;
     }
 
     if status.success() {
         Ok(())
     } else {
         Err(anyhow!("ci checks failed"))
+    }
+}
+
+/// A GitHub Actions run reference extracted from a `detailsUrl` or bare id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunRef {
+    run_id: String,
+    job_id: Option<String>,
+}
+
+/// Parse a GitHub Actions `detailsUrl`, run/job URL, or bare numeric run id
+/// into a [`RunRef`]. Returns `None` for non-Actions URLs (external CI
+/// services) or unparseable input.
+fn parse_run_ref(value: &str) -> Option<RunRef> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Some(RunRef {
+            run_id: trimmed.to_string(),
+            job_id: None,
+        });
+    }
+    let marker = "/actions/runs/";
+    let idx = trimmed.find(marker)?;
+    let after = &trimmed[idx + marker.len()..];
+    let mut parts = after.split('/');
+    let run_id = parts.next()?;
+    if !is_numeric(run_id) {
+        return None;
+    }
+    let job_id = match parts.next() {
+        Some("jobs") => parts.next().filter(|j| is_numeric(j)),
+        _ => None,
+    };
+    Some(RunRef {
+        run_id: run_id.to_string(),
+        job_id: job_id.map(str::to_string),
+    })
+}
+
+fn is_numeric(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Fetch and print logs for every failed check on `branch`, with attribution.
+/// Non-Actions checks and missing/expired/private logs are reported actionably
+/// rather than silently dropped.
+fn print_failed_check_logs(repo_root: &Path, branch: &str) -> Result<()> {
+    println!("\n--- Failed check logs ---\n");
+
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            branch,
+            "--json",
+            "statusCheckRollup",
+            "-q",
+            r#".statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "failure") | [.name, (.detailsUrl // "")] | @tsv"#,
+        ])
+        .current_dir(repo_root)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        eprintln!("Couldn't list failed checks: {stderr}");
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let (name, url) = line.split_once('\t').unwrap_or((line, ""));
+        print_single_check_logs(repo_root, name, url);
+    }
+
+    Ok(())
+}
+
+fn print_single_check_logs(repo_root: &Path, name: &str, url: &str) {
+    let Some(run_ref) = parse_run_ref(url) else {
+        if url.is_empty() {
+            eprintln!("### {name}\nNo details URL for this check; open the PR checks tab.\n");
+        } else {
+            eprintln!("### {name}\nLogs not available via gh for this check. Open: {url}\n");
+        }
+        return;
+    };
+
+    let mut args: Vec<&str> = vec!["run", "view", &run_ref.run_id, "--log"];
+    if let Some(job_id) = &run_ref.job_id {
+        args.extend(["--job", job_id]);
+    }
+
+    let output = Command::new("gh")
+        .args(&args)
+        .current_dir(repo_root)
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let logs = String::from_utf8_lossy(&out.stdout);
+            print!("### {name}\n\n{logs}");
+            if !logs.ends_with('\n') {
+                println!();
+            }
+            println!();
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            eprintln!(
+                "### {name}\nCouldn't fetch logs (run {}): {stderr}\n\
+                 The run may be missing, expired (>90 days), or private. Open: {url}\n",
+                run_ref.run_id
+            );
+        }
+        Err(err) => {
+            eprintln!("### {name}\nFailed to invoke gh: {err}\n");
+        }
     }
 }
 
@@ -2187,6 +2286,71 @@ mod telemetry_tests {
             porcelain(repo),
             "",
             "recording telemetry must not dirty a clean worktree"
+        );
+    }
+}
+
+#[cfg(test)]
+mod wt_ci_tests {
+    use super::{parse_run_ref, RunRef};
+
+    #[test]
+    fn parse_run_ref_handles_job_url() {
+        let url =
+            "https://github.com/loopflowstudio/loopflow/actions/runs/978123456/jobs/111222333";
+        let r = parse_run_ref(url).expect("job URL parses");
+        assert_eq!(r.run_id, "978123456");
+        assert_eq!(r.job_id, Some("111222333".to_string()));
+    }
+
+    #[test]
+    fn parse_run_ref_handles_run_url() {
+        let url = "https://github.com/loopflowstudio/loopflow/actions/runs/983654321";
+        let r = parse_run_ref(url).expect("run URL parses");
+        assert_eq!(r.run_id, "983654321");
+        assert_eq!(r.job_id, None);
+    }
+
+    #[test]
+    fn parse_run_ref_handles_bare_numeric_id() {
+        let r = parse_run_ref("978123456").expect("numeric id parses");
+        assert_eq!(
+            r,
+            RunRef {
+                run_id: "978123456".to_string(),
+                job_id: None
+            }
+        );
+    }
+
+    #[test]
+    fn parse_run_ref_trims_whitespace() {
+        let r = parse_run_ref("  978123456  ").expect("trimmed numeric id parses");
+        assert_eq!(r.run_id, "978123456");
+    }
+
+    #[test]
+    fn parse_run_ref_rejects_non_actions_url() {
+        assert_eq!(
+            parse_run_ref("https://example.com/build/123"),
+            None,
+            "external CI URLs are not Actions runs"
+        );
+    }
+
+    #[test]
+    fn parse_run_ref_rejects_empty_and_garbage() {
+        assert_eq!(parse_run_ref(""), None);
+        assert_eq!(parse_run_ref("   "), None);
+        assert_eq!(parse_run_ref("not-a-url"), None);
+    }
+
+    #[test]
+    fn parse_run_ref_rejects_non_numeric_run_id() {
+        assert_eq!(
+            parse_run_ref("https://github.com/o/r/actions/runs/abc"),
+            None,
+            "non-numeric run id is not a valid ref"
         );
     }
 }

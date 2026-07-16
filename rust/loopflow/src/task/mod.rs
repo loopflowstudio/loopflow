@@ -1129,6 +1129,20 @@ pub struct LinearObservationOutcome {
     pub follow_ups_created: Vec<ChildCommandId>,
 }
 
+/// The result of carrying a terminal Task Session's direction onto a successor.
+///
+/// `created` is `true` when this call inserted the successor and re-keyed the
+/// Linear observation cursor and ingested-comment ledger onto it; `false` when a
+/// non-terminal successor already existed (a concurrent or retried run), in
+/// which case the carry transaction was a no-op and the existing Session is
+/// returned. Historical receipts (`child_commands`, `child_directives`) stay on
+/// the predecessor for attribution in both cases.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSessionSuccession {
+    pub session: TaskSession,
+    pub created: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

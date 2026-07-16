@@ -278,6 +278,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "provider_deliveries",
         sql: include_str!("migrations/0.11.021_provider_deliveries.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 22,
+        },
+        name: "task_session_successors",
+        sql: include_str!("migrations/0.11.022_task_session_successors.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1341,7 +1350,8 @@ mod tests {
                 "0.11.018_session_body_provenance".to_string(),
                 "0.11.019_task_pr_github_observation".to_string(),
                 "0.11.020_task_pr_linear_linkage".to_string(),
-                "0.11.021_provider_deliveries".to_string()
+                "0.11.021_provider_deliveries".to_string(),
+                "0.11.022_task_session_successors".to_string()
             ]
         );
     }
@@ -1355,11 +1365,11 @@ mod tests {
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.020_task_pr_linear_linkage")
+            Some("0.11.021_provider_deliveries")
         );
-        assert!(!columns(&conn, "provider_deliveries")
+        assert!(!columns(&conn, "task_sessions")
             .iter()
-            .any(|column| column == "delivery_id"));
+            .any(|column| column == "predecessor_session_id"));
     }
 
     #[test]

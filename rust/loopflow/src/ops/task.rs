@@ -3219,8 +3219,7 @@ mod tests {
         verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{
-        ChildCommand, ChildCommandKind, ChildCommandSource, ChildProcessGeneration,
-        ChildRef,
+        ChildCommand, ChildCommandKind, ChildCommandSource, ChildProcessGeneration, ChildRef,
     };
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};

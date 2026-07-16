@@ -35,8 +35,11 @@ lf task follow-up INF-123 "also audit retry callers"
 ```
 
 A Task Session runs in one stable worktree, advances through zero or more serial
-PRs to `main`, and reports linked events to its Wave. It inherits the Wave's
-`GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
+PRs to `main`, and reports linked events to its Wave. It runs kickoff once,
+repeats its selected inner flow, then gates the proposed outcome. Gate repairs
+return the same Session to another iteration; approval settles it. The Task
+inherits the Wave's `GOAL.md` and `MEMORY.md` plus its Project definition and
+KRs.
 
 Each Task Session gets a sibling worktree. Its active PR owns the current branch;
 after merge or abandonment, Loopflow rotates that worktree onto the next branch

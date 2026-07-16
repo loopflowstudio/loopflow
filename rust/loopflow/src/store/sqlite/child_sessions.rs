@@ -31,8 +31,9 @@ use crate::session_context::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    AfterMerge, CiObservation, GithubPr, PrPhase, PrPublication, TaskEvent, TaskEventKind, TaskPr,
-    TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+    AfterMerge, CiObservation, GithubPr, PrPhase, PrPublication, TaskEvent, TaskEventKind,
+    TaskLifecyclePhase, TaskLifecyclePlan, TaskPhasePlan, TaskPr, TaskPrId, TaskSession,
+    TaskSessionId, TaskSessionStatus,
 };
 
 use super::SqliteStore;
@@ -2450,13 +2451,16 @@ const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
-    resolved_flow, interaction_policy, flow_cursor, flow_iteration,
+    iterate_flow, iterate_interaction_policy, phase_cursor, phase_iteration,
     process_group_id, process_agent, process_provider,
-    process_provider_session_id, process_lease_state, process_outcome_json
+    process_provider_session_id, process_lease_state, process_outcome_json,
+    kickoff_flow, kickoff_interaction_policy, gate_flow, gate_interaction_policy,
+    lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-    ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44
+    ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
+    ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -2468,9 +2472,11 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
-    resolved_flow, interaction_policy, flow_cursor, flow_iteration,
+    iterate_flow, iterate_interaction_policy, phase_cursor, phase_iteration,
     process_group_id, process_agent, process_provider,
-    process_provider_session_id, process_lease_state, process_outcome_json
+    process_provider_session_id, process_lease_state, process_outcome_json,
+    kickoff_flow, kickoff_interaction_policy, gate_flow, gate_interaction_policy,
+    lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -2482,9 +2488,11 @@ const TASK_SESSION_SELECT: &str = "SELECT
     pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
-    resolved_flow, interaction_policy, flow_cursor, flow_iteration,
+    iterate_flow, iterate_interaction_policy, phase_cursor, phase_iteration,
     process_group_id, process_agent, process_provider,
-    process_provider_session_id, process_lease_state, process_outcome_json
+    process_provider_session_id, process_lease_state, process_outcome_json,
+    kickoff_flow, kickoff_interaction_policy, gate_flow, gate_interaction_policy,
+    lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json
     FROM task_sessions WHERE id = ?1";
 const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
@@ -2498,12 +2506,7 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     current_directive_version=MAX(current_directive_version, ?28),
     incorporated_directive_version=MAX(incorporated_directive_version, ?29),
     lf_bin=?30, db_path=?31, lf_home=?32,
-    abandon_requested_at=?33, abandon_reason=?34,
-    flow_cursor=CASE
-        WHEN ?38 > flow_iteration OR (?38 = flow_iteration AND ?37 > flow_cursor) THEN ?37
-        ELSE flow_cursor
-    END,
-    flow_iteration=MAX(flow_iteration, ?38)
+    abandon_requested_at=?33, abandon_reason=?34
     WHERE id=?1";
 const TASK_SESSION_LEASE_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
@@ -2519,17 +2522,30 @@ const TASK_SESSION_LEASE_UPDATE: &str = "UPDATE task_sessions SET
     incorporated_directive_version=MAX(incorporated_directive_version, ?29),
     lf_bin=?30, db_path=?31, lf_home=?32,
     abandon_requested_at=?33, abandon_reason=?34,
-    flow_cursor=CASE
-        WHEN ?38 > flow_iteration OR (?38 = flow_iteration AND ?37 > flow_cursor) THEN ?37
-        ELSE flow_cursor
+    lifecycle_phase=CASE WHEN ?50>=phase_epoch THEN ?49 ELSE lifecycle_phase END,
+    phase_cursor=CASE
+        WHEN ?50>phase_epoch OR
+             (?50=phase_epoch AND (?38>phase_iteration OR
+                                   (?38=phase_iteration AND ?37>phase_cursor)))
+        THEN ?37 ELSE phase_cursor
     END,
-    flow_iteration=MAX(flow_iteration, ?38),
+    phase_iteration=CASE
+        WHEN ?50>phase_epoch THEN ?38
+        WHEN ?50=phase_epoch THEN MAX(phase_iteration, ?38)
+        ELSE phase_iteration
+    END,
+    phase_epoch=MAX(phase_epoch, ?50),
+    gate_cycle=CASE WHEN ?50>=phase_epoch THEN ?51 ELSE gate_cycle END,
+    gate_proposal_json=CASE WHEN ?50>=phase_epoch THEN ?52 ELSE gate_proposal_json END,
     process_group_id=?39, process_agent=?40, process_provider=?41,
     process_provider_session_id=?42, process_lease_state=?43,
     process_outcome_json=?44
-    WHERE id=?1 AND process_generation=?45 AND process_lease_token=?46
-      AND process_lease_state=?47
-      AND (status NOT IN ('completed', 'abandoned') OR status=?11)";
+    WHERE id=?1 AND process_generation=?53 AND process_lease_token=?54
+      AND process_lease_state=?55
+      AND (
+        status NOT IN ('completed', 'abandoned') OR status=?11 OR
+        (status='completed' AND ?11='running' AND ?49='gate' AND ?50>phase_epoch)
+      )";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
@@ -2812,10 +2828,17 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
                 .as_ref()
                 .map(|intent| intent.reason.clone()),
         ),
-        Box::new(session.resolved_flow.clone()),
-        Box::new(session.interaction_policy.as_str().to_string()),
-        Box::new(i64::from(session.flow_cursor)),
-        Box::new(i64::from(session.flow_iteration)),
+        Box::new(session.lifecycle.iterate.flow.clone()),
+        Box::new(
+            session
+                .lifecycle
+                .iterate
+                .interaction_policy
+                .as_str()
+                .to_string(),
+        ),
+        Box::new(i64::from(session.phase_cursor)),
+        Box::new(i64::from(session.phase_iteration)),
         Box::new(
             session
                 .latest_process
@@ -2855,12 +2878,36 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
                     serde_json::to_string(outcome).expect("child body outcome must serialize")
                 }),
         ),
+        Box::new(session.lifecycle.kickoff.flow.clone()),
+        Box::new(
+            session
+                .lifecycle
+                .kickoff
+                .interaction_policy
+                .as_str()
+                .to_string(),
+        ),
+        Box::new(session.lifecycle.gate.flow.clone()),
+        Box::new(
+            session
+                .lifecycle
+                .gate
+                .interaction_policy
+                .as_str()
+                .to_string(),
+        ),
+        Box::new(session.lifecycle_phase.as_str().to_string()),
+        Box::new(i64::from(session.phase_epoch)),
+        Box::new(i64::from(session.gate_cycle)),
+        Box::new(session.gate_proposal.as_ref().map(|proposal| {
+            serde_json::to_string(proposal).expect("Task gate proposal must serialize")
+        })),
     ]
 }
 
 fn task_session_control_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     let mut parameters = task_session_params(session);
-    parameters.truncate(38);
+    parameters.truncate(34);
     parameters
 }
 
@@ -3168,13 +3215,42 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         status_at: crate::store::rows::unix_to_datetime(row.get(12)?),
         worktree: PathBuf::from(row.get::<_, String>(13)?),
         workspace_slug: row.get(14)?,
-        resolved_flow: row.get(34)?,
-        interaction_policy: row
-            .get::<_, String>(35)?
-            .parse::<InteractionPolicy>()
-            .map_err(|error| invalid_column(35, error))?,
-        flow_cursor: row.get::<_, i64>(36)? as u32,
-        flow_iteration: row.get::<_, i64>(37)? as u32,
+        lifecycle: TaskLifecyclePlan {
+            kickoff: TaskPhasePlan {
+                flow: row.get(44)?,
+                interaction_policy: row
+                    .get::<_, String>(45)?
+                    .parse::<InteractionPolicy>()
+                    .map_err(|error| invalid_column(45, error))?,
+            },
+            iterate: TaskPhasePlan {
+                flow: row.get(34)?,
+                interaction_policy: row
+                    .get::<_, String>(35)?
+                    .parse::<InteractionPolicy>()
+                    .map_err(|error| invalid_column(35, error))?,
+            },
+            gate: TaskPhasePlan {
+                flow: row.get(46)?,
+                interaction_policy: row
+                    .get::<_, String>(47)?
+                    .parse::<InteractionPolicy>()
+                    .map_err(|error| invalid_column(47, error))?,
+            },
+        },
+        lifecycle_phase: row
+            .get::<_, String>(48)?
+            .parse::<TaskLifecyclePhase>()
+            .map_err(|error| invalid_column(48, error))?,
+        phase_epoch: row.get::<_, i64>(49)? as u32,
+        phase_cursor: row.get::<_, i64>(36)? as u32,
+        phase_iteration: row.get::<_, i64>(37)? as u32,
+        gate_cycle: row.get::<_, i64>(50)? as u32,
+        gate_proposal: row
+            .get::<_, Option<String>>(51)?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(|error| invalid_column(51, error))?,
         agent: row.get(15)?,
         provider: row.get(16)?,
         provider_session_id: row.get(17)?,

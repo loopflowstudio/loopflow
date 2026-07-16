@@ -528,7 +528,6 @@ mod tests {
                 _ => vec![],
             },
             observed_at: OffsetDateTime::UNIX_EPOCH,
-            woken_failure_set: None,
         }
     }
 

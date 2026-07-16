@@ -96,8 +96,8 @@ main's actual high-water mark, never a hardcoded guess. SQLite bakes CHECK
 constraints into the table, so widen the enum with the documented rebuild (mirror
 `0.11.002_project_session_successors.sql`): create `agent_launches_next` with
 `capture_status … CHECK (capture_status IN ('capturing','complete','partial','prompt_only','pruned'))`,
-`INSERT … SELECT` all rows, drop, rename, recreate the three indexes
-(`idx_agent_launches_run/process/wave`). The migration runner already disables FK
+`INSERT … SELECT` all rows, drop, rename, recreate the five indexes
+(`idx_agent_launches_run/process/wave/project/task`). The migration runner already disables FK
 actions and runs `foreign_key_check` around the transaction, so the
 `agent_turns.launch_id … ON DELETE CASCADE` reference is safe.
 

@@ -138,6 +138,149 @@ pub fn list_execs(json: bool) -> Result<()> {
     Ok(())
 }
 
+/// A capture lifecycle is considered lost beyond 48h: terminal launches whose
+/// artifacts vanished that long ago are safe to tombstone, and `capturing`
+/// launches still stuck past this point are provably dead. Younger missing
+/// captures are reported as candidates to investigate, not swept — the
+/// anti-masking line that keeps a live capture regression visible.
+const RECONCILE_AGE_GUARD_HOURS: i64 = 48;
+
+/// `lf runs reconcile`: tombstone terminal captures whose conversation
+/// artifacts are gone, and finalize orphaned `capturing` launches. Dry-run by
+/// default; `--apply` writes. A red `lf doctor` capture check means
+/// un-acknowledged loss — this is the explicit acknowledgment.
+pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
+    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
+    let launches = store
+        .agent_launches_since(0)
+        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?;
+    let events = store
+        .list_run_events_since(0)
+        .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+
+    let now = chrono::Utc::now().timestamp();
+    let guard = now - RECONCILE_AGE_GUARD_HOURS * 3600;
+    let stamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let pruned_reason = format!("conversation artifact absent at reconcile {stamp}");
+    let finalized_reason = "capture interrupted; process ended without finalizing";
+
+    let terminal: [&str; 3] = ["complete", "partial", "prompt_only"];
+    let mut pruned: Vec<ReconcileEntry> = Vec::new();
+    let mut recent_missing: Vec<ReconcileEntry> = Vec::new();
+    let mut finalized: Vec<ReconcileEntry> = Vec::new();
+
+    for launch in &launches {
+        let process_ended = events.iter().any(|event| {
+            event.process_id == launch.process_id && event.node == "run" && event.event != "started"
+        });
+        let stale = launch.started_at < guard;
+        let file_present = conversation_artifact_present(&launch.conversation_path);
+
+        if !file_present {
+            // Artifact is gone. Terminal launches are always candidates; a
+            // `capturing` launch is a candidate only once its process is
+            // provably dead (or stale past the guard) — a live process may
+            // still be writing, and `begin` always creates the file, so an
+            // absent file on a live `capturing` launch is a transient race,
+            // not a tombstone target.
+            let dead = terminal.contains(&launch.capture_status.as_str())
+                || (launch.capture_status == "capturing" && (process_ended || stale));
+            if !dead {
+                continue;
+            }
+            // Age guard: a terminal launch is old when it ended before the
+            // guard; a `capturing` launch never set `ended_at`, so use the
+            // stale-start check instead. Without this line, `--apply` during an
+            // active capture regression would tombstone the evidence.
+            let old = launch.ended_at.is_some_and(|ended| ended < guard) || stale;
+            if old || all {
+                pruned.push(ReconcileEntry::from_launch(launch, &pruned_reason));
+            } else {
+                recent_missing.push(ReconcileEntry::from_launch(launch, &pruned_reason));
+            }
+            continue;
+        }
+
+        // File is present. Finalize an orphaned `capturing` launch whose
+        // process ended without calling `finish()` — making it terminal and
+        // honest rather than stuck.
+        if launch.capture_status == "capturing" && (process_ended || stale) {
+            finalized.push(ReconcileEntry::from_launch(launch, finalized_reason));
+        }
+    }
+
+    if apply {
+        for entry in &pruned {
+            store.reconcile_launch_capture(&entry.id, "pruned", Some(&entry.reason), now)?;
+        }
+        for entry in &finalized {
+            store.reconcile_launch_capture(&entry.id, "partial", Some(&entry.reason), now)?;
+        }
+    }
+
+    let report = ReconcileReport {
+        applied: apply,
+        pruned,
+        recent_missing,
+        finalized,
+    };
+
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(());
+    }
+
+    let verb = if apply { "applied" } else { "dry-run" };
+    println!("reconcile ({verb})");
+    println!("  {} pruned", report.pruned.len());
+    if !report.recent_missing.is_empty() {
+        println!(
+            "  {} recent missing — investigate before reconciling (use --all to include)",
+            report.recent_missing.len()
+        );
+    }
+    println!("  {} finalized", report.finalized.len());
+    if !apply && (!report.pruned.is_empty() || !report.finalized.is_empty()) {
+        println!(
+            "run with --apply to tombstone {} and finalize {}.",
+            report.pruned.len(),
+            report.finalized.len()
+        );
+    }
+    Ok(())
+}
+
+fn conversation_artifact_present(conversation_path: &str) -> bool {
+    crate::trace::resolve_artifact(conversation_path).is_ok_and(|path| path.is_file())
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ReconcileEntry {
+    id: String,
+    run_id: String,
+    reason: String,
+    ended_at: Option<i64>,
+}
+
+impl ReconcileEntry {
+    fn from_launch(launch: &crate::trace::AgentLaunchRow, reason: &str) -> Self {
+        Self {
+            id: launch.id.clone(),
+            run_id: launch.run_id.clone(),
+            reason: reason.to_string(),
+            ended_at: launch.ended_at,
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ReconcileReport {
+    applied: bool,
+    pruned: Vec<ReconcileEntry>,
+    recent_missing: Vec<ReconcileEntry>,
+    finalized: Vec<ReconcileEntry>,
+}
+
 /// `lf trace <exec-or-trace-id>`: reconstruct one process tree.
 pub fn trace(
     exec_id: &str,

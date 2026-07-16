@@ -389,6 +389,8 @@ pub enum Commands {
         /// Emit the run history as JSON
         #[arg(long)]
         json: bool,
+        #[command(subcommand)]
+        cmd: Option<RunsCommand>,
     },
     /// Show recent lf process executions (all repos, local-only)
     Execs {
@@ -535,6 +537,27 @@ pub enum Commands {
     /// External: skill/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RunsCommand {
+    /// Tombstone terminal captures whose conversation artifacts are gone, and
+    /// finalize orphaned `capturing` launches. Dry-run by default; `--apply`
+    /// writes. A red `lf doctor` capture check means un-acknowledged loss —
+    /// this is the explicit acknowledgment that turns historical loss green
+    /// while leaving fresh loss red.
+    Reconcile {
+        /// Apply the tombstone/finalize transitions (default: dry-run report)
+        #[arg(long)]
+        apply: bool,
+        /// Reconcile recent missing captures too (default: age-guard <48h as
+        /// candidates to investigate, not tombstone)
+        #[arg(long)]
+        all: bool,
+        /// Emit the reconciliation report as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -206,7 +206,16 @@ fn check_capture(
 
     let mut failures = Vec::new();
     let mut prompt_only = 0;
+    let mut pruned = 0;
     for launch in &launches {
+        if launch.capture_status == "pruned" {
+            // Tombstoned by `lf runs reconcile`: the artifact is known-absent
+            // and the absence is acknowledged. Counted, never a failure — must
+            // short-circuit before the file-resolution checks below, which would
+            // otherwise flag the known-absent file as a fresh failure.
+            pruned += 1;
+            continue;
+        }
         if crate::trace::resolve_artifact(&launch.artifact_dir).is_err()
             || crate::trace::resolve_artifact(&launch.conversation_path).is_err()
             || launch
@@ -369,11 +378,16 @@ fn check_capture(
             "process {process_id} reports provider spend but has no launch"
         ));
     }
+    let pruned_clause = if pruned > 0 {
+        format!(", {pruned} pruned")
+    } else {
+        String::new()
+    };
     if !failures.is_empty() {
         return Ok(Check::fail(
             "capture",
             format!(
-                "{} failure(s); {} launches, {} turns, {} bytes: {}",
+                "{} failure(s); {} launches, {} turns, {} bytes{pruned_clause}: {}",
                 failures.len(),
                 launches.len(),
                 turns.len(),
@@ -389,7 +403,7 @@ fn check_capture(
         return Ok(Check::warn(
             "capture",
             format!(
-                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only",
+                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only{pruned_clause}",
                 launches.len(),
                 turns.len()
             ),
@@ -398,7 +412,7 @@ fn check_capture(
     Ok(Check::ok(
         "capture",
         format!(
-            "{} launches, {} turns, {} assets, {} bytes",
+            "{} launches, {} turns, {} assets, {} bytes{pruned_clause}",
             launches.len(),
             turns.len(),
             assets.len(),

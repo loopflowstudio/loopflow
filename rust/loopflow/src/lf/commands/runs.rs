@@ -1104,12 +1104,13 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
                 .rev()
                 .find(|event| event.node == "run" && event.event != "started")
                 .copied();
-            let boundary = terminal.unwrap_or_else(|| {
+            // Usage rows are per-boundary deltas; the process's spend is
+            // their sum.
+            let usage_rows = || {
                 process_events
-                    .last()
-                    .copied()
-                    .expect("process has an event")
-            });
+                    .iter()
+                    .filter(|event| event.input_tokens.is_some())
+            };
             SpanDto {
                 run_id: started.run_id.clone(),
                 process_id: started.process_id.clone(),
@@ -1130,11 +1131,13 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
                 status: terminal
                     .map(|event| event.event.clone())
                     .unwrap_or_else(|| "open".to_string()),
-                input_tokens: boundary.input_tokens,
-                output_tokens: boundary.output_tokens,
-                cache_read_tokens: boundary.cache_read_tokens,
-                cost_usd: boundary.cost_usd,
-                duration_secs: boundary.duration_secs,
+                input_tokens: sum_optional_i64(usage_rows().map(|event| event.input_tokens)),
+                output_tokens: sum_optional_i64(usage_rows().map(|event| event.output_tokens)),
+                cache_read_tokens: sum_optional_i64(
+                    usage_rows().map(|event| event.cache_read_tokens),
+                ),
+                cost_usd: sum_optional_f64(usage_rows().map(|event| event.cost_usd)),
+                duration_secs: sum_optional_f64(usage_rows().map(|event| event.duration_secs)),
                 provider: process_events
                     .iter()
                     .rev()
@@ -1150,9 +1153,10 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
     spans
 }
 
-/// Every row that carries a cumulative usage reading, at its own grain: a skill
-/// boundary names its skill, a terminal run row names its command. Feed this to
-/// [`own_spend`] to get what each boundary actually spent.
+/// Every row that carries a usage report, at its own grain: a skill boundary
+/// names its skill and owns that skill's spend, a terminal run row names its
+/// command and owns whatever ran outside any skill. Rows are already deltas —
+/// sum them for any rollup.
 ///
 /// `trace_spans` folds a whole process into one span, which is right for a
 /// process tree and wrong for asking where the tokens went inside it.
@@ -1162,8 +1166,7 @@ pub(crate) fn boundary_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
         .filter(|event| event.input_tokens.is_some())
         .filter(|event| (event.node == "run" || event.node == "skill") && event.event != "started")
         .collect();
-    // own_spend diffs against the previous boundary in the same process. `seq`
-    // is the production order; wall time can jump backwards under clock sync.
+    // `seq` is the production order; wall time can jump backwards under clock sync.
     rows.sort_by_key(|event| (event.process_id.as_str(), event.seq));
 
     rows.into_iter()
@@ -1196,55 +1199,6 @@ pub(crate) fn boundary_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
             model: event.model.clone(),
         })
         .collect()
-}
-
-/// Convert cumulative boundary readings into the spend attributable to each
-/// boundary. Diffing lives here so CLI and dashboard consumers share one rule.
-pub fn own_spend(spans: &[SpanDto]) -> Vec<SpanDto> {
-    let mut previous: BTreeMap<&str, BoundaryUsage> = BTreeMap::new();
-    spans
-        .iter()
-        .map(|span| {
-            let prior = previous
-                .get(span.process_id.as_str())
-                .copied()
-                .unwrap_or_default();
-            let mut own = span.clone();
-            own.input_tokens = diff_i64(span.input_tokens, prior.input_tokens);
-            own.output_tokens = diff_i64(span.output_tokens, prior.output_tokens);
-            own.cache_read_tokens = diff_i64(span.cache_read_tokens, prior.cache_read_tokens);
-            own.cost_usd = diff_f64(span.cost_usd, prior.cost_usd);
-            own.duration_secs = diff_f64(span.duration_secs, prior.duration_secs);
-            previous.insert(
-                span.process_id.as_str(),
-                BoundaryUsage {
-                    input_tokens: span.input_tokens,
-                    output_tokens: span.output_tokens,
-                    cache_read_tokens: span.cache_read_tokens,
-                    cost_usd: span.cost_usd,
-                    duration_secs: span.duration_secs,
-                },
-            );
-            own
-        })
-        .collect()
-}
-
-#[derive(Clone, Copy, Default)]
-struct BoundaryUsage {
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
-    cache_read_tokens: Option<i64>,
-    cost_usd: Option<f64>,
-    duration_secs: Option<f64>,
-}
-
-fn diff_i64(value: Option<i64>, previous: Option<i64>) -> Option<i64> {
-    value.map(|value| value.saturating_sub(previous.unwrap_or(0)).max(0))
-}
-
-fn diff_f64(value: Option<f64>, previous: Option<f64>) -> Option<f64> {
-    value.map(|value| (value - previous.unwrap_or(0.0)).max(0.0))
 }
 
 fn status_label(event: &str) -> &'static str {
@@ -1375,8 +1329,8 @@ pub(crate) fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        boundary_spans, format_duration, format_tokens, own_spend, plan_orphans, plan_reconcile,
-        summarize_execs, trace_id_for_address, trace_spans, SpanDto,
+        boundary_spans, format_duration, format_tokens, plan_orphans, plan_reconcile,
+        summarize_execs, trace_id_for_address, trace_spans,
     };
     use crate::store::RunEventRow;
     use crate::trace::AgentLaunchRow;
@@ -1703,10 +1657,10 @@ mod tests {
         assert_eq!(spans[0].ended_at, None);
     }
 
-    /// The charts group these rows and must reconcile with `lf usage`. A skill
-    /// boundary reads cumulative, so the terminal run row that follows it spends
-    /// nothing of its own — summing every boundary yields the run total exactly
-    /// once.
+    /// The charts group these rows and must reconcile with `lf usage`. Rows are
+    /// per-boundary deltas: each skill row owns its spend and the terminal run
+    /// row owns only what ran outside any skill — summing every boundary yields
+    /// the run total exactly once.
     #[test]
     fn boundary_spend_sums_to_the_run_total_without_double_counting() {
         let mut events = vec![
@@ -1718,10 +1672,10 @@ mod tests {
         events[1].skill = Some("implement".to_string());
         events[1].input_tokens = Some(100);
         events[2].skill = Some("gate".to_string());
-        events[2].input_tokens = Some(150); // cumulative
-        events[3].input_tokens = Some(150); // the run total
+        events[2].input_tokens = Some(50);
+        events[3].input_tokens = Some(0); // nothing ran outside the skills
 
-        let spend = own_spend(&boundary_spans(&events));
+        let spend = boundary_spans(&events);
         let total: i64 = spend.iter().map(|s| s.input_tokens.unwrap_or(0)).sum();
 
         assert_eq!(total, 150, "boundaries must sum to the run total");
@@ -1730,53 +1684,27 @@ mod tests {
         assert_eq!(spend[0].input_tokens, Some(100));
         assert_eq!(spend[1].skill.as_deref(), Some("gate"));
         assert_eq!(spend[1].input_tokens, Some(50));
-        // The terminal row adds nothing: its process already reported everything.
         assert_eq!(spend[2].input_tokens, Some(0));
     }
 
     #[test]
-    fn boundary_spend_follows_process_sequence_when_wall_time_moves_backwards() {
-        let mut first = row("trace", 1, 200, "skill", "completed");
-        first.input_tokens = Some(100);
-        let mut second = row("trace", 2, 100, "run", "completed");
-        second.input_tokens = Some(150);
+    fn a_trace_span_sums_its_process_boundaries() {
+        let mut events = vec![
+            row("trace", 1, 100, "run", "started"),
+            row("trace", 2, 110, "skill", "completed"),
+            row("trace", 3, 120, "skill", "completed"),
+            row("trace", 4, 130, "run", "completed"),
+        ];
+        events[1].input_tokens = Some(100);
+        events[1].cost_usd = Some(1.0);
+        events[2].input_tokens = Some(50);
+        events[2].cost_usd = Some(0.25);
+        events[3].input_tokens = Some(0);
 
-        let spend = own_spend(&boundary_spans(&[first, second]));
-        assert_eq!(spend[0].seq, 1);
-        assert_eq!(spend[0].input_tokens, Some(100));
-        assert_eq!(spend[1].seq, 2);
-        assert_eq!(spend[1].input_tokens, Some(50));
-    }
-
-    #[test]
-    fn own_spend_diffs_consecutive_boundaries_within_a_process() {
-        let boundary = |cost, input| SpanDto {
-            run_id: "trace".to_string(),
-            process_id: "span".to_string(),
-            parent_process_id: None,
-            seq: input,
-            node: "skill".to_string(),
-            name: Some("implement".to_string()),
-            repo: Some("/repo".to_string()),
-            wave: None,
-            flow: None,
-            skill: Some("implement".to_string()),
-            started_at: input,
-            ended_at: Some(input + 1),
-            status: "completed".to_string(),
-            input_tokens: Some(input),
-            output_tokens: Some(input / 10),
-            cache_read_tokens: Some(0),
-            cost_usd: Some(cost),
-            duration_secs: Some(input as f64 / 10.0),
-            provider: Some("claude".to_string()),
-            model: Some("opus".to_string()),
-        };
-        let own = own_spend(&[boundary(1.0, 100), boundary(1.25, 150)]);
-        assert_eq!(own[0].cost_usd, Some(1.0));
-        assert_eq!(own[1].cost_usd, Some(0.25));
-        assert_eq!(own[1].input_tokens, Some(50));
-        assert_eq!(own[1].output_tokens, Some(5));
+        let spans = trace_spans(&events);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].input_tokens, Some(150));
+        assert_eq!(spans[0].cost_usd, Some(1.25));
     }
 
     #[test]

@@ -331,48 +331,6 @@ fn check_capture(
         }
     }
 
-    for process_id in launch_processes {
-        let terminal = events
-            .iter()
-            .filter(|event| event.process_id == process_id)
-            .filter(|event| event.node == "run" && event.event != "started")
-            .max_by_key(|event| event.seq);
-        let Some(terminal) = terminal else {
-            continue;
-        };
-        let process_launches: HashSet<&str> = launches
-            .iter()
-            .filter(|launch| launch.process_id == process_id)
-            .map(|launch| launch.id.as_str())
-            .collect();
-        let process_turns = turns
-            .iter()
-            .filter(|turn| process_launches.contains(turn.launch_id.as_str()))
-            .collect::<Vec<_>>();
-        let input: i64 = process_turns
-            .iter()
-            .filter_map(|turn| turn.provider_input_tokens)
-            .sum();
-        let output: i64 = process_turns
-            .iter()
-            .filter_map(|turn| turn.provider_output_tokens)
-            .sum();
-        let cache: i64 = process_turns
-            .iter()
-            .filter_map(|turn| turn.cache_read_tokens)
-            .sum();
-        if terminal.input_tokens.is_some_and(|value| value != input)
-            || terminal.output_tokens.is_some_and(|value| value != output)
-            || terminal
-                .cache_read_tokens
-                .is_some_and(|value| value != cache)
-        {
-            failures.push(format!(
-                "{process_id} turn usage disagrees with its terminal row"
-            ));
-        }
-    }
-
     for process_id in uncaptured_spend {
         failures.push(format!(
             "process {process_id} reports provider spend but has no launch"

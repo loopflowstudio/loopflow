@@ -10,6 +10,10 @@ pub mod opencode;
 mod opencode_mapping;
 pub mod opencode_runtime;
 
+/// Name a codex rate-limit window by duration — shared with the subscription
+/// poller so stream and poll observations land on the same window key.
+pub(crate) use codex_mapping::window_name as codex_window_name;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;

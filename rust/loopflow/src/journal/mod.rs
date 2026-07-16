@@ -131,7 +131,8 @@ struct RunContext {
 }
 
 /// Token/cost totals accumulated from the agent stream on this thread, plus the
-/// agent that spent them. Attached to ledger rows as the run progresses.
+/// agent that spent them. Drained at each ledger boundary, so every row carries
+/// the spend attributable to that boundary alone — readers sum rows, never diff.
 #[derive(Debug, Clone)]
 struct PendingUsage {
     input_tokens: u64,
@@ -157,6 +158,18 @@ impl PendingUsage {
             seen: false,
         }
     }
+
+    /// Take the spend accumulated since the previous boundary, keeping agent
+    /// attribution (and `seen`) for the boundaries that follow.
+    fn drain(&mut self) -> Self {
+        let drained = self.clone();
+        self.input_tokens = 0;
+        self.output_tokens = 0;
+        self.cache_read_tokens = 0;
+        self.cost_usd = None;
+        self.duration_secs = None;
+        drained
+    }
 }
 
 /// Accumulate token usage reported by the agent stream for the current run.
@@ -172,11 +185,8 @@ pub fn record_usage(input: Option<u64>, output: Option<u64>, cache_read: Option<
 
 /// Record the stream's final cost/duration report for the current run.
 ///
-/// Every usage field on a ledger row is cumulative to that point in the run, so
-/// a reader diffs consecutive rows for a per-skill figure and reads the terminal
-/// row for the run total. Cost used to overwrite instead of accumulate, which
-/// made a multi-skill run report only its last agent invocation's cost — and a
-/// run's cost could *fall* between skills, which no running total ever does.
+/// Cost accumulates until the next boundary drains it; a skill that launches
+/// several agents reports the sum, not just the last invocation.
 pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
     PENDING_USAGE.with(|cell| {
         let mut usage = cell.borrow_mut();
@@ -205,10 +215,10 @@ pub fn record_agent(provider: Option<&'static str>, model: Option<&str>) {
     });
 }
 
-fn snapshot_usage() -> Option<PendingUsage> {
+fn drain_usage() -> Option<PendingUsage> {
     PENDING_USAGE.with(|cell| {
-        let usage = cell.borrow();
-        usage.seen.then(|| usage.clone())
+        let mut usage = cell.borrow_mut();
+        usage.seen.then(|| usage.drain())
     })
 }
 
@@ -378,10 +388,11 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         );
     let is_skill_boundary = matches!(event.node, LfNode::Skill)
         && matches!(event.event, LfEventType::Completed | LfEventType::Errored);
-    // Terminal run rows carry the run's totals; skill boundaries carry a
-    // cumulative snapshot so a reader can diff consecutive skills.
+    // Each boundary drains the spend accumulated since the previous one: a
+    // skill row carries that skill's spend, the terminal run row carries
+    // whatever ran outside any skill. Summing rows gives any rollup.
     let usage = if is_terminal_run || is_skill_boundary {
-        snapshot_usage()
+        drain_usage()
     } else {
         None
     };
@@ -786,26 +797,43 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn every_usage_field_accumulates_across_a_multi_skill_run() {
-        // A ledger row's usage is cumulative to that point. Cost once
-        // overwrote, so a run could report a *lower* cost after a later skill
-        // and `lf usage` summed only the final skill's spend.
+    fn each_boundary_drains_only_its_own_spend() {
+        // A ledger row carries the spend since the previous boundary, so a
+        // reader sums rows: skill rows own their spend, the terminal run row
+        // owns whatever ran outside any skill.
         super::clear_usage();
         super::record_usage(Some(100), Some(10), Some(5));
         super::record_result(Some(1.00), Some(2.0));
+
+        let first = super::drain_usage().expect("usage seen");
+        assert_eq!(first.input_tokens, 100);
+        assert_eq!(first.output_tokens, 10);
+        assert_eq!(first.cache_read_tokens, 5);
+        assert_eq!(first.cost_usd, Some(1.00));
+        assert_eq!(first.duration_secs, Some(2.0));
+
         super::record_usage(Some(50), Some(5), Some(0));
         super::record_result(Some(0.25), Some(3.0));
 
-        let usage = super::snapshot_usage().expect("usage seen");
-        assert_eq!(usage.input_tokens, 150);
-        assert_eq!(usage.output_tokens, 15);
-        assert_eq!(usage.cache_read_tokens, 5);
-        assert_eq!(usage.duration_secs, Some(5.0));
-        assert_eq!(
-            usage.cost_usd,
-            Some(1.25),
-            "cost must accumulate, not overwrite"
-        );
+        let second = super::drain_usage().expect("usage still seen");
+        assert_eq!(second.input_tokens, 50, "spend must not repeat");
+        assert_eq!(second.output_tokens, 5);
+        assert_eq!(second.cache_read_tokens, 0);
+        assert_eq!(second.cost_usd, Some(0.25));
+        assert_eq!(second.duration_secs, Some(3.0));
+        super::clear_usage();
+    }
+
+    #[test]
+    fn a_quiet_boundary_after_spend_reports_zero_not_a_repeat() {
+        super::clear_usage();
+        super::record_usage(Some(100), Some(10), Some(5));
+        super::drain_usage().expect("usage seen");
+
+        let quiet = super::drain_usage().expect("seen persists across boundaries");
+        assert_eq!(quiet.input_tokens, 0);
+        assert_eq!(quiet.output_tokens, 0);
+        assert_eq!(quiet.cost_usd, None);
         super::clear_usage();
     }
 
@@ -814,13 +842,13 @@ mod tests {
         super::clear_usage();
         super::record_agent(Some("claude"), Some("opus"));
         super::record_usage(Some(100), Some(10), None);
-        let first = super::snapshot_usage().expect("first usage");
+        let first = super::drain_usage().expect("first usage");
         assert_eq!(first.provider, Some("claude"));
         assert_eq!(first.model.as_deref(), Some("opus"));
 
         super::record_agent(Some("codex"), None);
         super::record_usage(Some(50), Some(5), None);
-        let second = super::snapshot_usage().expect("second usage");
+        let second = super::drain_usage().expect("second usage");
         assert_eq!(second.provider, Some("codex"));
         assert_eq!(second.model, None, "the prior launch's model must not leak");
         super::clear_usage();

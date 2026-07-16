@@ -109,3 +109,75 @@ fn handoff_cli_opens_attaches_and_hands_the_same_session_back() {
     assert_eq!(handed_back.id.as_str(), session_id);
     assert_eq!(handed_back.status, InteractiveHandoffStatus::HandedBack);
 }
+
+#[test]
+fn handoff_present_execs_into_the_attach_argv() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let wave = Wave::new(
+        WaveId::new(),
+        "product".to_string(),
+        repo.path().display().to_string(),
+    );
+    store.create_wave(&wave).unwrap();
+    drop(store);
+
+    let parent = format!("wave:{}", wave.id());
+    let cwd = repo.path().display().to_string();
+    let opened = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "handoff",
+            "open",
+            "--parent",
+            &parent,
+            "--home",
+            "jack@local",
+            "--cwd",
+            &cwd,
+            "--provider",
+            "codex",
+            "--generation",
+            "1",
+            "--reason",
+            "OAuth login requires a human",
+            "--json",
+            "--",
+            "true",
+        ],
+    );
+    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
+    let session_id = opened["handoff"]["id"].as_str().unwrap();
+
+    // present attaches and execs `true`; the process exits 0 when `true` finishes.
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["handoff", "present", session_id])
+        .current_dir(repo.path())
+        .env("LF_HOME", home.path())
+        .env("LF_DB_PATH", home.path().join("loopflow.db"))
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .env_remove("LF_RUN_ID")
+        .env_remove("LF_PROCESS_ID")
+        .env_remove("LF_WAVE_ID")
+        .env_remove("LF_PROJECT_SESSION_ID")
+        .env_remove("LF_TASK_SESSION_ID")
+        .output()
+        .expect("run lf handoff present");
+    assert!(
+        output.status.success(),
+        "lf handoff present failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // After present, the handoff should be attached (first-attach evidence recorded).
+    let status = run_lf(
+        repo.path(),
+        home.path(),
+        &["handoff", "status", session_id, "--json"],
+    );
+    let handoff: InteractiveHandoff = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(handoff.status, InteractiveHandoffStatus::Attached);
+}

@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
@@ -154,6 +156,12 @@ async fn run_async(command: &HandoffCommand) -> anyhow::Result<()> {
             )
             .await?;
         }
+        HandoffCommand::Present { session_id } => {
+            let session_id = parse_session_id(session_id)?;
+            let handoff = store.attach_interactive_handoff(&session_id).await?;
+            let descriptor = handoff.attach_descriptor();
+            present(&descriptor)?;
+        }
     }
     Ok(())
 }
@@ -292,6 +300,30 @@ fn print_attach(attach: &InteractiveHandoffAttach, json: bool) -> anyhow::Result
         );
     }
     Ok(())
+}
+
+/// CLI presentation adapter: attach and exec into the interactive terminal.
+///
+/// Records first-attach evidence, then replaces this process with the terminal
+/// session (e.g. `tmux attach-session`). When the terminal exits, control
+/// returns to the caller's shell — the human can then complete, hand back, or
+/// fail the handoff.
+fn present(descriptor: &InteractiveHandoffAttach) -> anyhow::Result<()> {
+    let argv: Vec<&str> = descriptor.argv.iter().map(String::as_str).collect();
+    let (program, args) = argv
+        .split_first()
+        .ok_or_else(|| anyhow!("attach argv is empty"))?;
+
+    let mut command = Command::new(program);
+    command.args(args);
+    command.current_dir(&descriptor.cwd);
+    for (key, value) in &descriptor.environment {
+        command.env(key, value);
+    }
+
+    // exec replaces the process — the terminal session inherits our stdin/stdout/stderr.
+    let error = command.exec();
+    Err(anyhow!("failed to exec {program:?}: {error}"))
 }
 
 #[cfg(test)]

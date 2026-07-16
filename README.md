@@ -95,7 +95,7 @@ Present one deliberate interactive child without inventing another parent
 lifecycle:
 
 ```bash
-lf handoff attach ih_0123456789abcdef0123456789abcdef --json
+lf handoff present ih_0123456789abcdef0123456789abcdef   # attach and exec into the terminal
 lf handoff complete ih_0123456789abcdef0123456789abcdef \
   --summary "login complete; auth tests pass"
 lf handoff back ih_0123456789abcdef0123456789abcdef \

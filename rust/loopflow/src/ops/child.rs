@@ -189,6 +189,23 @@ impl ChildSession {
         }
     }
 
+    /// The automatic-recovery bar: terminal and abandoning work only.
+    ///
+    /// Unlike the supervisor bar, this does **not** consult the PR phase. A
+    /// strand is decided by durable status — `plan_stranded_recovery` only ever
+    /// reaches a launch for a Session whose status claims a body that does not
+    /// exist, and delivered work parks at `Waiting`, which it never selects. So
+    /// the open-PR/W2-129 bar is already honoured upstream, and re-applying it
+    /// here would refuse exactly the crashed-mid-publication strands this path
+    /// exists to recover (their PR phase moves to `Open` after the fact, when
+    /// the receipt is finally observed).
+    fn recovery_restart_bar(&self) -> Option<String> {
+        match self {
+            Self::Project(session) => session.supervisor_restart_bar(),
+            Self::Task(session) => session.terminal_or_abandon_bar(),
+        }
+    }
+
     fn current_directive_version(&self) -> u32 {
         match self {
             Self::Project(session) => session.current_directive_version,
@@ -256,6 +273,7 @@ impl ChildSession {
             LaunchIntent::Supervisor => self.supervisor_restart_bar(store).await?,
             LaunchIntent::ExplicitResume => self.abandon_intent_reason(),
             LaunchIntent::CiFix => self.ci_fix_restart_bar(store).await?,
+            LaunchIntent::Recovery => self.recovery_restart_bar(),
         };
         if let Some(bar) = bar {
             return Err(child_error(bar));
@@ -472,6 +490,11 @@ enum LaunchIntent {
     /// the active PR carries a warranted current-head required-check failure
     /// (`TaskSession::ci_fix_restart_bar`).
     CiFix,
+    /// Automatic recovery of a Session whose body died while its status still
+    /// claimed one. Barred only by terminal and abandoning work; the strand
+    /// predicate upstream (`plan_stranded_recovery`) is what keeps it off
+    /// delivered work.
+    Recovery,
 }
 
 /// Wake a Task that is sleeping on an open PR into a bounded `ci-fix` turn.
@@ -495,6 +518,23 @@ pub(crate) async fn wake_task_ci_fix(
         *session = *relaunched;
     }
     Ok(true)
+}
+
+/// Re-dispatch a Task Session whose body died, with no human asking.
+///
+/// The one automatic path for a strand. Barred only by terminal and abandoning
+/// work — see [`ChildSession::recovery_restart_bar`] for why the PR phase is
+/// deliberately not consulted here.
+pub(crate) async fn redispatch_task_body(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<()> {
+    let mut child = ChildSession::Task(Box::new(session.clone()));
+    child.launch(store, LaunchIntent::Recovery).await?;
+    if let ChildSession::Task(relaunched) = child {
+        *session = *relaunched;
+    }
+    Ok(())
 }
 
 pub(crate) async fn resume_session(

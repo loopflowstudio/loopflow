@@ -784,6 +784,170 @@ pub(crate) fn plan_body_recovery(
     }
 }
 
+/// Consecutive automatic recovery attempts a strand gets before Loopflow stops
+/// and says why.
+///
+/// Deliberately not the process generation, which also increments on legitimate
+/// PR rotation — a healthy serial Task reaches generation 17 without ever having
+/// been recovered, and bounding on it would strand exactly the Sessions that are
+/// working.
+pub(crate) const MAX_RECOVERY_ATTEMPTS: u32 = 3;
+
+/// What supervision may do about a Session whose durable status claims a body
+/// that does not exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StrandedPlan {
+    /// The body is alive, unobservable, deliberately parked, or terminal.
+    LeaveAlone,
+    /// A strand a resume fixes. Redispatch as this attempt.
+    Redispatch { attempt: u32 },
+    /// A strand a resume cannot fix, or recovery is spent. Say so once.
+    Surface { reason: String },
+}
+
+/// Whether the body behind a bodyless Session left a strand a resume can fix.
+enum StrandVerdict {
+    Recoverable,
+    Terminal(String),
+    NotStranded,
+}
+
+/// Decide whether a Session with no live body is stranded, and whether a resume
+/// can fix it.
+///
+/// Keyed on durable *status* (through [`BodyIntent`]), never on the `Lost` label
+/// alone. A Task that COMPLETED successfully also reaps its body as `Lost`, so
+/// anything keyed on the tag by itself chases finished work forever. Intent is
+/// consulted first and rejects terminal work before the tag is read at all.
+///
+/// `Waiting`/`Blocked` are parked on purpose, not stranded. That is what
+/// preserves the W2-129 open-PR bar here: a Task that delivered a PR parks at
+/// `Waiting`, so recovery never restarts delivered work and never needs to
+/// consult the PR phase — which is a lagging, mutable signal that can change
+/// long after a strand forms.
+///
+/// The caller must skip a reservation still inside its startup grace
+/// ([`crate::ops::child::child_body_reservation_is_fresh`]); a relaunch already
+/// in flight is not a strand, and re-entering it here would double-dispatch.
+pub(crate) fn plan_stranded_recovery(
+    intent: BodyIntent,
+    observable: bool,
+    process_alive: bool,
+    process: Option<&ChildProcessGeneration>,
+    attempts: u32,
+) -> StrandedPlan {
+    // An unobservable machine never asserts a body is gone, and a live body
+    // belongs to the stall path in `plan_body_recovery`.
+    if !observable || process_alive {
+        return StrandedPlan::LeaveAlone;
+    }
+    match intent {
+        BodyIntent::Terminal | BodyIntent::Waiting | BodyIntent::Blocked => {
+            return StrandedPlan::LeaveAlone;
+        }
+        BodyIntent::Active | BodyIntent::Failed => {}
+    }
+    let Some(process) = process else {
+        return StrandedPlan::LeaveAlone;
+    };
+    match strand_verdict(process) {
+        StrandVerdict::NotStranded => StrandedPlan::LeaveAlone,
+        StrandVerdict::Terminal(reason) => StrandedPlan::Surface { reason },
+        StrandVerdict::Recoverable if attempts >= MAX_RECOVERY_ATTEMPTS => StrandedPlan::Surface {
+            reason: format!(
+                "body generation {} did not survive {MAX_RECOVERY_ATTEMPTS} automatic recovery attempts; \
+                 resume it explicitly or hand it to another agent with `--model`",
+                process.generation
+            ),
+        },
+        StrandVerdict::Recoverable => StrandedPlan::Redispatch {
+            attempt: attempts + 1,
+        },
+    }
+}
+
+/// Read the strand from the lease and the outcome tag — structurally, never by
+/// parsing `status_reason`, which is free-form prose written from many sites and
+/// would rot the first time a provider reworded an error.
+///
+/// Every outcome gets an arm. A fall-through here silently strands whole classes
+/// of body, which is the defect this whole path exists to remove.
+fn strand_verdict(process: &ChildProcessGeneration) -> StrandVerdict {
+    match process.state {
+        // A dead body still holding its lease recorded no outcome at all. The
+        // reaper writes `Lost` for exactly this, so it is recoverable by
+        // construction — no need to wait a tick for the tag to appear.
+        ChildLeaseState::Legacy | ChildLeaseState::Reserved | ChildLeaseState::Active => {
+            StrandVerdict::Recoverable
+        }
+        // A revoked lease is a reap that began and never finished — in practice,
+        // a kill that failed (EPERM) and returned before
+        // `finish_revoked_task_process` could run. `reserve_task_process` CASes
+        // on `IS NULL OR = 'finished'`, so a revoked lease can never reserve
+        // another generation: redispatching would burn the whole attempt budget
+        // on a CAS that cannot pass, and surface a generic exhaustion instead of
+        // the real cause. Say the real cause the first time.
+        //
+        // Finishing such a lease (verifying the process group is truly gone, then
+        // releasing it) is the reaping task's job, not recovery's.
+        ChildLeaseState::Revoked => StrandVerdict::Terminal(format!(
+            "body generation {} is pinned by a lease stuck at `revoked`: its reap never completed, \
+             so no new generation can be reserved. The process group may already be gone; \
+             this needs the lease released, not a resume",
+            process.generation
+        )),
+        ChildLeaseState::Finished => match &process.outcome {
+            // Loopflow's own reap verdict: the body vanished without recording
+            // why it stopped. Nobody chose this, so a resume is the honest
+            // answer — and it is what revived 13/13 hand-swept Sessions.
+            Some(ChildBodyOutcome::Lost { .. }) => StrandVerdict::Recoverable,
+            // Supervision revoked this body *intending* to start its successor
+            // ("recovering the same Task Session"), and the successor never came
+            // — a successful one would have replaced this generation with gen+1,
+            // reserved and outcome-free. So a `Superseded` tag still sitting on
+            // the latest generation proves the intended recovery aborted. The
+            // system already decided it wanted a new body; give it one.
+            Some(ChildBodyOutcome::Superseded { .. }) => StrandVerdict::Recoverable,
+            // The body recorded why it stopped. Something already decided this
+            // is terminal, so a blind resume just re-fails.
+            Some(ChildBodyOutcome::Failed { reason }) => StrandVerdict::Terminal(reason.clone()),
+            // The body ran to a clean end. Its Session is delivered or parked,
+            // and its status — not this tag — decides what happens next.
+            Some(ChildBodyOutcome::Completed) => StrandVerdict::NotStranded,
+            // A human stopped this body on purpose. Restarting it would overrule
+            // an explicit command.
+            Some(ChildBodyOutcome::Interrupted { .. }) => StrandVerdict::NotStranded,
+            // A relic from before explicit leases. Nothing here is trustworthy
+            // enough to restart a body on.
+            Some(ChildBodyOutcome::LegacyStopped { .. }) => StrandVerdict::NotStranded,
+            // A finished lease always carries an outcome; a missing one is a
+            // write that lost a race, and the next pass will read it.
+            None => StrandVerdict::NotStranded,
+        },
+    }
+}
+
+/// Consecutive recovery attempts behind `events` (newest first).
+///
+/// Progress-relative rather than absolute: a recovery of its own appends only
+/// lease and status churn, so anything else in the log means a body booted and
+/// did real work, which resets the count. A Session that recovers, works, and
+/// later strands again therefore gets a full budget rather than inheriting an
+/// old one.
+pub(crate) fn count_recovery_attempts(events: &[TaskEvent]) -> u32 {
+    let mut attempts = 0;
+    for event in events {
+        match event.kind {
+            TaskEventKind::BodyRecoveryAttempted { .. } => attempts += 1,
+            // The churn a recovery itself writes; keep walking past it.
+            TaskEventKind::BodyLeaseChanged { .. } | TaskEventKind::StatusChanged { .. } => {}
+            // Any other durable event is real progress.
+            _ => break,
+        }
+    }
+    attempts
+}
+
 /// Derive the observed body state from durable intent and body evidence.
 ///
 /// Liveness (a body exists) and progress (it advanced) are separate inputs;
@@ -1171,5 +1335,257 @@ mod tests {
     fn a_newer_directive_blocks_the_flow_boundary_until_incorporated() {
         assert_eq!(unincorporated_directive_version(2, 1), Some(2));
         assert_eq!(unincorporated_directive_version(2, 2), None);
+    }
+
+    fn body(state: ChildLeaseState, outcome: Option<ChildBodyOutcome>) -> ChildProcessGeneration {
+        ChildProcessGeneration {
+            generation: 9,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "lf-task-W2-135-7db82f3f".to_string(),
+            agent: "claude".to_string(),
+            provider: "claude".to_string(),
+            provider_session_id: None,
+            started_at: time::OffsetDateTime::UNIX_EPOCH,
+            state,
+            outcome,
+            provenance: None,
+        }
+    }
+
+    fn lost() -> Option<ChildBodyOutcome> {
+        Some(ChildBodyOutcome::Lost {
+            reason: "task process disappeared before recording a terminal outcome".to_string(),
+        })
+    }
+
+    /// A dead body under a Session that still believes it is working is the
+    /// strand. Nobody has to ask.
+    #[test]
+    fn a_dead_body_under_a_running_task_is_redispatched() {
+        let process = body(ChildLeaseState::Active, None);
+        assert_eq!(
+            plan_stranded_recovery(BodyIntent::Active, true, false, Some(&process), 0),
+            StrandedPlan::Redispatch { attempt: 1 }
+        );
+    }
+
+    /// W2-135: frozen at generation 9 with a reaped `lost` body, and the metric
+    /// this feature is measured by counts exactly this row. A predicate keyed on
+    /// `is_process_active()` alone would ignore it forever.
+    #[test]
+    fn a_frozen_failed_session_with_a_lost_body_is_redispatched() {
+        let process = body(ChildLeaseState::Finished, lost());
+        assert_eq!(
+            plan_stranded_recovery(BodyIntent::Failed, true, false, Some(&process), 0),
+            StrandedPlan::Redispatch { attempt: 1 }
+        );
+    }
+
+    /// The triage's central trap: a Task that COMPLETED successfully also reaps
+    /// its body as `lost`. Anything keyed on the tag alone chases finished work
+    /// forever, so intent is consulted first.
+    #[test]
+    fn a_completed_task_with_a_lost_body_is_never_touched() {
+        let process = body(ChildLeaseState::Finished, lost());
+        assert_eq!(
+            plan_stranded_recovery(BodyIntent::Terminal, true, false, Some(&process), 0),
+            StrandedPlan::LeaveAlone
+        );
+    }
+
+    /// W2-212: the body recorded why it stopped. A blind resume just re-fails,
+    /// so recovery says the real reason instead of retrying.
+    #[test]
+    fn a_body_that_recorded_its_own_failure_is_surfaced_not_retried() {
+        let process = body(
+            ChildLeaseState::Finished,
+            Some(ChildBodyOutcome::Failed {
+                reason: "codex_error: You've hit your usage limit".to_string(),
+            }),
+        );
+        assert_eq!(
+            plan_stranded_recovery(BodyIntent::Failed, true, false, Some(&process), 0),
+            StrandedPlan::Surface {
+                reason: "codex_error: You've hit your usage limit".to_string()
+            }
+        );
+    }
+
+    /// W2-230: supervision revoked this body meaning to start its successor, and
+    /// the successor never came. A `superseded` tag still on the latest
+    /// generation proves the intended recovery aborted.
+    #[test]
+    fn an_aborted_recovery_leaves_a_superseded_body_that_is_redispatched() {
+        let process = body(
+            ChildLeaseState::Finished,
+            Some(ChildBodyOutcome::Superseded {
+                reason: "body generation 2 stalled after 1804s without durable progress; \
+                         recovering the same Task Session"
+                    .to_string(),
+            }),
+        );
+        assert_eq!(
+            plan_stranded_recovery(BodyIntent::Active, true, false, Some(&process), 0),
+            StrandedPlan::Redispatch { attempt: 1 }
+        );
+    }
+
+    /// A reap that failed leaves the lease at `revoked`, which
+    /// `reserve_task_process` can never CAS past. Redispatching would burn the
+    /// whole budget on an impossible reservation, so say the real cause once.
+    #[test]
+    fn a_lease_stuck_at_revoked_surfaces_the_real_cause_instead_of_redispatching() {
+        let process = body(ChildLeaseState::Revoked, lost());
+        let plan = plan_stranded_recovery(BodyIntent::Active, true, false, Some(&process), 0);
+        let StrandedPlan::Surface { reason } = plan else {
+            panic!("a revoked lease cannot reserve, so it must surface: {plan:?}");
+        };
+        assert!(reason.contains("stuck at `revoked`"), "{reason}");
+    }
+
+    /// A human stopped this body on purpose; restarting it would overrule an
+    /// explicit command.
+    #[test]
+    fn a_deliberately_stopped_body_is_never_redispatched() {
+        for outcome in [
+            ChildBodyOutcome::Completed,
+            ChildBodyOutcome::Interrupted {
+                reason: "operator interrupted".to_string(),
+            },
+            ChildBodyOutcome::LegacyStopped {
+                reason: "body predates explicit leases".to_string(),
+            },
+        ] {
+            let process = body(ChildLeaseState::Finished, Some(outcome.clone()));
+            assert_eq!(
+                plan_stranded_recovery(BodyIntent::Active, true, false, Some(&process), 0),
+                StrandedPlan::LeaveAlone,
+                "{outcome:?} must not restart a body"
+            );
+        }
+    }
+
+    /// Delivered work parks at `Waiting`. This is what preserves the W2-129
+    /// open-PR bar without ever consulting the PR phase.
+    #[test]
+    fn a_parked_session_is_never_redispatched() {
+        let process = body(ChildLeaseState::Finished, lost());
+        for intent in [BodyIntent::Waiting, BodyIntent::Blocked] {
+            assert_eq!(
+                plan_stranded_recovery(intent, true, false, Some(&process), 0),
+                StrandedPlan::LeaveAlone,
+                "{intent:?} is parked on purpose, not stranded"
+            );
+        }
+    }
+
+    /// A live body belongs to the stall path, and a machine that cannot see
+    /// bodies never asserts one is gone.
+    #[test]
+    fn a_live_or_unobservable_body_is_left_to_someone_else() {
+        let process = body(ChildLeaseState::Active, None);
+        assert_eq!(
+            plan_stranded_recovery(BodyIntent::Active, true, true, Some(&process), 0),
+            StrandedPlan::LeaveAlone
+        );
+        assert_eq!(
+            plan_stranded_recovery(BodyIntent::Active, false, false, Some(&process), 0),
+            StrandedPlan::LeaveAlone
+        );
+    }
+
+    /// Recovery stops and says why rather than minting dead generations.
+    #[test]
+    fn recovery_is_bounded_and_then_surfaces() {
+        let process = body(ChildLeaseState::Finished, lost());
+        assert_eq!(
+            plan_stranded_recovery(
+                BodyIntent::Active,
+                true,
+                false,
+                Some(&process),
+                MAX_RECOVERY_ATTEMPTS - 1
+            ),
+            StrandedPlan::Redispatch {
+                attempt: MAX_RECOVERY_ATTEMPTS
+            }
+        );
+        let plan = plan_stranded_recovery(
+            BodyIntent::Active,
+            true,
+            false,
+            Some(&process),
+            MAX_RECOVERY_ATTEMPTS,
+        );
+        let StrandedPlan::Surface { reason } = plan else {
+            panic!("a spent budget must surface, not redispatch: {plan:?}");
+        };
+        assert!(reason.contains("did not survive"), "{reason}");
+    }
+
+    fn recovery_event(id: i64, attempt: u32) -> TaskEvent {
+        TaskEvent {
+            id,
+            session_id: TaskSessionId::from("ts_46981e681adf4f9aaf68769a3afdeaaf"),
+            kind: TaskEventKind::BodyRecoveryAttempted {
+                generation: 2,
+                attempt,
+                reason: "died".to_string(),
+            },
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn other_event(id: i64, kind: TaskEventKind) -> TaskEvent {
+        TaskEvent {
+            id,
+            session_id: TaskSessionId::from("ts_46981e681adf4f9aaf68769a3afdeaaf"),
+            kind,
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    /// The churn a recovery itself writes must not hide an earlier attempt.
+    #[test]
+    fn recovery_attempts_count_past_their_own_lease_and_status_churn() {
+        let events = vec![
+            other_event(
+                5,
+                TaskEventKind::StatusChanged {
+                    from: crate::task::TaskSessionStatus::Failed,
+                    to: crate::task::TaskSessionStatus::Starting,
+                    reason: "recovering".to_string(),
+                },
+            ),
+            recovery_event(4, 2),
+            other_event(
+                3,
+                TaskEventKind::BodyLeaseChanged {
+                    process: body(ChildLeaseState::Finished, lost()),
+                },
+            ),
+            recovery_event(2, 1),
+        ];
+        assert_eq!(count_recovery_attempts(&events), 2);
+    }
+
+    /// A body that booted and did real work resets the budget, so a Session that
+    /// recovers, works, and strands again later is not punished for its history.
+    #[test]
+    fn real_progress_resets_the_recovery_budget() {
+        let events = vec![
+            recovery_event(9, 1),
+            other_event(
+                8,
+                TaskEventKind::Progress {
+                    summary: "implemented the classifier".to_string(),
+                },
+            ),
+            recovery_event(7, 3),
+            recovery_event(6, 2),
+        ];
+        assert_eq!(count_recovery_attempts(&events), 1);
+        assert_eq!(count_recovery_attempts(&[]), 0);
     }
 }

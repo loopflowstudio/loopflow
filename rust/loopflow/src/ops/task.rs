@@ -5,10 +5,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child_session::{
-    body_progress_age, observe, plan_body_recovery, task_write_lease_from_env, BodyEvidence,
-    BodyRecoveryPlan, ChildBodyOutcome, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState,
-    ChildProcessGeneration, ChildRef, ChildWriteLease, DEFAULT_STALL_AFTER,
+    body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
+    plan_stranded_recovery, task_write_lease_from_env, BodyEvidence, BodyRecoveryPlan,
+    ChildBodyOutcome, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
+    ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState, ChildProcessGeneration,
+    ChildRef, ChildWriteLease, StrandedPlan, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -1972,7 +1973,12 @@ pub(crate) async fn reconcile_process_liveness(
             .map_err(|error| task_error(error.to_string()))?;
         return Ok(());
     }
-    let reason = "task process is missing; resume the same Task Session with `lf task resume`";
+    // Do not write a human instruction into a durable field and stop. This line
+    // was the strand: it told a person to type `lf task resume` and nothing ever
+    // read it, so 13 Sessions sat frozen until someone swept them by hand. State
+    // the fact; the supervision tick's `recover_stranded_task_body` re-dispatches
+    // it, and only announces a verdict a resume cannot fix.
+    let reason = "task process is missing; Loopflow will recover this Task Session";
     record_task_failure(store, session, reason, reason.to_string()).await
 }
 
@@ -1982,6 +1988,11 @@ pub(crate) async fn reconcile_process_liveness(
 /// second watchdog process. A live Project runner calls this on its existing
 /// control tick and recovers only children whose durable progress deadline has
 /// passed on a machine that can still observe their tmux body.
+/// How far back the recovery attempt count reads. Comfortably past the lease and
+/// status churn a few consecutive recoveries write, and far short of a long
+/// Task's full event log.
+const RECOVERY_ATTEMPT_WINDOW: u32 = 64;
+
 pub(crate) async fn supervise_project_task_bodies(
     store: &SharedStore,
     project: &crate::project_session::ProjectSession,
@@ -1998,9 +2009,37 @@ pub(crate) async fn supervise_project_task_bodies(
         .map_err(|error| task_error(format!("failed to list supervised Tasks: {error}")))?;
     let now = time::OffsetDateTime::now_utc();
     let mut recovered = 0;
-    for task in tasks.into_iter().filter(|task| {
-        task.project_session_id == project.id
-            && task.status.is_process_active()
+    let mine = tasks
+        .into_iter()
+        .filter(|task| task.project_session_id == project.id)
+        .collect::<Vec<_>>();
+    // A strand is a body this machine can see is gone. It is deliberately a
+    // separate cohort from the stall sweep below, which only ever looks at
+    // bodies that are alive: the two conditions are disjoint, and folding them
+    // together would make one predicate answer two different questions.
+    for mut task in mine.iter().cloned().filter(|task| {
+        task.latest_process.as_ref().is_some_and(|process| {
+            !live_sessions.contains(&process.tmux_name)
+                // A reservation inside its startup grace is a relaunch in
+                // flight, not a strand.
+                && !super::child::child_body_reservation_is_fresh(process)
+        })
+    }) {
+        match recover_stranded_task_body(store, &mut task).await {
+            Ok(true) => recovered += 1,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    project_session = %project.id,
+                    task = %task.launch.issue.identifier,
+                    error = %error,
+                    "stranded Task recovery failed"
+                );
+            }
+        }
+    }
+    for task in mine.into_iter().filter(|task| {
+        task.status.is_process_active()
             && task.latest_process.as_ref().is_some_and(|process| {
                 process.state == ChildLeaseState::Active
                     && live_sessions.contains(&process.tmux_name)
@@ -2045,6 +2084,113 @@ pub(crate) async fn supervise_project_task_bodies(
         }
     }
     Ok(recovered)
+}
+
+/// Re-dispatch one Session whose body is gone while its status still claims one.
+///
+/// This is the strand path: the body died, and nothing but a resume was ever
+/// going to bring it back. Before this existed, `reconcile_process_liveness`
+/// wrote *"resume the same Task Session with `lf task resume`"* into a durable
+/// field and stopped — a human instruction with no reader.
+///
+/// Returns whether a generation was launched.
+async fn recover_stranded_task_body(
+    store: &SharedStore,
+    task: &mut TaskSession,
+) -> OpsResult<bool> {
+    // A bounded tail is enough: the count only ever walks back over the lease
+    // and status churn a recovery itself writes.
+    let events = store
+        .recent_task_events(&task.id, RECOVERY_ATTEMPT_WINDOW)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task recovery history: {error}")))?;
+    let attempts = count_recovery_attempts(&events);
+    let plan = plan_stranded_recovery(
+        task.status.body_intent(),
+        true,
+        false,
+        task.latest_process.as_ref(),
+        attempts,
+    );
+    let (attempt, reason) = match plan {
+        StrandedPlan::LeaveAlone => return Ok(false),
+        StrandedPlan::Surface { reason } => {
+            // Say it once. A Session already parked on this verdict must not
+            // re-announce it every 5s tick.
+            if task.status == TaskSessionStatus::Failed && task.status_reason == reason {
+                return Ok(false);
+            }
+            record_task_failure(store, task, reason.clone(), reason).await?;
+            return Ok(false);
+        }
+        StrandedPlan::Redispatch { attempt } => {
+            let generation = task
+                .latest_process
+                .as_ref()
+                .map_or(0, |process| process.generation);
+            (
+                attempt,
+                format!(
+                    "body generation {generation} died without recording an outcome; \
+                     recovering the same Task Session (attempt {attempt}/{MAX_RECOVERY_ATTEMPTS})"
+                ),
+            )
+        }
+    };
+    // A successor commits into the worktree, so it must clear the same adoption
+    // preconditions as an explicit resume. `task_recovery_adoption` owns that
+    // refusal; do not second-guess it here.
+    if let Err(error) = task_recovery_adoption(store, task).await {
+        tracing::info!(
+            task = %task.launch.issue.identifier,
+            "not recovering stranded Task: {error}"
+        );
+        return Ok(false);
+    }
+    // Reap the dead lease before reserving the successor: `reserve_task_process`
+    // CASes on a `finished` lease, so a strand still holding `active` can never
+    // launch until this runs.
+    if let Some(process) = task.latest_process.as_ref() {
+        if matches!(
+            process.state,
+            ChildLeaseState::Legacy | ChildLeaseState::Reserved | ChildLeaseState::Active
+        ) {
+            let outcome = super::child::lost_child_body_outcome(process, &reason);
+            task.latest_process = Some(
+                super::child::revoke_and_reap_child_body(
+                    store,
+                    &ChildRef::Task(task.id.clone()),
+                    outcome,
+                )
+                .await?,
+            );
+        }
+    }
+    let generation = task
+        .latest_process
+        .as_ref()
+        .map_or(0, |process| process.generation);
+    // Record the attempt before launching. A launch that fails still reaps as
+    // `Lost` and fails the Session, so counting only successful launches would
+    // let an unlaunchable Session retry forever.
+    store
+        .append_task_event(
+            &task.id,
+            &TaskEventKind::BodyRecoveryAttempted {
+                generation,
+                attempt,
+                reason: reason.clone(),
+            },
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    super::child::redispatch_task_body(store, task).await?;
+    tracing::info!(
+        task = %task.launch.issue.identifier,
+        attempt,
+        "recovered a stranded Task body"
+    );
+    Ok(true)
 }
 
 async fn recover_stalled_task_body(

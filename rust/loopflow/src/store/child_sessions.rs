@@ -296,6 +296,18 @@ impl Store {
         .await
     }
 
+    pub async fn recent_task_events(
+        &self,
+        session_id: &TaskSessionId,
+        limit: u32,
+    ) -> StoreResult<Vec<TaskEvent>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.recent_task_events(&session_id, limit)
+        })
+        .await
+    }
+
     pub async fn latest_task_event(
         &self,
         session_id: &TaskSessionId,

@@ -736,7 +736,9 @@ impl TaskSession {
         None
     }
 
-    fn terminal_or_abandon_bar(&self) -> Option<String> {
+    /// The two bars that hold for *every* automatic restart intent: the work is
+    /// over, or its abandonment is already decided.
+    pub(crate) fn terminal_or_abandon_bar(&self) -> Option<String> {
         if self.status.is_terminal() {
             return Some(format!(
                 "Task {} is {}; terminal Task Sessions do not restart",
@@ -917,6 +919,14 @@ pub enum TaskEventKind {
     },
     BodyLeaseChanged {
         process: ChildProcessGeneration,
+    },
+    /// Loopflow re-dispatched a Session whose body died, with no human asking.
+    /// The durable record of a recovery: `attempt` bounds the retry and this
+    /// event is what [`crate::child_session::count_recovery_attempts`] counts.
+    BodyRecoveryAttempted {
+        generation: u32,
+        attempt: u32,
+        reason: String,
     },
     StatusChanged {
         from: TaskSessionStatus,

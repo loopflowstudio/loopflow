@@ -330,6 +330,65 @@ impl InteractiveHandoff {
             argv: self.attach_argv.clone(),
         }
     }
+
+    /// A handoff still expecting a human: its parent is blocked on it. Terminal
+    /// outcomes (completed, handed back, failed) are no longer active.
+    pub fn is_active(&self) -> bool {
+        !self.status.is_terminal()
+    }
+
+    /// The census/display row for `lf handoff list`. `now` computes `age_secs`
+    /// against `updated_at`; timestamps that will not format leave the string
+    /// empty and the age `None` rather than fabricating a value.
+    pub fn list_row(&self, now: OffsetDateTime) -> InteractiveHandoffListRow {
+        let updated_at = format_rfc3339(self.updated_at);
+        let age_secs =
+            (!updated_at.is_empty()).then(|| (now - self.updated_at).whole_seconds().max(0));
+        InteractiveHandoffListRow {
+            session_id: self.id.clone(),
+            parent_kind: self.parent.kind().to_string(),
+            parent_id: self.parent.id().to_string(),
+            wave_id: self.wave_id.clone(),
+            status: self.status,
+            provider: self.provider.clone(),
+            provider_session_id: self.provider_session_id.clone(),
+            home: self.home.to_string(),
+            cwd: self.cwd.clone(),
+            reason: self.reason.clone(),
+            created_at: format_rfc3339(self.created_at),
+            updated_at,
+            age_secs,
+        }
+    }
+}
+
+fn format_rfc3339(ts: OffsetDateTime) -> String {
+    ts.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
+/// One row of `lf handoff list --json`: enough to census and display a durable
+/// handoff without a second read, but never its attach argv or environment.
+/// Presentations that decide to Open re-fetch the attach descriptor through
+/// `lf handoff attach`, which is the contract's first-attach evidence point.
+/// `parent_kind` is `wave`/`project`/`task`; `home` is the canonical Home
+/// address. `age_secs` is `now - updated_at`, `None` when the timestamp cannot
+/// be read — an unknown age is never a zero one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractiveHandoffListRow {
+    pub session_id: InteractiveHandoffId,
+    pub parent_kind: String,
+    pub parent_id: String,
+    pub wave_id: WaveId,
+    pub status: InteractiveHandoffStatus,
+    pub provider: String,
+    pub provider_session_id: Option<String>,
+    pub home: String,
+    pub cwd: PathBuf,
+    pub reason: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub age_secs: Option<i64>,
 }
 
 /// Stable wire contract consumed by terminal and app presentation adapters.
@@ -405,6 +464,29 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<InteractiveHandoffAttach>(&encoded).unwrap(),
             attach
+        );
+    }
+
+    #[test]
+    fn interactive_handoff_list_fixture_round_trips() {
+        use super::InteractiveHandoffListRow;
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/interactive_handoff_list.json"
+        ));
+        let rows: Vec<InteractiveHandoffListRow> = serde_json::from_str(fixture).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].parent_kind, "task");
+        assert_eq!(rows[0].status, InteractiveHandoffStatus::Waiting);
+        assert_eq!(rows[0].age_secs, Some(90));
+        // An unreadable timestamp keeps age None, not a fabricated zero.
+        assert_eq!(rows[1].parent_kind, "project");
+        assert_eq!(rows[1].provider_session_id, None);
+        assert_eq!(rows[1].age_secs, None);
+        let encoded = serde_json::to_string(&rows).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<InteractiveHandoffListRow>>(&encoded).unwrap(),
+            rows
         );
     }
 }

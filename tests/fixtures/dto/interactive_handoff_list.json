@@ -1,0 +1,32 @@
+[
+  {
+    "session_id": "ih_00000000000000000000000000000001",
+    "parent_kind": "task",
+    "parent_id": "ts_00000000000000000000000000000002",
+    "wave_id": "00000000-0000-4000-8000-000000000003",
+    "status": "waiting",
+    "provider": "codex",
+    "provider_session_id": "codex-abc123",
+    "home": "jack@local",
+    "cwd": "/src/loopflow.interactive-handoff",
+    "reason": "Needs an OAuth login",
+    "created_at": "2026-07-15T00:00:00Z",
+    "updated_at": "2026-07-15T00:00:30Z",
+    "age_secs": 90
+  },
+  {
+    "session_id": "ih_00000000000000000000000000000004",
+    "parent_kind": "project",
+    "parent_id": "ps_00000000000000000000000000000005",
+    "wave_id": "00000000-0000-4000-8000-000000000003",
+    "status": "attached",
+    "provider": "claude",
+    "provider_session_id": null,
+    "home": "ssh://jack@studio.ts.net",
+    "cwd": "/home/jack/src/loopflow",
+    "reason": "Confirm the destructive rebase plan",
+    "created_at": "2026-07-15T00:01:00Z",
+    "updated_at": "2026-07-15T00:02:00Z",
+    "age_secs": null
+  }
+]

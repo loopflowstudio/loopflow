@@ -44,6 +44,7 @@ struct WaveDetailPane: View {
     @State private var selection: WaveWorkSelection?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
+    @State private var showsControl = false
     @StateObject private var terminalStore = TaskTerminalStore.shared
 
     var body: some View {
@@ -111,6 +112,17 @@ struct WaveDetailPane: View {
             .accessibilityIdentifier("wave-context-lab")
 
             Button {
+                showsControl = true
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("Open Control")
+            .accessibilityLabel("Open Control")
+
+            Button {
                 onClose()
             } label: {
                 Image(systemName: "xmark")
@@ -123,6 +135,9 @@ struct WaveDetailPane: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
+        .sheet(isPresented: $showsControl) {
+            ControlView { showsControl = false }
+        }
     }
 }
 

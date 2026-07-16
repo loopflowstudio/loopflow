@@ -199,6 +199,7 @@ lf handoff open \
   -- tmux attach-session -t lf-auth-interactive
 
 lf handoff attach ih_0123456789abcdef0123456789abcdef --json
+lf handoff list --active --json        # every handoff still waiting on a human
 lf handoff complete ih_0123456789abcdef0123456789abcdef \
   --summary "login complete; auth tests pass"
 lf handoff back ih_0123456789abcdef0123456789abcdef \
@@ -210,6 +211,13 @@ Task Session. Repeating `open` returns that Session; repeating `attach` returns
 the same structured `{session_id,status,cwd,host,environment,argv}` descriptor.
 `complete`, `back`, and `fail` are terminal. The first terminal result wins and
 creates one wake for the same parent Session.
+
+`list` enumerates durable handoffs across the machine — each row carries
+identity, the declared parent (`wave`/`project`/`task`), Home, provider, reason,
+and age, but never argv or environment. A census (the Mac's Active Sessions)
+reads `--active` to list only handoffs still waiting on or attached to a human,
+then re-`attach`es the one a human chooses to Open. `--parent <ref>` scopes the
+list to one parent.
 
 This contract carries presentation instructions, not a terminal stream. tmux
 or the vendor owns terminal bytes. The handoff references the parent's existing

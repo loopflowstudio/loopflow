@@ -278,7 +278,6 @@ const MIGRATIONS: &[Migration] = &[
         name: "provider_deliveries",
         sql: include_str!("migrations/0.11.021_provider_deliveries.sql"),
     },
-    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

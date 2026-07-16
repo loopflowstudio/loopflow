@@ -643,6 +643,8 @@ pub enum HandoffCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Attach and exec into the interactive terminal session
+    Present { session_id: String },
 }
 
 fn reject_retired_sub(_: &str) -> Result<String, String> {
@@ -2698,6 +2700,22 @@ mod tests {
                     parent: None,
                 }
             })
+        ));
+
+        let present = Cli::try_parse_from([
+            "lf",
+            "handoff",
+            "present",
+            "ih_00000000000000000000000000000000",
+        ])
+        .expect("parse handoff present");
+        assert!(matches!(
+            present.command,
+            Some(Commands::Handoff {
+                cmd: HandoffCommand::Present {
+                    session_id,
+                }
+            }) if session_id == "ih_00000000000000000000000000000000"
         ));
     }
 

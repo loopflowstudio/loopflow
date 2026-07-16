@@ -230,7 +230,7 @@ lf handoff open \
   --json \
   -- tmux attach-session -t lf-auth-interactive
 
-lf handoff attach ih_0123456789abcdef0123456789abcdef --json
+lf handoff present ih_0123456789abcdef0123456789abcdef   # attach + exec into the terminal
 lf handoff list --active --json        # every handoff still waiting on a human
 lf handoff complete ih_0123456789abcdef0123456789abcdef \
   --summary "login complete; auth tests pass"
@@ -241,6 +241,10 @@ lf handoff back ih_0123456789abcdef0123456789abcdef \
 The shared store allows one unresolved handoff per Wave, Project Session, or
 Task Session. Repeating `open` returns that Session; repeating `attach` returns
 the same structured `{session_id,status,cwd,host,environment,argv}` descriptor.
+`present` is the CLI presentation adapter: it records first-attach evidence then
+replaces the `lf` process with the `argv` (typically `tmux attach-session`),
+passing the descriptor's environment and cwd. When the terminal exits, control
+returns to the shell and the human can complete, hand back, or fail the handoff.
 `complete`, `back`, and `fail` are terminal. The first terminal result wins and
 creates one wake for the same parent Session.
 

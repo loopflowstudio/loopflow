@@ -24,7 +24,11 @@ struct ActiveSessionsView: View {
                     notice(message, color: .statusWarning)
                 }
                 if let census = reading.census {
-                    if census.isEmpty && reading.notices.isEmpty {
+                    // "No active sessions" is a *healthy* empty state, so it may
+                    // only show when nothing is wrong: no live bodies, no scoped
+                    // read failure, and no Wave whose evidence is unavailable.
+                    let anyUnavailable = census.groups.contains { $0.evidence == .unavailable }
+                    if census.isEmpty && reading.notices.isEmpty && !anyUnavailable {
                         emptyState
                     }
                     ForEach(census.groups) { group in
@@ -124,8 +128,14 @@ private struct WaveGroupView: View {
 
     @Environment(\.palette) private var palette
 
+    /// Parent index built once per group, so row indentation is an O(1) lookup.
+    private var rowsById: [String: ActiveSessionRow] {
+        Dictionary(group.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        let byId = rowsById
+        return VStack(alignment: .leading, spacing: Spacing.sm) {
             header
             if let reason = group.unavailableReason {
                 Text(reason)
@@ -141,7 +151,7 @@ private struct WaveGroupView: View {
             ForEach(group.rows) { row in
                 SessionRowView(
                     row: row,
-                    depth: depth(of: row),
+                    depth: Self.depth(of: row, in: byId),
                     onOpen: onOpen
                 )
             }
@@ -176,10 +186,9 @@ private struct WaveGroupView: View {
     }
 
     /// Indent a row under the parent the census declared, by walking parent ids.
-    private func depth(of row: ActiveSessionRow) -> Int {
+    private static func depth(of row: ActiveSessionRow, in byId: [String: ActiveSessionRow]) -> Int {
         var depth = 0
         var current = row.parentRowId
-        let byId = Dictionary(group.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         while let parentId = current, let parent = byId[parentId], depth < 4 {
             depth += 1
             current = parent.parentRowId

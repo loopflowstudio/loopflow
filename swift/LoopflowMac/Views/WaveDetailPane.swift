@@ -136,7 +136,7 @@ struct WaveDetailPane: View {
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
         .sheet(isPresented: $showsControl) {
-            ControlView(repoPath: repoPath) { showsControl = false }
+            ControlView { showsControl = false }
         }
     }
 }

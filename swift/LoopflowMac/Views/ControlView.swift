@@ -7,7 +7,6 @@ import SwiftUI
 /// reached from the Wave header. Its first view is Active Sessions; Run History
 /// is named but deferred to a quiet, disabled affordance.
 struct ControlView: View {
-    let repoPath: String
     let onClose: () -> Void
 
     @Environment(\.palette) private var palette

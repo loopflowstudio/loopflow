@@ -17,6 +17,7 @@ mod rebase;
 mod release;
 pub mod task;
 pub(crate) mod task_pm;
+pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
 

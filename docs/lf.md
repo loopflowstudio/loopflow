@@ -367,8 +367,10 @@ path, and the latest known and applied migrations. Those fields still print
 when the database is too new or came from a divergent development build.
 The `receipts` check sweeps every wave's memory facts for receipt health:
 missing (zero receipts), orphaned (reference resolves to no known record),
-and cross-wave (receipt wave differs from the claim's wave). During the
-post-contract grace window all findings are warnings, not failures.
+cross-wave (receipt wave differs from the claim's wave), and inaccessible
+(the evidence source couldn't be read this run, so the receipt can't be
+judged — surfaced with the read error, never silently called orphaned).
+During the post-contract grace window all findings are warnings, not failures.
 
 ## Measuring Codebase Weight
 

@@ -775,6 +775,36 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(crate) fn arm_task_pr_ci_fix_for_lease(
+        &self,
+        pr: &TaskPr,
+        lease: &ChildWriteLease,
+        responded_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        validate_task_pr(pr)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_child_write_lease(
+            &transaction,
+            &ChildRef::Task(pr.task_session_id.clone()),
+            lease,
+        )?;
+        if update_task_pr(&transaction, pr)? == 0 {
+            return Err(StoreError::NotFound);
+        }
+        if let Some(observation) = pr.fresh_ci() {
+            super::ci_incidents::mark_ci_incident_responded_on(
+                &transaction,
+                &pr.id,
+                &observation.head_sha,
+                &observation.failure_set(),
+                responded_at,
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if heal_task_pr_base(&conn, pr)? == 0 {

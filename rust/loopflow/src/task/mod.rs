@@ -338,6 +338,30 @@ impl CiObservation {
     }
 }
 
+/// One failed CI head carried forward after the PR's current observation moves
+/// on. This is evidence about the recovery loop, never a wake queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CiIncident {
+    pub identity: String,
+    pub task_session_id: TaskSessionId,
+    pub pr_id: TaskPrId,
+    pub repo: String,
+    pub pr_number: u32,
+    pub failed_head_sha: String,
+    pub failure_set: Vec<String>,
+    pub provider_completed_at: Option<OffsetDateTime>,
+    pub poll_observed_at: Option<OffsetDateTime>,
+    pub webhook_received_at: Option<OffsetDateTime>,
+    pub trigger_command_id: Option<ChildCommandId>,
+    pub responded_at: Option<OffsetDateTime>,
+    pub green_at: Option<OffsetDateTime>,
+    pub merged_at: Option<OffsetDateTime>,
+    pub blocked_at: Option<OffsetDateTime>,
+    pub blocked_reason: Option<String>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
 /// The last attempt to refresh one persisted GitHub PR. This metadata lives on
 /// `TaskPr` beside the cached PR fields: it bounds repeated reads across `lf`
 /// processes without making GitHub the source of truth.

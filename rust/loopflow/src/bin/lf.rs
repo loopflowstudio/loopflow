@@ -1513,6 +1513,17 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Usage { json, days }) => {
                 loopflow::lf::commands::usage::run(*json, *days)
             }
+            Some(Commands::Ci {
+                since,
+                wave,
+                repo,
+                json,
+            }) => loopflow::lf::commands::ci::run(
+                since,
+                wave.as_deref(),
+                repo.as_deref(),
+                *json,
+            ),
             Some(Commands::Top) => loopflow::lf::commands::top::run(),
             Some(Commands::Context {
                 days,

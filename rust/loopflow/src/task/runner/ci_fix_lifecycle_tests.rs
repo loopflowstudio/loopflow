@@ -525,6 +525,17 @@ impl Harness {
             .and_then(|pr| pr.ci_observation)
     }
 
+    async fn incidents(&self) -> Vec<crate::store::ci_incidents::CiIncidentReportRow> {
+        self.store
+            .ci_incidents_since(
+                self.task.created_at - time::Duration::seconds(1),
+                None,
+                Some("test/repo"),
+            )
+            .await
+            .expect("read CI incidents")
+    }
+
     /// The gate is the `tests-result` roll-up; the leaves are what actually
     /// broke. Mirrors this repo's real branch protection.
     fn checks_failing(&self) {
@@ -600,9 +611,20 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
         vec!["cargo-fmt", "clippy"],
         "the seed carries the failing leaves parsed from gh's full read"
     );
+    let incidents = harness.incidents().await;
+    assert_eq!(
+        incidents.len(),
+        1,
+        "the first failed head opens an incident"
+    );
+    assert_eq!(incidents[0].incident.responded_at, None);
 
     // 3. Exactly one body.
     assert!(harness.arm().await, "a red head wakes a ci-fix body");
+    assert!(
+        harness.incidents().await[0].incident.responded_at.is_some(),
+        "body birth records the response milestone"
+    );
     assert!(
         !harness.arm().await,
         "a duplicate delivery must not wake a second body"
@@ -629,6 +651,11 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
         harness.arm().await,
         "a new failing head rearms rather than staying deduped against the old one"
     );
+    assert_eq!(
+        harness.incidents().await.len(),
+        2,
+        "each failed repair head is one measurable attempt"
+    );
 
     // 6. Green: the repair worked and the Task settles back to waiting.
     harness.checks_passing();
@@ -639,6 +666,14 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
         .expect("a passing reading lands");
     assert_eq!(observation.state, CiState::Passing);
     assert!(!harness.arm().await, "a green head must not wake a body");
+    assert!(
+        harness
+            .incidents()
+            .await
+            .iter()
+            .all(|incident| incident.incident.green_at.is_some()),
+        "the passing head closes every open attempt on the PR"
+    );
 }
 
 /// The carry-forward is conditional on the failing *set*, not just the head: a

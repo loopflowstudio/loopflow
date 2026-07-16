@@ -13,6 +13,7 @@ use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::wave::Wave;
 mod child_sessions;
+pub(crate) mod ci_incidents;
 mod interaction_reviews;
 mod interactive_handoffs;
 pub mod migrations;
@@ -960,7 +961,7 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::task::{
-        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind,
+        AfterMerge, CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind,
         TaskGateProposal, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession, TaskSessionId,
         TaskSessionStatus,
     };
@@ -968,7 +969,7 @@ mod tests {
     use std::env;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use time::OffsetDateTime;
+    use time::{Duration, OffsetDateTime};
 
     #[test]
     fn build_provenance_selects_separate_default_store_universes() {
@@ -1192,6 +1193,109 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[tokio::test]
+    async fn ci_incident_preserves_recovery_milestones_after_current_pr_state_moves_on() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let task = make_task_session(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+
+        let observed_at = task.created_at + Duration::seconds(5);
+        let incident = CiIncident {
+            identity: "github:ci:owner/repo:42:bad-head:digest".to_string(),
+            task_session_id: task.id.clone(),
+            pr_id: pr.id.clone(),
+            repo: "owner/repo".to_string(),
+            pr_number: 42,
+            failed_head_sha: "bad-head".to_string(),
+            failure_set: vec!["test".to_string()],
+            provider_completed_at: None,
+            poll_observed_at: Some(observed_at),
+            webhook_received_at: None,
+            trigger_command_id: None,
+            responded_at: None,
+            green_at: None,
+            merged_at: None,
+            blocked_at: None,
+            blocked_reason: None,
+            created_at: observed_at,
+            updated_at: observed_at,
+        };
+        store.observe_ci_incident(&incident).await.unwrap();
+        store.observe_ci_incident(&incident).await.unwrap();
+
+        let mut command = ChildCommand::new(
+            ChildRef::Task(task.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
+                text: "check the repair".to_string(),
+            },
+        );
+        command.created_at = observed_at + Duration::seconds(15);
+        store.create_child_command(&command).await.unwrap();
+        assert!(store
+            .mark_ci_incident_responded(
+                &pr.id,
+                "bad-head",
+                &["test".to_string()],
+                observed_at + Duration::seconds(10),
+            )
+            .await
+            .unwrap());
+        store
+            .mark_ci_incidents_blocked(
+                &pr.id,
+                observed_at + Duration::seconds(20),
+                "waiting for credentials",
+            )
+            .await
+            .unwrap();
+        store
+            .mark_ci_incidents_green(&pr.id, observed_at + Duration::seconds(30))
+            .await
+            .unwrap();
+        store
+            .mark_ci_incidents_merged(&pr.id, observed_at + Duration::seconds(40))
+            .await
+            .unwrap();
+
+        let rows = store
+            .ci_incidents_since(task.created_at, None, Some("owner/repo"))
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.incident.poll_observed_at, Some(observed_at));
+        assert_eq!(
+            row.incident.responded_at,
+            Some(observed_at + Duration::seconds(10))
+        );
+        assert_eq!(
+            row.incident.green_at,
+            Some(observed_at + Duration::seconds(30))
+        );
+        assert_eq!(
+            row.incident.merged_at,
+            Some(observed_at + Duration::seconds(40))
+        );
+        assert_eq!(
+            row.incident.blocked_at,
+            Some(observed_at + Duration::seconds(20))
+        );
+        assert_eq!(
+            row.incident.blocked_reason.as_deref(),
+            Some("waiting for credentials")
+        );
+        assert!(row.human_assisted);
     }
 
     #[tokio::test]

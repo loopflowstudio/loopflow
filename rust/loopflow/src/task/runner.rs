@@ -1807,6 +1807,17 @@ async fn set_and_record_status(
             },
         )
         .await?;
+    if status == TaskSessionStatus::Blocked {
+        if let Some(pr) = store.active_task_pr(&session.id).await? {
+            store
+                .mark_ci_incidents_blocked(
+                    &pr.id,
+                    time::OffsetDateTime::now_utc(),
+                    &session.status_reason,
+                )
+                .await?;
+        }
+    }
     Ok(())
 }
 
@@ -1959,7 +1970,9 @@ async fn arm_ci_fix_wake(
         observation.mark_woken();
     }
     pr.updated_at = time::OffsetDateTime::now_utc();
-    store.update_task_pr_for_lease(&pr, lease).await?;
+    store
+        .arm_task_pr_ci_fix_for_lease(&pr, lease, pr.updated_at)
+        .await?;
     Ok(true)
 }
 

@@ -282,6 +282,20 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn arm_task_pr_ci_fix_for_lease(
+        &self,
+        pr: &TaskPr,
+        lease: &ChildWriteLease,
+        responded_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let pr = pr.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.arm_task_pr_ci_fix_for_lease(&pr, &lease, responded_at)
+        })
+        .await
+    }
+
     pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.heal_task_pr_base(&pr)).await

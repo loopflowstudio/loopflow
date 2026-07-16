@@ -10,6 +10,7 @@ use crate::interactive_handoff::{
 };
 use crate::lf::HandoffCommand;
 use crate::store::{open_store, storage_config_from_env, Store};
+use crate::task::TaskSessionId;
 
 #[derive(Debug, Serialize)]
 struct OpenResult {
@@ -182,7 +183,41 @@ async fn finish(
     let handoff = store
         .finish_interactive_handoff(&session_id, &outcome)
         .await?;
+    wake_parent(store, &handoff).await;
     print_handoff(&handoff, json)
+}
+
+/// Wake the blocked parent so a fresh body reconciles this terminal outcome and
+/// resumes exactly once (the wake-claim guard makes duplicate resumes harmless).
+/// Best-effort: the handoff is already durably recorded, so a resume that cannot
+/// be queued — parent abandoned, registry busy — must not fail the human's
+/// completion. Project and Wave parents resume through their own supervision.
+async fn wake_parent(store: &Store, handoff: &InteractiveHandoff) {
+    let InteractiveHandoffParent::Task(task_id) = &handoff.parent else {
+        return;
+    };
+    if let Err(error) = resume_task_parent(store, task_id).await {
+        eprintln!(
+            "warning: interactive handoff {} resolved but waking parent Task {} failed: {error}",
+            handoff.id, task_id
+        );
+    }
+}
+
+async fn resume_task_parent(store: &Store, task_id: &TaskSessionId) -> anyhow::Result<()> {
+    let session = store
+        .get_task_session(task_id)
+        .await?
+        .ok_or_else(|| anyhow!("parent Task Session {task_id} not found"))?;
+    crate::ops::task::resume_task_async(
+        &session.launch.issue.identifier,
+        None,
+        None,
+        Some("interactive handoff resolved".to_string()),
+    )
+    .await
+    .map_err(|error| anyhow!(error.to_string()))?;
+    Ok(())
 }
 
 fn parse_session_id(value: &str) -> anyhow::Result<InteractiveHandoffId> {

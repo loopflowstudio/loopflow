@@ -170,6 +170,34 @@ Commands to run:
   the handoff row, not in memory.
 - Wake claim is one atomic `UPDATE … WHERE wake_claimed_at IS NULL` (already built).
 
+## Implemented (this PR)
+
+The rendezvous landed as a **pure reader** over the handoff the agent opens via
+the existing `lf handoff open` CLI — faithful to "an agent *deliberately* opens":
+
+- `task/interactive_rendezvous.rs` — `pending()` (the one unresolved handoff:
+  non-terminal, or terminal-but-unclaimed) and `resolve()` (reads + claims the
+  wake once, returning `None` / `Waiting` / `Resume { outcome, fresh }`). Unit
+  tested against a temp store.
+- `task/runner.rs`, two seams both keyed on `pending`/`resolve`:
+  - **Birth reconcile** (before the provider starts): `resolve()` → advance past a
+    resolved step (Completed/HandedBack), block on Failed, or park while Waiting.
+  - **Post-turn park**: if `pending()` is `Some` after a completed turn, the agent
+    opened a handoff — clear the body as interrupted (cursor holds) and park
+    `Waiting`. Using `pending` (not "non-terminal only") closes a double-advance:
+    a handoff that goes terminal *within* the turn still parks, so the next
+    birth claims+advances exactly once instead of the turn advancing too.
+- `lf handoff complete|back|fail` wakes a Task parent via
+  `ops::task::resume_task_async` (best-effort; exactly-once is the wake claim, not
+  the enqueue). `task_resume` was split into a sync wrapper + async core so the
+  handoff command can wake without a nested runtime.
+
+**Known limitation (documented in `scratch/questions.md`):** a crash in the
+microsecond between claiming the wake and persisting the advanced cursor can let
+the next body re-run the interactive step and open a *duplicate* handoff. Rare,
+self-correcting (a human completes the duplicate), and closable later with a step
+key on the handoff row or a single atomic claim+advance.
+
 ## Exclusions (deliberate, follow-up Tasks)
 
 - **Project / Wave runner wiring.** The rendezvous helper is written

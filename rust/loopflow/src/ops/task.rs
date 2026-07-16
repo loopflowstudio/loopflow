@@ -2748,28 +2748,38 @@ pub fn task_resume(
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<TaskControlResult> {
-    block_on_task(async move {
-        let store = task_store().await?;
-        let mut session = store
-            .get_task_session_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        reconcile_task_pr(&store, &mut session).await?;
-        reconcile_process_liveness(&store, &mut session).await?;
-        let issue_id = session.launch.issue.identifier.clone();
-        let source = command_source(&session)?;
-        let result = super::child::resume_session(
-            &store,
-            super::child::ChildSession::Task(Box::new(session)),
-            source,
-            message,
-            model,
-            reason,
-        )
-        .await?;
-        Ok(task_control_result(issue_id, result))
-    })
+    let issue = issue.to_string();
+    block_on_task(async move { resume_task_async(&issue, message, model, reason).await })
+}
+
+/// Async core of [`task_resume`], reusable from callers already inside a runtime
+/// (e.g. `lf handoff complete` waking the parent it just resolved).
+pub(crate) async fn resume_task_async(
+    issue: &str,
+    message: Option<String>,
+    model: Option<String>,
+    reason: Option<String>,
+) -> OpsResult<TaskControlResult> {
+    let store = task_store().await?;
+    let mut session = store
+        .get_task_session_by_issue(issue)
+        .await
+        .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+        .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+    reconcile_task_pr(&store, &mut session).await?;
+    reconcile_process_liveness(&store, &mut session).await?;
+    let issue_id = session.launch.issue.identifier.clone();
+    let source = command_source(&session)?;
+    let result = super::child::resume_session(
+        &store,
+        super::child::ChildSession::Task(Box::new(session)),
+        source,
+        message,
+        model,
+        reason,
+    )
+    .await?;
+    Ok(task_control_result(issue_id, result))
 }
 
 pub fn task_receipt(

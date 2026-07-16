@@ -39,3 +39,25 @@
   Completed / HandedBack advance the flow past the interactive step; Failed wakes
   the parent once and parks it `Blocked` (operator-resumable) with the failure
   reason, so an unmet interactive obligation never loops or is silently skipped.
+
+## Known limitations of the shipped slice (follow-up)
+
+- **Claim-then-crash-before-advance window.** The runner's birth reconcile claims
+  the wake, then advances the flow cursor, then persists it. A crash in the gap
+  between the claim and the cursor persist leaves a terminal-claimed handoff with
+  the cursor still on the interactive step. `pending()` excludes claimed handoffs,
+  so the next body resolves `None`, re-runs the interactive step, and the agent
+  opens a *duplicate* handoff. Rare (a crash in a two-write window) and
+  self-correcting (a human completes the duplicate). Closable with a step key on
+  the handoff row, or by making claim+advance a single atomic store write. Not
+  worth the schema/store surface in this first slice.
+
+- **Project / Wave parents don't auto-wake on `lf handoff complete`.** The wake
+  enqueue is Task-only for now; Project/Wave resume through their own supervision.
+  The rendezvous *reader* is parent-agnostic, so wiring their runners is additive.
+
+- **Flow-authored `WaitInteractive` does not auto-open a handoff.** This slice is
+  agent-initiated: the agent opens the handoff with `lf handoff open`, and the
+  runner reads it. Auto-opening at a `Require`-policy interactive flow step (so a
+  flow author, not the agent, drives the rendezvous) needs the runner to build the
+  attach descriptor itself and is deferred.

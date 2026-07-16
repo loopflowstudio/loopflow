@@ -1330,18 +1330,37 @@ mod tests {
             "main",
         );
 
+        // A real run first, so the ledger exists and holds rows. Without it
+        // the drop would prove nothing: an absent database answers "not
+        // recorded" for every id, and this test would pass with the lookup
+        // hardwired to `true`.
+        super::emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Started,
+            fields.clone(),
+        );
+        let recorded = super::current_context().expect("recorded run");
+        super::clear_context();
+
         // The production shape behind `lf doctor`'s seven dangling parents: a
         // parent exported its identity but its ledger write never landed — a
         // development build the production-store guard refused, or a listener
         // that outlived the store it minted against. The trace id survives in
         // the environment; the parent's rows do not exist anywhere.
         let ghost = ProcessId::new();
-        std::env::set_var(super::LF_RUN_ID_ENV, RunId::new().as_str());
+        std::env::set_var(super::LF_RUN_ID_ENV, recorded.run_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
 
         let context = super::ensure_run_context(repo.path(), &fields)
             .expect("run context")
             .expect("context");
+
+        assert!(
+            super::parent_is_recorded(&recorded.process_id),
+            "the ledger this test queries must really hold a parent, or the \
+             assertion below passes for the wrong reason"
+        );
 
         assert_eq!(
             context.parent_process_id, None,

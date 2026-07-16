@@ -105,17 +105,38 @@ mod tests {
     use crate::store::{open_store, StorageConfig};
     use crate::wave::Wave;
 
+    /// Holds the test-env serialization lock and restores `LF_WAVE_ID` on drop.
+    /// The `MutexGuard` lives in a field so clippy's `await_holding_lock` stays
+    /// quiet — the lock must span the whole async test body.
+    struct WaveIdGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl WaveIdGuard {
+        fn new() -> Self {
+            Self {
+                _lock: crate::journal::test_env_lock(),
+                previous: std::env::var_os(WAVE_ID_ENV),
+            }
+        }
+    }
+
+    impl Drop for WaveIdGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(WAVE_ID_ENV, value),
+                None => std::env::remove_var(WAVE_ID_ENV),
+            }
+        }
+    }
+
     /// The classification matrix: both Task and Project controls call
     /// `resolve_child_command_source`, so this single test proves identical
     /// classification across every ambient context. Real store rows, no network.
     #[tokio::test]
     async fn command_source_classifies_every_ambient_context() {
-        let _lock = crate::journal::test_env_lock();
-        let previous = std::env::var(WAVE_ID_ENV).ok();
-        let restore = || match &previous {
-            Some(value) => std::env::set_var(WAVE_ID_ENV, value),
-            None => std::env::remove_var(WAVE_ID_ENV),
-        };
+        let _guard = WaveIdGuard::new();
 
         let tmp = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
@@ -194,7 +215,5 @@ mod tests {
             msg.contains("cannot control"),
             "foreign wave UUID error should mention cannot control: {msg}"
         );
-
-        restore();
     }
 }

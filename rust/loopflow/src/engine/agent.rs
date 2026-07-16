@@ -561,6 +561,8 @@ pub fn resolve_codex_model(model: &str) -> Option<String> {
     }
 }
 
+const CODEX_DEFAULT_SERVICE_TIER: &str = "default";
+
 /// Build `thread/start` params for Codex app-server sessions.
 ///
 /// Mirrors model/cwd mapping used by one-shot Codex launches so session and
@@ -569,6 +571,11 @@ pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
+
+    params.insert(
+        "serviceTier".to_string(),
+        serde_json::Value::String(CODEX_DEFAULT_SERVICE_TIER.to_string()),
+    );
 
     if let Some(model) = launch.agent.as_deref().and_then(resolve_codex_model) {
         params.insert("model".to_string(), serde_json::Value::String(model));
@@ -677,6 +684,9 @@ pub fn build_codex_command(
     } else {
         vec!["codex".to_string()]
     };
+
+    cmd.push("-c".to_string());
+    cmd.push(format!("service_tier=\"{CODEX_DEFAULT_SERVICE_TIER}\""));
 
     // Load context via model_instructions_file (replaces AGENTS.md)
     if let Some(ref context_file) = process.context_file {
@@ -1620,6 +1630,7 @@ trust_level = "trusted"
         let cmd = build_codex_command(&launch, &process, None);
         let policy_args = codex_permission_args(None, true, false);
         assert!(cmd.contains(&"exec".to_string()));
+        assert_arg_pair(&cmd, "-c", "service_tier=\"default\"");
         assert!(!cmd.contains(&"--full-auto".to_string()));
         assert_eq!(
             cmd.contains(&"--sandbox".to_string()),
@@ -1644,6 +1655,7 @@ trust_level = "trusted"
             ..Default::default()
         };
         let cmd = build_codex_command(&launch, &process, None);
+        assert_arg_pair(&cmd, "-c", "service_tier=\"default\"");
         assert!(
             !cmd.contains(&"exec".to_string()),
             "interactive mode should not use 'exec'"
@@ -2030,6 +2042,10 @@ trust_level = "trusted"
             params.get("cwd"),
             Some(&serde_json::Value::String("/tmp/repo".to_string()))
         );
+        assert_eq!(
+            params.get("serviceTier"),
+            Some(&serde_json::Value::String("default".to_string()))
+        );
     }
 
     #[test]
@@ -2045,6 +2061,10 @@ trust_level = "trusted"
         assert_eq!(
             params.get("cwd"),
             Some(&serde_json::Value::String("/tmp/repo".to_string()))
+        );
+        assert_eq!(
+            params.get("serviceTier"),
+            Some(&serde_json::Value::String("default".to_string()))
         );
     }
 

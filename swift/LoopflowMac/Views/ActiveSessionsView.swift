@@ -12,7 +12,7 @@ struct ActiveSessionsView: View {
 
     @Environment(\.palette) private var palette
     @State private var reading = ActiveSessionsReading()
-    @State private var openTarget: OpenHandoffTarget?
+    @State private var openTarget: InteractiveHandoffListRow?
 
     var body: some View {
         ScrollView {
@@ -49,8 +49,8 @@ struct ActiveSessionsView: View {
             }
         }
         .refreshable { await load() }
-        .sheet(item: $openTarget) { target in
-            HandoffAttachSheet(sessionId: target.id, query: query) { openTarget = nil }
+        .sheet(item: $openTarget) { handoff in
+            HandoffAttachSheet(handoff: handoff, query: query) { openTarget = nil }
         }
     }
 
@@ -74,7 +74,9 @@ struct ActiveSessionsView: View {
     }
 
     private func openHandoff(_ sessionId: String) {
-        openTarget = OpenHandoffTarget(id: sessionId)
+        // Open needs the durable row's provider, Home, and provider session id to
+        // resolve the surface; look it up from the same list the census read.
+        openTarget = reading.handoffs.first { $0.sessionId == sessionId }
     }
 
     private func load() async {
@@ -97,12 +99,14 @@ struct ActiveSessionsView: View {
             }
             reading = ActiveSessionsReading(
                 census: ActiveSessionsCensus(roadmap: roadmap, runs: runs, handoffs: handoffs),
+                handoffs: handoffs,
                 notices: notices,
                 error: nil
             )
         } catch {
             reading = ActiveSessionsReading(
                 census: nil,
+                handoffs: [],
                 notices: [],
                 error: "Active Sessions unavailable: \(error.localizedDescription)"
             )
@@ -112,12 +116,9 @@ struct ActiveSessionsView: View {
 
 private struct ActiveSessionsReading {
     var census: ActiveSessionsCensus?
+    var handoffs: [InteractiveHandoffListRow] = []
     var notices: [String] = []
     var error: String?
-}
-
-private struct OpenHandoffTarget: Identifiable {
-    let id: String
 }
 
 // MARK: - One Wave's group
@@ -348,45 +349,85 @@ private enum RelativeAge {
     }
 }
 
-// MARK: - Open: re-attach the exact durable Session
+// MARK: - Open: present the exact durable Session in the remembered surface
 
-/// Open records first-attach evidence through `lf handoff attach` and embeds the
-/// returned descriptor in Ghostty. The Session is the vendor's; this view owns no
-/// lifecycle — it renders the argv the contract hands back.
+/// Open resolves *where* to present the handoff — the last successful surface for
+/// this provider on this Home, then the last overall, then embedded Ghostty — and
+/// records the choice only after a launch succeeds. Every target attaches the one
+/// durable Session by running the argv the contract hands back; this view owns no
+/// lifecycle and never creates or names the Session.
 private struct HandoffAttachSheet: View {
-    let sessionId: String
+    let handoff: InteractiveHandoffListRow
     let query: RegistryQuery
     let onClose: () -> Void
+    var preferences: HandoffSurfacePreferences = .shared
 
     @Environment(\.palette) private var palette
     @State private var attach: InteractiveHandoffAttach?
+    @State private var capability: HandoffSurfaceCapability?
+    @State private var surface: HandoffSurface?
+    @State private var externalNote: String?
+    @State private var fallbackNotice: String?
     @State private var error: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Interactive handoff")
-                    .font(Typography.sectionTitle(15))
-                    .foregroundStyle(palette.text)
-                Spacer()
-                Button(action: onClose) {
-                    Image(systemName: "xmark").font(Typography.caption())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close handoff")
-            }
-            .padding(Spacing.md)
+            header
             Divider()
             content
         }
         .frame(minWidth: 720, minHeight: 460)
         .background(palette.background)
-        .task { await attachSession() }
+        .task { await start() }
+    }
+
+    private var header: some View {
+        HStack(spacing: Spacing.sm) {
+            Text("Interactive handoff")
+                .font(Typography.sectionTitle(15))
+                .foregroundStyle(palette.text)
+            if let fallbackNotice {
+                Text(fallbackNotice)
+                    .font(Typography.caption(10))
+                    .foregroundStyle(Color.statusWarning)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if let capability, let attach {
+                surfaceMenu(capability: capability, attach: attach)
+            }
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(Typography.caption())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close handoff")
+        }
+        .padding(Spacing.md)
+    }
+
+    /// The honest picker: only surfaces that can reach this handoff, each labeled
+    /// by the reach it delivers so a worktree-only option never overclaims.
+    private func surfaceMenu(
+        capability: HandoffSurfaceCapability,
+        attach: InteractiveHandoffAttach
+    ) -> some View {
+        Menu {
+            ForEach(capability.offeredOptions) { option in
+                Button(option.label) {
+                    Task { await present(option.surface, attach: attach, capability: capability, userInitiated: true) }
+                }
+            }
+        } label: {
+            Label("Open in \(surface?.appName ?? "…")", systemImage: "rectangle.on.rectangle")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("Choose where to open the handoff")
     }
 
     @ViewBuilder
     private var content: some View {
-        if let attach {
+        if let attach, surface == .ghostty {
             GhosttyTerminalView(
                 workingDirectory: attach.cwd,
                 argv: attach.argv,
@@ -394,6 +435,18 @@ private struct HandoffAttachSheet: View {
                 sessionId: "handoff-\(attach.sessionId)"
             )
             .id(attach.sessionId)
+        } else if let surface, let externalNote {
+            ContentUnavailableView {
+                Label("Presented in \(surface.appName)", systemImage: "arrow.up.forward.app")
+            } description: {
+                Text(externalNote).textSelection(.enabled)
+            } actions: {
+                if let attach, let capability {
+                    Button("Open here in Ghostty instead") {
+                        Task { await present(.ghostty, attach: attach, capability: capability, userInitiated: true) }
+                    }
+                }
+            }
         } else if let error {
             ContentUnavailableView {
                 Label("Could not attach", systemImage: "exclamationmark.triangle")
@@ -405,12 +458,62 @@ private struct HandoffAttachSheet: View {
         }
     }
 
-    private func attachSession() async {
+    private func start() async {
         do {
-            attach = try await query.attachHandoff(sessionId: sessionId)
-            error = nil
+            let descriptor = try await query.attachHandoff(sessionId: handoff.sessionId)
+            attach = descriptor
+            let cap = HandoffSurfaceLauncher.capability(cwd: descriptor.cwd)
+            capability = cap
+            let resolved = HandoffSurfaceResolver.resolve(
+                provider: handoff.provider,
+                home: handoff.home,
+                memory: preferences.memory,
+                capability: cap
+            )
+            await present(resolved, attach: descriptor, capability: cap, userInitiated: false)
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    /// Present the handoff in `target`. Ghostty embeds; an external target
+    /// launches through the shared command. The preference advances only when a
+    /// user-initiated launch succeeds — an auto-resolved fallback never rewrites
+    /// the remembered surface, so a briefly-unavailable app returns when it comes
+    /// back. A failed launch falls back visibly to the embedded terminal.
+    private func present(
+        _ target: HandoffSurface,
+        attach: InteractiveHandoffAttach,
+        capability: HandoffSurfaceCapability,
+        userInitiated: Bool
+    ) async {
+        error = nil
+        if target == .ghostty {
+            surface = .ghostty
+            externalNote = nil
+            if userInitiated {
+                preferences.record(.ghostty, provider: handoff.provider, home: handoff.home)
+                fallbackNotice = nil
+            }
+            return
+        }
+
+        let reach = capability.reach(target)
+        let launched = await HandoffSurfaceLauncher.launch(target, attach: attach, reach: reach)
+        if launched {
+            surface = target
+            externalNote = reach == .attach
+                ? "Attached in \(target.appName). Complete or hand back from there."
+                : "Opened the worktree in \(target.appName) — this does not attach the Session."
+            fallbackNotice = nil
+            if userInitiated {
+                preferences.record(target, provider: handoff.provider, home: handoff.home)
+            }
+        } else {
+            // Visible fallback: embed Ghostty and leave the preference untouched.
+            surface = .ghostty
+            externalNote = nil
+            fallbackNotice = "\(target.appName) unavailable — fell back to the embedded terminal."
         }
     }
 }

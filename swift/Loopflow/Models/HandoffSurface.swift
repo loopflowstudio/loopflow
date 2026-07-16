@@ -66,29 +66,28 @@ public struct HandoffSurfaceOption: Codable, Sendable, Hashable, Identifiable {
 /// What the current machine and handoff permit. The resolver reads only these
 /// facts; it never touches the filesystem or `NSWorkspace` itself, which keeps
 /// the decision pure and testable.
+///
+/// Only a surface that runs the *exact shared attach command* may claim
+/// `.attach`: Ghostty embeds it, and Warp runs it through a command-bearing
+/// launch configuration. An IDE opened at a folder does not resume the specific
+/// provider Session, so an IDE is never more than `.worktreeOnly` — it opens the
+/// worktree without ever claiming to attach.
 public struct HandoffSurfaceCapability: Sendable, Hashable {
     /// External apps installed on the current Home. Ghostty is embedded, so it is
     /// never listed here and is always available.
     public let installedApps: Set<HandoffSurface>
-    /// The handoff's provider is Claude — IDE attach names Claude.
-    public let providerIsClaude: Bool
-    /// A provider session id is known, so an IDE can claim to attach.
-    public let providerSessionKnown: Bool
     /// The worktree is a proven workspace an IDE can open.
     public let workspaceProven: Bool
-    /// Warp can be handed a command-bearing launch configuration.
+    /// Warp can be handed a command-bearing launch configuration that runs the
+    /// exact shared attach command.
     public let warpCommandBearing: Bool
 
     public init(
         installedApps: Set<HandoffSurface>,
-        providerIsClaude: Bool,
-        providerSessionKnown: Bool,
         workspaceProven: Bool,
         warpCommandBearing: Bool
     ) {
         self.installedApps = installedApps
-        self.providerIsClaude = providerIsClaude
-        self.providerSessionKnown = providerSessionKnown
         self.workspaceProven = workspaceProven
         self.warpCommandBearing = warpCommandBearing
     }
@@ -101,14 +100,13 @@ public struct HandoffSurfaceCapability: Sendable, Hashable {
             return .attach
         case .warp:
             guard installedApps.contains(.warp) else { return .unavailable }
+            // Attach only through a command-bearing config; a plain worktree
+            // window is the weaker action and is labeled as such.
             return warpCommandBearing ? .attach : .worktreeOnly
         case .vscode, .cursor:
-            guard installedApps.contains(surface) else { return .unavailable }
-            // Claude-in-IDE attach needs a session id and a proven workspace;
-            // anything short of that opens the worktree without claiming to attach.
-            if providerIsClaude && providerSessionKnown && workspaceProven {
-                return .attach
-            }
+            guard installedApps.contains(surface), workspaceProven else { return .unavailable }
+            // No IDE launch resumes the specific provider Session, so an IDE
+            // opens the worktree without ever claiming to attach.
             return .worktreeOnly
         }
     }

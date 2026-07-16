@@ -4,35 +4,59 @@ import Testing
 
 /// Resolving where Open presents a handoff is a pure decision. These tests are
 /// the contract's Proof: provider-specific preference, overall fallback, an
-/// unavailable remembered app, an unsupported provider, a remote Home, a launch
-/// failure that leaves the preference untouched, and a preference that updates
-/// only after success.
+/// unavailable remembered app, an IDE that never claims attach, a remote Home, a
+/// launch failure that leaves the preference untouched, and a preference that
+/// updates only after success.
+///
+/// The honesty invariant runs through all of it: only Ghostty (embedded) and
+/// Warp (command-bearing) run the exact shared attach command, so only they may
+/// be honored as an attach preference. An IDE opens the worktree without ever
+/// claiming to attach.
 @Suite("Handoff surface resolution")
 struct HandoffSurfaceTests {
-    /// Everything installed and Claude fully credentialed — every surface attaches.
+    /// Everything installed with a proven workspace. Ghostty and Warp attach;
+    /// IDEs are offered only as the weaker worktree-only action.
     private func fullCapability(
-        providerIsClaude: Bool = true,
-        providerSessionKnown: Bool = true,
         workspaceProven: Bool = true,
         warpCommandBearing: Bool = true,
         installed: Set<HandoffSurface> = [.warp, .vscode, .cursor]
     ) -> HandoffSurfaceCapability {
         HandoffSurfaceCapability(
             installedApps: installed,
-            providerIsClaude: providerIsClaude,
-            providerSessionKnown: providerSessionKnown,
             workspaceProven: workspaceProven,
             warpCommandBearing: warpCommandBearing
         )
     }
 
+    @Test("an IDE never attaches — it opens the worktree without claiming to")
+    func ideNeverAttaches() {
+        let capability = fullCapability()
+        #expect(capability.reach(.vscode) == .worktreeOnly)
+        #expect(capability.reach(.cursor) == .worktreeOnly)
+        // Ghostty and Warp are the only surfaces that run the shared command.
+        #expect(capability.reach(.ghostty) == .attach)
+        #expect(capability.reach(.warp) == .attach)
+
+        // A remembered IDE surface is never honored as an attach preference; Open
+        // falls back to the embedded terminal that actually attaches.
+        var memory = HandoffSurfaceMemory()
+        memory.record(.cursor, provider: "claude", home: "jack@local")
+        let resolved = HandoffSurfaceResolver.resolve(
+            provider: "claude",
+            home: "jack@local",
+            memory: memory,
+            capability: capability
+        )
+        #expect(resolved == .ghostty)
+    }
+
     @Test("provider-on-Home preference wins over the overall preference")
     func providerSpecificPreference() {
         var memory = HandoffSurfaceMemory()
-        memory.record(.vscode, provider: "codex", home: "jack@local")
+        memory.record(.ghostty, provider: "codex", home: "jack@local")
         memory.record(.warp, provider: "claude", home: "jack@local")
 
-        // Claude on this Home resolves to Warp even though VS Code was recorded
+        // Claude on this Home resolves to Warp even though Ghostty was recorded
         // more recently overall.
         let resolved = HandoffSurfaceResolver.resolve(
             provider: "claude",
@@ -46,16 +70,17 @@ struct HandoffSurfaceTests {
     @Test("with no provider-on-Home memory, the overall preference is used")
     func overallFallback() {
         var memory = HandoffSurfaceMemory()
-        memory.record(.cursor, provider: "codex", home: "jack@remote")
+        memory.record(.warp, provider: "codex", home: "jack@remote")
 
-        // A never-seen provider/Home pair inherits the overall surface.
+        // A never-seen provider/Home pair inherits the overall surface — Warp,
+        // an attach-capable surface, so it is honored.
         let resolved = HandoffSurfaceResolver.resolve(
             provider: "claude",
             home: "jack@local",
             memory: memory,
             capability: fullCapability()
         )
-        #expect(resolved == .cursor)
+        #expect(resolved == .warp)
     }
 
     @Test("a remembered app that is no longer installed falls back visibly")
@@ -77,37 +102,27 @@ struct HandoffSurfaceTests {
     @Test("a remembered surface whose capability was lost falls back")
     func capabilityLossFallsBack() {
         var memory = HandoffSurfaceMemory()
-        memory.record(.cursor, provider: "claude", home: "jack@local")
-        memory.record(.vscode, provider: "claude", home: "jack@local")
+        memory.record(.warp, provider: "claude", home: "jack@local")
 
-        // Cursor stays installed but the workspace is no longer proven, so it
-        // drops to worktree-only and cannot be honored as an attach preference.
+        // Warp stays installed but can no longer be handed a command-bearing
+        // config, so it drops to worktree-only and is not honored as an attach
+        // preference.
         let resolved = HandoffSurfaceResolver.resolve(
             provider: "claude",
             home: "jack@local",
             memory: memory,
-            capability: fullCapability(workspaceProven: false)
+            capability: fullCapability(warpCommandBearing: false)
         )
         #expect(resolved == .ghostty)
     }
 
-    @Test("a non-Claude provider never attaches an IDE")
-    func unsupportedProvider() {
-        let capability = fullCapability(providerIsClaude: false)
-        #expect(capability.reach(.vscode) == .worktreeOnly)
-        #expect(capability.reach(.cursor) == .worktreeOnly)
-
-        var memory = HandoffSurfaceMemory()
-        memory.record(.vscode, provider: "codex", home: "jack@local")
-
-        // VS Code cannot attach a Codex session, so Open resolves to Ghostty.
-        let resolved = HandoffSurfaceResolver.resolve(
-            provider: "codex",
-            home: "jack@local",
-            memory: memory,
-            capability: capability
-        )
-        #expect(resolved == .ghostty)
+    @Test("an unproven workspace makes an IDE unavailable, not worktree-only")
+    func unprovenWorkspaceHidesIDE() {
+        let capability = fullCapability(workspaceProven: false)
+        #expect(capability.reach(.vscode) == .unavailable)
+        #expect(capability.reach(.cursor) == .unavailable)
+        // Ghostty still attaches regardless of the workspace probe.
+        #expect(capability.reach(.ghostty) == .attach)
     }
 
     @Test("preferences are keyed by Home, so a remote Home keeps its own memory")
@@ -138,7 +153,7 @@ struct HandoffSurfaceTests {
         // stands and the next Open still resolves to it.
         let launchSucceeded = false
         if launchSucceeded {
-            memory.record(.cursor, provider: "claude", home: "jack@local")
+            memory.record(.ghostty, provider: "claude", home: "jack@local")
         }
         #expect(memory.preferred(provider: "claude", home: "jack@local") == .warp)
     }
@@ -146,32 +161,30 @@ struct HandoffSurfaceTests {
     @Test("recording only after success advances the preference")
     func recordAdvancesPreferenceOnSuccess() {
         var memory = HandoffSurfaceMemory()
-        memory.record(.warp, provider: "claude", home: "jack@local")
+        memory.record(.ghostty, provider: "claude", home: "jack@local")
 
-        // A successful Cursor launch updates both the provider-on-Home and the
+        // A successful Warp launch updates both the provider-on-Home and the
         // overall preference.
-        memory.record(.cursor, provider: "claude", home: "jack@local")
-        #expect(memory.preferred(provider: "claude", home: "jack@local") == .cursor)
-        #expect(memory.overallPreferred == .cursor)
+        memory.record(.warp, provider: "claude", home: "jack@local")
+        #expect(memory.preferred(provider: "claude", home: "jack@local") == .warp)
+        #expect(memory.overallPreferred == .warp)
     }
 
     @Test("offered options are honest and Ghostty always leads")
     func offeredOptionsAreHonest() {
-        // Claude fully credentialed: every surface attaches, Ghostty first.
+        // Fully installed: Ghostty and Warp attach, IDEs are worktree-only.
         let full = fullCapability().offeredOptions
         #expect(full.map(\.surface) == [.ghostty, .warp, .vscode, .cursor])
-        let everyFullOptionAttaches = full.allSatisfy(\.canAttach)
-        #expect(everyFullOptionAttaches)
+        #expect(full.first { $0.surface == .ghostty }?.reach == .attach)
+        #expect(full.first { $0.surface == .warp }?.reach == .attach)
+        let vscode = full.first { $0.surface == .vscode }
+        #expect(vscode?.reach == .worktreeOnly)
+        #expect(vscode?.label == "VS Code (open worktree)")
 
-        // Uncredentialed Claude with only Cursor installed: Ghostty attaches,
-        // Cursor is offered as the weaker worktree-only action, Warp is absent.
-        let partial = fullCapability(
-            providerSessionKnown: false,
-            installed: [.cursor]
-        ).offeredOptions
+        // Only Cursor installed, workspace proven: Ghostty attaches, Cursor is the
+        // weaker worktree-only action, Warp is absent.
+        let partial = fullCapability(installed: [.cursor]).offeredOptions
         #expect(partial.map(\.surface) == [.ghostty, .cursor])
-        let cursor = partial.first { $0.surface == .cursor }
-        #expect(cursor?.reach == .worktreeOnly)
-        #expect(cursor?.label == "Cursor (open worktree)")
+        #expect(partial.first { $0.surface == .cursor }?.reach == .worktreeOnly)
     }
 }

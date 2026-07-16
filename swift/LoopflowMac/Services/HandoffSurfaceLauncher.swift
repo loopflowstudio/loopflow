@@ -1,0 +1,185 @@
+#if os(macOS)
+import AppKit
+import Foundation
+import Loopflow
+
+/// Persists the remembered surface across launches, turning the pure
+/// `HandoffSurfaceMemory` into a durable preference. Recorded only after a
+/// launch succeeds, so a failed attempt never rewrites the memory.
+@MainActor
+@Observable
+final class HandoffSurfacePreferences {
+    static let shared = HandoffSurfacePreferences()
+
+    private let defaults: UserDefaults
+    private let key: String
+    private(set) var memory: HandoffSurfaceMemory
+
+    init(defaults: UserDefaults = .standard, key: String = "handoffSurfaceMemory") {
+        self.defaults = defaults
+        self.key = key
+        if let data = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode(HandoffSurfaceMemory.self, from: data) {
+            memory = decoded
+        } else {
+            memory = HandoffSurfaceMemory()
+        }
+    }
+
+    func record(_ surface: HandoffSurface, provider: String, home: String) {
+        memory.record(surface, provider: provider, home: home)
+        if let data = try? JSONEncoder().encode(memory) {
+            defaults.set(data, forKey: key)
+        }
+    }
+}
+
+/// Detects which surfaces the current machine can present and opens them. The
+/// pure resolver decides *which* surface; this is the side effect that reaches
+/// out to `NSWorkspace` and the filesystem. It never creates or names a Session
+/// — it runs the exact shared attach command the store handed back.
+enum HandoffSurfaceLauncher {
+    private static func bundleId(_ surface: HandoffSurface) -> String? {
+        switch surface {
+        case .ghostty: nil
+        case .warp: "dev.warp.Warp-Stable"
+        case .vscode: "com.microsoft.VSCode"
+        case .cursor: "com.todesktop.230313mzl4w4u92"
+        }
+    }
+
+    static func appURL(_ surface: HandoffSurface) -> URL? {
+        guard let id = bundleId(surface) else { return nil }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)
+    }
+
+    static func installedApps() -> Set<HandoffSurface> {
+        Set([HandoffSurface.warp, .vscode, .cursor].filter { appURL($0) != nil })
+    }
+
+    /// Probe the machine and handoff into the pure capability the resolver reads.
+    static func capability(cwd: String) -> HandoffSurfaceCapability {
+        let installed = installedApps()
+        var isDirectory: ObjCBool = false
+        let proven = FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+        return HandoffSurfaceCapability(
+            installedApps: installed,
+            workspaceProven: proven,
+            // A command-bearing Warp launch needs only that Warp is installed; the
+            // launch configuration is written on demand.
+            warpCommandBearing: installed.contains(.warp)
+        )
+    }
+
+    /// Launch an external surface for a handoff. Ghostty is embedded and never
+    /// routed here. Returns whether the launch succeeded; the caller records the
+    /// preference only on success and falls back visibly otherwise.
+    @MainActor
+    static func launch(
+        _ surface: HandoffSurface,
+        attach: InteractiveHandoffAttach,
+        reach: HandoffSurfaceReach
+    ) async -> Bool {
+        switch surface {
+        case .ghostty:
+            // Embedded terminal is presented by the view, not launched here.
+            return true
+        case .warp:
+            return launchWarp(attach: attach, attaching: reach == .attach)
+        case .vscode, .cursor:
+            return await openWorkspace(surface, cwd: attach.cwd)
+        }
+    }
+
+    private static func launchWarp(attach: InteractiveHandoffAttach, attaching: Bool) -> Bool {
+        if attaching {
+            // Attach only if the command-bearing config actually gets written; a
+            // failed write returns false so the caller falls back to the embedded
+            // terminal rather than opening a bare window and calling it "attached".
+            guard let launchURL = writeWarpLaunchConfig(attach: attach) else { return false }
+            return NSWorkspace.shared.open(launchURL)
+        }
+        // Worktree-only: open a window at the worktree with no command. Weaker,
+        // and labeled as such by the option that offered it.
+        var components = URLComponents()
+        components.scheme = "warp"
+        components.host = "action"
+        components.path = "/new_window"
+        components.queryItems = [URLQueryItem(name: "path", value: attach.cwd)]
+        guard let url = components.url else { return false }
+        return NSWorkspace.shared.open(url)
+    }
+
+    /// The name of the Warp launch configuration for a handoff.
+    static func warpLaunchConfigName(sessionId: String) -> String {
+        "loopflow-handoff-\(sessionId)"
+    }
+
+    /// Render a command-bearing Warp launch configuration that runs the *exact
+    /// shared attach command* in the worktree. Pure and testable: the embedded
+    /// command is the provider-session-bearing argv the store handed back, so a
+    /// Warp launch attaches the same durable Session rather than a fresh shell.
+    static func warpLaunchConfigYAML(name: String, cwd: String, argv: [String]) -> String {
+        let command = argv.map(Self.shellQuote).joined(separator: " ")
+        return """
+        ---
+        name: \(name)
+        windows:
+          - tabs:
+              - layout:
+                  cwd: \(Self.yamlQuote(cwd))
+                  commands:
+                    - exec: \(Self.yamlQuote(command))
+        """
+    }
+
+    /// Write the launch configuration, returning its `warp://launch` URL, or nil
+    /// if it could not be written so the caller can fall back visibly.
+    private static func writeWarpLaunchConfig(attach: InteractiveHandoffAttach) -> URL? {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".warp/launch_configurations", isDirectory: true)
+        let name = warpLaunchConfigName(sessionId: attach.sessionId)
+        let yaml = warpLaunchConfigYAML(name: name, cwd: attach.cwd, argv: attach.argv)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let file = directory.appendingPathComponent("\(name).yaml")
+            try yaml.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            return nil
+        }
+        var components = URLComponents()
+        components.scheme = "warp"
+        components.host = "launch"
+        components.path = "/\(name)"
+        return components.url
+    }
+
+    @MainActor
+    private static func openWorkspace(_ surface: HandoffSurface, cwd: String) async -> Bool {
+        guard let appURL = appURL(surface) else { return false }
+        let folder = URL(fileURLWithPath: cwd, isDirectory: true)
+        do {
+            _ = try await NSWorkspace.shared.open(
+                [folder],
+                withApplicationAt: appURL,
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func yamlQuote(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+}
+#endif

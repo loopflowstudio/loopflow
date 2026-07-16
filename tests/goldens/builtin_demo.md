@@ -12,7 +12,8 @@ Use the top-level `lf` command suites for mechanical git and GitHub operations.
 
 ```bash
 lf commit -m "message" -p     # commit and push
-lf pr open --title "..."           # create/update PR
+lf pr publish --title "..."        # push + create/update PR, print state+URL (no browser)
+lf pr open --title "..."           # publish, then open the PR for human review
 lf pr submit                     # prep + mark ready + assign to you; you click merge
 lf pr land                       # land one PR; Task remains open
 lf pr land -c                    # land and complete the owning Task after merge
@@ -22,14 +23,15 @@ lf rebase                     # apply the planned update
 lf task run CHILD --stack-on PARENT  # separate Task worktree based on PARENT's open PR
 ```
 
-### `pr` vs `submit` vs `land`
+### `publish` vs `submit` vs `land`
 
-Three commands, three commitment levels — pick by how done the work is and who
-lands it:
+Three commitment levels — pick by how done the work is and who lands it. All
+three publish the PR headlessly and open no browser:
 
-- **`lf pr open`** — open or refresh the PR while work is still in flight. Rebases
-  only if behind, writes title/body, leaves the PR up for review. Use it to make
-  work visible mid-stream; nothing is finalized.
+- **`lf pr publish`** — push and create or refresh the PR while work is still in
+  flight. Rebases only if behind, writes title/body, prints state + URL, leaves
+  the PR up. Use it to make work visible mid-stream; nothing is finalized and
+  nothing is presented. This is the agent's default "make a PR" verb.
 - **`lf pr submit`** — the work is done and a **human** lands it. Rebases onto
   main, clears `scratch/`, marks the PR ready, and assigns it to you. Stops
   there: no auto-merge. Your merge click on GitHub is the one required gate —
@@ -42,6 +44,12 @@ lands it:
   `land` settles one PR but leaves the Task open; `-c` completes the Task
   after merge. `--next <slug>` names the following PR. The Task keeps its
   worktree while Loopflow rotates serial branches from fetched main.
+
+**`lf pr open`** is the one command that *presents* — it publishes, then opens
+the PR for review (the GitHub page in the browser). It is a human-initiated
+review action; if launching the review surface fails, only `pr open` fails and
+the published PR is untouched. Agents publish/submit/land; reach for `pr open`
+only when a human explicitly asked to see the PR.
 
 Stay in the worktree Loopflow placed for this run. If the assigned task is
 explicitly about worktree management, use `lf wt`; never create another

@@ -416,6 +416,25 @@ impl TaskPr {
             .and_then(|publication| publication.github.as_ref())
     }
 
+    /// The receipt-resolution identity for this PR: its repository, number, and
+    /// the commit sha(s) it carries. `None` until the PR has a GitHub identity
+    /// (an `owner/repo` URL and number). A `pr:` receipt resolves against this.
+    pub fn pr_identity(&self) -> Option<crate::receipt::PrIdentity> {
+        let github = self.github()?;
+        let repo = crate::receipt::github_repo_slug(&github.url)?;
+        let shas = self
+            .merge_commit
+            .iter()
+            .chain(github.head_sha.iter())
+            .cloned()
+            .collect();
+        Some(crate::receipt::PrIdentity {
+            repo,
+            number: github.number,
+            shas,
+        })
+    }
+
     /// The current head SHA of the open PR, when recorded.
     pub fn head_sha(&self) -> Option<&str> {
         self.github().and_then(|github| github.head_sha.as_deref())
@@ -1203,6 +1222,31 @@ mod tests {
 
         pr.publication.as_mut().unwrap().after_merge = AfterMerge::CompleteTask;
         assert!(pr.validate().is_err());
+    }
+
+    #[test]
+    fn pr_identity_maps_repo_number_and_carried_shas() {
+        let mut pr = open_pr("headsha", None);
+        let open = pr.pr_identity().expect("open PR has an identity");
+        assert_eq!(open.repo, "loopflow/loopflow");
+        assert_eq!(open.number, 900);
+        assert_eq!(open.shas, vec!["headsha".to_string()]);
+
+        // A merged PR resolves against both its merge commit and its last head,
+        // so a claim pinned to either sha still drills.
+        pr.merge_commit = Some("mergesha".to_string());
+        let merged = pr.pr_identity().expect("merged PR has an identity");
+        assert_eq!(
+            merged.shas,
+            vec!["mergesha".to_string(), "headsha".to_string()]
+        );
+
+        // No GitHub identity yet (still working) → no receipt identity to match.
+        let working = TaskPr {
+            publication: None,
+            ..pr
+        };
+        assert_eq!(working.pr_identity(), None);
     }
 
     fn open_pr(head_sha: &str, observation: Option<super::CiObservation>) -> TaskPr {

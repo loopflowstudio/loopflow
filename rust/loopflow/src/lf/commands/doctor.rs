@@ -17,7 +17,7 @@ use anyhow::{anyhow, Result};
 use time::{Duration, OffsetDateTime};
 
 use crate::lf::output::Colors;
-use crate::receipt::{parse_pr_number, EvidenceKind, Receipt};
+use crate::receipt::{EvidenceKind, PrIdentity, PrReference, Receipt};
 use crate::store::RunEventRow;
 use crate::wave::journal::{fold_thread, journal_path, memory_facts, read_events};
 
@@ -634,13 +634,30 @@ fn check_coverage(events: &[RunEventRow]) -> Check {
 /// Known ids for each evidence kind — the resolution surface the receipt
 /// sweep checks against. Gathered from the store and wave journals; the check
 /// itself is pure over these sets.
+///
+/// `unavailable` records kinds whose backing store or journal could not be read
+/// this run. A receipt of an unavailable kind can't be judged resolved-or-orphaned
+/// — the sweep reports it as *inaccessible* rather than silently calling it
+/// orphaned, so a dropped read never masquerades as a missing record.
 #[derive(Debug, Default)]
 pub struct ReceiptKnownIds {
     pub chat_turn_ids: HashSet<String>,
     pub run_ids: HashSet<String>,
     pub trace_turn_ids: HashSet<String>,
     pub pm_ids: HashSet<String>,
-    pub pr_numbers: HashSet<u32>,
+    pub prs: Vec<PrIdentity>,
+    pub unavailable: HashSet<EvidenceKind>,
+    pub errors: Vec<String>,
+}
+
+impl ReceiptKnownIds {
+    /// Record that an evidence kind's backing source could not be read, so its
+    /// receipts are reported inaccessible (not orphaned) and the reason is
+    /// surfaced in the check detail.
+    fn mark_unavailable(&mut self, kind: EvidenceKind, error: impl Into<String>) {
+        self.unavailable.insert(kind);
+        self.errors.push(error.into());
+    }
 }
 
 /// One memory fact paired with its claim wave, for the receipt sweep.
@@ -658,13 +675,26 @@ pub struct ReceiptFact {
 /// During the post-contract grace window all findings are `warn`, not `fail`,
 /// so pre-contract claims and cross-machine references don't break the gate.
 /// Cross-wave is always `warn` — legitimate for child→parent citation.
+/// How one receipt fared against the known-id sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Resolution {
+    /// The reference resolves to a known record.
+    Resolved,
+    /// The reference resolves to no known record (a real dangling pointer).
+    Orphaned,
+    /// The reference's evidence kind could not be read this run, so we can't
+    /// judge it — surfaced, never silently counted as orphaned.
+    Inaccessible,
+}
+
 fn check_receipts(facts: &[ReceiptFact], known: &ReceiptKnownIds) -> Check {
-    if facts.is_empty() {
+    if facts.is_empty() && known.errors.is_empty() {
         return Check::ok("receipts", "no memory facts to audit");
     }
 
     let mut missing = 0;
     let mut orphaned = 0;
+    let mut inaccessible = 0;
     let mut cross_wave = 0;
     let mut total_receipts = 0;
 
@@ -678,34 +708,50 @@ fn check_receipts(facts: &[ReceiptFact], known: &ReceiptKnownIds) -> Check {
             if receipt.wave != fact.wave {
                 cross_wave += 1;
             }
-            if !receipt_resolves(receipt, known) {
-                orphaned += 1;
+            match resolve_receipt(receipt, known) {
+                Resolution::Resolved => {}
+                Resolution::Orphaned => orphaned += 1,
+                Resolution::Inaccessible => inaccessible += 1,
             }
         }
     }
 
     let total_facts = facts.len();
-    let detail = format!(
+    let mut detail = format!(
         "{total_facts} fact(s) with {total_receipts} receipt(s): \
-         {missing} missing, {orphaned} orphaned, {cross_wave} cross-wave"
+         {missing} missing, {orphaned} orphaned, {inaccessible} inaccessible, {cross_wave} cross-wave"
     );
+    if !known.errors.is_empty() {
+        detail.push_str(&format!(
+            "; unreadable evidence: {}",
+            known.errors.join("; ")
+        ));
+    }
 
-    if orphaned > 0 || missing > 0 || cross_wave > 0 {
+    if missing > 0 || orphaned > 0 || inaccessible > 0 || cross_wave > 0 || !known.errors.is_empty()
+    {
         Check::warn("receipts", detail)
     } else {
         Check::ok("receipts", detail)
     }
 }
 
-fn receipt_resolves(receipt: &Receipt, known: &ReceiptKnownIds) -> bool {
-    match receipt.kind {
+fn resolve_receipt(receipt: &Receipt, known: &ReceiptKnownIds) -> Resolution {
+    if known.unavailable.contains(&receipt.kind) {
+        return Resolution::Inaccessible;
+    }
+    let resolved = match receipt.kind {
         EvidenceKind::ChatTurn => known.chat_turn_ids.contains(&receipt.reference),
         EvidenceKind::WorkerReport => known.run_ids.contains(&receipt.reference),
         EvidenceKind::Trace => known.trace_turn_ids.contains(&receipt.reference),
         EvidenceKind::Pm => known.pm_ids.contains(&receipt.reference),
-        EvidenceKind::Pr => {
-            parse_pr_number(&receipt.reference).is_some_and(|n| known.pr_numbers.contains(&n))
-        }
+        EvidenceKind::Pr => PrReference::parse(&receipt.reference)
+            .is_some_and(|target| known.prs.iter().any(|id| target.matches(id))),
+    };
+    if resolved {
+        Resolution::Resolved
+    } else {
+        Resolution::Orphaned
     }
 }
 
@@ -720,54 +766,83 @@ fn gather_receipt_audit(
 
     known.run_ids = events.iter().map(|e| e.run_id.clone()).collect();
 
-    if let Ok(launches) = store.agent_launches_since(0) {
-        let launch_ids: Vec<String> = launches.iter().map(|l| l.id.clone()).collect();
-        if let Ok(turns) = store.agent_turns_for_launches(&launch_ids) {
-            known.trace_turn_ids = turns.iter().map(|t| t.id.clone()).collect();
-        }
-    }
-
-    if let Ok(prs) = store.all_task_prs() {
-        known.pr_numbers = prs
-            .iter()
-            .filter_map(|pr| pr.github().map(|g| g.number))
-            .collect();
-    }
-
-    if let Ok(waves) = store.list_waves(None) {
-        for wave in &waves {
-            let repo_root = Path::new(wave.repo());
-            let journal = journal_path(repo_root, wave.name());
-            if journal.exists() {
-                let journal_events = read_events(&journal);
-                for fact in memory_facts(&journal_events) {
-                    facts.push(ReceiptFact {
-                        wave: wave.name().to_string(),
-                        receipts: fact.receipts,
-                    });
+    // Trace turns: a failure to read launches or their turns leaves the set
+    // unknown, so mark the whole kind inaccessible rather than judging every
+    // trace receipt orphaned against an empty set.
+    match store.agent_launches_since(0) {
+        Ok(launches) => {
+            let launch_ids: Vec<String> = launches.iter().map(|l| l.id.clone()).collect();
+            match store.agent_turns_for_launches(&launch_ids) {
+                Ok(turns) => known.trace_turn_ids = turns.iter().map(|t| t.id.clone()).collect(),
+                Err(err) => {
+                    known.mark_unavailable(EvidenceKind::Trace, format!("trace turns: {err}"))
                 }
-                let fold = fold_thread(&journal_events);
-                known
-                    .chat_turn_ids
-                    .extend(fold.turns.iter().map(|t| t.id.clone()));
-                known
-                    .chat_turn_ids
-                    .extend(fold.open.iter().map(|t| t.id.clone()));
             }
+        }
+        Err(err) => known.mark_unavailable(EvidenceKind::Trace, format!("agent launches: {err}")),
+    }
 
-            if let Ok(Some(snapshot)) = store.pm_snapshot(wave.repo(), wave.name()) {
-                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&snapshot.payload) {
-                    for key in ["items", "projects"] {
-                        if let Some(arr) = payload.get(key).and_then(|v| v.as_array()) {
-                            for entry in arr {
-                                if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
-                                    known.pm_ids.insert(id.to_string());
+    match store.all_task_prs() {
+        Ok(prs) => known.prs = prs.iter().filter_map(|pr| pr.pr_identity()).collect(),
+        Err(err) => known.mark_unavailable(EvidenceKind::Pr, format!("task PRs: {err}")),
+    }
+
+    let waves = match store.list_waves(None) {
+        Ok(waves) => waves,
+        Err(err) => {
+            // Without the wave list we can read neither journals (chat turns,
+            // facts) nor PM snapshots — the sweep is blind for those kinds.
+            known.mark_unavailable(EvidenceKind::ChatTurn, format!("wave list: {err}"));
+            known.mark_unavailable(EvidenceKind::Pm, format!("wave list: {err}"));
+            return (facts, known);
+        }
+    };
+
+    for wave in &waves {
+        let repo_root = Path::new(wave.repo());
+        let journal = journal_path(repo_root, wave.name());
+        if journal.exists() {
+            let journal_events = read_events(&journal);
+            for fact in memory_facts(&journal_events) {
+                facts.push(ReceiptFact {
+                    wave: wave.name().to_string(),
+                    receipts: fact.receipts,
+                });
+            }
+            let fold = fold_thread(&journal_events);
+            known
+                .chat_turn_ids
+                .extend(fold.turns.iter().map(|t| t.id.clone()));
+            known
+                .chat_turn_ids
+                .extend(fold.open.iter().map(|t| t.id.clone()));
+        }
+
+        match store.pm_snapshot(wave.repo(), wave.name()) {
+            Ok(Some(snapshot)) => {
+                match serde_json::from_str::<serde_json::Value>(&snapshot.payload) {
+                    Ok(payload) => {
+                        for key in ["items", "projects"] {
+                            if let Some(arr) = payload.get(key).and_then(|v| v.as_array()) {
+                                for entry in arr {
+                                    if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
+                                        known.pm_ids.insert(id.to_string());
+                                    }
                                 }
                             }
                         }
                     }
+                    Err(err) => known.mark_unavailable(
+                        EvidenceKind::Pm,
+                        format!("PM snapshot for wave '{}': {err}", wave.name()),
+                    ),
                 }
             }
+            Ok(None) => {}
+            Err(err) => known.mark_unavailable(
+                EvidenceKind::Pm,
+                format!("PM snapshot for wave '{}': {err}", wave.name()),
+            ),
         }
     }
 
@@ -1083,7 +1158,7 @@ mod tests {
     // ── receipt sweep tests (pure over facts + known-id sets) ─────────
 
     use super::{check_receipts, ReceiptFact, ReceiptKnownIds};
-    use crate::receipt::{EvidenceKind, Receipt};
+    use crate::receipt::{EvidenceKind, PrIdentity, Receipt};
 
     fn receipt(kind: EvidenceKind, reference: &str, wave: &str) -> Receipt {
         Receipt::new(kind, reference, wave)
@@ -1153,8 +1228,19 @@ mod tests {
         assert!(check.detail.contains("1 cross-wave"), "{}", check.detail);
     }
 
+    fn known_pr(repo: &str, number: u32, shas: &[&str]) -> ReceiptKnownIds {
+        ReceiptKnownIds {
+            prs: vec![PrIdentity {
+                repo: repo.to_string(),
+                number,
+                shas: shas.iter().map(|s| s.to_string()).collect(),
+            }],
+            ..Default::default()
+        }
+    }
+
     #[test]
-    fn pr_receipt_resolves_by_number() {
+    fn pr_receipt_resolves_by_repo_and_number() {
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
             receipts: vec![receipt(
@@ -1163,12 +1249,22 @@ mod tests {
                 "ship",
             )],
         }];
-        let known = ReceiptKnownIds {
-            pr_numbers: [912].into(),
-            ..Default::default()
-        };
+        let known = known_pr("loopflow/loopflow", 912, &["abc123"]);
         let check = check_receipts(&facts, &known);
         assert_eq!(check.status, Status::Ok);
+    }
+
+    #[test]
+    fn pr_receipt_with_matching_number_but_wrong_repo_is_orphaned() {
+        // A bare number scan would resolve this; matching repo + number rejects it.
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![receipt(EvidenceKind::Pr, "other/repo#912", "ship")],
+        }];
+        let known = known_pr("loopflow/loopflow", 912, &[]);
+        let check = check_receipts(&facts, &known);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
     }
 
     #[test]
@@ -1177,12 +1273,45 @@ mod tests {
             wave: "ship".to_string(),
             receipts: vec![receipt(EvidenceKind::Pr, "loopflow/loopflow#999", "ship")],
         }];
-        let known = ReceiptKnownIds {
-            pr_numbers: [912].into(),
-            ..Default::default()
-        };
+        let known = known_pr("loopflow/loopflow", 912, &[]);
         let check = check_receipts(&facts, &known);
         assert_eq!(check.status, Status::Warn);
         assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
+    }
+
+    #[test]
+    fn inaccessible_evidence_is_surfaced_not_orphaned() {
+        // The store couldn't read task PRs, so a pr receipt is inaccessible —
+        // reported and explained, never silently counted orphaned.
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![receipt(EvidenceKind::Pr, "loopflow/loopflow#912", "ship")],
+        }];
+        let mut known = ReceiptKnownIds::default();
+        known.mark_unavailable(EvidenceKind::Pr, "task PRs: database is locked");
+        let check = check_receipts(&facts, &known);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("1 inaccessible"), "{}", check.detail);
+        assert!(check.detail.contains("0 orphaned"), "{}", check.detail);
+        assert!(
+            check.detail.contains("database is locked"),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn unreadable_evidence_warns_even_with_no_facts() {
+        // A wave-list failure yields zero facts; the sweep must still warn and
+        // surface the error rather than reporting a clean "nothing to audit".
+        let mut known = ReceiptKnownIds::default();
+        known.mark_unavailable(EvidenceKind::ChatTurn, "wave list: connection refused");
+        let check = check_receipts(&[], &known);
+        assert_eq!(check.status, Status::Warn);
+        assert!(
+            check.detail.contains("connection refused"),
+            "{}",
+            check.detail
+        );
     }
 }

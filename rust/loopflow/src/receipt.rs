@@ -127,12 +127,70 @@ impl Receipt {
     }
 }
 
-/// Extract the PR number from a `pr:` receipt reference (`owner/repo#N[@sha]`).
-/// Returns `None` when the reference lacks a `#N` segment.
-pub fn parse_pr_number(reference: &str) -> Option<u32> {
-    let after_hash = reference.split_once('#')?.1;
-    let number_str = after_hash.split('@').next()?;
-    number_str.parse().ok()
+/// A parsed `pr:` receipt reference: `owner/repo#N[@sha]`. Identity is the
+/// repository *and* the number — a bare `#N` is ambiguous across repos — and an
+/// optional commit sha that pins the exact head/merge the claim was made against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrReference {
+    /// `owner/repo` — the GitHub repository the PR lives in.
+    pub repo: String,
+    pub number: u32,
+    /// The merge (or head) commit sha, when the reference pins one. Absent means
+    /// "any head of this PR", present means the claim is bound to that commit.
+    pub sha: Option<String>,
+}
+
+impl PrReference {
+    /// Parse `owner/repo#N[@sha]`. Returns `None` unless the reference names a
+    /// repository (`owner/repo`, at least one `/`) and a numeric PR number.
+    pub fn parse(reference: &str) -> Option<Self> {
+        let (repo, rest) = reference.split_once('#')?;
+        if repo.is_empty() || !repo.contains('/') {
+            return None;
+        }
+        let (number, sha) = match rest.split_once('@') {
+            Some((number, sha)) => (number, Some(sha)),
+            None => (rest, None),
+        };
+        let number: u32 = number.parse().ok()?;
+        let sha = sha.filter(|sha| !sha.is_empty()).map(str::to_string);
+        Some(Self {
+            repo: repo.to_string(),
+            number,
+            sha,
+        })
+    }
+
+    /// Whether this reference resolves to a known PR: same repository and number,
+    /// and — when the reference pins a sha — that sha is one the PR carries.
+    pub fn matches(&self, identity: &PrIdentity) -> bool {
+        self.repo == identity.repo
+            && self.number == identity.number
+            && self
+                .sha
+                .as_ref()
+                .is_none_or(|sha| identity.shas.iter().any(|known| known == sha))
+    }
+}
+
+/// The identity a known PR resolves against: its repository, number, and the
+/// commit sha(s) it carries (merge commit and/or last observed head).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrIdentity {
+    pub repo: String,
+    pub number: u32,
+    pub shas: Vec<String>,
+}
+
+/// Extract `owner/repo` from a GitHub PR URL like
+/// `https://github.com/owner/repo/pull/912`. Returns `None` when the URL has no
+/// `github.com/owner/repo` segment.
+pub fn github_repo_slug(url: &str) -> Option<String> {
+    let path = url.split("github.com/").nth(1)?;
+    let mut parts = path.split('/');
+    let owner = parts.next().filter(|part| !part.is_empty())?;
+    let repo = parts.next().filter(|part| !part.is_empty())?;
+    Some(format!("{owner}/{repo}"))
 }
 
 impl fmt::Display for Receipt {
@@ -208,12 +266,62 @@ mod tests {
     }
 
     #[test]
-    fn parse_pr_number_extracts_from_owner_repo_hash_n() {
-        assert_eq!(parse_pr_number("loopflow/loopflow#912"), Some(912));
-        assert_eq!(parse_pr_number("loopflow/loopflow#912@abc1234"), Some(912));
-        assert_eq!(parse_pr_number("no-number"), None);
-        assert_eq!(parse_pr_number("owner/repo"), None);
-        assert_eq!(parse_pr_number("owner/repo#abc"), None);
-        assert_eq!(parse_pr_number("owner/repo#0"), Some(0));
+    fn pr_reference_parses_repo_number_and_optional_sha() {
+        let bare = PrReference::parse("loopflow/loopflow#912").expect("parse");
+        assert_eq!(bare.repo, "loopflow/loopflow");
+        assert_eq!(bare.number, 912);
+        assert_eq!(bare.sha, None);
+
+        let pinned = PrReference::parse("loopflow/loopflow#912@abc1234").expect("parse");
+        assert_eq!(pinned.repo, "loopflow/loopflow");
+        assert_eq!(pinned.number, 912);
+        assert_eq!(pinned.sha.as_deref(), Some("abc1234"));
+
+        assert_eq!(
+            PrReference::parse("owner/repo#0").map(|r| r.number),
+            Some(0)
+        );
+        // No repository, no number, or a non-numeric number: not a PR reference.
+        assert_eq!(PrReference::parse("no-number"), None);
+        assert_eq!(PrReference::parse("owner/repo"), None);
+        assert_eq!(PrReference::parse("owner/repo#abc"), None);
+        assert_eq!(PrReference::parse("#912"), None);
+    }
+
+    #[test]
+    fn pr_reference_matches_repo_number_and_honors_sha() {
+        let identity = PrIdentity {
+            repo: "loopflow/loopflow".to_string(),
+            number: 912,
+            shas: vec!["mergesha".to_string(), "headsha".to_string()],
+        };
+        // Same repo + number, no sha pinned: matches any head.
+        assert!(PrReference::parse("loopflow/loopflow#912")
+            .unwrap()
+            .matches(&identity));
+        // A pinned sha the PR carries matches; one it doesn't carry fails.
+        assert!(PrReference::parse("loopflow/loopflow#912@mergesha")
+            .unwrap()
+            .matches(&identity));
+        assert!(!PrReference::parse("loopflow/loopflow#912@stale")
+            .unwrap()
+            .matches(&identity));
+        // A bare number is not enough — a different repo with the same number
+        // must not resolve.
+        assert!(!PrReference::parse("other/repo#912")
+            .unwrap()
+            .matches(&identity));
+        assert!(!PrReference::parse("loopflow/loopflow#5")
+            .unwrap()
+            .matches(&identity));
+    }
+
+    #[test]
+    fn github_repo_slug_extracts_owner_repo() {
+        assert_eq!(
+            github_repo_slug("https://github.com/loopflow/loopflow/pull/912").as_deref(),
+            Some("loopflow/loopflow")
+        );
+        assert_eq!(github_repo_slug("https://example.com/x/y"), None);
     }
 }

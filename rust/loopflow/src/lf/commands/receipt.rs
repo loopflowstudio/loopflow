@@ -15,7 +15,7 @@ use crate::journal::open_ledger;
 use crate::lf::commands::chat::{resolve_target, CliContext, ResolvedWave};
 use crate::lf::WaveTargetArgs;
 use crate::pm::{PmItem, PmProject};
-use crate::receipt::{parse_pr_number, EvidenceKind, Receipt};
+use crate::receipt::{EvidenceKind, PrReference, Receipt};
 use crate::store::RunEventRow;
 use crate::task::TaskPr;
 use crate::trace::AgentTurnRow;
@@ -293,22 +293,42 @@ fn resolve_pm(reference: &str, resolved: &ResolvedWave) -> Result<ResolvedRecord
 }
 
 fn resolve_pr(reference: &str) -> Result<ResolvedRecord> {
-    let number = parse_pr_number(reference)
-        .ok_or_else(|| anyhow!("pr:{reference} must include a PR number (owner/repo#N[@sha])"))?;
+    let target = PrReference::parse(reference).ok_or_else(|| {
+        anyhow!("pr:{reference} must be written as owner/repo#N[@sha] with a numeric PR number")
+    })?;
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let prs = store
         .all_task_prs()
         .map_err(|err| anyhow!("failed to read task PRs: {err}"))?;
     let pr = prs
         .iter()
-        .find(|pr| pr.github().is_some_and(|g| g.number == number))
-        .ok_or_else(|| {
-            anyhow!(
-                "pr:{reference} (#{number}) not found among {} task PR(s)",
-                prs.len()
-            )
-        })?;
+        .find(|pr| pr.pr_identity().is_some_and(|id| target.matches(&id)))
+        .ok_or_else(|| pr_not_found(&target, reference, &prs))?;
     Ok(pr_record(pr))
+}
+
+/// Distinguish "no such repo+number" from "that PR exists but under a different
+/// sha" so a stale-sha claim doesn't read as a missing PR.
+fn pr_not_found(target: &PrReference, reference: &str, prs: &[TaskPr]) -> anyhow::Error {
+    let same_number = prs.iter().any(|pr| {
+        pr.pr_identity()
+            .is_some_and(|id| id.repo == target.repo && id.number == target.number)
+    });
+    if same_number && target.sha.is_some() {
+        anyhow!(
+            "pr:{reference} names {}#{} but no task PR carries that sha — the head moved or the \
+             commit is wrong",
+            target.repo,
+            target.number,
+        )
+    } else {
+        anyhow!(
+            "pr:{reference} ({}#{}) not found among {} task PR(s)",
+            target.repo,
+            target.number,
+            prs.len()
+        )
+    }
 }
 
 fn pr_record(pr: &TaskPr) -> ResolvedRecord {
@@ -537,5 +557,287 @@ mod tests {
         let err = resolve_worker_report("run-missing", &resolved("ship", root))
             .expect_err("should not resolve");
         assert!(err.to_string().contains("run-missing"), "{}", err);
+    }
+
+    fn seed_trace_turn(store: &crate::store::sqlite::SqliteStore, turn_id: &str) {
+        use crate::trace::{AgentLaunchRow, AgentTurnRow};
+        let launch = AgentLaunchRow {
+            id: "launch-1".to_string(),
+            run_id: "run-1".to_string(),
+            process_id: "proc-1".to_string(),
+            started_at: 1000,
+            ended_at: Some(2000),
+            repo: "/repo".to_string(),
+            worktree: "/repo".to_string(),
+            wave: Some("ship".to_string()),
+            flow: None,
+            skill: None,
+            project: None,
+            task: None,
+            provider: "claude".to_string(),
+            model: Some("opus".to_string()),
+            surface: "cli".to_string(),
+            capture_status: "complete".to_string(),
+            incomplete_reason: None,
+            outcome: "completed".to_string(),
+            artifact_dir: "artifacts".to_string(),
+            conversation_path: "artifacts/conv.jsonl".to_string(),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 1,
+            conversation_bytes: 10,
+        };
+        let turn = AgentTurnRow {
+            id: turn_id.to_string(),
+            launch_id: launch.id.clone(),
+            ordinal: 1,
+            provider_turn_id: None,
+            started_at: 1000,
+            ended_at: Some(2000),
+            status: "completed".to_string(),
+            input_op: "initial".to_string(),
+            context_coverage: "assembled".to_string(),
+            tokenizer: "claude".to_string(),
+            system_prompt_path: None,
+            task_prompt_path: "artifacts/task.md".to_string(),
+            system_tokens: 0,
+            task_tokens: 5,
+            supplied_context_tokens: 5,
+            provider_input_tokens: Some(100),
+            provider_total_input_tokens: Some(100),
+            peak_input_tokens: Some(100),
+            context_window_tokens: Some(200_000),
+            provider_output_tokens: Some(50),
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            cost_usd: None,
+            context_gather_ms: 0,
+            context_render_ms: 0,
+            context_persist_ms: 0,
+            first_event_seq: Some(0),
+            last_event_seq: Some(1),
+        };
+        store
+            .insert_trace_capture(&launch, &turn, &[], &[])
+            .expect("insert trace capture");
+    }
+
+    /// `resolve_trace` finds one agent turn by its UUID and reports its status
+    /// and provider token counts — the trace drill path.
+    #[test]
+    fn resolve_trace_finds_an_agent_turn() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::open_ledger().expect("open ledger");
+        seed_trace_turn(&store, "turn-uuid-1");
+
+        let record = resolve_trace("turn-uuid-1").expect("resolve");
+        match record {
+            ResolvedRecord::Trace {
+                turn_id,
+                launch_id,
+                status,
+                output_tokens,
+                ..
+            } => {
+                assert_eq!(turn_id, "turn-uuid-1");
+                assert_eq!(launch_id, "launch-1");
+                assert_eq!(status, "completed");
+                assert_eq!(output_tokens, Some(50));
+            }
+            other => panic!("expected Trace, got {other:?}"),
+        }
+    }
+
+    /// An unknown trace UUID exits with a reason — no partial spoof.
+    #[test]
+    fn resolve_trace_errors_on_missing_turn() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let _store = crate::journal::open_ledger().expect("open ledger");
+        let err = resolve_trace("turn-absent").expect_err("should not resolve");
+        assert!(err.to_string().contains("turn-absent"), "{}", err);
+        assert!(err.to_string().contains("not found"), "{}", err);
+    }
+
+    fn seed_pm_snapshot(
+        store: &crate::store::sqlite::SqliteStore,
+        wave: &str,
+        root: &Path,
+        items: serde_json::Value,
+        projects: serde_json::Value,
+    ) {
+        let repo_key = std::fs::canonicalize(root)
+            .unwrap_or_else(|_| root.to_path_buf())
+            .to_string_lossy()
+            .into_owned();
+        let payload = serde_json::json!({ "items": items, "projects": projects }).to_string();
+        store
+            .put_pm_snapshot(&crate::store::PmSnapshotRow {
+                repo: repo_key,
+                wave: wave.to_string(),
+                provider: "linear".to_string(),
+                initiative: "initiative".to_string(),
+                synced_at: 1000,
+                payload,
+            })
+            .expect("put pm snapshot");
+    }
+
+    /// `resolve_pm` reads the cached snapshot and finds an item by its Linear id —
+    /// a local read that never hits Linear.
+    #[test]
+    fn resolve_pm_finds_a_snapshot_item() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::open_ledger().expect("open ledger");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        seed_pm_snapshot(
+            &store,
+            "ship",
+            root,
+            serde_json::json!([{
+                "id": "issue-uuid-7",
+                "identifier": "SHIP-7",
+                "url": null,
+                "name": "Land the receipt slice",
+                "description": "",
+                "rank": 1,
+                "completed": true,
+                "project": null,
+                "assignee": null,
+            }]),
+            serde_json::json!([]),
+        );
+
+        let record = resolve_pm("issue-uuid-7", &resolved("ship", root)).expect("resolve");
+        match record {
+            ResolvedRecord::Pm {
+                id,
+                identifier,
+                name,
+                completed,
+            } => {
+                assert_eq!(id, "issue-uuid-7");
+                assert_eq!(identifier, "SHIP-7");
+                assert_eq!(name, "Land the receipt slice");
+                assert!(completed);
+            }
+            other => panic!("expected Pm, got {other:?}"),
+        }
+    }
+
+    /// A `pm:` reference also resolves to a Project by its id.
+    #[test]
+    fn resolve_pm_finds_a_project() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::open_ledger().expect("open ledger");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        seed_pm_snapshot(
+            &store,
+            "ship",
+            root,
+            serde_json::json!([]),
+            serde_json::json!([{
+                "id": "project-uuid-3",
+                "slug": "receipts",
+                "name": "Evidence receipts",
+                "summary": "",
+                "definition": "",
+                "krs": [],
+                "initiative_ids": [],
+                "team_ids": null,
+            }]),
+        );
+
+        let record = resolve_pm("project-uuid-3", &resolved("ship", root)).expect("resolve");
+        match record {
+            ResolvedRecord::Pm { id, identifier, .. } => {
+                assert_eq!(id, "project-uuid-3");
+                assert_eq!(identifier, "receipts");
+            }
+            other => panic!("expected Pm, got {other:?}"),
+        }
+    }
+
+    /// An id absent from the snapshot exits with a reason.
+    #[test]
+    fn resolve_pm_errors_on_missing_id() {
+        let _guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::open_ledger().expect("open ledger");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        seed_pm_snapshot(
+            &store,
+            "ship",
+            root,
+            serde_json::json!([]),
+            serde_json::json!([]),
+        );
+
+        let err =
+            resolve_pm("issue-absent", &resolved("ship", root)).expect_err("should not resolve");
+        assert!(err.to_string().contains("issue-absent"), "{}", err);
+        assert!(err.to_string().contains("not found"), "{}", err);
+    }
+
+    fn github_pr(number: u32, merge: Option<&str>, head: Option<&str>) -> TaskPr {
+        use crate::task::{AfterMerge, GithubPr, PrPublication, TaskPrId, TaskSessionId};
+        use time::OffsetDateTime;
+        let now = OffsetDateTime::from_unix_timestamp(1000).expect("timestamp");
+        TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "receipts".to_string(),
+            branch: "jack/receipts".to_string(),
+            base_commit: "base".to_string(),
+            parent_pr_id: None,
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number,
+                    url: format!("https://github.com/loopflow/loopflow/pull/{number}"),
+                    head_sha: head.map(str::to_string),
+                }),
+            }),
+            merge_commit: merge.map(str::to_string),
+            abandoned_at: None,
+            ci_observation: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// A `pr:` reference matches on repository and number, and — when the head
+    /// moved — a pinned stale sha is reported as a moved head, not a missing PR.
+    #[test]
+    fn resolve_pr_matches_repo_number_and_differentiates_stale_sha() {
+        let prs = vec![github_pr(912, Some("mergesha"), Some("headsha"))];
+
+        // Bare repo#number resolves.
+        let target = PrReference::parse("loopflow/loopflow#912").unwrap();
+        assert!(prs
+            .iter()
+            .any(|pr| pr.pr_identity().is_some_and(|id| target.matches(&id))));
+
+        // A different repo with the same number does not.
+        let other = PrReference::parse("other/repo#912").unwrap();
+        assert!(!prs
+            .iter()
+            .any(|pr| pr.pr_identity().is_some_and(|id| other.matches(&id))));
+
+        // A stale pinned sha: repo+number exist, so the error names a moved head.
+        let stale = PrReference::parse("loopflow/loopflow#912@stale").unwrap();
+        let err = pr_not_found(&stale, "loopflow/loopflow#912@stale", &prs);
+        assert!(err.to_string().contains("sha"), "{}", err);
+
+        // An entirely unknown number is reported as not found.
+        let absent = PrReference::parse("loopflow/loopflow#5").unwrap();
+        let err = pr_not_found(&absent, "loopflow/loopflow#5", &prs);
+        assert!(err.to_string().contains("not found"), "{}", err);
     }
 }

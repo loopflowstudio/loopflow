@@ -16,7 +16,7 @@ use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::util::resolve_wave_name;
+use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
@@ -536,7 +536,7 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
 }
 
 fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
-    resolve_wave_name(wave)
+    wave.and_then(normalize_wave_name)
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 

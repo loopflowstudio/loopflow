@@ -1,0 +1,1063 @@
+//! W2-241: the complete CLI Wave-resolution matrix for reads and mutations.
+//!
+//! Every Wave-scoped `lf` command — reads and mutations — runs across seven
+//! ambient environments in one table-driven harness. All commands in the same
+//! environment classify the same way. A completeness guard walks the clap tree
+//! and fails CI when a new `--wave`-bearing command is not registered.
+//!
+//! The five divergences W2-151 left behind (`lf home probe`, `lf reviews
+//! catch-up`, `lf roadmap`, `lf project start`, `lf project promote`) were
+//! fixed on main before this test shipped. The matrix is the proof they stay
+//! fixed: any command that silently drops a stale UUID or invents its own
+//! resolution rule fails a cell.
+
+use std::collections::HashSet;
+use std::io::Write;
+use std::os::unix::process::CommandExt;
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use clap::{ArgAction, CommandFactory};
+use loopflow::id::WaveId;
+use loopflow::lf::Cli;
+use loopflow::store::sqlite::SqliteStore;
+use loopflow::store::PmSnapshotRow;
+use loopflow::wave::Wave;
+
+// ─── Command registry ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Read,
+    Mutation,
+}
+
+/// How a command accepts its explicit `--wave` override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WaveForm {
+    /// `--wave <name>` flag on the subcommand.
+    Flag,
+    /// `<name>` positional on the subcommand.
+    Positional,
+    /// `WaveTargetArgs` flattened: `--wave <name>`.
+    Target,
+    /// `--wave <name>` on the top-level `Cli` (prepended before the subcommand).
+    Global,
+    /// `--channel <name>` (radio pub).
+    Channel,
+    /// `<name>` positional channel (radio sub).
+    ChanPos,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Special {
+    /// `NoContext` → proceed globally (list all waves, sync all waves) — exit
+    /// 0 or downstream error, not a resolution error. Roadmap and `pm status`
+    /// behave this way.
+    global_default: bool,
+    /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). Radio,
+    /// `memory add`, `chat post` drop silently instead of erroring.
+    silent_drop: bool,
+    /// Blocks (server or subscriber); needs a kill timeout.
+    long_running: bool,
+    /// Needs `LF_LINEAR_WEBHOOK_SECRET` to reach wave resolution.
+    needs_secret: bool,
+    /// Pipes this text to stdin (for commands whose `trailing_var_arg` would
+    /// swallow `--wave` if text were on the command line).
+    stdin: Option<&'static str>,
+}
+
+impl Special {
+    const NONE: Self = Self {
+        global_default: false,
+        silent_drop: false,
+        long_running: false,
+        needs_secret: false,
+        stdin: None,
+    };
+}
+
+struct Cmd {
+    id: &'static str,
+    /// Subcommand path for the completeness guard (e.g. `["pm", "show"]`).
+    path: &'static [&'static str],
+    /// Full args after `lf` (subcommand path + extra flags/values).
+    base_args: &'static [&'static str],
+    wave_form: WaveForm,
+    kind: Kind,
+    special: Special,
+}
+
+/// Commands that resolve an ambient wave without a `wave` arg on the
+/// subcommand itself — they inherit the top-level `--wave` or read
+/// `LF_WAVE_ID` / `LF_CHANNEL` directly. The completeness guard checks
+/// these exist as real clap leaves but does not discover them via the
+/// `wave`-arg walk.
+const AMBIENT_ONLY: &[&[&str]] = &[
+    &["reviews", "catch-up"],
+    &["radio", "pub"],
+    &["radio", "sub"],
+];
+
+const COMMANDS: &[Cmd] = &[
+    // ── Reads ────────────────────────────────────────────────────────────
+    Cmd {
+        id: "status",
+        path: &["status"],
+        base_args: &["status", "--json"],
+        wave_form: WaveForm::Positional,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "roadmap",
+        path: &["roadmap"],
+        base_args: &["roadmap", "--json"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Read,
+        special: Special {
+            global_default: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "pm show",
+        path: &["pm", "show"],
+        base_args: &["pm", "show", "--no-sync", "--json"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm status",
+        path: &["pm", "status"],
+        base_args: &["pm", "status"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Read,
+        special: Special {
+            global_default: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "memory bare",
+        path: &["memory"],
+        base_args: &["memory"],
+        wave_form: WaveForm::Target,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "memory show",
+        path: &["memory", "show"],
+        base_args: &["memory", "show"],
+        wave_form: WaveForm::Target,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "memory log",
+        path: &["memory", "log"],
+        base_args: &["memory", "log"],
+        wave_form: WaveForm::Target,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "chat history",
+        path: &["chat"],
+        base_args: &["chat", "--history", "--json"],
+        wave_form: WaveForm::Target,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "receipt show",
+        path: &["receipt", "show"],
+        base_args: &["receipt", "show", "chat_turn:turn-1"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "home probe",
+        path: &["home", "probe"],
+        base_args: &["home", "probe", "--json"],
+        wave_form: WaveForm::Positional,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm sync plan",
+        path: &["pm", "sync"],
+        base_args: &["pm", "sync", "--plan"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Read,
+        special: Special {
+            global_default: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "reviews catch-up",
+        path: &["reviews", "catch-up"],
+        base_args: &["reviews", "catch-up", "--plan"],
+        wave_form: WaveForm::Global,
+        kind: Kind::Read,
+        special: Special::NONE,
+    },
+    // ── Mutations ────────────────────────────────────────────────────────
+    // `chat post` and `radio pub` use stdin for text: their `trailing_var_arg`
+    // would swallow `--wave`/`--channel` if text were on the command line.
+    Cmd {
+        id: "memory add",
+        path: &["memory", "add"],
+        base_args: &["memory", "add", "matrix-test-fact"],
+        wave_form: WaveForm::Target,
+        kind: Kind::Mutation,
+        special: Special {
+            silent_drop: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "memory update",
+        path: &["memory", "update"],
+        base_args: &["memory", "update"],
+        wave_form: WaveForm::Target,
+        kind: Kind::Mutation,
+        special: Special {
+            silent_drop: true,
+            stdin: Some("replacement memory\n"),
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "chat post",
+        path: &["chat"],
+        base_args: &["chat"],
+        wave_form: WaveForm::Target,
+        kind: Kind::Mutation,
+        special: Special {
+            silent_drop: true,
+            stdin: Some("matrix-test-message\n"),
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "radio pub",
+        path: &["radio", "pub"],
+        base_args: &["radio", "pub"],
+        wave_form: WaveForm::Channel,
+        kind: Kind::Mutation,
+        special: Special {
+            silent_drop: true,
+            stdin: Some("matrix-test\n"),
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "radio sub",
+        path: &["radio", "sub"],
+        base_args: &["radio", "sub"],
+        wave_form: WaveForm::ChanPos,
+        kind: Kind::Read,
+        special: Special {
+            silent_drop: true,
+            long_running: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "pm init",
+        path: &["pm", "init"],
+        base_args: &["pm", "init"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm sync",
+        path: &["pm", "sync"],
+        base_args: &["pm", "sync"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special {
+            global_default: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "pm rename",
+        path: &["pm", "rename"],
+        base_args: &["pm", "rename", "--title", "Renamed"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm reteam",
+        path: &["pm", "reteam"],
+        base_args: &["pm", "reteam"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm task create",
+        path: &["pm", "task", "create"],
+        base_args: &["pm", "task", "create", "--project", "test", "--title", "T"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm task update",
+        path: &["pm", "task", "update"],
+        base_args: &["pm", "task", "update", "--id", "W2-999"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm task done",
+        path: &["pm", "task", "done"],
+        base_args: &["pm", "task", "done", "--id", "W2-999"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm task move",
+        path: &["pm", "task", "move"],
+        base_args: &["pm", "task", "move", "--id", "W2-999", "--project", "test"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm project create",
+        path: &["pm", "project", "create"],
+        base_args: &[
+            "pm",
+            "project",
+            "create",
+            "--title",
+            "T",
+            "--definition",
+            "D",
+            "--kr",
+            "K",
+        ],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm project update",
+        path: &["pm", "project", "update"],
+        base_args: &[
+            "pm",
+            "project",
+            "update",
+            "--project",
+            "test",
+            "--definition",
+            "D",
+            "--kr",
+            "K",
+        ],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm project archive",
+        path: &["pm", "project", "archive"],
+        base_args: &["pm", "project", "archive", "--project", "test"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "pm webhook serve",
+        path: &["pm", "webhook", "serve"],
+        base_args: &["pm", "webhook", "serve", "--addr", "127.0.0.1:0"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special {
+            needs_secret: true,
+            long_running: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "pm webhook register",
+        path: &["pm", "webhook", "register"],
+        base_args: &[
+            "pm",
+            "webhook",
+            "register",
+            "--url",
+            "https://example.com/wh",
+        ],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special {
+            needs_secret: true,
+            ..Special::NONE
+        },
+    },
+    Cmd {
+        id: "cron add",
+        path: &["cron", "add"],
+        base_args: &[
+            "cron",
+            "add",
+            "--flow",
+            "matrix-test-flow",
+            "--schedule",
+            "daily",
+        ],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "project start",
+        path: &["project", "start"],
+        base_args: &["project", "start", "Test Project"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "project promote",
+        path: &["project", "promote"],
+        base_args: &["project", "promote", "test-slug"],
+        wave_form: WaveForm::Flag,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+    Cmd {
+        id: "home start",
+        path: &["home", "start"],
+        base_args: &["home", "start", "--json"],
+        wave_form: WaveForm::Positional,
+        kind: Kind::Mutation,
+        special: Special::NONE,
+    },
+];
+
+// ─── Environments ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// Wave was resolved (command succeeded or failed downstream of resolution).
+    Resolved,
+    /// Resolver returned `StaleIdentity` — a UUID the registry has no row for.
+    StaleIdentity,
+    /// Resolver returned `NoContext` — no `--wave` and no `LF_WAVE_ID`.
+    NoContext,
+    /// Resolver rejected an explicit name absent from the registry.
+    UnknownExplicit,
+    /// Publish-to-no-subscriber: no wave resolved → exit 0 "dropped".
+    Drop,
+}
+
+struct Env {
+    id: &'static str,
+    /// `LF_WAVE_ID` value (None = unset).
+    wave_id: Option<String>,
+    /// Explicit `--wave` value to pass (None = don't pass).
+    explicit_wave: Option<String>,
+    /// Expected outcome for standard commands in this environment.
+    default_expected: Outcome,
+}
+
+fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
+    vec![
+        Env {
+            id: "registered-uuid",
+            wave_id: Some(product_uuid.to_string()),
+            explicit_wave: None,
+            default_expected: Outcome::Resolved,
+        },
+        Env {
+            id: "registered-name",
+            wave_id: Some("product".to_string()),
+            explicit_wave: None,
+            default_expected: Outcome::Resolved,
+        },
+        Env {
+            id: "explicit-override",
+            wave_id: Some(stale_uuid.to_string()),
+            explicit_wave: Some("product".to_string()),
+            default_expected: Outcome::Resolved,
+        },
+        Env {
+            id: "stale-uuid",
+            wave_id: Some(stale_uuid.to_string()),
+            explicit_wave: None,
+            default_expected: Outcome::StaleIdentity,
+        },
+        Env {
+            id: "stale-name",
+            wave_id: Some("ghost".to_string()),
+            explicit_wave: None,
+            default_expected: Outcome::Resolved,
+        },
+        Env {
+            id: "explicit-unknown",
+            wave_id: None,
+            explicit_wave: Some("unknown-explicit".to_string()),
+            default_expected: Outcome::UnknownExplicit,
+        },
+        Env {
+            id: "absent",
+            wave_id: None,
+            explicit_wave: None,
+            default_expected: Outcome::NoContext,
+        },
+    ]
+}
+
+/// Expected outcome for a specific command × environment cell, accounting for
+/// documented special cases.
+fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
+    // Creation flows may name the Wave being registered. Direct radio channels
+    // are transport names, not managed Wave selections. All intentionally
+    // bypass managed-selection validation.
+    if env.id == "explicit-unknown"
+        && (matches!(cmd.id, "pm init" | "home start")
+            || matches!(cmd.wave_form, WaveForm::Channel | WaveForm::ChanPos))
+    {
+        return Outcome::Resolved;
+    }
+
+    // `radio pub` uses `--channel` but still resolves the ambient wave for
+    // attribution. In `explicit-override`, the ambient UUID is stale, so the
+    // command errors before checking `--channel`. `radio sub` with a
+    // positional channel subscribes directly — no ambient resolution.
+    if env.id == "explicit-override" && cmd.wave_form == WaveForm::Channel {
+        return Outcome::StaleIdentity;
+    }
+
+    if env.id == "absent" {
+        if cmd.special.silent_drop {
+            return Outcome::Drop;
+        }
+        if cmd.special.global_default {
+            return Outcome::Resolved;
+        }
+        return Outcome::NoContext;
+    }
+    env.default_expected
+}
+
+// ─── Classification ─────────────────────────────────────────────────────
+
+fn classify(output: &std::process::Output) -> Outcome {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("{stderr}{stdout}");
+    let resolution_text = combined
+        .lines()
+        .filter(|line| !line.contains("ambient wave identity failed validation; run attributed"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if !output.status.success() {
+        if resolution_text.contains("is not registered on this machine") {
+            return Outcome::UnknownExplicit;
+        }
+        if resolution_text.contains("stale") {
+            return Outcome::StaleIdentity;
+        }
+        if resolution_text.contains("determine wave")
+            || resolution_text.contains("no wave")
+            || resolution_text.contains("pass --wave")
+            || resolution_text.contains("pass a wave")
+            || resolution_text.contains("no wave given")
+        {
+            return Outcome::NoContext;
+        }
+        // Non-resolution error: the wave was resolved, the command failed
+        // downstream (no Linear token, no registry row, git check, etc.).
+        return Outcome::Resolved;
+    }
+
+    // Exit 0
+    if combined.contains("dropped") || combined.contains("nothing to tune in to") {
+        return Outcome::Drop;
+    }
+    Outcome::Resolved
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────
+
+/// Seed a machine home with one registered wave ("product"), a PM snapshot,
+/// a wave directory with MEMORY.md, and a git repo on a clean `main` branch.
+fn seed(home: &Path, repo: &Path) -> Wave {
+    std::fs::create_dir_all(home).expect("home");
+    std::fs::create_dir_all(repo).expect("repo");
+
+    // Git repo on a clean main — `lf project start` requires this before
+    // reaching wave resolution.
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .expect("git")
+    };
+    if !repo.join(".git").exists() {
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.email", "test@loopflow.test"]);
+        git(&["config", "user.name", "Matrix Test"]);
+    }
+
+    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let wave = Wave::new(
+        WaveId::new(),
+        "product".to_string(),
+        repo.display().to_string(),
+    );
+    store.create_wave(&wave).expect("register wave");
+    let repo_key = std::fs::canonicalize(repo)
+        .expect("canonicalize repo")
+        .display()
+        .to_string();
+    store
+        .put_pm_snapshot(&PmSnapshotRow {
+            repo: repo_key,
+            wave: "product".to_string(),
+            provider: "linear".to_string(),
+            initiative: "initiative-1".to_string(),
+            synced_at: chrono::Utc::now().timestamp(),
+            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+        })
+        .expect("seed pm snapshot");
+
+    // Wave directory with MEMORY.md — `lf memory show` reads it.
+    let wave_dir = repo.join("wave/product");
+    std::fs::create_dir_all(&wave_dir).expect("wave dir");
+    std::fs::write(wave_dir.join("MEMORY.md"), "PRODUCT MEMORY\n").expect("seed memory");
+
+    // Commit everything so the repo is clean.
+    git(&["add", "."]);
+    let commit = git(&["commit", "-m", "seed", "--allow-empty"]);
+    assert!(
+        commit.status.success() || commit.status.code() == Some(1),
+        "git commit failed: {}",
+        String::from_utf8_lossy(&commit.stderr)
+    );
+
+    wave
+}
+
+/// Build the full CLI args for a command × environment cell.
+fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
+    let mut args: Vec<String> = Vec::new();
+    let explicit = env.explicit_wave.as_deref();
+
+    match cmd.wave_form {
+        WaveForm::Global => {
+            if let Some(w) = explicit {
+                args.push("--wave".to_string());
+                args.push(w.to_string());
+            }
+            args.extend(cmd.base_args.iter().map(|s| s.to_string()));
+        }
+        _ => {
+            args.extend(cmd.base_args.iter().map(|s| s.to_string()));
+            if let Some(w) = explicit {
+                match cmd.wave_form {
+                    WaveForm::Flag | WaveForm::Target => {
+                        args.push("--wave".to_string());
+                        args.push(w.to_string());
+                    }
+                    WaveForm::Positional | WaveForm::ChanPos => {
+                        args.push(w.to_string());
+                    }
+                    WaveForm::Channel => {
+                        args.push("--channel".to_string());
+                        args.push(w.to_string());
+                    }
+                    WaveForm::Global => unreachable!(),
+                }
+            }
+        }
+    }
+    args
+}
+
+/// Run `lf` with the given home, repo, command, and environment. Returns the
+/// process output (stdout, stderr, exit code). Long-running commands are
+/// killed after a timeout; stdin-needing commands receive piped input.
+fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Output {
+    let args = build_args(cmd, env);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .args(&args)
+        .current_dir(repo)
+        .env("LF_HOME", home)
+        // Redirect HOME so `lf cron add` writes plists into the temp dir,
+        // not the real ~/Library/LaunchAgents.
+        .env("HOME", home)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .env_remove("LF_RUN_ID")
+        .env_remove("LF_CHANNEL")
+        .env_remove("LF_WAVE_ID");
+
+    if let Some(id) = &env.wave_id {
+        command.env("LF_WAVE_ID", id);
+    }
+    if cmd.special.needs_secret {
+        command.env("LF_LINEAR_WEBHOOK_SECRET", "test");
+    }
+
+    if let Some(stdin_text) = cmd.special.stdin {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().expect("spawn");
+        // Write stdin on a separate thread so wait_with_output can drain
+        // stdout/stderr concurrently — a child that errors before reading
+        // stdin must not deadlock the pipe.
+        let stdin = child.stdin.take();
+        let text = stdin_text.to_string();
+        let handle = std::thread::spawn(move || {
+            if let Some(mut stdin) = stdin {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+        });
+        let output = child.wait_with_output().expect("wait");
+        let _ = handle.join();
+        return output;
+    }
+
+    if cmd.special.long_running {
+        command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0);
+        let mut child = command.spawn().expect("spawn");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => return child.wait_with_output().expect("wait"),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                _ => {
+                    // SAFETY: the child created its own process group above,
+                    // and its pid is therefore the group id. A negative pid
+                    // targets only that test-owned group and its descendants.
+                    unsafe {
+                        libc::kill(-(child.id() as i32), libc::SIGKILL);
+                    }
+                    return child.wait_with_output().expect("wait after kill");
+                }
+            }
+        }
+    }
+
+    command.output().expect("lf runs")
+}
+
+fn _stop_started_homes(home: &Path, repo: &Path) {
+    // `lf home start` launches the Wave resident out of process. Stop every
+    // name this matrix can resolve before the temp Home disappears so the
+    // test never leaves resident processes behind on the host.
+    for wave in ["product", "ghost", "unknown-explicit"] {
+        let _ = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["stop", wave])
+            .current_dir(repo)
+            .env("LF_HOME", home)
+            .env("HOME", home)
+            .env_remove("LF_DB_PATH")
+            .env_remove("LF_CONTROL_HOME")
+            .env_remove("LF_CONTROL_DB_PATH")
+            .env_remove("LF_RUN_ID")
+            .env_remove("LF_CHANNEL")
+            .env_remove("LF_WAVE_ID")
+            .output();
+    }
+}
+
+// ─── Matrix test ────────────────────────────────────────────────────────
+
+/// Every Wave-scoped command × every environment. The expected outcome is
+/// shared per environment (with documented special cases for roadmap and
+/// radio). A divergence — a command that silently drops a stale UUID or
+/// invents its own resolution rule — fails a cell.
+#[test]
+fn matrix_every_command_every_environment() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let home = tmp.path().join("home");
+    let repo = tmp.path().join("repo");
+    let wave = seed(&home, &repo);
+    let product_uuid = wave.id().as_str().to_string();
+    let stale_uuid = WaveId::new().to_string();
+    let envs = make_envs(&product_uuid, &stale_uuid);
+
+    let mut failures = Vec::new();
+    let mut total = 0usize;
+
+    for env in &envs {
+        // Run reads before mutations so `lf project start` sees a clean repo.
+        let mut reads: Vec<&Cmd> = Vec::new();
+        let mut mutations: Vec<&Cmd> = Vec::new();
+        for cmd in COMMANDS {
+            if matches!(cmd.kind, Kind::Read) {
+                reads.push(cmd);
+            } else {
+                mutations.push(cmd);
+            }
+        }
+
+        for cmd in reads.iter().chain(mutations.iter()) {
+            // `lf project start` calls `ensure_clean_main` before wave
+            // resolution. Earlier mutations (memory add, chat post) dirty
+            // the repo; reset so project start reaches the resolver.
+            if cmd.id == "project start" {
+                let _ = std::process::Command::new("git")
+                    .args(["reset", "--hard", "HEAD"])
+                    .current_dir(&repo)
+                    .output();
+                let _ = std::process::Command::new("git")
+                    .args(["clean", "-fdx"])
+                    .current_dir(&repo)
+                    .output();
+            }
+
+            total += 1;
+            let output = run_lf(&home, &repo, cmd, env);
+            if cmd.id == "home start" {
+                _stop_started_homes(&home, &repo);
+            }
+            let outcome = classify(&output);
+            let expected = expected_outcome(cmd, env);
+
+            if outcome != expected {
+                failures.push(format!(
+                    "  `{}` in `{}` → {:?} (expected {:?})\n    exit: {}\n    stdout: {}\n    stderr: {}",
+                    cmd.id,
+                    env.id,
+                    outcome,
+                    expected,
+                    output.status,
+                    String::from_utf8_lossy(&output.stdout).trim(),
+                    String::from_utf8_lossy(&output.stderr).trim(),
+                ));
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "matrix had {} failure(s) out of {} cells:\n{}",
+            failures.len(),
+            total,
+            failures.join("\n")
+        );
+    }
+}
+
+// ─── Completeness guard ─────────────────────────────────────────────────
+
+/// Recursively walk the clap command tree and collect every command path that
+/// has a non-required, non-Vec `wave` arg (by `long == "wave"` or `id ==
+/// "wave"`). Required `wave: String` (always-explicit) and `wave: Vec<String>`
+/// (filter, not target) are excluded.
+fn collect_wave_arg_commands(
+    cmd: &clap::Command,
+    path: &mut Vec<String>,
+    found: &mut Vec<Vec<String>>,
+) {
+    for sub in cmd.get_subcommands() {
+        path.push(sub.get_name().to_string());
+
+        let has_optional_wave = sub.get_arguments().any(|arg| {
+            let is_wave = arg.get_long() == Some("wave") || arg.get_id() == "wave";
+            let is_required = arg.is_required_set();
+            let is_vec = matches!(arg.get_action(), ArgAction::Append);
+            is_wave && !is_required && !is_vec
+        });
+        if has_optional_wave {
+            found.push(path.clone());
+        }
+
+        collect_wave_arg_commands(sub, path, found);
+        path.pop();
+    }
+}
+
+/// Navigate the clap tree by subcommand names. Returns the leaf command if
+/// found.
+fn find_clap_command<'a>(root: &'a clap::Command, path: &[&str]) -> Option<&'a clap::Command> {
+    let mut current = root;
+    for name in path {
+        current = current.find_subcommand(name)?;
+    }
+    Some(current)
+}
+
+/// The registry is complete: every `wave`-bearing clap leaf is in the matrix,
+/// every ambient-only command exists as a real clap leaf, and every registry
+/// entry maps to a real clap leaf. Adding a new `--wave`-bearing command
+/// without registering it fails CI; removing a command leaves a stale entry
+/// that also fails.
+#[test]
+fn registry_is_complete() {
+    let root = Cli::command();
+
+    // 1. Discover all wave-arg commands in the clap tree.
+    let mut found = Vec::new();
+    collect_wave_arg_commands(&root, &mut Vec::new(), &mut found);
+    found.sort();
+    found.dedup();
+
+    // 2. Build the registry path set from COMMANDS.
+    let registry_paths: HashSet<Vec<String>> = COMMANDS
+        .iter()
+        .map(|c| c.path.iter().map(|s| s.to_string()).collect())
+        .collect();
+
+    // 3. Every wave-arg clap command must be in the registry.
+    for path in &found {
+        assert!(
+            registry_paths.contains(path),
+            "clap command {:?} has an optional `wave` arg but is not in the matrix \
+             registry — add it to COMMANDS",
+            path
+        );
+    }
+
+    // 4. Every ambient-only command must exist as a real clap leaf.
+    for path in AMBIENT_ONLY {
+        assert!(
+            find_clap_command(&root, path).is_some(),
+            "ambient-only command {:?} does not exist in the clap tree",
+            path
+        );
+    }
+
+    // 5. Every registry entry must map to a real clap command (no stale
+    //    entries). Ambient-only commands are checked above.
+    let ambient_set: HashSet<Vec<String>> = AMBIENT_ONLY
+        .iter()
+        .map(|p| p.iter().map(|s| s.to_string()).collect())
+        .collect();
+
+    for cmd in COMMANDS {
+        let path: Vec<&str> = cmd.path.to_vec();
+        if ambient_set.contains(&cmd.path.iter().map(|s| s.to_string()).collect::<Vec<_>>()) {
+            continue;
+        }
+        assert!(
+            find_clap_command(&root, &path).is_some(),
+            "registry entry `{}` ({:?}) does not map to a real clap command",
+            cmd.id,
+            cmd.path
+        );
+    }
+}
+
+// ─── Mutation targeting ─────────────────────────────────────────────────
+
+/// Cache-only mutations target exactly the resolved Wave. Seed two waves
+/// ("alpha" and "beta"); run `lf cron add` resolving to alpha; assert the
+/// plist names alpha, not beta. `cron add` writes the plist before calling
+/// `launchctl load`, so the file is on disk even when `launchctl` fails.
+#[test]
+fn cache_mutations_target_the_resolved_wave() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let home = tmp.path().join("home");
+    let repo = tmp.path().join("repo");
+
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::create_dir_all(&repo).expect("repo");
+
+    // Git repo — `lf cron add` calls `find_repo_root` before wave resolution.
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .expect("git")
+    };
+    git(&["init", "-b", "main"]);
+    git(&["config", "user.email", "test@loopflow.test"]);
+    git(&["config", "user.name", "Test"]);
+    std::fs::write(repo.join(".gitkeep"), "").expect("gitkeep");
+    git(&["add", "."]);
+    git(&["commit", "-m", "init"]);
+
+    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let alpha = Wave::new(
+        WaveId::new(),
+        "alpha".to_string(),
+        repo.display().to_string(),
+    );
+    let beta = Wave::new(
+        WaveId::new(),
+        "beta".to_string(),
+        repo.display().to_string(),
+    );
+    store.create_wave(&alpha).expect("register alpha");
+    store.create_wave(&beta).expect("register beta");
+
+    let alpha_uuid = alpha.id().as_str();
+
+    // `lf cron add` with alpha's UUID → plist names alpha, not beta.
+    // `launchctl load` may fail (no launchd on CI); the plist is written
+    // before that call, so we can read it regardless.
+    let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "cron",
+            "add",
+            "--flow",
+            "mutation-test",
+            "--schedule",
+            "daily",
+        ])
+        .current_dir(&repo)
+        .env("LF_HOME", &home)
+        .env("HOME", &home)
+        .env("LF_WAVE_ID", alpha_uuid)
+        .env_remove("LF_CHANNEL")
+        .output()
+        .expect("run cron add");
+
+    let launch_agents = home.join("Library/LaunchAgents");
+    let alpha_plist = launch_agents.join("loopflow.cron.alpha.mutation-test.plist");
+    let beta_plist = launch_agents.join("loopflow.cron.beta.mutation-test.plist");
+
+    assert!(
+        alpha_plist.exists(),
+        "alpha plist should exist (cron add exit: {}, stderr: {})",
+        cron.status,
+        String::from_utf8_lossy(&cron.stderr).trim()
+    );
+    assert!(
+        !beta_plist.exists(),
+        "beta plist should NOT exist — mutation targeted the wrong wave"
+    );
+
+    let plist = std::fs::read_to_string(&alpha_plist).expect("read plist");
+    assert!(
+        plist.contains("<string>alpha</string>"),
+        "plist should contain the resolved wave name 'alpha':\n{plist}"
+    );
+    assert!(
+        !plist.contains("<string>beta</string>"),
+        "plist must not contain 'beta':\n{plist}"
+    );
+}

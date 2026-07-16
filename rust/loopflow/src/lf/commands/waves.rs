@@ -601,16 +601,28 @@ pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
             }
             return Ok(());
         };
-        let waves = match wave {
-            Some(name) => vec![store
-                .get_wave_by_name(name)
+        // The ONE ambient-Wave rule: `--wave` wins, else `LF_WAVE_ID` (durable
+        // UUID → registry name, hand-set name as fallback). Roadmap is the one
+        // command where `NoContext` is a valid default — it lists every wave.
+        // A stale UUID is a loud error, never a silent drop to global scope.
+        let env_wave_id = std::env::var(crate::engine::wave_context::WAVE_ID_ENV).ok();
+        let waves = match crate::engine::wave_context::resolve_managed_wave_name(
+            Some(&store),
+            wave,
+            env_wave_id.as_deref(),
+        )
+        .await
+        {
+            Ok(name) => vec![store
+                .get_wave_by_name(&name)
                 .await
                 .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
                 .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"))?],
-            None => store
+            Err(crate::engine::wave_context::WaveResolveError::NoContext) => store
                 .list_waves(None)
                 .await
                 .map_err(|err| anyhow!("failed to read wave registry: {err}"))?,
+            Err(other) => return Err(anyhow!(other)),
         };
         // One tmux reading for every Session on the machine, taken once.
         let liveness = TmuxLiveness::snapshot().await;

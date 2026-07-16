@@ -1442,9 +1442,16 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Project {
                 cmd: ProjectCommand::Promote { slug, wave },
             }) => in_repo_runtime(&args, |repo| {
-                let parent = wave.clone().ok_or_else(|| {
-                    anyhow::anyhow!("cannot determine parent wave; pass --wave <name>")
-                })?;
+                let parent =
+                    loopflow::engine::wave_context::resolve_managed_wave_name_sync(wave.as_deref())
+                        .map_err(|err| match err {
+                            loopflow::engine::wave_context::WaveResolveError::NoContext => {
+                                anyhow::anyhow!(
+                                    "cannot determine parent wave; pass --wave <name>"
+                                )
+                            }
+                            other => anyhow::Error::from(other),
+                        })?;
                 let message = format!(
                     "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
                 );

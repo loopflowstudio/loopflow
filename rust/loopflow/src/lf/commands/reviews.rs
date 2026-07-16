@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 
+use crate::engine::wave_context::{resolve_managed_wave_name_sync, WaveResolveError};
 use crate::interaction_review::{InteractionReview, InteractionReviewer};
 use crate::lf::ReviewsCommand;
 use crate::store::{open_store, storage_config_from_env};
@@ -24,8 +25,10 @@ pub fn prepare(command: &ReviewsCommand, wave: Option<&str>) -> Result<CatchUpPl
         skill,
         plan: preview,
     } = command;
-    let wave = crate::ops::resolve_wave_name(wave)
-        .ok_or_else(|| anyhow!("cannot determine Wave; pass --wave <name>"))?;
+    let wave = resolve_managed_wave_name_sync(wave).map_err(|err| match err {
+        WaveResolveError::NoContext => anyhow!("cannot determine Wave; pass --wave <name>"),
+        other => other.into(),
+    })?;
     let runtime = tokio::runtime::Runtime::new().context("start review catch-up runtime")?;
     runtime.block_on(_prepare(&wave, skill, *preview))
 }

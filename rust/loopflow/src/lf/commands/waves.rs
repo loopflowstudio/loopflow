@@ -1670,6 +1670,20 @@ fn next_move_for_task(
     // exists for the current head; otherwise it is the review/merge gate.
     if pr_phase == Some(PrPhase::Open) {
         if let Some(ci) = ci {
+            // A live ci-fix generation (Running/Starting) owns the next move:
+            // the Task is actively repairing the branch, not waiting for an
+            // external CI fix. Failing + idle → Ci (the wake will fire);
+            // Passing → Review regardless of process state.
+            let fixing = matches!(
+                status,
+                TaskSessionStatus::Running | TaskSessionStatus::Starting
+            ) && ci.state == CiState::Failing;
+            if fixing {
+                return NextMove {
+                    owner: NextMoveOwner::Task,
+                    reason: "fixing CI".to_string(),
+                };
+            }
             return match ci.state {
                 CiState::Pending => NextMove {
                     owner: NextMoveOwner::Ci,
@@ -2229,6 +2243,47 @@ mod tests {
             "pull request #900 is open for review",
         );
         assert_eq!(unknown.owner, NextMoveOwner::Review);
+    }
+
+    #[test]
+    fn open_pr_failing_with_live_generation_owns_task() {
+        // A live ci-fix generation (Running) on a failing open PR: the Task
+        // is fixing CI, not waiting for an external fix.
+        let fixing = next_move_for_task(
+            TaskSessionStatus::Running,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["build"])),
+            "PR #900 is open; waiting for review",
+        );
+        assert_eq!(fixing.owner, NextMoveOwner::Task);
+        assert_eq!(fixing.reason, "fixing CI");
+
+        // Starting (process launching) is also live.
+        let starting = next_move_for_task(
+            TaskSessionStatus::Starting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["build"])),
+            "PR #900 is open; waiting for review",
+        );
+        assert_eq!(starting.owner, NextMoveOwner::Task);
+
+        // Idle (Waiting) + failing: Ci owns — the wake has not fired yet.
+        let idle = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["build"])),
+            "PR #900 is open; waiting for review",
+        );
+        assert_eq!(idle.owner, NextMoveOwner::Ci);
+
+        // Running + Passing: review gate, not "fixing CI".
+        let green = next_move_for_task(
+            TaskSessionStatus::Running,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Passing, &[])),
+            "PR #900 is open; waiting for review",
+        );
+        assert_eq!(green.owner, NextMoveOwner::Review);
     }
 
     #[test]

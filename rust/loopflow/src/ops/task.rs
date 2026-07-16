@@ -1716,6 +1716,21 @@ pub(crate) async fn reconcile_process_liveness(
         .await
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?;
     if active.as_ref().is_none_or(|pr| pr.phase() == PrPhase::Open) {
+        // W2-144 gen 7: before settling a dead-process open-PR Task to Waiting,
+        // consume a queued manual Resume. The command was queued (by
+        // `lf task resume` or a queued steer) but never claimed because the
+        // process died first. Relaunching lets the new generation drain and
+        // honor it — one relaunch path, shared with the ci-fix wake.
+        let commands = store
+            .list_child_commands(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(format!("failed to read command queue: {error}")))?;
+        let has_pending_resume = commands.iter().any(|cmd| {
+            matches!(cmd.kind, ChildCommandKind::Resume { .. }) && !cmd.state.is_terminal()
+        });
+        if has_pending_resume {
+            return relaunch_inactive_process(store, session).await;
+        }
         let from = session.status;
         session.set_status(
             TaskSessionStatus::Waiting,
@@ -3201,7 +3216,10 @@ mod tests {
         refuse_if_canonical_ahead, resolve_task_flow, resolve_upstream_base,
         verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
     };
-    use crate::child_session::{ChildCommandSource, ChildProcessGeneration};
+    use crate::child_session::{
+        ChildCommand, ChildCommandKind, ChildCommandSource, ChildExecutionContext,
+        ChildProcessGeneration, ChildRef,
+    };
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
@@ -4089,6 +4107,223 @@ mod tests {
         assert!(
             message.contains("unpushed canonical commit"),
             "refusal must name the unpushed commit, got: {message}"
+        );
+    }
+
+    /// W2-144 gen 7: a dead process on an open-PR Task with a queued `Resume`
+    /// must relaunch (consuming the Resume) instead of settling to `Waiting`.
+    /// Without a queued Resume, the existing settle-to-Waiting behavior holds.
+    #[tokio::test]
+    async fn reconcile_process_liveness_consumes_queued_resume_before_settling() {
+        let dir = tempfile::tempdir().unwrap();
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let now = OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            WaveId::new(),
+            "queue-bridge".to_string(),
+            dir.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let execution = ChildExecutionContext {
+            lf_bin: std::path::PathBuf::from("/usr/bin/false"),
+            db_path: dir.path().join("registry.db"),
+            lf_home: dir.path().to_path_buf(),
+        };
+        let project = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(format!("project-{}", WaveId::new())).unwrap(),
+                    slug: "queue-bridge".to_string(),
+                    name: "Queue bridge".to_string(),
+                    prompt_context: "Test".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Running,
+            status_reason: "test".to_string(),
+            status_at: now,
+            iteration: 1,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("thread".to_string()),
+            latest_process: Some(ChildProcessGeneration {
+                generation: 1,
+                pid: None,
+                process_group_id: None,
+                tmux_name: "lf-project-test".to_string(),
+                agent: "codex".to_string(),
+                provider: "codex".to_string(),
+                provider_session_id: Some("thread".to_string()),
+                started_at: now,
+                state: crate::child_session::ChildLeaseState::Active,
+                outcome: None,
+            }),
+            execution: Some(execution.clone()),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project_session(&project).await.unwrap();
+
+        let task = TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).unwrap(),
+                    identifier: "INF-QUEUE".to_string(),
+                    title: "Queue bridge proof".to_string(),
+                    description: "Resume must be consumed.".to_string(),
+                },
+                project: project.launch.project.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_session_id: project.id.clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Running,
+            status_reason: "task is running".to_string(),
+            status_at: now,
+            worktree: dir.path().to_path_buf(),
+            workspace_slug: "queue-bridge".to_string(),
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("thread".to_string()),
+            latest_process: Some(ChildProcessGeneration {
+                generation: 1,
+                pid: None,
+                process_group_id: None,
+                tmux_name: "lf-task-queue-bridge".to_string(),
+                agent: "codex".to_string(),
+                provider: "codex".to_string(),
+                provider_session_id: Some("thread".to_string()),
+                started_at: now - time::Duration::seconds(30),
+                state: crate::child_session::ChildLeaseState::Active,
+                outcome: None,
+            }),
+            execution: Some(execution),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let mut pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: "jack/queue-bridge".to_string(),
+            base_commit: "0".repeat(40),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_task_session(&task, &pr).await.unwrap();
+
+        // Promote the PR to Open (published on GitHub) after creation.
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 999,
+                url: "https://github.com/loopflow/loopflow/pull/999".to_string(),
+                head_sha: Some("head-1".to_string()),
+            }),
+        });
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&pr).await.unwrap();
+
+        // --- Without a queued Resume: settles to Waiting (existing behavior) ---
+        let mut idle = store.get_task_session(&task.id).await.unwrap().unwrap();
+        super::reconcile_process_liveness(&store, &mut idle)
+            .await
+            .expect("settle without Resume");
+        assert_eq!(
+            idle.status,
+            TaskSessionStatus::Waiting,
+            "idle task settles to Waiting"
+        );
+
+        // --- With a queued Resume: relaunches, does NOT settle to Waiting ---
+        // Re-arm the task to Running with a stale process for the second pass.
+        idle.set_status(TaskSessionStatus::Running, "re-armed for resume proof");
+        idle.latest_process = Some(ChildProcessGeneration {
+            generation: 2,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "lf-task-queue-bridge-2".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("thread".to_string()),
+            started_at: OffsetDateTime::now_utc() - time::Duration::seconds(30),
+            state: crate::child_session::ChildLeaseState::Active,
+            outcome: None,
+        });
+        store.update_task_session(&idle).await.unwrap();
+
+        let resume = ChildCommand::new(
+            ChildRef::Task(task.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Resume { message: None },
+        );
+        store.create_child_command(&resume).await.unwrap();
+
+        let mut with_resume = store.get_task_session(&task.id).await.unwrap().unwrap();
+        let result = super::reconcile_process_liveness(&store, &mut with_resume).await;
+
+        // The bridge fired: relaunch was attempted. In the test env the launch
+        // fails (lf_bin = /usr/bin/false), so we get an error — but the key
+        // proof is that the status is NOT Waiting (it took the relaunch path).
+        assert_ne!(
+            with_resume.status,
+            TaskSessionStatus::Waiting,
+            "a queued Resume must prevent the Waiting settle"
+        );
+        // Either the launch failed (error returned) or a new generation started
+        // (Starting). Both prove the bridge consumed the Resume.
+        assert!(
+            result.is_err() || with_resume.status == TaskSessionStatus::Starting,
+            "bridge should relaunch, got status={}, result={:?}",
+            with_resume.status.as_str(),
+            result.as_ref().err().map(|e| e.to_string())
+        );
+
+        // The Resume command is still in the queue (not yet claimed by a
+        // successful generation), but it was not discarded — the bridge
+        // attempted a relaunch to consume it.
+        let commands = store
+            .list_child_commands(&ChildRef::Task(task.id))
+            .await
+            .unwrap();
+        let resume_still_pending = commands.iter().any(|cmd| {
+            matches!(cmd.kind, ChildCommandKind::Resume { .. }) && !cmd.state.is_terminal()
+        });
+        assert!(
+            resume_still_pending,
+            "the Resume command is still in the queue, not discarded"
         );
     }
 }

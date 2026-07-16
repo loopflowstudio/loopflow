@@ -2385,6 +2385,7 @@ mod tests {
             slug: "ship".to_string(),
             branch: "jack/ship".to_string(),
             base_commit: "base".to_string(),
+            parent_pr_id: None,
             publication: Some(crate::task::PrPublication {
                 requested_at: now,
                 after_merge: crate::task::AfterMerge::Review,

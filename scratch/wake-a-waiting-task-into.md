@@ -128,20 +128,22 @@ wake.
   `task.yaml`; `prepare_task_flow_step` seeds the ci-fix step with the PR + failing
   leaf checks + log URLs. After the push, the existing settle path returns the Task
   to `Waiting` and reconcile rearms on the new head. Tested.
-- **Next — pursue starts with a rebase**, then slice 3. Branch is ~7 behind main
-  and touches hot files (`task/runner.rs`, `ops/task.rs`, `ops/child.rs`,
-  `project_session/runner.rs`) that active waves also edit — `lf rebase` first to
-  shrink the conflict surface. Slice 3: the `reconcile_process_liveness` queue
-  bridge (W2-144 gen 7 — consume a queued manual `lf task resume` before the
-  open-PR `Waiting` settle); the `lf status` "fixing CI" owner (open PR + failing +
-  live ci-fix generation → owner `Task`); and the deterministic integration harness
-  proving the full contract. That completes PR2.
-- **Recurring control-plane blocker (not W2-156's to fix):** a Context Lab worker
-  keeps migrating the shared `~/.lf/loopflow.db` with its *unmerged* migration
-  (first `0.11.004_context_launch_work`, now renumbered to `0.11.006`), bricking
-  the release/product `lf` each time. Renumbering is not the fix — **dev-store
-  isolation** (`LF_HOME=~/.lf-dev`) is, so a wave's in-flight schema never touches
-  the real ledger. `cargo` tests (temp DBs) are unaffected and slice 2 code is
-  buildable; `lf` store ops (acknowledge / land) are blocked while the shared store
-  carries an unknown migration. Details in `scratch/questions.md`.
+- **Slice 3 shipped** (this rebase): completes PR2.
+  - **3a — `reconcile_process_liveness` queue bridge (W2-144 gen 7):** before
+    settling a dead-process open-PR Task to `Waiting`, the reconcile path now
+    checks the command queue for a pending `Resume`. If found, it relaunches
+    (consuming the Resume via the new generation's command drain) instead of
+    settling — so a manual `lf task resume` is never discarded because the PR is
+    open. One relaunch path, shared with the ci-fix wake. Tested.
+  - **3b — `lf status` "fixing CI" owner:** `next_move_for_task` now returns
+    `Task` (not `Ci`) when an open PR has a failing fresh reading AND the Task
+    status is `Running`/`Starting` — the ci-fix turn is live, the Task owns the
+    next move. Idle (`Waiting`) + failing → `Ci` (the wake will fire). Passing →
+    `Review` regardless. Tested.
+  - **3c — integration harness:** deterministic test proving the queue bridge
+    (with-Resume relaunches, without-Resume settles) + the owner refinement
+    (Running+failing→Task, Waiting+failing→Ci, Running+passing→Review). The
+    pre-existing `ci_fix_seed` and `ci_fix_restart_bar` tests cover slices 1–2c.
+  - **Pre-existing fix:** `task/runner.rs` test `TaskPr` initializer was missing
+    `parent_pr_id` (surfaced by the rebase); fixed.
 </content>

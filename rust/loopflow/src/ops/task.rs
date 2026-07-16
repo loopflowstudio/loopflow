@@ -37,10 +37,10 @@ use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, StoreError,
 };
 use crate::task::{
-    AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
-    GithubPr, Observation, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
-    TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
-    TaskSessionSuccession,
+    AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
+    GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
+    PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId,
+    TaskSessionStatus, TaskSessionSuccession,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -2565,6 +2565,45 @@ fn observe_required_checks(
     Some(observation)
 }
 
+fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
+    if observation.state != CiState::Failing {
+        return None;
+    }
+    let identity = pr.pr_identity()?;
+    let failure_set = observation.failure_set();
+    let mut digest = Sha256::new();
+    for check in &failure_set {
+        digest.update(check.as_bytes());
+        digest.update([0]);
+    }
+    Some(CiIncident {
+        identity: format!(
+            "github:ci:{}:{}:{}:{}",
+            identity.repo,
+            identity.number,
+            observation.head_sha,
+            hex::encode(digest.finalize())
+        ),
+        task_session_id: pr.task_session_id.clone(),
+        pr_id: pr.id.clone(),
+        repo: identity.repo,
+        pr_number: identity.number,
+        failed_head_sha: observation.head_sha.clone(),
+        failure_set,
+        provider_completed_at: None,
+        poll_observed_at: Some(observation.observed_at),
+        webhook_received_at: None,
+        trigger_command_id: None,
+        responded_at: None,
+        green_at: None,
+        merged_at: None,
+        blocked_at: None,
+        blocked_reason: None,
+        created_at: observation.observed_at,
+        updated_at: observation.observed_at,
+    })
+}
+
 // Local control commands often arrive in a burst (`status`, then `follow-up`,
 // then another `status`). One minute keeps merge/CI state responsive while
 // bounding those bursts to one GitHub read. A failed read opens a longer circuit:
@@ -2692,6 +2731,9 @@ async fn reconcile_task_pr_with_authority(
         head_sha: github_pr.head_sha.clone(),
     });
 
+    let mut observed_incident = None;
+    let mut green_at = None;
+    let mut merged_at = None;
     let pr_event = match github_pr.state.as_str() {
         "merged" => {
             let merge_commit = github_pr.merge_commit.clone().ok_or_else(|| {
@@ -2702,6 +2744,7 @@ async fn reconcile_task_pr_with_authority(
             })?;
             pr.merge_commit = Some(merge_commit.clone());
             pr.ci_observation = None;
+            merged_at = Some(now);
             // Record the merge, but withhold completion while an accepted
             // directive is unincorporated — an auto-merge armed by `lf pr land`
             // must not silently erase direction accepted after it was armed.
@@ -2784,6 +2827,11 @@ async fn reconcile_task_pr_with_authority(
                 pr.ci_observation.as_ref(),
                 now,
             ) {
+                if ci_observation.state == CiState::Passing {
+                    green_at = Some(ci_observation.observed_at);
+                } else {
+                    observed_incident = ci_incident(&pr, &ci_observation);
+                }
                 pr.ci_observation = Some(ci_observation);
             }
             Some(TaskEventKind::PrOpened {
@@ -2819,6 +2867,24 @@ async fn reconcile_task_pr_with_authority(
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
         }
+    }
+    if let Some(incident) = observed_incident {
+        store
+            .observe_ci_incident(&incident)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    if let Some(green_at) = green_at {
+        store
+            .mark_ci_incidents_green(&pr.id, green_at)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    if let Some(merged_at) = merged_at {
+        store
+            .mark_ci_incidents_merged(&pr.id, merged_at)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
     }
     if !session_saved_with_pr
         && (session.status != previous_session_status

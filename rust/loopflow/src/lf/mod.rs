@@ -295,6 +295,21 @@ pub enum Commands {
         #[arg(long, default_value_t = 30)]
         days: u32,
     },
+    /// Show how failed CI is detected, repaired, and landed across this Home
+    Ci {
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Scope to one Wave
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one GitHub owner/repo
+        #[arg(long)]
+        repo: Option<String>,
+        /// Emit the complete incident report as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Graph output-token throughput for the last hour and show running lf processes
     Top,
     /// Inspect supplied agent context and its contributing assets
@@ -1722,6 +1737,31 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn ci_report_accepts_machine_wide_filters() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "ci",
+            "--since",
+            "24h",
+            "--wave",
+            "infrastructure",
+            "--repo",
+            "loopflowstudio/loopflow",
+            "--json",
+        ])
+        .expect("parse CI report");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Ci {
+                since,
+                wave: Some(wave),
+                repo: Some(repo),
+                json: true,
+            }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
+        ));
+    }
 
     #[test]
     fn auth_help_exposes_managed_account_flows() {

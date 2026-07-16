@@ -23,6 +23,7 @@ use crate::trace::{
 use crate::wave::Wave;
 
 mod child_sessions;
+mod ci_incidents;
 mod interaction_reviews;
 mod interactive_handoffs;
 mod provider_deliveries;

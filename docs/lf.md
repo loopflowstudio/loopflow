@@ -345,6 +345,8 @@ lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
+lf ci --since 7d                # CI repair attempts, latency, and outcomes
+lf ci --since 7d --json         # complete machine-wide incident receipt
 lf top                          # last-hour provider throughput + live sessions
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
@@ -361,6 +363,10 @@ revision; missing revision identity does not match the current-only filter.
 `lf trace --content` is the explicit
 reader for the exact prompt and normalized conversation at one immutable
 run/launch/turn address.
+
+`lf ci` reads durable CI incidents from the local Home store. One failed head is
+one attempt; later passing and merge observations close every open attempt on
+that PR. `--wave` and `--repo owner/repo` filter the same local report.
 
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print

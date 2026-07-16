@@ -1,7 +1,10 @@
-#[cfg(target_os = "macos")]
+use std::fs;
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+#[cfg(target_os = "macos")]
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,11 +22,10 @@ use crate::provider_account::{
     parse_account_id, remove_account_profile,
 };
 use crate::provider_auth::{
-    capture_claude_profile_credentials, capture_codex_profile_credentials,
-    disconnect_provider_account_auth, drive_claude_browser_authorization, no_event_sink,
+    capture_claude_authorization_code_from_chrome, capture_claude_profile_credentials,
+    disconnect_provider_account_auth, import_ambient_claude_profile_credentials, no_event_sink,
     prepare_provider_account_access_token, provider_account_auth_status,
-    start_provider_account_auth, AuthStatus, ClaudeKeychainGuard, Provider, ProviderAuthService,
-    ProviderAuthSnapshot,
+    start_provider_account_auth, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
 };
 use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
@@ -192,15 +194,18 @@ async fn connect_managed_account(
     chrome_profile: LocalChromeProfile,
 ) -> Result<()> {
     let account_home = ensure_account_profile(provider, &account_id)?;
-    let controller_profile = (provider == Provider::Claude
-        && account_home.join(".credentials.json").is_file())
-    .then(|| account_home.clone());
-    let keychain_guard = if provider == Provider::Claude {
-        Some(ClaudeKeychainGuard::preserve()?)
-    } else {
-        None
-    };
-    let handle = start_provider_account_auth(provider, account_home.clone()).await?;
+    let _login_lock = acquire_managed_login_lock(&account_home, provider, &account_id)?;
+    let parent = account_home
+        .parent()
+        .ok_or_else(|| anyhow!("account home has no parent directory"))?;
+    let login_home = tempfile::Builder::new()
+        .prefix(".login-")
+        .tempdir_in(parent)
+        .context("create private provider login home")?;
+    let auth_home = login_home.path().to_path_buf();
+    let handle =
+        start_provider_account_auth(provider, auth_home.clone(), chrome_profile.login.as_deref())
+            .await?;
     let flow = handle.response.clone();
     let verification_url = flow
         .verification_uri_complete
@@ -213,26 +218,21 @@ async fn connect_managed_account(
     );
     if handle.requires_authorization_code() {
         open_chrome_profile(&chrome_profile, &verification_url)?;
-        println!("Authorizing with Claude in Chrome...");
-        if let Some(code) = drive_claude_browser_authorization(
+        println!("Approve authorization in the browser.");
+        let code = match capture_claude_authorization_code_from_chrome(
             &verification_url,
-            controller_profile.as_deref(),
-            Some(chrome_profile.label.as_str()),
+            chrome_profile.name.as_str(),
         )
         .await?
         {
-            handle
-                .submit_authorization_code(code.expose_secret())
-                .await?;
-        } else {
-            println!("Chrome controller unavailable; complete authorization in the browser.");
-            let code = SecretString::new(rpassword::prompt_password(
-                "Paste the one-time code from the browser: ",
-            )?);
-            handle
-                .submit_authorization_code(code.expose_secret())
-                .await?;
-        }
+            Some(code) => code,
+            None => SecretString::new(rpassword::prompt_password(
+                "Browser handoff unavailable; paste the one-time code: ",
+            )?),
+        };
+        handle
+            .submit_authorization_code(code.expose_secret())
+            .await?;
     } else {
         println!("Complete authorization in the browser.");
         open_chrome_profile(&chrome_profile, &verification_url)?;
@@ -247,25 +247,13 @@ async fn connect_managed_account(
             )
         })??;
 
-    let observed_claude_login = if provider == Provider::Claude {
-        capture_claude_profile_credentials(&account_home)?;
-        let login = match provider_account_auth_status(provider, account_home.clone()).await? {
-            AuthStatus::Active { login } => login,
-            _ => None,
-        };
-        require_managed_access_token(provider, &account_id, &account_home).await?;
-        if let Some(guard) = keychain_guard {
-            guard.restore()?;
+    let login = match provider {
+        Provider::Claude => {
+            capture_claude_profile_credentials(&auth_home)?;
+            require_managed_access_token(provider, &account_id, &auth_home).await?;
+            None
         }
-        login
-    } else {
-        None
-    };
-
-    let login = if provider == Provider::Claude {
-        observed_claude_login
-    } else {
-        match provider_account_auth_status(provider, account_home.clone()).await? {
+        Provider::Codex => match provider_account_auth_status(provider, auth_home.clone()).await? {
             AuthStatus::Active { login } => login,
             other => {
                 return Err(anyhow!(
@@ -275,9 +263,15 @@ async fn connect_managed_account(
                     other.as_str()
                 ))
             }
-        }
+        },
+        _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
     };
     let login = resolve_profile_login(provider, Some(&chrome_profile), login)?;
+    match provider {
+        Provider::Claude => install_claude_login(login_home.path(), &account_home)?,
+        Provider::Codex => install_codex_login(login_home.path(), &account_home)?,
+        _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
+    }
     register_managed_account(
         store,
         provider,
@@ -293,6 +287,53 @@ async fn connect_managed_account(
         profile_id
     );
     Ok(())
+}
+
+fn acquire_managed_login_lock(
+    account_home: &Path,
+    provider: Provider,
+    account_id: &ProviderAccountId,
+) -> Result<fs::File> {
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(account_home.join(".login.lock"))
+        .context("open managed login lock")?;
+    fs2::FileExt::try_lock_exclusive(&lock).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            anyhow!(
+                "another {} login is already in progress for account '{}'",
+                provider.display_name(),
+                account_id
+            )
+        } else {
+            anyhow!(
+                "could not lock {} account '{}' for login: {error}",
+                provider.display_name(),
+                account_id
+            )
+        }
+    })?;
+    Ok(lock)
+}
+
+fn install_codex_login(login_home: &Path, account_home: &Path) -> Result<()> {
+    let source = login_home.join("auth.json");
+    if !source.is_file() {
+        return Err(anyhow!("Codex login did not produce an OAuth credential"));
+    }
+    fs::rename(source, account_home.join("auth.json")).context("install verified Codex credential")
+}
+
+fn install_claude_login(login_home: &Path, account_home: &Path) -> Result<()> {
+    let source = login_home.join(".credentials.json");
+    if !source.is_file() {
+        return Err(anyhow!("Claude login did not produce an OAuth credential"));
+    }
+    fs::rename(source, account_home.join(".credentials.json"))
+        .context("install verified Claude credential")
 }
 
 async fn register_managed_account(
@@ -424,21 +465,24 @@ async fn import_account(
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
+    if provider != Provider::Claude {
+        return Err(anyhow!(
+            "existing login import is supported for Claude only"
+        ));
+    }
     let account_id = parse_account_id(raw_account)?;
     let provider_profile = ensure_account_profile(provider, &account_id)?;
+    let profile_id = raw_profile
+        .map(ProfileId::parse)
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
     let chrome_profile = resolve_auth_chrome_profile(raw_profile, raw_chrome_profile).await?;
     let paired_login = chrome_profile
         .as_ref()
-        .map(|profile| profile.label.as_str())
-        .filter(|label| label.contains('@'))
+        .and_then(|profile| profile.login.as_deref())
         .map(String::from);
 
-    let credential_exists = match provider {
-        Provider::Claude => provider_profile.join(".credentials.json").is_file(),
-        Provider::Codex => provider_profile.join("auth.json").is_file(),
-        _ => false,
-    };
-    let login = if credential_exists {
+    let login = if provider_profile.join(".credentials.json").is_file() {
         match provider_account_auth_status(provider, provider_profile.clone()).await? {
             AuthStatus::Active { login } => login,
             other => {
@@ -451,46 +495,36 @@ async fn import_account(
             }
         }
     } else {
-        match provider {
-            Provider::Claude => {
-                let ambient = read_ambient_claude_status()?;
-                if !ambient.logged_in {
-                    return Err(anyhow!("the ambient Claude CLI is not logged in"));
-                }
-                if let (Some(expected), Some(actual)) =
-                    (paired_login.as_deref(), ambient.email.as_deref())
-                {
-                    if !expected.eq_ignore_ascii_case(actual) {
-                        return Err(anyhow!(
-                            "ambient Claude login '{}' does not match paired Chrome profile '{}'",
-                            actual,
-                            expected
-                        ));
-                    }
-                }
-                capture_claude_profile_credentials(&provider_profile)?;
-                ambient.email.or(paired_login)
-            }
-            Provider::Codex => {
-                capture_codex_profile_credentials(&provider_profile)?;
-                match provider_account_auth_status(provider, provider_profile.clone()).await? {
-                    AuthStatus::Active { login } => login,
-                    other => {
-                        return Err(anyhow!(
-                            "ambient Codex credential produced status {}",
-                            other.as_str()
-                        ))
-                    }
-                }
-            }
-            _ => return Err(anyhow!("{} account import is unsupported", provider)),
+        let ambient = read_ambient_claude_status()?;
+        if !ambient.logged_in {
+            return Err(anyhow!("the ambient Claude CLI is not logged in"));
         }
+        if let (Some(expected), Some(actual)) = (paired_login.as_deref(), ambient.email.as_deref())
+        {
+            if !expected.eq_ignore_ascii_case(actual) {
+                return Err(anyhow!(
+                    "ambient Claude login '{}' does not match paired Chrome profile '{}'",
+                    actual,
+                    expected
+                ));
+            }
+        }
+        import_ambient_claude_profile_credentials(&provider_profile)?;
+        ambient.email.or(paired_login)
     };
 
     require_managed_access_token(provider, &account_id, &provider_profile).await?;
     let login = resolve_profile_login(provider, chrome_profile.as_ref(), login)?;
     let store = open_account_store().await?;
-    register_managed_account(&store, provider, &account_id, provider_profile, login, None).await?;
+    register_managed_account(
+        &store,
+        provider,
+        &account_id,
+        provider_profile,
+        login,
+        profile_id.as_ref(),
+    )
+    .await?;
     println!(
         "Imported {} account '{}'",
         provider.display_name(),
@@ -565,10 +599,23 @@ async fn resolve_profile_chrome_profile(
                 profile_id
             )
         })?;
-    Ok(LocalChromeProfile {
-        directory: binding.chrome_directory,
-        label: binding.profile_id.to_string(),
-    })
+    let chrome_profile = crate::profile::resolve_local_chrome_profile(&binding.chrome_directory)
+        .map_err(anyhow::Error::msg)?;
+    let login = chrome_profile.login.as_deref().ok_or_else(|| {
+        anyhow!(
+            "Chrome profile '{}' has no signed-in account",
+            chrome_profile.name
+        )
+    })?;
+    if !login.eq_ignore_ascii_case(profile_id.as_str()) {
+        return Err(anyhow!(
+            "Chrome profile '{}' is signed in as '{}', not '{}'",
+            chrome_profile.name,
+            login,
+            profile_id
+        ));
+    }
+    Ok(chrome_profile)
 }
 
 fn resolve_profile_login(
@@ -576,9 +623,7 @@ fn resolve_profile_login(
     chrome_profile: Option<&LocalChromeProfile>,
     provider_login: Option<String>,
 ) -> Result<Option<String>> {
-    let expected_login = chrome_profile
-        .map(|profile| profile.label.as_str())
-        .filter(|label| label.contains('@'));
+    let expected_login = chrome_profile.and_then(|profile| profile.login.as_deref());
     let Some(expected) = expected_login else {
         return Ok(provider_login);
     };
@@ -607,16 +652,19 @@ fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
     if !chrome.is_file() {
         return Err(anyhow!("Google Chrome is not installed in /Applications"));
     }
-    let status = Command::new(chrome)
+    let status = Command::new("open")
+        .args(["-n", "-a", "Google Chrome", "--args"])
         .arg(format!("--profile-directory={}", profile.directory))
         .arg("--new-window")
         .arg(url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .context("open matching Chrome profile")?;
     if !status.success() {
         return Err(anyhow!(
             "Google Chrome could not open profile '{}'",
-            profile.label
+            profile.name
         ));
     }
     Ok(())
@@ -1028,6 +1076,7 @@ fn format_relative_delta(seconds: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -1043,8 +1092,9 @@ mod tests {
     };
 
     use super::{
-        account_for_profile, account_id_for_profile, format_account, format_relative_delta,
-        format_snapshot, parse_paid_through, parse_routing_state, register_managed_account,
+        account_for_profile, account_id_for_profile, acquire_managed_login_lock, format_account,
+        format_relative_delta, format_snapshot, import_account, install_claude_login,
+        install_codex_login, parse_paid_through, parse_routing_state, register_managed_account,
         resolve_profile_login,
     };
 
@@ -1168,11 +1218,74 @@ mod tests {
         assert_eq!(format_relative_delta(172_800), "2d");
     }
 
+    #[tokio::test]
+    async fn codex_login_cannot_be_created_by_importing_ambient_credentials() {
+        let error = import_account("codex", "engineering", None, None)
+            .await
+            .expect_err("Codex imports must require a direct login");
+
+        assert!(error
+            .to_string()
+            .contains("existing login import is supported for Claude only"));
+    }
+
+    #[test]
+    fn verified_codex_login_replaces_the_previous_credential() {
+        let parent = tempfile::tempdir().unwrap();
+        let login_home = parent.path().join("login");
+        let account_home = parent.path().join("account");
+        fs::create_dir_all(&login_home).unwrap();
+        fs::create_dir_all(&account_home).unwrap();
+        fs::write(login_home.join("auth.json"), "verified").unwrap();
+        fs::write(account_home.join("auth.json"), "previous").unwrap();
+
+        install_codex_login(&login_home, &account_home).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(account_home.join("auth.json")).unwrap(),
+            "verified"
+        );
+        assert!(!login_home.join("auth.json").exists());
+    }
+
+    #[test]
+    fn verified_claude_login_replaces_the_previous_credential() {
+        let parent = tempfile::tempdir().unwrap();
+        let login_home = parent.path().join("login");
+        let account_home = parent.path().join("account");
+        fs::create_dir_all(&login_home).unwrap();
+        fs::create_dir_all(&account_home).unwrap();
+        fs::write(login_home.join(".credentials.json"), "verified").unwrap();
+        fs::write(account_home.join(".credentials.json"), "previous").unwrap();
+
+        install_claude_login(&login_home, &account_home).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(account_home.join(".credentials.json")).unwrap(),
+            "verified"
+        );
+        assert!(!login_home.join(".credentials.json").exists());
+    }
+
+    #[test]
+    fn concurrent_login_for_the_same_account_is_rejected() {
+        let account_home = tempfile::tempdir().unwrap();
+        let account_id = ProviderAccountId::parse("engineering").unwrap();
+        let _first =
+            acquire_managed_login_lock(account_home.path(), Provider::Codex, &account_id).unwrap();
+
+        let error = acquire_managed_login_lock(account_home.path(), Provider::Codex, &account_id)
+            .expect_err("second login must not open another browser flow");
+
+        assert!(error.to_string().contains("already in progress"));
+    }
+
     #[test]
     fn codex_profile_and_provider_login_must_name_the_same_account() {
         let chrome_profile = LocalChromeProfile {
             directory: "Profile 7".to_string(),
-            label: "primary@example.com".to_string(),
+            name: "Primary".to_string(),
+            login: Some("primary@example.com".to_string()),
         };
 
         assert_eq!(
@@ -1197,7 +1310,8 @@ mod tests {
     fn claude_uses_the_selected_profile_when_status_omits_email() {
         let chrome_profile = LocalChromeProfile {
             directory: "Profile 7".to_string(),
-            label: "primary@example.com".to_string(),
+            name: "Primary".to_string(),
+            login: Some("primary@example.com".to_string()),
         };
 
         assert_eq!(

@@ -397,6 +397,10 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
+    reject_detached_forwarded_profile(
+        std::env::var_os(crate::provider_account::FORWARDED_PROFILE_BUNDLE_ENV)
+            .is_some_and(|value| !value.is_empty()),
+    )?;
     let context = pinned_execution_context()?;
     let inherited_context = ["LF_RUN_ID", "LF_PROCESS_ID"]
         .into_iter()
@@ -419,6 +423,16 @@ pub(crate) async fn start_lf_session_with_env(
         .collect::<Vec<_>>();
     let shell_command = lf_session_shell_command(argv, &environment);
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
+}
+
+fn reject_detached_forwarded_profile(forwarded: bool) -> Result<()> {
+    if forwarded {
+        return Err(anyhow!(
+            "cannot launch a detached session from an ephemeral forwarded provider profile; \
+             keep the remote command in the foreground or authenticate on the remote host"
+        ));
+    }
+    Ok(())
 }
 
 fn extend_session_control_context(
@@ -534,7 +548,8 @@ mod tests {
 
     use super::{
         extend_session_control_context, lf_session_shell_command, reap_child_process,
-        select_binary_override, select_current_home_binary, tmux_installed,
+        reject_detached_forwarded_profile, select_binary_override, select_current_home_binary,
+        tmux_installed,
     };
     use crate::build_info::BuildProvenance;
     use crate::child_session::ChildExecutionContext;
@@ -667,6 +682,15 @@ mod tests {
             command,
             "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
         );
+    }
+
+    #[test]
+    fn detached_session_rejects_an_ephemeral_forwarded_profile() {
+        assert!(reject_detached_forwarded_profile(false).is_ok());
+        assert!(reject_detached_forwarded_profile(true)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot launch a detached session"));
     }
 
     #[tokio::test]

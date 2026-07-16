@@ -1346,7 +1346,6 @@ dependencies = [
  "rpassword",
  "rusqlite",
  "secrecy",
- "security-framework",
  "serde",
  "serde_json",
  "serde_urlencoded",

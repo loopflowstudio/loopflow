@@ -5,6 +5,8 @@
 //! machine, forwarded into the remote process environment as a stdin preamble
 //! (never in argv, `ps`, or logs), and are NOT persisted on the remote — they
 //! die with the process. The remote host stays a stateless compute surface.
+//! Detached work is rejected when a profile bundle is forwarded because it
+//! would outlive that credential lease.
 //!
 //! Forwarded bundle: GitHub (`gh`), Claude/Codex agent OAuth, and — the
 //! capability beyond the shell prototype — the PM/Linear token, which lives in
@@ -113,6 +115,8 @@ pub fn capture_routed(
     let credentials = runtime
         .block_on(resolve_credentials(&[]))
         .map_err(|error| SshCaptureError::Local(error.to_string()))?;
+    reject_detached_profile_forwarding(credentials.profile_bundle.is_some(), cmd)
+        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
     let preamble = build_preamble(
         &credentials,
         dest,
@@ -146,8 +150,22 @@ fn run_with_env(
     let repo = repo.unwrap_or(DEFAULT_REPO);
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     let credentials = runtime.block_on(resolve_credentials(secret_names))?;
+    reject_detached_profile_forwarding(credentials.profile_bundle.is_some(), cmd)?;
     let preamble = build_preamble(&credentials, dest, repo, cmd, extra_env);
     run_ssh(dest, port, forward_agent, &preamble)
+}
+
+fn reject_detached_profile_forwarding(
+    has_profile_bundle: bool,
+    cmd: &[String],
+) -> anyhow::Result<()> {
+    if has_profile_bundle && cmd.first().is_some_and(|program| program == "tmux") {
+        return Err(anyhow!(
+            "cannot forward ephemeral provider profiles into a remote tmux command; \
+             run the remote command in the foreground or authenticate on the remote host"
+        ));
+    }
+    Ok(())
 }
 
 /// Resolve the credential bundle from local sources. Auth tokens that aren't
@@ -615,6 +633,17 @@ mod tests {
             pm_provider: Some("linear".to_string()),
             secrets: vec![("STRIPE_KEY".to_string(), "sk-live-123".to_string())],
         }
+    }
+
+    #[test]
+    fn remote_tmux_rejects_ephemeral_profile_forwarding() {
+        let cmd = vec!["tmux".to_string(), "list-sessions".to_string()];
+
+        assert!(reject_detached_profile_forwarding(false, &cmd).is_ok());
+        assert!(reject_detached_profile_forwarding(true, &cmd)
+            .unwrap_err()
+            .to_string()
+            .contains("remote tmux"));
     }
 
     #[test]

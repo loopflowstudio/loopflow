@@ -571,18 +571,22 @@ Loopflow follows shared mappings to the owning browser identity.
 
 Codex account connection uses Codex's native local OAuth callback. Loopflow
 waits for the human to approve it and verifies the login email from Codex's ID
-token. It does not drive the OpenAI page or use device-code auth. Authenticate
-on the local host before `lf ssh`; SSH forwards the selected credential for the
+token. The resulting grant belongs to that account's home under
+`~/.lf/accounts/codex/`; Loopflow verifies it in a private staging home before
+replacing any working credential, and does not copy the ambient Codex login. It
+does not drive the OpenAI page or use device-code auth. Authenticate on the
+local host before `lf ssh`; SSH forwards the selected credential for the
 process lifetime.
 
-Claude authorization runs through Claude in Chrome when its browser extension
-is connected. If the controller is unavailable, Loopflow falls back to a hidden
-terminal prompt for the one-time handoff code. `profile create
+Claude authorization preselects the profile email and opens one browser window
+in the matching Chrome profile. After you click Authorize, Loopflow reads the
+resulting handoff from the visible page on macOS while restoring the clipboard.
+A hidden terminal prompt is the final fallback. `profile create
 --chrome-profile` binds the profile directory, name, or signed-in email on this
 host; `auth connect --profile` reuses that binding. `auth import` adopts an
-existing isolated Claude or Codex credential without another OAuth flow. When
-the account home is empty, it copies the current macOS Claude Keychain login or
-the ambient Codex OAuth login into the isolated account home.
+existing isolated Claude credential—or the current macOS Keychain login when
+the account home is empty—without another OAuth flow. Import migrates an
+existing grant; use `auth connect --profile` to create an independent grant.
 
 Each provider account keeps independent auth and session state under
 `~/.lf/accounts/`. Profiles reuse those accounts and give each repository a
@@ -596,17 +600,20 @@ treats the account as `explicit-only`; clear the date and set `automatic` if a
 downgraded account should remain a normal fallback.
 
 ```bash
-lf ssh mini -- lf wave product
+lf ssh mini -- lf pr open
 ```
 
 `lf ssh` forwards the current repository's ordered profile route and each
 referenced Claude or Codex credential once, even when profiles share an
-account. It writes no credential files on the remote host. Provider-child
-restarts inherit the routing lease and its accrued cooldowns. Before connecting,
-the local provider CLIs validate or refresh each automatically eligible routed
-login; `lf ssh` fails instead of sending an incomplete route. After the Wave,
-tmux session, or host restarts, start or reconnect from the local machine to
-resolve and forward fresh credentials.
+account. It writes no credential files on the remote host. Before connecting,
+Loopflow validates each automatically eligible routed login and refreshes Codex
+when due; `lf ssh` fails instead of sending an incomplete route.
+
+Forwarded profile auth lasts only for the foreground SSH command. Loopflow
+rejects its own detached Wave, Project, and Task sessions, plus direct remote
+tmux commands, because their credentials would disappear when SSH exits. Other
+shell or daemon detachment is unsupported. Authenticate on the remote host for
+detached or long-running work.
 
 ```bash
 lf status product          # inspect live execution and attention in one Wave

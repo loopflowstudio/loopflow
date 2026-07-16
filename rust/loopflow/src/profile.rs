@@ -95,7 +95,8 @@ impl fmt::Display for HostId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalChromeProfile {
     pub directory: String,
-    pub label: String,
+    pub name: String,
+    pub login: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -152,13 +153,17 @@ fn select_chrome_profile(
     let (directory, profile) = matches
         .pop()
         .expect("one matched Chrome profile should exist");
-    let label = profile
-        .user_name
-        .filter(|login| !login.trim().is_empty())
-        .unwrap_or(profile.name);
+    let login = profile.user_name.filter(|login| !login.trim().is_empty());
     validate_chrome_profile_identifier(&directory)?;
-    validate_chrome_profile_identifier(&label)?;
-    Ok(LocalChromeProfile { directory, label })
+    validate_chrome_profile_identifier(&profile.name)?;
+    if let Some(login) = &login {
+        validate_chrome_profile_identifier(login)?;
+    }
+    Ok(LocalChromeProfile {
+        directory,
+        name: profile.name,
+        login,
+    })
 }
 
 fn validate_chrome_profile_identifier(value: &str) -> Result<(), String> {
@@ -279,7 +284,8 @@ mod tests {
             select_chrome_profile(profiles, "jack@example.com").unwrap(),
             LocalChromeProfile {
                 directory: "Profile 7".to_string(),
-                label: "jack@example.com".to_string(),
+                name: "Loopflow".to_string(),
+                login: Some("jack@example.com".to_string()),
             }
         );
     }

@@ -114,14 +114,26 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         .await?;
     reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id, lease)).await?;
 
-    let mut flow = resume_task_phase(&session)?;
-    // Reconcile any interactive handoff the parent's prior body opened before this
-    // body runs a provider turn. A completed outcome advances past work the human
-    // finished, a hand-back resumes the same step, and a still-open handoff parks
-    // the parent without ever starting the provider.
-    if reconcile_interactive_rendezvous_at_birth(&store, &mut session, lease, &mut flow).await? {
-        return finish_parked(&store, &mut session, lease, None).await;
-    }
+    // A woken open-PR Task whose current head has a fresh required-check failure
+    // runs the single-step `ci-fix` flow; every other launch resumes the standard
+    // task lifecycle phase. Marking the observation woken here — before any body
+    // starts — makes the wake idempotent: the same `(head, failure set)` never
+    // starts a second ci-fix generation.
+    let ci_fix_wake = arm_ci_fix_wake(&store, &session, lease).await?;
+    let mut flow = if ci_fix_wake {
+        Playhead::new(QueuedInvocation::load(&session.worktree, "ci-fix")?).0
+    } else {
+        let mut flow = resume_task_phase(&session)?;
+        // Reconcile any interactive handoff the parent's prior body opened before
+        // this body runs a provider turn. A completed outcome advances past work the
+        // human finished, a hand-back resumes the same step, and a still-open handoff
+        // parks the parent without ever starting the provider.
+        if reconcile_interactive_rendezvous_at_birth(&store, &mut session, lease, &mut flow).await?
+        {
+            return finish_parked(&store, &mut session, lease, None).await;
+        }
+        flow
+    };
     let mut prepared =
         prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
@@ -905,7 +917,13 @@ async fn prepare_task_flow_step(
         .active_task_pr(&session.id)
         .await?
         .ok_or_else(|| anyhow!("Task Session {} has no active PR", session.id))?;
-    let seed = task_seed(session, &pr, wave_name, directive);
+    // The `ci-fix` step gets the failure seed (PR + failing checks); every other
+    // Task-flow step gets the standard task seed.
+    let seed = if step.step == "ci-fix" {
+        ci_fix_seed(session, &pr, wave_name)
+    } else {
+        task_seed(session, &pr, wave_name, directive)
+    };
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
@@ -1798,6 +1816,72 @@ async fn finish_command_stop(
     }
 }
 
+/// Detect a ci-fix wake at generation startup and arm it once. Returns `true`
+/// when this Task's active PR has a fresh required-check failure the wake has not
+/// fired for yet, and stamps the observation woken (persisted) so the same
+/// `(head, failure set)` cannot start a second ci-fix generation.
+async fn arm_ci_fix_wake(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: &ChildWriteLease,
+) -> Result<bool> {
+    let Some(mut pr) = store.active_task_pr(&session.id).await? else {
+        return Ok(false);
+    };
+    if !pr
+        .fresh_ci()
+        .is_some_and(crate::task::CiObservation::wake_warranted)
+    {
+        return Ok(false);
+    }
+    if let Some(observation) = pr.ci_observation.as_mut() {
+        observation.mark_woken();
+    }
+    pr.updated_at = time::OffsetDateTime::now_utc();
+    store.update_task_pr_for_lease(&pr, lease).await?;
+    Ok(true)
+}
+
+/// The seed for a `ci-fix` turn: the PR the skill must repair plus the failing
+/// required checks (names + log URLs) so it resolves the exact failure on the
+/// current head without re-deriving it.
+fn ci_fix_seed(session: &TaskSession, pr: &crate::task::TaskPr, wave_name: &str) -> String {
+    let github = pr.github();
+    let number = github.map(|github| github.number);
+    let url = github.map(|github| github.url.as_str()).unwrap_or("");
+    let head = pr.head_sha().unwrap_or("");
+    let failing = pr
+        .fresh_ci()
+        .map(|observation| {
+            observation
+                .failing_checks
+                .iter()
+                .map(|check| match &check.url {
+                    Some(link) => format!("- {} ({link})", check.name),
+                    None => format!("- {}", check.name),
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    format!(
+        "Fix the failing required CI checks on Linear task {identifier}'s open pull request.\n\n\
+         Run the ci-fix skill: reproduce the latest failure on the current head, make the smallest correct fix, run targeted then proportional checks, and push the same branch. Report an infrastructure or credential blocker rather than weakening tests.\n\n\
+         PR #{number}: {url}\nBranch: {branch}\nHead commit: {head}\nFailing required checks:\n{failing}\n\n\
+         Wave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\n\n\
+         Push fixes to the same branch; do not open a new PR or rotate the serial branch. When the push lands, the Task returns to waiting on the new head.",
+        identifier = session.launch.issue.identifier,
+        number = number.map(|n| n.to_string()).unwrap_or_default(),
+        url = url,
+        branch = pr.branch,
+        head = head,
+        failing = if failing.is_empty() { "- (none reported)".to_string() } else { failing },
+        wave = wave_name,
+        session_id = session.id,
+        worktree = session.worktree.display(),
+    )
+}
+
 fn task_seed(
     session: &TaskSession,
     pr: &crate::task::TaskPr,
@@ -1869,7 +1953,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        absorb_commands, apply_input, apply_next_pending, handle_attachment,
+        absorb_commands, apply_input, apply_next_pending, ci_fix_seed, handle_attachment,
         human_interaction_review_protocol, interaction_review_prompt, prepare_task_flow_step,
         progress_summary, resume_task_phase, start_prepared_task_step, task_seed, CommandStop,
         PreparedTaskStep,
@@ -2287,6 +2371,64 @@ mod tests {
                 .unwrap()
                 .current_directive_version,
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn ci_fix_seed_carries_the_pr_and_the_failing_checks() {
+        let (_store, session, _lease) = conformance_session("codex").await;
+        let now = time::OffsetDateTime::now_utc();
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: "ship".to_string(),
+            branch: "jack/ship".to_string(),
+            base_commit: "base".to_string(),
+            parent_pr_id: None,
+            publication: Some(crate::task::PrPublication {
+                requested_at: now,
+                after_merge: crate::task::AfterMerge::Review,
+                next_slug: None,
+                github: Some(crate::task::GithubPr {
+                    number: 916,
+                    url: "https://github.com/loopflow/loopflow/pull/916".to_string(),
+                    head_sha: Some("headsha".to_string()),
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: Some(crate::task::CiObservation {
+                head_sha: "headsha".to_string(),
+                state: crate::task::CiState::Failing,
+                failing_checks: vec![crate::task::CiCheck {
+                    name: "rust-test".to_string(),
+                    url: Some("https://ci/rust".to_string()),
+                }],
+                observed_at: now,
+                woken_failure_set: None,
+            }),
+            created_at: now,
+            updated_at: now,
+        };
+        // The runner loads the `ci-fix` flow by name; it must be a registered builtin.
+        assert!(
+            crate::engine::builtins::get_builtin_flow("ci-fix").is_some(),
+            "the ci-fix builtin flow must resolve"
+        );
+        let seed = ci_fix_seed(&session, &pr, "product");
+        // The skill resolves the exact failure from the injected metadata.
+        assert!(seed.contains("#916"), "seed names the PR");
+        assert!(seed.contains("jack/ship"), "seed names the branch");
+        assert!(seed.contains("headsha"), "seed names the head commit");
+        assert!(
+            seed.contains("rust-test"),
+            "seed names the failing leaf check"
+        );
+        assert!(seed.contains("https://ci/rust"), "seed carries the log URL");
+        assert!(
+            seed.contains("ci-fix skill"),
+            "seed points at the ci-fix skill"
         );
     }
 

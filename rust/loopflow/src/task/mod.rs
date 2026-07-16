@@ -297,6 +297,45 @@ pub struct CiObservation {
     pub state: CiState,
     pub failing_checks: Vec<CiCheck>,
     pub observed_at: OffsetDateTime,
+    /// The failing-check set a `ci-fix` wake has already fired for at this head,
+    /// sorted. `None` until a wake fires. This is the dedup key: a wake is
+    /// warranted only when the current failing set differs from it, so a repeated
+    /// poll or a coalesced multi-check delivery never wakes a second body. The
+    /// marker rides this JSON column — absent on readings written before the wake
+    /// landed, hence `serde(default)` rather than a migration.
+    #[serde(default)]
+    pub woken_failure_set: Option<Vec<String>>,
+}
+
+impl CiObservation {
+    /// The current failing required checks by name, sorted — the dedup key's
+    /// content half. Empty unless `state` is `Failing`.
+    pub fn failure_set(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .failing_checks
+            .iter()
+            .map(|check| check.name.clone())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Whether this reading warrants a `ci-fix` wake: the head is failing and no
+    /// wake has fired for this exact failing set yet. `false` once a wake for the
+    /// same set is recorded (repeat poll / coalesced delivery) — the wake is
+    /// re-armed only when the head moves (a fresh reading) or the failing set
+    /// changes.
+    pub fn wake_warranted(&self) -> bool {
+        self.state == CiState::Failing
+            && self.woken_failure_set.as_deref() != Some(self.failure_set().as_slice())
+    }
+
+    /// Record that a wake fired for the current failing set, so the next reading
+    /// with the same `(head, failing set)` does not wake again.
+    pub fn mark_woken(&mut self) {
+        self.woken_failure_set = Some(self.failure_set());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -603,6 +642,45 @@ impl TaskSession {
     /// A human may still `lf task resume` a submitted Session to answer review;
     /// this bars the supervisor, not the operator.
     pub fn supervisor_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
+        if let Some(bar) = self.terminal_or_abandon_bar() {
+            return Some(bar);
+        }
+        if let Some(pr) = active_pr {
+            match pr.phase() {
+                PrPhase::Publishing => return Some(self.publishing_bar()),
+                PrPhase::Open => return Some(self.open_pr_bar(pr)),
+                PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
+            }
+        }
+        None
+    }
+
+    /// The restart bar for an automated `ci-fix` wake. Identical to the supervisor
+    /// bar, except an `Open` PR is *permitted* when its current head carries a
+    /// failing required check the wake has not yet fired for
+    /// ([`CiObservation::wake_warranted`]). This is the one automated path allowed
+    /// to restart a submitted Task, and only on fresh current-head failure
+    /// evidence — never a blind wake over passing, pending, or already-woken work,
+    /// and never past the terminal, abandon, or publishing bars.
+    pub fn ci_fix_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
+        if let Some(bar) = self.terminal_or_abandon_bar() {
+            return Some(bar);
+        }
+        if let Some(pr) = active_pr {
+            match pr.phase() {
+                PrPhase::Publishing => return Some(self.publishing_bar()),
+                // An open PR restarts only with a warranted ci-fix; otherwise it
+                // stays barred exactly as the supervisor bar leaves it.
+                PrPhase::Open if !pr.fresh_ci().is_some_and(CiObservation::wake_warranted) => {
+                    return Some(self.open_pr_bar(pr));
+                }
+                PrPhase::Open | PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
+            }
+        }
+        None
+    }
+
+    fn terminal_or_abandon_bar(&self) -> Option<String> {
         if self.status.is_terminal() {
             return Some(format!(
                 "Task {} is {}; terminal Task Sessions do not restart",
@@ -616,27 +694,24 @@ impl TaskSession {
                 self.launch.issue.identifier, intent.reason
             ));
         }
-        if let Some(pr) = active_pr {
-            match pr.phase() {
-                PrPhase::Publishing => {
-                    return Some(format!(
-                        "Task {} requested PR publication but has no GitHub receipt; \
-                         resume it explicitly with `lf task resume {}` to retry publication",
-                        self.launch.issue.identifier, self.launch.issue.identifier,
-                    ));
-                }
-                PrPhase::Open => {
-                    let number = pr.github().expect("open Task PR passed validation").number;
-                    return Some(format!(
-                        "Task {} submitted pull request #{} and is awaiting review; \
-                         resume it explicitly with `lf task resume {}` to answer review",
-                        self.launch.issue.identifier, number, self.launch.issue.identifier,
-                    ));
-                }
-                PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
-            }
-        }
         None
+    }
+
+    fn publishing_bar(&self) -> String {
+        format!(
+            "Task {} requested PR publication but has no GitHub receipt; \
+             resume it explicitly with `lf task resume {}` to retry publication",
+            self.launch.issue.identifier, self.launch.issue.identifier,
+        )
+    }
+
+    fn open_pr_bar(&self, pr: &TaskPr) -> String {
+        let number = pr.github().expect("open Task PR passed validation").number;
+        format!(
+            "Task {} submitted pull request #{} and is awaiting review; \
+             resume it explicitly with `lf task resume {}` to answer review",
+            self.launch.issue.identifier, number, self.launch.issue.identifier,
+        )
     }
 
     pub fn validate(&self) -> Result<(), TaskDataError> {
@@ -1285,6 +1360,7 @@ mod tests {
                 url: None,
             }],
             observed_at: now,
+            woken_failure_set: None,
         };
         // Reading matches the current head: fresh.
         let current = open_pr("old-head", Some(observation.clone()));
@@ -1295,6 +1371,90 @@ mod tests {
         // Head has moved on: the stale reading never surfaces (and never wakes work).
         let moved = open_pr("new-head", Some(observation));
         assert!(moved.fresh_ci().is_none());
+    }
+
+    fn failing(head: &str, checks: &[&str], woken: Option<Vec<String>>) -> super::CiObservation {
+        super::CiObservation {
+            head_sha: head.to_string(),
+            state: super::CiState::Failing,
+            failing_checks: checks
+                .iter()
+                .map(|name| super::CiCheck {
+                    name: name.to_string(),
+                    url: None,
+                })
+                .collect(),
+            observed_at: time::OffsetDateTime::now_utc(),
+            woken_failure_set: woken,
+        }
+    }
+
+    #[test]
+    fn ci_wake_dedup_fires_once_per_head_and_failure_set() {
+        // A fresh failing reading warrants a wake.
+        let mut obs = failing("h1", &["build", "lint"], None);
+        assert!(obs.wake_warranted());
+        // The failing set is order-independent and deduplicated.
+        assert_eq!(
+            obs.failure_set(),
+            vec!["build".to_string(), "lint".to_string()]
+        );
+
+        // Once a wake fires, the same (head, set) does not wake again — a repeat
+        // poll or a coalesced multi-check delivery is absorbed.
+        obs.mark_woken();
+        assert!(!obs.wake_warranted());
+        let same_set_reordered = failing("h1", &["lint", "build"], obs.woken_failure_set.clone());
+        assert!(!same_set_reordered.wake_warranted());
+
+        // A changed failing set at the same head re-arms one new wake.
+        let new_check = failing(
+            "h1",
+            &["build", "lint", "audit"],
+            obs.woken_failure_set.clone(),
+        );
+        assert!(new_check.wake_warranted());
+
+        // A passing or pending reading never warrants a wake.
+        let mut green = obs.clone();
+        green.state = super::CiState::Passing;
+        assert!(!green.wake_warranted());
+        let mut pending = obs.clone();
+        pending.state = super::CiState::Pending;
+        assert!(!pending.wake_warranted());
+    }
+
+    #[test]
+    fn ci_fix_restart_bar_permits_only_a_warranted_open_pr_wake() {
+        let session = task_session(); // status Waiting, no abandon intent
+
+        // Open PR, fresh failing head, not yet woken: the ci-fix wake is permitted
+        // where the plain supervisor restart stays barred.
+        let warranted = open_pr("h1", Some(failing("h1", &["build"], None)));
+        assert!(session.supervisor_restart_bar(Some(&warranted)).is_some());
+        assert!(session.ci_fix_restart_bar(Some(&warranted)).is_none());
+
+        // Already woken for this (head, set): not warranted → still barred.
+        let woken = open_pr(
+            "h1",
+            Some(failing("h1", &["build"], Some(vec!["build".into()]))),
+        );
+        assert!(session.ci_fix_restart_bar(Some(&woken)).is_some());
+
+        // Passing head → not warranted → barred.
+        let mut green_obs = failing("h1", &[], None);
+        green_obs.state = super::CiState::Passing;
+        let green = open_pr("h1", Some(green_obs));
+        assert!(session.ci_fix_restart_bar(Some(&green)).is_some());
+
+        // Stale reading (observation head != PR head) → fresh_ci None → barred.
+        let stale = open_pr("h2", Some(failing("h1", &["build"], None)));
+        assert!(session.ci_fix_restart_bar(Some(&stale)).is_some());
+
+        // Terminal intent dominates even a warranted wake.
+        let mut terminal = task_session();
+        terminal.status = TaskSessionStatus::Completed;
+        assert!(terminal.ci_fix_restart_bar(Some(&warranted)).is_some());
     }
 
     #[test]

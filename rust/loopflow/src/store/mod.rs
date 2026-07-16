@@ -2677,6 +2677,7 @@ mod tests {
                 url: Some("https://ci/build".to_string()),
             }],
             observed_at: OffsetDateTime::now_utc(),
+            woken_failure_set: None,
         });
         pr.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&pr).await.unwrap();

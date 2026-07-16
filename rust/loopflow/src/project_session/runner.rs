@@ -785,6 +785,20 @@ async fn inspect_outcome(
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
             }
+        } else if !task.status.is_process_active() {
+            // The PR is still open and the Task is asleep. A fresh required-check
+            // failure on the current head wakes the same Task into one bounded
+            // ci-fix turn; a healthy (pending/green) or already-woken head does
+            // not. `wake_task_ci_fix` is a no-op unless the reading warrants it.
+            let warranted = observed
+                .as_ref()
+                .and_then(|pr| pr.fresh_ci())
+                .is_some_and(crate::task::CiObservation::wake_warranted);
+            if warranted {
+                crate::ops::task::wake_task_ci_fix(store, task)
+                    .await
+                    .map_err(|error| anyhow!(error.to_string()))?;
+            }
         }
     }
     let pm_tasks = resolved

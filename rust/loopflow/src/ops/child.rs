@@ -165,6 +165,22 @@ impl ChildSession {
         }
     }
 
+    /// The `ci-fix` wake bar. Task-only: it permits the open-PR restart the
+    /// supervisor bar forbids, but only on a warranted current-head failure. A
+    /// Project is never woken this way, so it falls back to the supervisor bar.
+    async fn ci_fix_restart_bar(&self, store: &SharedStore) -> OpsResult<Option<String>> {
+        match self {
+            Self::Project(session) => Ok(session.supervisor_restart_bar()),
+            Self::Task(session) => {
+                let pr = store
+                    .active_task_pr(&session.id)
+                    .await
+                    .map_err(child_error)?;
+                Ok(session.ci_fix_restart_bar(pr.as_ref()))
+            }
+        }
+    }
+
     fn current_directive_version(&self) -> u32 {
         match self {
             Self::Project(session) => session.current_directive_version,
@@ -231,6 +247,7 @@ impl ChildSession {
         let bar = match intent {
             LaunchIntent::Supervisor => self.supervisor_restart_bar(store).await?,
             LaunchIntent::ExplicitResume => self.abandon_intent_reason(),
+            LaunchIntent::CiFix => self.ci_fix_restart_bar(store).await?,
         };
         if let Some(bar) = bar {
             return Err(child_error(bar));
@@ -443,6 +460,33 @@ pub(crate) struct ChildControlResult {
 enum LaunchIntent {
     Supervisor,
     ExplicitResume,
+    /// An automated `ci-fix` wake: allowed past the open-PR bar, but only when
+    /// the active PR carries a warranted current-head required-check failure
+    /// (`TaskSession::ci_fix_restart_bar`).
+    CiFix,
+}
+
+/// Wake a Task that is sleeping on an open PR into a bounded `ci-fix` turn.
+///
+/// Launches a fresh generation under [`LaunchIntent::CiFix`], which the
+/// `ci_fix_restart_bar` permits past the open-PR/W2-129 bar only because the
+/// active PR carries a warranted current-head required-check failure. A no-op if
+/// a process is already active — the caller may poll every supervision pass, and
+/// the lease CAS in `reserve_task_process` is the second guard against a double
+/// body. Returns whether a generation was launched.
+pub(crate) async fn wake_task_ci_fix(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<bool> {
+    if session.status.is_process_active() {
+        return Ok(false);
+    }
+    let mut child = ChildSession::Task(Box::new(session.clone()));
+    child.launch(store, LaunchIntent::CiFix).await?;
+    if let ChildSession::Task(relaunched) = child {
+        *session = *relaunched;
+    }
+    Ok(true)
 }
 
 pub(crate) async fn resume_session(
@@ -1184,6 +1228,54 @@ mod tests {
 
         // No generation 2, and the Session still reads as delivered.
         let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+        assert_eq!(persisted.latest_process, None);
+    }
+
+    #[tokio::test]
+    async fn ci_fix_wake_refuses_an_open_pr_without_a_warranted_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+
+        let mut task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let mut pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+        // Open PR, head observed green: no failure warrants a ci-fix wake.
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: crate::task::AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 878,
+                url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+                head_sha: Some("h1".to_string()),
+            }),
+        });
+        pr.ci_observation = Some(crate::task::CiObservation {
+            head_sha: "h1".to_string(),
+            state: crate::task::CiState::Passing,
+            failing_checks: vec![],
+            observed_at: pr.updated_at,
+            woken_failure_set: None,
+        });
+        store.update_task_pr(&pr).await.unwrap();
+
+        let error = super::wake_task_ci_fix(&store, &mut task)
+            .await
+            .expect_err("a green open PR must not wake a ci-fix turn");
+        assert!(
+            error.to_string().contains("#878"),
+            "the refusal names the open PR, got: {error}"
+        );
+        let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
         assert_eq!(persisted.status, TaskSessionStatus::Waiting);
         assert_eq!(persisted.latest_process, None);
     }

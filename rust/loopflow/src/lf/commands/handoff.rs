@@ -196,7 +196,7 @@ async fn wake_parent(store: &Store, handoff: &InteractiveHandoff) {
     let InteractiveHandoffParent::Task(task_id) = &handoff.parent else {
         return;
     };
-    if let Err(error) = resume_task_parent(store, task_id).await {
+    if let Err(error) = resume_task_parent(store, task_id, handoff.outcome.as_ref()).await {
         eprintln!(
             "warning: interactive handoff {} resolved but waking parent Task {} failed: {error}",
             handoff.id, task_id
@@ -204,20 +204,37 @@ async fn wake_parent(store: &Store, handoff: &InteractiveHandoff) {
     }
 }
 
-async fn resume_task_parent(store: &Store, task_id: &TaskSessionId) -> anyhow::Result<()> {
+async fn resume_task_parent(
+    store: &Store,
+    task_id: &TaskSessionId,
+    outcome: Option<&InteractiveHandoffOutcome>,
+) -> anyhow::Result<()> {
     let session = store
         .get_task_session(task_id)
         .await?
         .ok_or_else(|| anyhow!("parent Task Session {task_id} not found"))?;
     crate::ops::task::resume_task_async(
         &session.launch.issue.identifier,
-        None,
+        handoff_resume_message(outcome),
         None,
         Some("interactive handoff resolved".to_string()),
     )
     .await
     .map_err(|error| anyhow!(error.to_string()))?;
     Ok(())
+}
+
+fn handoff_resume_message(outcome: Option<&InteractiveHandoffOutcome>) -> Option<String> {
+    match outcome {
+        Some(InteractiveHandoffOutcome::HandedBack { summary }) => Some(format!(
+            "Resume the interrupted Task step after the human handed back the interactive work:\n{summary}"
+        )),
+        Some(
+            InteractiveHandoffOutcome::Completed { .. }
+            | InteractiveHandoffOutcome::Failed { .. },
+        )
+        | None => None,
+    }
 }
 
 fn parse_session_id(value: &str) -> anyhow::Result<InteractiveHandoffId> {
@@ -279,7 +296,8 @@ fn print_attach(attach: &InteractiveHandoffAttach, json: bool) -> anyhow::Result
 
 #[cfg(test)]
 mod tests {
-    use super::parse_environment;
+    use super::{handoff_resume_message, parse_environment};
+    use crate::interactive_handoff::InteractiveHandoffOutcome;
 
     #[test]
     fn environment_parser_preserves_values_without_building_shell_text() {
@@ -288,5 +306,21 @@ mod tests {
         assert_eq!(parsed.get("LF_HOME").map(String::as_str), Some("/tmp/lf"));
         assert_eq!(parsed.get("EMPTY").map(String::as_str), Some(""));
         assert!(parse_environment(&["LF_HOME=/a".to_string(), "LF_HOME=/b".to_string()]).is_err());
+    }
+
+    #[test]
+    fn hand_back_resumes_the_same_task_step_with_the_human_summary() {
+        let message = handoff_resume_message(Some(&InteractiveHandoffOutcome::HandedBack {
+            summary: "Finish the review fixes headlessly".to_string(),
+        }))
+        .unwrap();
+        assert!(message.contains("Resume the interrupted Task step"));
+        assert!(message.contains("Finish the review fixes headlessly"));
+        assert!(
+            handoff_resume_message(Some(&InteractiveHandoffOutcome::Completed {
+                summary: "Human finished the whole step".to_string(),
+            }))
+            .is_none()
+        );
     }
 }

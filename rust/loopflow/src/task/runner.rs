@@ -3089,6 +3089,68 @@ mod tests {
         }
     }
 
+    /// A wake claimed *during* a body's life lost its race: the observer saw an
+    /// inactive Session and enqueued while a body was starting. Every wake
+    /// claimable at birth is consumed by `arm_ci_fix_wake`, so this is the only
+    /// way a `CiFix` reaches `absorb_commands` at all.
+    ///
+    /// The body already working this PR makes the wake moot. It must not be
+    /// delivered as input — the repair seed is not a steer, and this turn is not
+    /// the turn it was written for — and it must not start a second body.
+    #[tokio::test]
+    async fn a_live_body_supersedes_a_raced_ci_fix_wake_without_delivering_it() {
+        let (store, session, lease) = conformance_session("codex").await;
+        let command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::System,
+            ChildCommandKind::CiFix {
+                incident_identity: "github:ci:owner/repo:7:h1:digest".to_string(),
+                pr_number: 7,
+                head_sha: "h1".to_string(),
+                failing_checks: vec![crate::task::CiCheck {
+                    name: "cargo-fmt".to_string(),
+                    url: None,
+                }],
+            },
+        );
+        store.create_child_command(&command).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+            .await
+            .unwrap();
+        let mut harness = ScriptedHarness::new(true);
+        let mut pending = VecDeque::new();
+
+        let stop = absorb_commands(
+            &store,
+            &session,
+            &lease,
+            commands,
+            &mut harness,
+            true,
+            &mut pending,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stop, None, "a moot wake does not stop the live turn");
+        assert!(
+            pending.is_empty(),
+            "a repair seed is not input; it must never queue into an unrelated turn"
+        );
+        assert_eq!(harness.sent.len(), 0, "and never reaches the provider");
+        assert_eq!(harness.interrupts, 0, "the live body is not interrupted");
+        assert_eq!(
+            store
+                .get_child_command(&command.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ChildCommandState::Superseded,
+        );
+    }
+
     #[tokio::test]
     async fn bare_task_interrupt_stops_one_turn_without_abandoning_the_session() {
         let (store, session, lease) = conformance_session("codex").await;

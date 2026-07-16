@@ -884,6 +884,41 @@ async fn a_changed_failing_set_on_the_same_head_rearms() {
     );
 }
 
+/// The Project runner's seam, through the real entry point.
+///
+/// `queue_ci_fix_command` is what the observation calls now; the direct
+/// `wake_task_ci_fix` launch is deleted, so no caller can reach a body except
+/// through the ledger. A healthy head must enqueue nothing — and because a wake
+/// that is never minted is also never launched, this half of the seam is safe to
+/// drive here. The red half launches a real process, so its ledger behaviour is
+/// covered where the launch is barred (`ops::child`).
+#[tokio::test]
+async fn the_observer_enqueues_nothing_for_a_healthy_head() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_passing();
+    harness.reconcile().await;
+
+    let pr = harness
+        .store
+        .active_task_pr(&harness.task.id)
+        .await
+        .expect("read active pr")
+        .expect("an active pr");
+    crate::ops::task::queue_ci_fix_command(&harness.store, &harness.task, &pr)
+        .await
+        .expect("a healthy head is not an error, it is simply nothing to repair");
+
+    assert!(
+        harness.ci_fix_commands().await.is_empty(),
+        "a green head mints no wake, so nothing can launch a body"
+    );
+    assert!(
+        harness.incidents().await.is_empty(),
+        "and opens no incident"
+    );
+}
+
 /// The selector's proof. Two wakes can be claimable at once — a head fails, is
 /// pushed to, and fails again before any body boots. Taking the first claimed
 /// command would seed an obsolete repair *and* spend the current wake's identity

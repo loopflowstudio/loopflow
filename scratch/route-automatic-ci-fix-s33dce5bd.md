@@ -66,18 +66,27 @@ one.
 Fail a required check on an open Task PR whose body is asleep. Then:
 
 ```
-$ lf ci
-IDENTITY                                  PR    HEAD     FAILURE SET     TRIGGER    RESPONDED
-github:ci:loopflow:1042:a1b2c3d:9f0e…     1042  a1b2c3d  tests-result    cc_7f3a…   12s ago
+$ lf ci --json | jq '.incidents[0] | {failed_head_sha, failure_set, trigger_command_id, responded_at}'
+{
+  "failed_head_sha": "a1b2c3d",
+  "failure_set": ["tests-result"],
+  "trigger_command_id": "cc_7f3a…",
+  "responded_at": "2026-07-16T18:22:41Z"
+}
 
 $ lf task status ENG-NN --json | jq .events
 … { "kind": "command_changed", "command_id": "cc_7f3a…", "state": "claimed" }
 ```
 
 One row answers the whole question: this failure set, on this head, woke this
-command, and a body responded 12s later. `lf ci` needs no join — `CiIncident`
-already carries `pr_number`, `failed_head_sha`, and `failure_set`; the command id
-is the one fact it was missing.
+command, and a body responded. No join — `CiIncident` already carries
+`pr_number`, `failed_head_sha`, and `failure_set`; the command id is the one fact
+it was missing, and it is the fact that makes the wake countable.
+
+(The `--json` DTO is the demo surface and what the Measure queries read. `lf ci`'s
+human table is a fixed-width recovery-health roll-up —
+repo/wave/task/PR/fixes/detect/respond/green/merge/outcome — and a command id is
+a grep handle, not a health signal, so it is not worth a tenth column there.)
 
 Then kill the body mid-repair. A successor generation reclaims **the same
 `cc_7f3a…`**, selects `ci-fix` again, and `lf ci` still shows one trigger command
@@ -616,9 +625,16 @@ didn't move):
 - `a_ci_fix_command_mints_no_directive` — `current_directive_version` unchanged;
   `task_completion_gate` not blocked.
 - `a_ci_fix_command_round_trips_its_payload` — serde on `kind_json`.
-- **Project-runner coverage** (`project_session/`): the `:835-849` seam
-  enqueues rather than launches — the path Explore confirmed has zero tests
-  today.
+- **Project-runner seam** — `the_observer_enqueues_nothing_for_a_healthy_head`
+  drives the real `queue_ci_fix_command` the observation now calls. Only the
+  green half is drivable: the red half launches a real process, so its ledger
+  behaviour is covered where the launch is barred (`ops::child`). The stronger
+  guarantee is not a test at all — **`wake_task_ci_fix` is deleted**, so no
+  caller can reach a body except through the ledger, and the compiler enforces
+  it. What stays uncovered is `inspect_outcome`'s glue (the
+  `!is_process_active()` guard and the call itself); reaching it needs Linear PM
+  resolution, and mocking that to assert three lines is the elaborate-mock smell
+  CLAUDE.md names.
 
 Every test that asserts a post-arm state asserts **`Claimed`**. No test in this
 PR may assert a terminal `CiFix` state — if one does, settlement leaked in from

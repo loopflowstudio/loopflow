@@ -190,6 +190,22 @@ an explicit interruption. The human closes the durable checkpoint with
 `lf task review complete`; the worker records its replies with
 `lf task review reply`.
 
+Run a manual Wave catch-up after headless work accumulates review or integration
+debt:
+
+```bash
+lf reviews catch-up --wave product --plan
+lf reviews catch-up --wave product --skill demo
+lf reviews catch-up --wave product --skill code-review
+```
+
+The command assembles completed and still-open parent reviews with their Task,
+Project, commit, worktree, PR, disposition, and outcome evidence. `demo` proves
+each relevant design-doc Done When through the product, code, admin state, logs,
+stats, or metrics, including real sign-in when authentication is in scope.
+`code-review` reviews the combined architecture and integration seams. Catch-up
+never rewrites the original lifecycle decisions; it files follow-up work.
+
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.

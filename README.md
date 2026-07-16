@@ -188,6 +188,18 @@ cycle. The durable review records the exercise, evidence snapshot, conversation,
 disposition, and outcome. A generic interactive handoff only tells another UI
 how to present or attach to the existing session; it does not decide the review.
 
+Catch up accumulated parent-review and integration debt across a Wave:
+
+```bash
+lf reviews catch-up --wave product --plan             # inspect the evidence packet
+lf reviews catch-up --wave product --skill demo       # prove the integrated experience
+lf reviews catch-up --wave product --skill code-review
+```
+
+Catch-up reads every durable parent-reviewed interaction in the Wave and runs
+one human exercise over their current integrated state. It does not change the
+original Task dispositions; findings become follow-up Tasks.
+
 Start dependent work without sharing the parent's worktree:
 
 ```bash

@@ -115,7 +115,7 @@ pub fn route(
     ))
 }
 
-/// The repo/PR/release/PM operations that must run where the Wave's work lives.
+/// The repo/PR/release/PM/review operations that must run where the Wave's work lives.
 /// Deliberately minimal — everything else stays local until a concrete need
 /// grows the set.
 fn is_routable(command: &Commands) -> bool {
@@ -126,6 +126,7 @@ fn is_routable(command: &Commands) -> bool {
             | Commands::Rebase { .. }
             | Commands::Release { .. }
             | Commands::Pm { .. }
+            | Commands::Reviews { .. }
     )
 }
 
@@ -185,6 +186,12 @@ mod tests {
             no_add: false,
         }));
         assert!(is_routable(&Commands::Pr { cmd: None }));
+        assert!(is_routable(&Commands::Reviews {
+            cmd: crate::lf::ReviewsCommand::CatchUp {
+                skill: "demo".to_string(),
+                plan: false,
+            },
+        }));
         assert!(!is_routable(&Commands::Status {
             wave: None,
             json: false,

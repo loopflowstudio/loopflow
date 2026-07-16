@@ -20,6 +20,21 @@
   `claude-501` session caches to ~9 GiB to unblock tooling. Underlying disk
   pressure is a machine-health issue, not caused by this task.
 
+## PR state (pursue)
+
+- `lf pr open` **rebased onto latest main and pushed the branch** (HEAD
+  `409644d4b`), auto-resolving a conflict with #945's kickoff-iterate-gate
+  phase-plan refactor; the rendezvous wiring composes cleanly with the phase model
+  and all tests/fmt/clippy pass on the rebased tree.
+- **PR creation itself did not complete**: `lf pr open`'s store step errored with
+  `ambient Task Session ts_44e5843…  is not registered` (same local-store gap as
+  the acknowledge blocker), and GitHub's GraphQL quota was momentarily exhausted.
+  Retrying `lf pr open` won't help until the Task Session is registered in the
+  store this machine reads. A raw `gh pr create` was deliberately **not** run — it
+  would bypass loopflow's PR reconciliation and risk a duplicate when the
+  orchestrator (which does track this Task) reconciles the pushed branch. The
+  pushed branch is the handoff point; loopflow's PR machinery opens the PR.
+
 ## Design decisions resolved inline (executive calls)
 
 - **Scope of this PR = the runtime rendezvous only.** The shared store + CLI +

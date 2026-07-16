@@ -27,7 +27,7 @@ use crate::ops::{
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -1299,6 +1299,16 @@ fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
     }
 }
 
+/// Local ops telemetry lives under the git-ignored `.lf/tmp/` tree so read-only
+/// operations (`rebase --plan`, status, dispatch) never dirty a tracked
+/// worktree. Single source of truth for the path.
+fn ops_metrics_path(repo: &Path) -> PathBuf {
+    repo.join(".lf")
+        .join("tmp")
+        .join("metrics")
+        .join("ops.jsonl")
+}
+
 fn record_ops_metric(repo: &Path, mut event: serde_json::Value) {
     let Some(object) = event.as_object_mut() else {
         return;
@@ -1307,7 +1317,7 @@ fn record_ops_metric(repo: &Path, mut event: serde_json::Value) {
         "ts".to_string(),
         serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
     );
-    let path = repo.join(".lf").join("metrics").join("ops.jsonl");
+    let path = ops_metrics_path(repo);
     let Some(parent) = path.parent() else {
         return;
     };
@@ -2104,6 +2114,68 @@ mod doctor_tests {
             committed,
             brewfile_contents(),
             "Brewfile is stale; update it alongside SYSTEM_DEPS"
+        );
+    }
+}
+
+#[cfg(test)]
+mod telemetry_tests {
+    use super::{ops_metrics_path, record_ops_metric};
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(repo: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .status()
+            .expect("git runs")
+            .success();
+        assert!(ok, "git {args:?} failed");
+    }
+
+    fn porcelain(repo: &Path) -> String {
+        let out = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(repo)
+            .output()
+            .expect("git status runs");
+        String::from_utf8(out.stdout).expect("utf8")
+    }
+
+    /// The dogfood regression: recording ops telemetry into a clean checkout must
+    /// leave it clean. The tracked-path bug (`.lf/metrics/ops.jsonl`) made every
+    /// read-only op dirty the worktree and blocked `lf task run`; the fix routes
+    /// telemetry under the git-ignored `.lf/tmp/` tree.
+    #[test]
+    fn recording_telemetry_leaves_a_clean_checkout() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = dir.path();
+
+        git(repo, &["init", "-q"]);
+        git(repo, &["config", "user.email", "test@example.com"]);
+        git(repo, &["config", "user.name", "Test"]);
+        // The ignored-path contract: `.lf/tmp/` is never committed.
+        std::fs::write(repo.join(".gitignore"), ".lf/tmp/\n").expect("write .gitignore");
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-qm", "init"]);
+        assert_eq!(porcelain(repo), "", "fixture should start clean");
+
+        record_ops_metric(repo, serde_json::json!({ "op": "rebase", "class": "noop" }));
+
+        // Telemetry is not disabled: the record lands on disk...
+        let path = ops_metrics_path(repo);
+        assert!(path.exists(), "telemetry file must be written");
+        assert!(
+            path.starts_with(repo.join(".lf").join("tmp")),
+            "telemetry must live under the ignored .lf/tmp/ tree, got {}",
+            path.display()
+        );
+        // ...but the checkout stays clean, so dispatch/rebase/status never refuse.
+        assert_eq!(
+            porcelain(repo),
+            "",
+            "recording telemetry must not dirty a clean worktree"
         );
     }
 }

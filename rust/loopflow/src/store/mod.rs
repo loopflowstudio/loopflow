@@ -3799,6 +3799,99 @@ mod tests {
             .is_empty());
     }
 
+    /// Superseding says "this never mattered". A `delivering` command's outcome is
+    /// genuinely unknown — the provider may have received it — so that claim would
+    /// be a lie, and it would erase the ambiguity
+    /// `mark_stale_child_deliveries_uncertain` exists to preserve. The helper is
+    /// generic, so it must refuse regardless of the kind reaching for it.
+    #[tokio::test]
+    async fn superseding_refuses_a_command_whose_delivery_is_already_in_flight() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("supersede".to_string());
+        let lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut task.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        task.set_status(TaskSessionStatus::Running, "active");
+        store.activate_task_process(&task, &lease).await.unwrap();
+
+        let target = ChildRef::Task(task.id.clone());
+        let command = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "change direction".to_string(),
+            },
+        );
+        store.create_child_command(&command).await.unwrap();
+        store.claim_child_commands(&target, 1).await.unwrap();
+
+        // Claimed but not yet delivered: moot is a truthful verdict.
+        store
+            .supersede_child_command_for_lease(&target, &lease, &command.id)
+            .await
+            .expect("a claimed command may be superseded");
+        assert_eq!(
+            store
+                .get_child_command(&command.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ChildCommandState::Superseded
+        );
+
+        // Mid-delivery: refused, and the state is left for the uncertain path.
+        let delivering = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "and again".to_string(),
+            },
+        );
+        store.create_child_command(&delivering).await.unwrap();
+        store.claim_child_commands(&target, 1).await.unwrap();
+        store
+            .mark_child_command_delivering(&delivering.id, ChildCommandEffect::LiveSteer)
+            .await
+            .unwrap();
+        let error = store
+            .supersede_child_command_for_lease(&target, &lease, &delivering.id)
+            .await
+            .expect_err("an in-flight delivery is not moot; its outcome is unknown");
+        assert!(
+            error.to_string().contains("mid-delivery"),
+            "the refusal names why, got: {error}"
+        );
+        assert_eq!(
+            store
+                .get_child_command(&delivering.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ChildCommandState::Delivering,
+            "the ambiguity survives for reconcile_stale_deliveries to resolve"
+        );
+    }
+
     #[tokio::test]
     async fn task_boundary_atomically_claims_work_or_stops_the_generation() {
         let dir = tempfile::tempdir().unwrap();

@@ -1066,9 +1066,9 @@ impl SqliteStore {
     /// a coalesced multi-check delivery, and a restart between observation and
     /// arming all land here and all find the same command.
     ///
-    /// Terminal state is *not* consulted: an identity that already woke a body
-    /// and accepted must not wake a second one. Re-arming is the job of a new
-    /// identity — a moved head or a changed failure set.
+    /// State is *not* consulted, terminal included: an identity that already has
+    /// a wake must never mint a second, however that wake settled. Re-arming is
+    /// the job of a new identity — a moved head or a changed failure set.
     pub fn ensure_child_ci_fix_command(
         &self,
         command: &ChildCommand,
@@ -1834,11 +1834,20 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Displace one claimed command that circumstances made moot.
+    /// Displace one undelivered command that circumstances made moot.
     ///
     /// Distinct from `fail_child_command_for_lease`: nothing went wrong, so the
     /// `error` column stays null and `lf task status` does not report a fault.
     /// The reason rides the event instead.
+    ///
+    /// `delivering` is deliberately **not** superseded. That state means a
+    /// provider call is in flight and a crash from here is genuinely ambiguous;
+    /// resolving it is `reconcile_stale_deliveries`' job, which moves it to
+    /// `uncertain` so a human inspects the transcript before anything retries.
+    /// Superseding it instead would erase that ambiguity — recording "this never
+    /// mattered" about input the provider may well have received. No caller needs
+    /// it: the only command kind that supersedes from a moot state is `CiFix`,
+    /// which never enters `delivering` at all.
     pub(crate) fn supersede_child_command_for_lease(
         &self,
         target: &ChildRef,
@@ -1852,7 +1861,7 @@ impl SqliteStore {
             "UPDATE child_commands
              SET state='superseded'
              WHERE id=?1 AND target_kind=?2 AND session_id=?3
-               AND state IN ('persisted', 'claimed', 'delivering')",
+               AND state IN ('persisted', 'claimed')",
             params![
                 command_id.as_str(),
                 target.target_kind(),
@@ -1861,7 +1870,7 @@ impl SqliteStore {
         )?;
         if changed == 0 {
             return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is already resolved or belongs to another Session"
+                "child command {command_id} is resolved, mid-delivery, or belongs to another Session"
             )));
         }
         transaction.commit()?;

@@ -696,11 +696,16 @@ pub(crate) async fn queue_command(
     //
     // Runs on the duplicate path too: `ensure_` returned the surviving command, so
     // this re-links the same id and the COALESCE makes it a no-op.
+    //
+    // The link must actually land. `mark_ci_incident_triggered` reports whether an
+    // incident matched, and a missed link is refused rather than logged: launching
+    // anyway would produce exactly the unattributable body this ordering exists to
+    // prevent, and the caller would have no way to know.
     if let ChildCommandKind::CiFix {
         incident_identity, ..
     } = &command.kind
     {
-        store
+        let linked = store
             .mark_ci_incident_triggered(
                 incident_identity,
                 &command.id,
@@ -708,6 +713,14 @@ pub(crate) async fn queue_command(
             )
             .await
             .map_err(child_error)?;
+        if !linked {
+            return Err(child_error(format!(
+                "ci-fix wake {} names incident {incident_identity}, which is not recorded; \
+                 the observation that opens an incident must run before its wake is enqueued. \
+                 Refusing to launch a repair nothing can attribute.",
+                command.id
+            )));
+        }
     }
 
     if !created {
@@ -1352,6 +1365,33 @@ mod tests {
         });
         store.update_task_pr(&pr).await.unwrap();
 
+        // The wake must be attributable before the launch is even asked about, so
+        // the incident has to exist for this test to reach the bar at all.
+        let identity = "github:ci:loopflow/loopflow:878:h1:0000".to_string();
+        store
+            .observe_ci_incident(&crate::task::CiIncident {
+                identity: identity.clone(),
+                task_session_id: task.id.clone(),
+                pr_id: pr.id.clone(),
+                repo: "loopflow/loopflow".to_string(),
+                pr_number: 878,
+                failed_head_sha: "h1".to_string(),
+                failure_set: vec!["cargo-fmt".to_string()],
+                provider_completed_at: None,
+                poll_observed_at: Some(pr.updated_at),
+                webhook_received_at: None,
+                trigger_command_id: None,
+                responded_at: None,
+                green_at: None,
+                merged_at: None,
+                blocked_at: None,
+                blocked_reason: None,
+                created_at: pr.updated_at,
+                updated_at: pr.updated_at,
+            })
+            .await
+            .unwrap();
+
         // Reached through the ledger rather than a bespoke wake call: a `CiFix`
         // command is the only way to ask for this launch now. The observer never
         // enqueues one against a green head, so this asks the bar directly —
@@ -1361,7 +1401,7 @@ mod tests {
             ChildSession::Task(Box::new(task.clone())),
             ChildCommandSource::System,
             ChildCommandKind::CiFix {
-                incident_identity: "github:ci:loopflow/loopflow:878:h1:0000".to_string(),
+                incident_identity: identity,
                 pr_number: 878,
                 head_sha: "h1".to_string(),
                 failing_checks: vec![],
@@ -1531,6 +1571,53 @@ mod tests {
         assert_eq!(
             incident[0].incident.responded_at, None,
             "and nothing responded: no body was ever born"
+        );
+    }
+
+    /// The ordering is enforced, not documented. `mark_ci_incident_triggered`
+    /// reports whether it matched an incident, and a wake naming one that does not
+    /// exist is refused: launching anyway would produce the unattributable body
+    /// the link exists to prevent, and no caller would learn of it.
+    #[tokio::test]
+    async fn a_ci_fix_wake_naming_no_incident_refuses_rather_than_launching() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+        let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+
+        // No `observe_ci_incident` ran: the wake names evidence that isn't there.
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task.clone())),
+            ChildCommandSource::System,
+            ChildCommandKind::CiFix {
+                incident_identity: "github:ci:loopflow/loopflow:99:h9:missing".to_string(),
+                pr_number: 99,
+                head_sha: "h9".to_string(),
+                failing_checks: vec![],
+            },
+        )
+        .await
+        .expect_err("an unattributable wake must not launch");
+        assert!(
+            error.to_string().contains("not recorded"),
+            "the refusal says the incident is missing, got: {error}"
+        );
+
+        let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+        assert_eq!(
+            persisted.latest_process, None,
+            "no body was launched for a wake nothing can attribute"
         );
     }
 

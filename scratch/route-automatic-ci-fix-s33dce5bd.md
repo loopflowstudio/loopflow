@@ -321,6 +321,17 @@ ever claims one (the enqueue guard raced), it records `Superseded` with no
 harness delivery: a body already working this PR supersedes the wake for it.
 Existing state, existing event, no new concept.
 
+`supersede_child_command_for_lease` transitions from `persisted` or `claimed`
+**only — never `delivering`**. Superseding asserts "this never mattered"; a
+`delivering` command's outcome is genuinely unknown, because the provider may
+already have received it. Claiming it was moot would be a lie *and* would erase
+the ambiguity `reconcile_stale_deliveries` exists to preserve as `Uncertain`,
+where a human inspects the transcript before anything retries. The temptation is
+to justify the state set from `CiFix`'s properties — it is structurally forbidden
+from `delivering`, so the arm looks harmless — but this is a *generic* helper on
+`ChildTarget`, and the next caller will not be `CiFix`. It refuses regardless of
+who asks; no caller needs otherwise.
+
 ### 8. Evidence closes the loop
 
 **No new event kind.** The evidence is what already exists, wired up:
@@ -342,6 +353,16 @@ Existing state, existing event, no new concept.
   it. The link is upstream of the launch, so the wake is attributable before
   anything can service it. The column has no FK (`0.11.024:18`), so nothing but
   this ordering enforces it.
+
+  **The order is enforced, not documented.** Both stamps return whether they
+  matched an incident, and both call sites require `true`. A wake naming an
+  incident that does not exist is refused before the launch; an arm whose incident
+  has vanished fails rather than running a repair nothing can measure. Discarding
+  those bools would leave the ordering a comment — the code would produce the
+  unattributable body it is written to prevent, and no caller would learn of it.
+  Note the consequence: an unattributable wake is refused *before* the bar is
+  asked whether the launch is legal, because attribution belongs to the enqueue
+  and legality to the launch.
 - `arm_ci_fix_wake` stamps `responded_at` — unchanged milestone, now reached from
   the command path.
 - `arm_ci_fix_wake` emits `CommandChanged { command_id, state: Claimed }`. This

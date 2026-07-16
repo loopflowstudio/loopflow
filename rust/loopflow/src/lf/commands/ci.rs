@@ -54,6 +54,11 @@ pub struct CiIncidentDto {
     pub provider_completed_at: Option<String>,
     pub observed_at: String,
     pub observer: String,
+    /// The durable `ci-fix` wake this failure enqueued. `None` only before a wake
+    /// is linked — an incident holding `responded_at` without one means a body was
+    /// woken by something outside the ledger, which is the bypass this path
+    /// exists to prevent.
+    pub trigger_command_id: Option<String>,
     pub responded_at: Option<String>,
     pub green_at: Option<String>,
     pub merged_at: Option<String>,
@@ -198,6 +203,10 @@ fn incident_dto(
             .transpose()?,
         observed_at: format_time(observed_at)?,
         observer: observer.to_string(),
+        trigger_command_id: incident
+            .trigger_command_id
+            .as_ref()
+            .map(|id| id.as_str().to_string()),
         responded_at: incident.responded_at.map(format_time).transpose()?,
         green_at: incident.green_at.map(format_time).transpose()?,
         merged_at: incident.merged_at.map(format_time).transpose()?,

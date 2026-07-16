@@ -2093,9 +2093,23 @@ async fn arm_ci_fix_wake(
         )
         .await?;
     // A body now exists for this failure. Body birth is the response milestone.
-    store
+    //
+    // A missed stamp fails the arm rather than running an unmeasurable repair.
+    // The wake was linked to this incident before any launch could happen, so a
+    // row that is gone now means the evidence was pruned underneath a live wake —
+    // and a repair whose response nothing records is precisely what the ledger
+    // exists to make impossible. The command stays `Claimed`, so a successor
+    // generation reclaims it once the ledger is coherent again.
+    if !store
         .mark_ci_incident_responded(&incident_identity, time::OffsetDateTime::now_utc())
-        .await?;
+        .await?
+    {
+        anyhow::bail!(
+            "ci-fix wake {} names incident {incident_identity}, which is no longer recorded; \
+             refusing to run a repair whose response nothing can measure",
+            command.id
+        );
+    }
 
     Ok((
         Some(CiFixWake {

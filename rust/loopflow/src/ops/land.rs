@@ -65,8 +65,15 @@ fn prepare_pr(
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    // Prove the Task PR range is uncontaminated before the first GitHub side
+    // effect (prepare_land pushes and can open a draft PR). No-op for non-Task
+    // worktrees.
+    crate::ops::task::verify_task_pr_range(&repo_root)?;
     prepare_land(&repo_root, options, progress)?;
     let main_branch = rebase_land(&repo_root, &main_repo, progress)?;
+    // Rebase may advance the fork point. Re-run the same proof to heal the
+    // recorded base before publication state is written.
+    crate::ops::task::verify_task_pr_range(&repo_root)?;
     let pr_exists = if options.local {
         false
     } else {

@@ -25,7 +25,6 @@ use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
 use crate::engine::{expand_flow, load_flow, ConcreteStep};
-use crate::id::WaveId;
 use crate::interaction_review::{
     InteractionReview, InteractionReviewDisposition, InteractionReviewId,
 };
@@ -371,7 +370,10 @@ async fn owning_wave(store: &SharedStore, session: &TaskSession) -> OpsResult<Wa
         .ok_or_else(|| task_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
-fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
+async fn command_source(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<ChildCommandSource> {
     match std::env::var("LF_PROJECT_SESSION_ID") {
         Ok(value) => {
             let project_id =
@@ -392,31 +394,12 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
             return Err(task_error("ambient Project Session id is not valid UTF-8"))
         }
     }
-    let ambient = match std::env::var(crate::engine::wave_context::WAVE_ID_ENV) {
-        Ok(value) => Some(
-            WaveId::parse(&value)
-                .map_err(|error| task_error(format!("invalid ambient Wave id: {error}")))?,
-        ),
-        Err(std::env::VarError::NotPresent) => None,
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(task_error("ambient Wave id is not valid UTF-8"))
-        }
-    };
-    command_source_for_wave(ambient, &session.wave_id, &session.launch.issue.identifier)
-}
-
-fn command_source_for_wave(
-    ambient: Option<WaveId>,
-    owning_wave_id: &WaveId,
-    issue_identifier: &str,
-) -> OpsResult<ChildCommandSource> {
-    match ambient {
-        Some(wave_id) if &wave_id == owning_wave_id => Ok(ChildCommandSource::Wave(wave_id)),
-        Some(wave_id) => Err(task_error(format!(
-            "Wave {wave_id} cannot control Task {issue_identifier} owned by Wave {owning_wave_id}"
-        ))),
-        None => Ok(ChildCommandSource::Human),
-    }
+    super::util::resolve_child_command_source(
+        store,
+        &session.wave_id,
+        &format!("Task {}", session.launch.issue.identifier),
+    )
+    .await
 }
 
 fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {
@@ -720,7 +703,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         let initial = ChildDirective::initial(
             ChildRef::Task(session.id.clone()),
             directive,
-            command_source(&session)?,
+            command_source(&store, &session).await?,
         );
         match store
             .reserve_task_session_with_directive(&session, &pr, &initial)
@@ -3600,7 +3583,7 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
         reconcile_process_liveness(&store, &mut session).await?;
         let issue_id = session.launch.issue.identifier.clone();
         let observation = session.observation.clone();
-        let source = command_source(&session)?;
+        let source = command_source(&store, &session).await?;
         let result = super::child::queue_command(
             &store,
             super::child::ChildSession::Task(Box::new(session)),
@@ -3660,7 +3643,7 @@ pub(crate) async fn resume_task_async(
     reconcile_process_liveness(&store, &mut session).await?;
     let issue_id = session.launch.issue.identifier.clone();
     let observation = session.observation.clone();
-    let source = command_source(&session)?;
+    let source = command_source(&store, &session).await?;
     let result = super::child::resume_session(
         &store,
         super::child::ChildSession::Task(Box::new(session)),
@@ -4064,7 +4047,7 @@ mod tests {
 
     use super::{
         _defer_task_interactions, cached_github_observation, changes_snapshot,
-        command_source_for_wave, derive_workspace_slug, diff_snapshot, ensure_working_pr,
+        derive_workspace_slug, diff_snapshot, ensure_working_pr,
         ensure_working_pr_with_authority, file_snapshot, next_pr_slug, parse_pr_slug,
         parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
         recover_stalled_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
@@ -5537,23 +5520,6 @@ mod tests {
             ""
         );
         assert_eq!(git(repo.path(), &["stash", "list"]), "");
-    }
-
-    #[test]
-    fn foreign_wave_cannot_be_reclassified_as_a_human_command() {
-        let wave_id = crate::id::WaveId::new();
-
-        assert!(matches!(
-            command_source_for_wave(Some(wave_id.clone()), &wave_id, "INF-123").unwrap(),
-            ChildCommandSource::Wave(_)
-        ));
-        assert!(
-            command_source_for_wave(Some(crate::id::WaveId::new()), &wave_id, "INF-123").is_err()
-        );
-        assert_eq!(
-            command_source_for_wave(None, &wave_id, "INF-123").unwrap(),
-            ChildCommandSource::Human
-        );
     }
 
     #[test]

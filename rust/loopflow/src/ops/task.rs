@@ -1882,6 +1882,20 @@ async fn recover_stalled_task_body(
         BodyRecoveryPlan::Restart => None,
         BodyRecoveryPlan::LeaveAlone => unreachable!("leave-alone plan returned above"),
     };
+    // A restart commits a successor body into the worktree, so it must clear the
+    // same adoption preconditions as an explicit resume — refuse before the lease
+    // is reaped rather than after rotation rejects the branch. An uncertain plan
+    // launches nothing, so it still records the loss honestly; the explicit
+    // resume that follows is where the refusal belongs.
+    if uncertain.is_none() {
+        if let Err(error) = task_recovery_adoption(store, &task).await {
+            tracing::info!(
+                task = %task.launch.issue.identifier,
+                "not recovering Task body: {error}"
+            );
+            return Ok(false);
+        }
+    }
     let reason = uncertain.as_ref().map_or_else(
         || {
             format!(
@@ -2276,6 +2290,181 @@ async fn reconcile_task_pr_with_authority(
     Ok(Some(pr))
 }
 
+/// The slug for the next serial PR: the operator's `--next` override, else the
+/// settled PR's recorded `next_slug`, else the sequence number. One computation
+/// shared by the recovery gate and the rotation.
+fn next_pr_slug(settled: &TaskPr, slug_override: Option<&str>) -> String {
+    slug_override
+        .map(str::to_string)
+        .or_else(|| {
+            settled
+                .publication
+                .as_ref()
+                .and_then(|publication| publication.next_slug.clone())
+        })
+        .unwrap_or_else(|| (settled.sequence + 1).to_string())
+}
+
+/// The deterministic next serial branch for a settled Task PR — the same branch
+/// `ensure_working_pr_with_authority` would cut. The recovery gate reads this so
+/// a partial rotation (worktree already on the next branch) is adopted, not
+/// refused as an unrelated branch.
+fn deterministic_next_branch(
+    session: &TaskSession,
+    settled: &TaskPr,
+    slug_override: Option<&str>,
+) -> OpsResult<String> {
+    let slug = next_pr_slug(settled, slug_override);
+    let author = settled
+        .branch
+        .split_once('/')
+        .map(|(author, _)| author)
+        .ok_or_else(|| {
+            task_error(format!(
+                "Task PR branch {:?} has no author prefix",
+                settled.branch
+            ))
+        })?;
+    Ok(format!("{author}/{}-{slug}", session.workspace_slug))
+}
+
+/// The branch/worktree state a Task recovery must adopt, computed read-only
+/// from the durable PR sequence and the worktree before any ownership moves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TaskRecoveryAdoption {
+    /// An active PR owns the worktree; the body continues on its branch. A dirty
+    /// working tree is allowed — ongoing work survives recovery.
+    Active { branch: String },
+    /// No active PR: between-PR recovery. The worktree sits on the settled
+    /// branch or the deterministic next serial branch; the runner rotates.
+    BetweenPrs { settled: String, next: String },
+}
+
+/// Compute every branch/worktree/PR adoption precondition for Task recovery
+/// before any durable ownership moves. Read-only: it touches neither the store,
+/// the lease, the PR sequence, nor the worktree, so refusal leaves the
+/// predecessor, successor link, PR sequence, leases, and worktree untouched.
+pub(crate) async fn task_recovery_adoption(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<TaskRecoveryAdoption> {
+    let worktree = &session.worktree;
+    let identifier = &session.launch.issue.identifier;
+    if !worktree.exists() {
+        return Err(task_error(format!(
+            "Task {identifier} worktree {} is missing; recovery refused before moving any ownership",
+            worktree.display()
+        )));
+    }
+    if let Some(state) = crate::engine::git::intervention_state(worktree)
+        .map_err(|error| task_error(format!("failed to inspect Task worktree state: {error}")))?
+    {
+        return Err(task_error(format!(
+            "Task {identifier} worktree {} is mid-{state}; resolve or abort it before resuming, \
+             recovery refused before moving any ownership",
+            worktree.display()
+        )));
+    }
+    let current = current_branch(worktree)
+        .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
+        .ok_or_else(|| {
+            task_error(format!(
+                "Task {identifier} worktree {} is detached; recovery needs a branch",
+                worktree.display()
+            ))
+        })?;
+    if !ref_exists(worktree, &format!("refs/heads/{current}"))
+        .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
+    {
+        return Err(task_error(format!(
+            "Task {identifier} worktree {} is on branch {current:?} which no longer exists; \
+             re-create it or recover the worktree before resuming",
+            worktree.display()
+        )));
+    }
+    if let Some(active) = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+    {
+        if current != active.branch {
+            return Err(task_error(format!(
+                "Task {identifier} active PR expects branch {:?}, but the worktree is on \
+                 {current:?}; recovery refused before moving any ownership",
+                active.branch
+            )));
+        }
+        return Ok(TaskRecoveryAdoption::Active {
+            branch: active.branch,
+        });
+    }
+    let prs = store
+        .task_prs(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    let settled = prs
+        .last()
+        .cloned()
+        .ok_or_else(|| task_error("Task Session has no PR history"))?;
+    if !settled.is_settled() {
+        return Err(task_error(format!(
+            "Task PR {} is neither active nor settled",
+            settled.id
+        )));
+    }
+    let next = deterministic_next_branch(session, &settled, None)?;
+    if current != settled.branch && current != next {
+        return Err(task_error(format!(
+            "Task {identifier} between-PR recovery expected settled branch {:?} or next branch \
+             {next:?}, but the worktree is on {current:?}; recovery refused before moving any \
+             ownership",
+            settled.branch
+        )));
+    }
+    if !is_clean(worktree)
+        .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+    {
+        return Err(task_error(format!(
+            "Task {identifier} cannot recover between PRs while {} has uncommitted changes; \
+             carry them forward with `lf pr next` or commit before resuming, recovery refused \
+             before moving any ownership",
+            worktree.display()
+        )));
+    }
+    Ok(TaskRecoveryAdoption::BetweenPrs {
+        settled: settled.branch,
+        next,
+    })
+}
+
+/// Refuse a dirty between-PR worktree after PR reconciliation. The runner's
+/// strict rotation cannot carry a dirty tree, so catching this before the lease
+/// is reaped or a successor body is launched keeps ownership put. Read-only.
+pub(crate) async fn refuse_dirty_between_prs(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<()> {
+    if store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .is_some()
+    {
+        return Ok(());
+    }
+    if is_clean(&session.worktree)
+        .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+    {
+        return Ok(());
+    }
+    Err(task_error(format!(
+        "Task {} cannot recover between PRs while {} has uncommitted changes; carry them \
+         forward with `lf pr next` or commit before resuming",
+        session.launch.issue.identifier,
+        session.worktree.display()
+    )))
+}
+
 pub(crate) async fn ensure_working_pr(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -2346,27 +2535,8 @@ async fn ensure_working_pr_with_authority(
             .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
     }
     let sequence = settled.sequence + 1;
-    let slug = rotate
-        .slug_override
-        .clone()
-        .or_else(|| {
-            settled
-                .publication
-                .as_ref()
-                .and_then(|publication| publication.next_slug.clone())
-        })
-        .unwrap_or_else(|| sequence.to_string());
-    let author = settled
-        .branch
-        .split_once('/')
-        .map(|(author, _)| author)
-        .ok_or_else(|| {
-            task_error(format!(
-                "Task PR branch {:?} has no author prefix",
-                settled.branch
-            ))
-        })?;
-    let branch = format!("{author}/{}-{slug}", session.workspace_slug);
+    let slug = next_pr_slug(&settled, rotate.slug_override.as_deref());
+    let branch = deterministic_next_branch(session, &settled, rotate.slug_override.as_deref())?;
     let default_branch = get_default_branch(&session.worktree)
         .map_err(|error| task_error(format!("failed to resolve default branch: {error}")))?;
     let (base_ref, base_commit) = resolve_upstream_base(&session.worktree, &default_branch)?;
@@ -3059,7 +3229,15 @@ pub(crate) async fn resume_task_async(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+    // Compute every branch/worktree/PR adoption precondition before moving any
+    // durable ownership — a no-active-PR recovery must not commit the successor
+    // before PR rotation rejects an unrelated branch.
+    task_recovery_adoption(&store, &session).await?;
     reconcile_task_pr(&store, &mut session).await?;
+    // Reconcile may settle an active PR that merged out of band, moving the
+    // worktree into a between-PR state; refuse a dirty between-PR before the
+    // lease is reaped or a successor body is launched.
+    refuse_dirty_between_prs(&store, &session).await?;
     reconcile_process_liveness(&store, &mut session).await?;
     let issue_id = session.launch.issue.identifier.clone();
     let source = command_source(&session)?;
@@ -3463,10 +3641,11 @@ mod tests {
     use super::{
         _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
         diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
-        parse_pr_slug, parse_workspace_slug, project_context, reconcile_process_liveness,
-        recover_stalled_task_body, refuse_if_canonical_ahead, resolve_task_flow,
-        resolve_upstream_base, verify_task_pr_range_with_authority, RotateOptions,
-        TaskControlResult, TaskWorkspace,
+        next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
+        reconcile_process_liveness, recover_stalled_task_body, refuse_dirty_between_prs,
+        refuse_if_canonical_ahead, resolve_task_flow, resolve_upstream_base,
+        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
+        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -3632,6 +3811,18 @@ mod tests {
         branch: &str,
         base_commit: &str,
     ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
+        rotation_task_with_lease(repo, branch, base_commit, None).await
+    }
+
+    /// Like `rotation_task`, but optionally seeds a dead lease + status — the
+    /// shape an explicit resume must reconcile before reaping the lease and
+    /// launching a successor. The worktree stays the real `repo.path()`.
+    async fn rotation_task_with_lease(
+        repo: &TestRepo,
+        branch: &str,
+        base_commit: &str,
+        lease: Option<(crate::child_session::ChildLeaseState, TaskSessionStatus)>,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
         let home = tempfile::tempdir().expect("task home");
         let store = Arc::new(
             open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
@@ -3639,6 +3830,26 @@ mod tests {
                 .expect("open store"),
         );
         let now = OffsetDateTime::now_utc();
+        let lease_seed = lease.map(|(state, status)| {
+            (
+                status,
+                ChildProcessGeneration {
+                    generation: 1,
+                    pid: None,
+                    process_group_id: None,
+                    // A name no tmux server knows, so the liveness probe reads
+                    // it as dead.
+                    tmux_name: format!("dead-lease-{}", WaveId::new()),
+                    agent: "codex".to_string(),
+                    provider: "codex".to_string(),
+                    provider_session_id: None,
+                    started_at: now - time::Duration::hours(1),
+                    state,
+                    outcome: None,
+                    provenance: None,
+                },
+            )
+        });
         let wave = Wave::new(
             WaveId::new(),
             "task-pr-rotation".to_string(),
@@ -3702,8 +3913,15 @@ mod tests {
             project_session_id: project.id.clone(),
             current_directive_version: 0,
             incorporated_directive_version: 0,
-            status: TaskSessionStatus::Waiting,
-            status_reason: "first PR settled".to_string(),
+            status: lease_seed
+                .as_ref()
+                .map(|(status, _)| *status)
+                .unwrap_or(TaskSessionStatus::Waiting),
+            status_reason: if lease_seed.is_some() {
+                "recovered from a vanished body".to_string()
+            } else {
+                "first PR settled".to_string()
+            },
             status_at: now,
             worktree: repo.path().to_path_buf(),
             workspace_slug: "task-pr-proof".to_string(),
@@ -3717,7 +3935,7 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
+            latest_process: lease_seed.map(|(_, process)| process),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -3747,6 +3965,23 @@ mod tests {
             .await
             .expect("create Task");
         (home, store, session, pr)
+    }
+
+    /// Settle a rotation Task PR as merged, optionally recording a `next_slug`.
+    async fn settle_pr(store: &SharedStore, mut pr: TaskPr, merge: &str, next_slug: Option<&str>) {
+        pr.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: next_slug.map(str::to_string),
+            github: Some(GithubPr {
+                number: 900,
+                url: "https://example.com/pr/900".to_string(),
+                head_sha: None,
+            }),
+        });
+        pr.merge_commit = Some(merge.to_string());
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.settle_task_pr(&pr, None).await.expect("settle PR");
     }
 
     #[test]
@@ -4903,6 +5138,385 @@ mod tests {
         assert!(
             resume_still_pending,
             "the Resume command is still in the queue, not discarded"
+        );
+    }
+
+    // ── Task recovery adoption preconditions (W2-251) ───────────────────────
+    //
+    // Recovery must refuse unsafe worktree/branch state before moving any
+    // durable ownership. Each test proves one adoption precondition; the
+    // unrelated-branch test additionally proves refusal leaves the predecessor,
+    // successor link, PR sequence, lease, and worktree untouched.
+
+    fn checkout_branch(repo: &TestRepo, branch: &str) {
+        let status = Command::new("git")
+            .current_dir(repo.path())
+            .args(["checkout", branch])
+            .status()
+            .expect("checkout");
+        assert!(status.success(), "checkout {branch} failed");
+    }
+
+    #[tokio::test]
+    async fn recovery_refuses_an_unrelated_branch_before_moving_ownership() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        // Seed a dead Active lease so refusal's "leases untouched" is load-bearing:
+        // without the gate, reconcile_process_liveness would reap it.
+        let (_home, store, session, first) = rotation_task_with_lease(
+            &repo,
+            first_branch,
+            &base,
+            Some((
+                crate::child_session::ChildLeaseState::Active,
+                TaskSessionStatus::Waiting,
+            )),
+        )
+        .await;
+        settle_pr(&store, first, "merge-unrelated", None).await;
+
+        // The worktree is on an unrelated branch — neither settled nor the
+        // deterministic next branch.
+        repo.create_branch("jack/unrelated");
+        let prs_before = store.task_prs(&session.id).await.expect("read PRs");
+        let lease_before = store
+            .get_task_session(&session.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .latest_process
+            .clone()
+            .expect("dead lease seeded");
+
+        let err = task_recovery_adoption(&store, &session)
+            .await
+            .expect_err("unrelated branch must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("between-PR recovery expected settled branch"),
+            "expected unrelated-branch refusal, got: {message}"
+        );
+        assert!(
+            message.contains("jack/unrelated"),
+            "refusal must name the current branch, got: {message}"
+        );
+        assert!(
+            message.contains("refused before moving any ownership"),
+            "refusal must name the contract, got: {message}"
+        );
+
+        // Refusal left the PR sequence, lease, status, and worktree untouched.
+        assert_eq!(
+            store.task_prs(&session.id).await.expect("reread PRs"),
+            prs_before,
+            "PR sequence untouched"
+        );
+        let after = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            after.latest_process,
+            Some(lease_before),
+            "dead lease untouched — the gate is what prevents the reap"
+        );
+        assert_eq!(after.status, TaskSessionStatus::Waiting, "status untouched");
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "jack/unrelated",
+            "worktree branch untouched"
+        );
+    }
+
+    /// The supervisor's stall recovery restarts a body into the Task worktree, so
+    /// it clears the same adoption gate as an explicit resume. Without it a stalled
+    /// Task sitting on an unrelated branch has its lease reaped and a successor
+    /// committed, only for rotation to reject the branch afterwards.
+    #[tokio::test]
+    async fn supervised_restart_refuses_an_unrelated_branch() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, session, first) = rotation_task_with_lease(
+            &repo,
+            first_branch,
+            &base,
+            Some((ChildLeaseState::Active, TaskSessionStatus::Running)),
+        )
+        .await;
+        settle_pr(&store, first, "merge-supervised", None).await;
+        repo.create_branch("jack/unrelated");
+        // Re-read as the supervisor does: a stale status_at would make the
+        // revoke's compare-and-swap decline on its own and prove nothing.
+        let session = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let lease_before = session.latest_process.clone().expect("active lease seeded");
+
+        // No delivering command, so the plan is a plain restart: the path that
+        // would otherwise commit a successor.
+        let observation = observe(
+            &BodyEvidence {
+                intent: BodyIntent::Active,
+                observable: true,
+                process_alive: true,
+                progress_age: Duration::from_secs(31 * 60),
+                step: Some("task_pursue".to_string()),
+                reason: "body is alive but stalled".to_string(),
+            },
+            Duration::from_secs(30 * 60),
+        );
+        let latest_event_id = store
+            .latest_task_event(&session.id)
+            .await
+            .unwrap()
+            .map(|event| event.id);
+
+        assert!(
+            !recover_stalled_task_body(&store, session.clone(), &observation, latest_event_id)
+                .await
+                .expect("an unsafe worktree declines recovery; it does not fail the supervisor"),
+            "an unrelated branch must not be restarted"
+        );
+
+        let after = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            after.latest_process,
+            Some(lease_before),
+            "lease untouched — the gate is what prevents the reap"
+        );
+        assert_eq!(after.status, TaskSessionStatus::Running, "status untouched");
+    }
+
+    #[tokio::test]
+    async fn recovery_refuses_a_dirty_worktree_between_prs() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, session, first) =
+            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        settle_pr(&store, first, "merge-dirty", None).await;
+
+        // Uncommitted follow-up work on the settled branch: the runner's strict
+        // rotation cannot carry it, so recovery must refuse before moving
+        // ownership and point the human at `lf pr next`.
+        repo.create_file("follow-up.txt", "uncommitted\n");
+
+        let err = task_recovery_adoption(&store, &session)
+            .await
+            .expect_err("dirty between-PR worktree must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("uncommitted changes"),
+            "expected dirty refusal, got: {message}"
+        );
+        assert!(
+            message.contains("lf pr next"),
+            "refusal must name the recovery action, got: {message}"
+        );
+        assert!(
+            message.contains("refused before moving any ownership"),
+            "refusal must name the contract, got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_refuses_a_missing_branch() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, session, first) =
+            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        settle_pr(&store, first, "merge-missing", None).await;
+
+        // Delete the ref the worktree is checked out on; HEAD dangles off a
+        // branch that no longer exists.
+        Command::new("git")
+            .current_dir(repo.path())
+            .args(["update-ref", "-d", &format!("refs/heads/{first_branch}")])
+            .status()
+            .expect("delete branch ref");
+        assert_eq!(
+            git(repo.path(), &["symbolic-ref", "--short", "HEAD"]),
+            first_branch,
+            "HEAD still names the deleted branch"
+        );
+
+        let err = task_recovery_adoption(&store, &session)
+            .await
+            .expect_err("missing branch must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("no longer exists"),
+            "expected missing-branch refusal, got: {message}"
+        );
+        assert!(
+            message.contains(first_branch),
+            "refusal must name the missing branch, got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_adopts_an_active_pr_branch_and_allows_ongoing_work() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        // rotation_task seeds an active (Working) PR on `branch`.
+        let (_home, store, session, _pr) =
+            rotation_task_with_lease(&repo, branch, &base, None).await;
+
+        // Dirty ongoing work on the active PR's branch is allowed — recovery
+        // must not drop in-progress work.
+        repo.create_file("wip.txt", "ongoing\n");
+
+        let adoption = task_recovery_adoption(&store, &session)
+            .await
+            .expect("active PR on its branch is adopted, dirty work allowed");
+        assert_eq!(
+            adoption,
+            TaskRecoveryAdoption::Active {
+                branch: branch.to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_refuses_a_crash_boundary() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, session, _pr) =
+            rotation_task_with_lease(&repo, branch, &base, None).await;
+
+        // Drive the worktree into a conflicting rebase: advance main with a
+        // conflicting edit, then rebase the branch onto it.
+        repo.checkout("main");
+        repo.create_file("first.txt", "main wins\n");
+        repo.stage_all();
+        repo.commit("main advance");
+        checkout_branch(&repo, branch);
+        let rebase = Command::new("git")
+            .current_dir(repo.path())
+            .args(["rebase", "main"])
+            .output()
+            .expect("run rebase");
+        assert!(
+            !rebase.status.success(),
+            "rebase must conflict to seed a crash boundary"
+        );
+
+        let err = task_recovery_adoption(&store, &session)
+            .await
+            .expect_err("crash boundary must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("mid-rebase"),
+            "expected crash-boundary refusal, got: {message}"
+        );
+        assert!(
+            message.contains("refused before moving any ownership"),
+            "refusal must name the contract, got: {message}"
+        );
+
+        // Cleanup so the temp repo drops cleanly.
+        let _ = Command::new("git")
+            .current_dir(repo.path())
+            .args(["rebase", "--abort"])
+            .status();
+    }
+
+    #[tokio::test]
+    async fn between_prs_recovery_selects_the_deterministic_next_branch() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, session, first) =
+            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        settle_pr(&store, first, "merge-942", Some("follow-up")).await;
+
+        // The deterministic next branch the gate must select, read from the
+        // settled PR the gate reads (not the pre-settle local copy).
+        let settled = store
+            .task_prs(&session.id)
+            .await
+            .expect("read settled PR")
+            .pop()
+            .expect("settled PR");
+        let next = format!("{first_branch}-follow-up");
+        assert_eq!(next_pr_slug(&settled, None), "follow-up");
+
+        // The worktree is already on the next branch — a partial rotation the
+        // gate must adopt, not refuse as an unrelated branch.
+        Command::new("git")
+            .current_dir(repo.path())
+            .args(["checkout", "-b", &next])
+            .status()
+            .expect("cut next branch");
+
+        let adoption = task_recovery_adoption(&store, &session)
+            .await
+            .expect("partial rotation onto the next branch is adopted");
+        assert_eq!(
+            adoption,
+            TaskRecoveryAdoption::BetweenPrs {
+                settled: first_branch.to_string(),
+                next
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn refuse_dirty_between_prs_blocks_after_an_out_of_band_merge() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let first_branch = "jack/task-pr-proof";
+        repo.create_branch(first_branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, session, first) =
+            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        repo.create_file("wip.txt", "ongoing\n");
+
+        // While the PR is active, dirty ongoing work is fine.
+        refuse_dirty_between_prs(&store, &session)
+            .await
+            .expect("active PR with dirty work is allowed");
+
+        // The PR merges out of band -> settled -> between-PR. The post-reconcile
+        // guard must now refuse the dirty between-PR before the lease is reaped
+        // or a successor body is launched.
+        settle_pr(&store, first, "merge-out-of-band", None).await;
+        let err = refuse_dirty_between_prs(&store, &session)
+            .await
+            .expect_err("dirty between-PR after merge must refuse");
+        assert!(
+            err.to_string().contains("lf pr next"),
+            "expected dirty between-PR refusal, got: {err}"
         );
     }
 }

@@ -12,7 +12,7 @@ use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::lf::commands::runs::{boundary_spans, own_spend, SpanDto};
+use crate::lf::commands::runs::{boundary_spans, SpanDto};
 use crate::lf::output::{format_int, truncate};
 use crate::store::{sqlite::SqliteStore, RunEventRow};
 
@@ -54,11 +54,9 @@ impl ProcessKind {
 pub fn run() -> Result<()> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let home = dirs::home_dir().ok_or_else(|| anyhow!("home directory unavailable"))?;
-    // Boundary usage is cumulative within each process, so the hour needs the
-    // earlier boundary to avoid charging a long-running process's history now.
     let ledger_path = home.join(".lf/loopflow.db");
     let events = read_run_events(&ledger_path)?;
-    let spend = own_spend(&boundary_spans(&events));
+    let spend = boundary_spans(&events);
     let (mut buckets, has_codex_activity) = codex_token_buckets(&codex_session_roots(&home), now);
     add_ledger_tokens(&mut buckets, &spend, now, !has_codex_activity);
     let processes = running_loopflow_processes()?;

@@ -95,6 +95,12 @@ pub(super) struct NotificationState {
     thread_id_tx: Option<oneshot::Sender<String>>,
     /// Latest thread/tokenUsage/updated snapshot, reported at turn/completed.
     pending_usage: Option<TurnUsage>,
+    /// Cumulative thread totals already attributed to completed turns. Codex
+    /// reports lifetime-of-thread numbers; each turn reports the difference so
+    /// its usage means the same thing as Claude's per-turn report. `None`
+    /// until the first snapshot seeds it — a resumed thread arrives carrying
+    /// history that belongs to earlier launches, not to this turn.
+    reported: Option<ReportedTotals>,
     /// Codex closes each streamed agent message with the full text again.
     /// Remember which item ids already arrived as deltas so completion is a
     /// recovery fallback, not a second copy of the prose.
@@ -115,9 +121,79 @@ impl NotificationState {
             current_turn_id,
             thread_id_tx,
             pending_usage: None,
+            reported: None,
             streamed_agent_messages: HashSet::new(),
             tag_parser: LfTagParser::default(),
         }
+    }
+
+    /// Convert the latest cumulative snapshot into this turn's own usage and
+    /// advance the attributed baseline. Input is reported net of cache reads —
+    /// the same shape Claude reports — with the gross figure in
+    /// `total_input_tokens`.
+    fn take_turn_usage(&mut self) -> TurnUsage {
+        let Some(snapshot) = self.pending_usage.take() else {
+            return TurnUsage::default();
+        };
+        let baseline = self.reported.unwrap_or_default();
+        let gross_input = snapshot.input_tokens.saturating_sub(baseline.gross_input);
+        let output = snapshot.output_tokens.saturating_sub(baseline.output);
+        let reasoning = snapshot
+            .reasoning_tokens
+            .unwrap_or(0)
+            .saturating_sub(baseline.reasoning);
+        let cached = snapshot
+            .cache_read_tokens
+            .unwrap_or(0)
+            .saturating_sub(baseline.cached);
+        self.reported = Some(ReportedTotals {
+            gross_input: snapshot.input_tokens.max(baseline.gross_input),
+            output: snapshot.output_tokens.max(baseline.output),
+            reasoning: snapshot
+                .reasoning_tokens
+                .unwrap_or(0)
+                .max(baseline.reasoning),
+            cached: snapshot.cache_read_tokens.unwrap_or(0).max(baseline.cached),
+        });
+        TurnUsage {
+            input_tokens: gross_input.saturating_sub(cached),
+            output_tokens: output,
+            total_input_tokens: Some(gross_input),
+            peak_input_tokens: snapshot.peak_input_tokens,
+            context_window_tokens: snapshot.context_window_tokens,
+            reasoning_tokens: Some(reasoning),
+            cache_read_tokens: Some(cached),
+            cache_write_tokens: None,
+            model: None,
+            cost_usd: None,
+        }
+    }
+
+    /// On the first snapshot of the process, everything the thread consumed
+    /// before this request belongs to earlier launches of a resumed session —
+    /// baseline it out using the request-sized `last` report.
+    fn seed_reported_baseline(&mut self, params: &Value) {
+        if self.reported.is_some() {
+            return;
+        }
+        let total = |key: &str| {
+            params
+                .pointer(&format!("/tokenUsage/total/{key}"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        let last = |key: &str| {
+            params
+                .pointer(&format!("/tokenUsage/last/{key}"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        self.reported = Some(ReportedTotals {
+            gross_input: total("inputTokens").saturating_sub(last("inputTokens")),
+            output: total("outputTokens").saturating_sub(last("outputTokens")),
+            reasoning: total("reasoningOutputTokens").saturating_sub(last("reasoningOutputTokens")),
+            cached: total("cachedInputTokens").saturating_sub(last("cachedInputTokens")),
+        });
     }
 
     fn resolve_turn_id(&self, turn_id_from_params: Option<String>) -> String {
@@ -186,14 +262,16 @@ pub(super) fn process_notification(
                 turn_id: tid.clone(),
                 status,
             });
+            let usage = state.take_turn_usage();
             let _ = events.send(ConversationEvent::TurnUsage {
                 turn_id: tid,
-                usage: state.pending_usage.take().unwrap_or_default(),
+                usage,
             });
         }
         "thread/tokenUsage/updated" => {
             // Usage arrives mid-turn as cumulative snapshots. Keep the latest
             // lifetime totals and the highest single-request window pressure.
+            state.seed_reported_baseline(params);
             let mut latest = codex_mapping::map_token_usage(params);
             if let Some(previous) = state.pending_usage.take() {
                 retain_higher_context_pressure(&mut latest, &previous);
@@ -316,6 +394,16 @@ pub(super) fn process_notification(
             // Unknown notifications silently ignored.
         }
     }
+}
+
+/// Cumulative thread totals (gross input includes cache reads, as codex
+/// reports them) already attributed to completed turns.
+#[derive(Debug, Default, Clone, Copy)]
+struct ReportedTotals {
+    gross_input: u64,
+    output: u64,
+    reasoning: u64,
+    cached: u64,
 }
 
 fn retain_higher_context_pressure(latest: &mut TurnUsage, previous: &TurnUsage) {
@@ -966,6 +1054,67 @@ mod tests {
             None,
         );
         (state, slot)
+    }
+
+    /// Codex reports cumulative thread totals; each completed turn must
+    /// report only its own spend, with input net of cache reads.
+    #[test]
+    fn a_second_turn_reports_only_its_own_spend() {
+        let (mut state, _slot) = replay_state();
+        let usage = |gross, output, cached| {
+            serde_json::json!({
+                "tokenUsage": {
+                    "total": {"inputTokens": gross, "outputTokens": output,
+                              "cachedInputTokens": cached, "reasoningOutputTokens": 0},
+                    "last": {"inputTokens": gross},
+                    "modelContextWindow": 200_000
+                }
+            })
+        };
+
+        state.pending_usage = Some(codex_mapping::map_token_usage(&usage(16_065, 5, 9_600)));
+        let first = state.take_turn_usage();
+        assert_eq!(first.input_tokens, 6_465);
+        assert_eq!(first.total_input_tokens, Some(16_065));
+        assert_eq!(first.cache_read_tokens, Some(9_600));
+        assert_eq!(first.output_tokens, 5);
+
+        state.pending_usage = Some(codex_mapping::map_token_usage(&usage(20_065, 12, 13_100)));
+        let second = state.take_turn_usage();
+        assert_eq!(second.input_tokens, 500, "gross Δ4000 minus cached Δ3500");
+        assert_eq!(second.total_input_tokens, Some(4_000));
+        assert_eq!(second.cache_read_tokens, Some(3_500));
+        assert_eq!(second.output_tokens, 7);
+
+        // A turn that reported no usage stays zero rather than repeating.
+        let quiet = state.take_turn_usage();
+        assert_eq!(quiet.input_tokens, 0);
+        assert_eq!(quiet.output_tokens, 0);
+    }
+
+    /// A resumed thread's first snapshot carries every earlier launch's
+    /// tokens in `total`; only the request-sized `last` belongs to this turn.
+    #[test]
+    fn a_resumed_thread_baselines_out_prior_history() {
+        let (mut state, _slot) = replay_state();
+        let params = serde_json::json!({
+            "tokenUsage": {
+                "total": {"inputTokens": 100_000, "outputTokens": 9_000,
+                          "cachedInputTokens": 80_000, "reasoningOutputTokens": 500},
+                "last": {"inputTokens": 4_000, "outputTokens": 50,
+                         "cachedInputTokens": 3_000, "reasoningOutputTokens": 10},
+                "modelContextWindow": 200_000
+            }
+        });
+        state.seed_reported_baseline(&params);
+        state.pending_usage = Some(codex_mapping::map_token_usage(&params));
+
+        let usage = state.take_turn_usage();
+        assert_eq!(usage.total_input_tokens, Some(4_000));
+        assert_eq!(usage.cache_read_tokens, Some(3_000));
+        assert_eq!(usage.input_tokens, 1_000);
+        assert_eq!(usage.output_tokens, 50);
+        assert_eq!(usage.reasoning_tokens, Some(10));
     }
 
     #[test]

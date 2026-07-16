@@ -554,6 +554,34 @@ impl Store {
         .await
     }
 
+    pub async fn upsert_provider_account_limits(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        windows: &[AccountLimitWindow],
+        source: &str,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        let windows = windows.to_vec();
+        let source = source.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_provider_account_limits(&provider, &account_id, &windows, &source)
+        })
+        .await
+    }
+
+    pub async fn provider_account_limits(
+        &self,
+        provider: Option<&str>,
+    ) -> StoreResult<Vec<AccountLimitRow>> {
+        let provider = provider.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_account_limits(provider.as_deref())
+        })
+        .await
+    }
+
     pub async fn upsert_profile(&self, profile: &Profile) -> StoreResult<()> {
         let profile = profile.clone();
         run_sqlite(&self.sqlite, move |store| store.upsert_profile(&profile)).await
@@ -858,6 +886,30 @@ pub struct ProviderProfileSelection {
     pub profile_id: ProfileId,
     pub account: ProviderAccount,
     pub resume_requested_session: bool,
+}
+
+/// One observed subscription rate-limit window: how much of the plan's
+/// `session`/`weekly`/`weekly:<model>` window an account has consumed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountLimitWindow {
+    pub window: String,
+    pub used_percent: u8,
+    pub resets_at: Option<i64>,
+    pub plan: Option<String>,
+}
+
+/// A stored window observation for one managed account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountLimitRow {
+    pub provider: String,
+    pub account_id: ProviderAccountId,
+    pub window: String,
+    pub used_percent: u8,
+    pub resets_at: Option<i64>,
+    pub plan: Option<String>,
+    pub observed_at: i64,
+    /// 'stream' when a running harness reported it; 'poll' when asked for.
+    pub source: String,
 }
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {

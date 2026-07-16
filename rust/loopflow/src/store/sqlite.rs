@@ -716,6 +716,86 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Record observed subscription window state for one account, replacing
+    /// each window's previous observation.
+    pub fn upsert_provider_account_limits(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        windows: &[crate::store::AccountLimitWindow],
+        source: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let now = now_unix();
+        for window in windows {
+            conn.execute(
+                "INSERT INTO provider_account_limits
+                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(provider, account_id, window) DO UPDATE SET
+                     used_percent = excluded.used_percent,
+                     resets_at = excluded.resets_at,
+                     plan = excluded.plan,
+                     observed_at = excluded.observed_at,
+                     source = excluded.source",
+                params![
+                    provider,
+                    account_id.as_str(),
+                    window.window,
+                    window.used_percent,
+                    window.resets_at,
+                    window.plan,
+                    now,
+                    source,
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn provider_account_limits(
+        &self,
+        provider: Option<&str>,
+    ) -> StoreResult<Vec<crate::store::AccountLimitRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+             FROM provider_account_limits
+             WHERE ?1 IS NULL OR provider = ?1
+             ORDER BY provider, account_id, window",
+        )?;
+        let rows = statement.query_map([provider], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, u8>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        })?;
+        let mut limits = Vec::new();
+        for row in rows {
+            let (provider, account_id, window, used_percent, resets_at, plan, observed_at, source) =
+                row?;
+            let account_id =
+                ProviderAccountId::parse(&account_id).map_err(StoreError::InvalidData)?;
+            limits.push(crate::store::AccountLimitRow {
+                provider,
+                account_id,
+                window,
+                used_percent,
+                resets_at,
+                plan,
+                observed_at,
+                source,
+            });
+        }
+        Ok(limits)
+    }
+
     // -- Profiles -------------------------------------------------------------
 
     pub fn upsert_profile(&self, profile: &Profile) -> StoreResult<()> {

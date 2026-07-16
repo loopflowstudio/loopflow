@@ -343,7 +343,8 @@ lf trace 66863649 --json        # inspect the same tree and its skill launches
 lf trace 66863649 --json --content --launch <launch> --turn <turn>
 lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
-lf usage                        # additive spend by repo and provider
+lf usage                        # subscription % per account + spend by repo/provider
+lf usage --refresh              # poll every account's provider now
 lf usage --json --days 30       # additive skill/run boundary rows
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
@@ -351,6 +352,14 @@ lf top                          # last-hour provider throughput + live sessions
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
+
+`lf usage` leads with each managed account's subscription state — plan, session
+window, weekly window, reset times — from stored observations (harness streams
+report them mid-run) topped up by a live poll when older than 15 minutes.
+`--refresh` polls everything now; `--cached` skips polling. A revoked
+credential shows the fix (`lf auth connect <provider>`), not a blank. The
+spend table below it sums per-boundary delta rows; TOTAL is input+output with
+cache reads their own column, and SHARE is each row's slice of total tokens.
 
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a

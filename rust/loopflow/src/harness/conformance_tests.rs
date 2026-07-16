@@ -241,12 +241,16 @@ fn codex_trace_normal_turn() {
         events.get(1),
         Some(ConversationEvent::TextDelta { content, .. }) if content == "OK"
     ));
+    // Codex reports cumulative gross input (cache included); the harness
+    // reports the turn's own spend in Claude's shape: input net of cache,
+    // gross in total_input_tokens.
     assert!(matches!(
         events.last(),
         Some(ConversationEvent::TurnUsage { usage, .. })
-            if usage.input_tokens == 16065
+            if usage.input_tokens == 6465
                 && usage.output_tokens == 5
                 && usage.cache_read_tokens == Some(9600)
+                && usage.total_input_tokens == Some(16065)
     ));
 }
 

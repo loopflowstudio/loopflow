@@ -286,14 +286,20 @@ pub enum Commands {
         #[arg(long, value_name = "DAYS")]
         days: Option<u32>,
     },
-    /// Show token usage and cost by repo and provider (from the local ledger)
+    /// Show subscription state per account and token spend by repo/provider
     Usage {
         /// Emit per-boundary spend (skill, provider:model, repo) as JSON
         #[arg(long)]
         json: bool,
-        /// Window for --json, in days
+        /// Spend window, in days
         #[arg(long, default_value_t = 30)]
         days: u32,
+        /// Poll every account now, even the freshly observed ones
+        #[arg(long, short = 'r')]
+        refresh: bool,
+        /// Skip polling entirely; show only stored observations
+        #[arg(long)]
+        cached: bool,
     },
     /// Show how failed CI is detected, repaired, and landed across this Home
     Ci {

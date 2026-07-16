@@ -195,12 +195,32 @@ pub(super) fn rate_limit_signal(line: &str) -> Option<RateLimitSignal> {
     let reason = rate_type
         .map(|rate_type| format!("{status}: {rate_type}"))
         .unwrap_or_else(|| status.to_string());
+    // The stream event carries one window at a time; name it so the stored
+    // observation lands on the same key an on-demand poll would update.
+    let windows = utilization_percent
+        .map(|used_percent| {
+            vec![crate::store::AccountLimitWindow {
+                window: claude_window_name(rate_type).to_string(),
+                used_percent,
+                resets_at,
+                plan: None,
+            }]
+        })
+        .unwrap_or_default();
     Some(RateLimitSignal {
         utilization_percent,
         resets_at,
         limited,
         reason,
+        windows,
     })
+}
+
+fn claude_window_name(rate_type: Option<&str>) -> &'static str {
+    match rate_type {
+        Some(kind) if kind.contains("seven") || kind.contains("week") => "weekly",
+        _ => "session",
+    }
 }
 
 fn parse_reset_timestamp(value: &Value) -> Option<i64> {

@@ -1510,9 +1510,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
             }
-            Some(Commands::Usage { json, days }) => {
-                loopflow::lf::commands::usage::run(*json, *days)
-            }
+            Some(Commands::Usage {
+                json,
+                days,
+                refresh,
+                cached,
+            }) => loopflow::lf::commands::usage::run(*json, *days, *refresh, *cached),
             Some(Commands::Ci {
                 since,
                 wave,

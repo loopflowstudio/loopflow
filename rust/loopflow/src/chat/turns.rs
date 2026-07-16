@@ -327,6 +327,13 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             &handoff.reason,
         ),
         TaskEventKind::BodyLeaseChanged { process } => body_lease_activity("Task", process),
+        TaskEventKind::BodyRecoveryAttempted {
+            attempt, reason, ..
+        } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Task body recovered automatically (attempt {attempt})"),
+            reason,
+        ),
         TaskEventKind::StatusChanged { to, reason, .. } => activity(
             ChildActivityKind::StateChanged,
             &format!("Task is {}", to.as_str()),

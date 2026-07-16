@@ -1790,6 +1790,27 @@ impl SqliteStore {
         Ok(seconds.map(crate::store::rows::unix_to_datetime))
     }
 
+    /// The newest `limit` events, newest first. Recovery reads a bounded window
+    /// rather than the whole log: a long-lived Task accumulates thousands of
+    /// events, and the attempt count only ever looks at the recent tail.
+    pub fn recent_task_events(
+        &self,
+        session_id: &TaskSessionId,
+        limit: u32,
+    ) -> StoreResult<Vec<TaskEvent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id, session_id, kind_json, created_at
+             FROM task_events WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![session_id.as_str(), limit], map_task_event_row)?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
     pub fn latest_task_event(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(

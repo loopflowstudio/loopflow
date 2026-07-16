@@ -78,9 +78,26 @@ async fn resolver_matrix_agrees_across_every_environment() {
     );
 
     // An empty `--wave` is an explicit-but-unusable request, not "no context".
-    assert!(matches!(
+    assert_eq!(
         resolve_managed_wave_name(Some(&store), Some("  "), None).await,
-        Err(WaveResolveError::UnknownExplicit(_))
+        Err(WaveResolveError::EmptyExplicit)
+    );
+
+    // An explicit `--wave` naming a wave the registry has never seen is a
+    // classified error — never a silent accept. The resolver owns this rule;
+    // every consumer surfaces the same classification.
+    assert_eq!(
+        resolve_managed_wave_name(Some(&store), Some("definitely-unknown"), None).await,
+        Err(WaveResolveError::UnknownExplicit(
+            "definitely-unknown".to_string()
+        ))
+    );
+
+    // No registry on this machine + an explicit name → error, not silent
+    // accept. A machine with no registry has no valid wave names.
+    assert!(matches!(
+        resolve_managed_wave_name(None, Some("product"), None).await,
+        Err(WaveResolveError::Registry(_))
     ));
 
     // A hand-set name for a wave with no registry row still resolves to that
@@ -303,5 +320,94 @@ fn memory_show_resolves_like_status_across_environments() {
         String::from_utf8_lossy(&missing.stderr).contains("--wave"),
         "missing-context stderr: {}",
         String::from_utf8_lossy(&missing.stderr)
+    );
+}
+
+/// W2-240: an explicit `--wave` naming an unknown wave is rejected with the
+/// same classified error from every consumer — never silently accepted (the
+/// memory bug), never misdirected to a sync command (the PM bug), never given
+/// a generic "not found" (the status bug). The error names the wave and the
+/// safe next action. A valid ambient does not rescue an unknown explicit:
+/// explicit always wins.
+#[test]
+fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let home = tmp.path().join("home");
+    let repo = tmp.path().join("repo");
+    let wave = seed(&home, &repo, "product");
+    let uuid = wave.id().as_str();
+
+    let assert_rejected = |output: std::process::Output, label: &str| {
+        assert!(
+            !output.status.success(),
+            "{label}: unknown explicit wave should exit non-zero"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("definitely-unknown"),
+            "{label}: stderr should name the unknown wave: {stderr}"
+        );
+        assert!(
+            stderr.contains("is not registered on this machine"),
+            "{label}: stderr should classify as unregistered: {stderr}"
+        );
+    };
+
+    // No ambient: each consumer rejects the unknown explicit on its own.
+    assert_rejected(
+        lf(
+            &home,
+            &repo,
+            &["memory", "show", "--wave", "definitely-unknown"],
+            None,
+        ),
+        "memory show (no ambient)",
+    );
+    assert_rejected(
+        lf(
+            &home,
+            &repo,
+            &["status", "--wave", "definitely-unknown"],
+            None,
+        ),
+        "status (no ambient)",
+    );
+    assert_rejected(
+        lf(
+            &home,
+            &repo,
+            &["pm", "show", "--wave", "definitely-unknown", "--no-sync"],
+            None,
+        ),
+        "pm show (no ambient)",
+    );
+
+    // Valid ambient does not rescue an unknown explicit: explicit wins.
+    assert_rejected(
+        lf(
+            &home,
+            &repo,
+            &["memory", "show", "--wave", "definitely-unknown"],
+            Some(uuid),
+        ),
+        "memory show (with ambient)",
+    );
+    assert_rejected(
+        lf(
+            &home,
+            &repo,
+            &["status", "--wave", "definitely-unknown"],
+            Some(uuid),
+        ),
+        "status (with ambient)",
+    );
+    assert_rejected(
+        lf(
+            &home,
+            &repo,
+            &["pm", "show", "--wave", "definitely-unknown", "--no-sync"],
+            Some(uuid),
+        ),
+        "pm show (with ambient)",
     );
 }

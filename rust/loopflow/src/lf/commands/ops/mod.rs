@@ -517,8 +517,18 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 list_all_waves()?
             } else {
                 let explicit = wave.as_deref().or(wave_flag.as_deref());
-                vec![ambient_wave(explicit)?
-                    .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?]
+                // pm init is a creation flow: an explicit --wave may name a
+                // wave not yet registered (it links a wave directory to
+                // Linear, not a registry row). Normalize-only for explicit;
+                // ambient still uses the shared validating resolver.
+                let name = if let Some(raw) = explicit {
+                    crate::ops::resolve_wave_name(Some(raw))
+                        .ok_or_else(|| anyhow!("--wave requires a non-empty wave name"))?
+                } else {
+                    ambient_wave(None)?
+                        .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?
+                };
+                vec![name]
             };
             for wave in targets {
                 let result = crate::ops::pm::pm_init(

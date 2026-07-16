@@ -43,6 +43,11 @@ pub struct Cli {
     #[arg(short = 'm', long = "model", short_alias = 'M')]
     pub model: Option<String>,
 
+    /// Run as this managed provider account (login email or account id),
+    /// overriding the repo's profile route for this invocation and its children
+    #[arg(long = "account", alias = "profile")]
+    pub account: Option<String>,
+
     /// Skip permission prompts
     #[arg(long)]
     pub yolo: bool,

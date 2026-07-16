@@ -28,10 +28,18 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     /// Open Tasks the registry counts as active for this Wave.
     public var openTaskCount: Int { api.activeTasks }
 
-    /// The operational lens for this row. Provisional projection until W2-123
-    /// lands the shared attention field; see `WaveLens.provisional`.
+    /// The operational lens for this row, in the shared green/red/black grammar.
+    /// A registered Wave projects from the runtime `lf ls` carries; an unregistered
+    /// Wave (authored on disk, never served) has no runtime reading, so it stays
+    /// unknown-with-reason rather than a silent black or a local-session guess.
     public var lens: WaveLens {
-        WaveLens.provisional(
+        guard isRegistered else {
+            return WaveLens(
+                color: .unknown,
+                reason: "Not served yet · run the Wave to read its state"
+            )
+        }
+        return WaveLens.forWave(
             live: api.live,
             status: status,
             activeTasks: api.activeTasks,

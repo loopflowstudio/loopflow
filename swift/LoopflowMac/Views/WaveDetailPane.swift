@@ -45,7 +45,11 @@ struct WaveDetailPane: View {
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
     @State private var showsControl = false
-    @StateObject private var terminalStore = TaskTerminalStore.shared
+    // A shared singleton is externally owned, so it observes as an @ObservedObject.
+    // Wrapping it in @StateObject installs StateObject's create-and-own lifecycle
+    // during the first body pass, which fires the singleton's publisher mid-eval —
+    // an AttributeGraph dependency cycle at cold launch and sheet presentation.
+    @ObservedObject private var terminalStore = TaskTerminalStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -326,6 +330,9 @@ private struct WaveProjectWorkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                WaveLensView(lens: projectLens, diameter: 10, accessibilityId: "project-lens")
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+
                 Text(project.project.name)
                     .font(Typography.sectionTitle(17))
                     .foregroundStyle(palette.text)
@@ -398,6 +405,12 @@ private struct WaveProjectWorkView: View {
         selection == WaveWorkSelection(kind: .project, id: project.project.slug)
     }
 
+    /// The Project's lens, derived from its shared runtime and its Tasks'
+    /// attention evidence — the same grammar the Wave and Task rows use.
+    private var projectLens: WaveLens {
+        WaveLens.forProject(runtime: project.runtime, tasks: project.tasks)
+    }
+
     private var openTaskLabel: String {
         let open = project.tasks.filter { !$0.task.completed }.count
         return open == 1 ? "1 open task" : "\(open) open tasks"
@@ -435,10 +448,9 @@ private struct WaveTaskWorkView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: task.task.completed ? "checkmark.circle.fill" : "circle")
-                .font(Typography.caption(11))
-                .foregroundStyle(task.task.completed ? palette.accent : palette.textSecondary)
+            WaveLensView(lens: WaveLens.forTask(task.attention), diameter: 9, accessibilityId: "task-lens")
                 .frame(width: 14)
+                .padding(.top, 2)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text(task.task.identifier)

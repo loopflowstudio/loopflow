@@ -34,6 +34,10 @@ struct WaveTests {
         )
 
         #expect(!wave.isRegistered)
+        // No runtime reading exists yet, so the lens is unknown-with-reason —
+        // never a silent black and never a local-session guess.
+        #expect(wave.lens.color == .unknown)
+        #expect(!wave.lens.reason.isEmpty)
     }
 
     @Test("objective tagline uses the first authored line")

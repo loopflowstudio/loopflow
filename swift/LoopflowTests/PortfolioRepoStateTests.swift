@@ -23,12 +23,14 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
-    @Test("waves sort by presence before name")
-    func wavesSortByPresenceBeforeName() {
+    @Test("waves hold one stable alphabetical order, not a status regrouping")
+    func wavesSortStableAlphabetical() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo)
 
+        // Status varies, but the row's lens carries state — so the list stays in
+        // one alphabetical order and never reorders as processes start and stop.
         state.applyConnectedWaves([
             makeWave(id: "running-b", repoPath: repo.path, status: .running),
             makeWave(id: "idle", repoPath: repo.path, status: .idle),
@@ -36,7 +38,7 @@ struct PortfolioRepoStateTests {
             makeWave(id: "running-a", repoPath: repo.path, status: .running),
         ])
 
-        #expect(state.waves.map(\.id) == ["running-a", "running-b", "paused", "idle"])
+        #expect(state.waves.map(\.id) == ["idle", "paused", "running-a", "running-b"])
     }
 
     @Test("wave agent session name mirrors lf tmux handle")

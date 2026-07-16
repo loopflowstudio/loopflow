@@ -67,7 +67,10 @@ struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @StateObject private var terminalStore = TaskTerminalStore.shared
+    // Externally-owned singleton: observe it, don't @StateObject-own it (see
+    // WaveDetailPane) — the create-and-own lifecycle fires the publisher during
+    // the first body pass and logs an AttributeGraph cycle at cold launch.
+    @ObservedObject private var terminalStore = TaskTerminalStore.shared
     @State private var lens: WorkLens = .now
     @State private var snapshot: RoadmapSnapshot?
     @State private var queryError: String?

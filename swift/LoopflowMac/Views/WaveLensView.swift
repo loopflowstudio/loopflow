@@ -10,6 +10,7 @@ import Loopflow
 struct WaveLensView: View {
     let lens: WaveLens
     var diameter: CGFloat = 11
+    var accessibilityId: String = "wave-lens"
 
     var body: some View {
         let color = lens.color.glow
@@ -41,7 +42,7 @@ struct WaveLensView: View {
             .shadow(color: lit ? color.opacity(0.6) : .clear, radius: lit ? 2.5 : 0)
             .accessibilityElement()
             .accessibilityLabel("Status: \(lens.reason)")
-            .accessibilityIdentifier("wave-lens")
+            .accessibilityIdentifier(accessibilityId)
             .help(lens.reason)
     }
 }

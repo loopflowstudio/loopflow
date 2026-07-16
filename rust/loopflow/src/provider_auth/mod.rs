@@ -31,8 +31,6 @@ use regex::Regex;
 use reqwest::Url;
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
-#[cfg(target_os = "macos")]
-use security_framework::item::{ItemClass, ItemSearchOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -65,12 +63,11 @@ const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
 const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
 const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
 #[cfg(target_os = "macos")]
-const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
-#[cfg(target_os = "macos")]
-const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
 const CLAUDE_BROWSER_AUTH_TIMEOUT: Duration = Duration::from_secs(120);
-const CLAUDE_BROWSER_OUTPUT_SCHEMA: &str = r#"{"type":"object","properties":{"status":{"type":"string","enum":["authorized","unavailable"]},"authorization_code":{"type":["string","null"]}},"required":["status","authorization_code"],"additionalProperties":false}"#;
-const CLAUDE_BROWSER_ALLOWED_TOOLS: &str = "Skill,ToolSearch,mcp__claude-in-chrome__list_connected_browsers,mcp__claude-in-chrome__select_browser,mcp__claude-in-chrome__switch_browser,mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__computer";
+#[cfg(target_os = "macos")]
+const CLAUDE_KEYCHAIN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(target_os = "macos")]
+const LEGACY_CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 pub(crate) const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -82,8 +79,10 @@ static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static ANSI_ESCAPE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
-static CLAUDE_AUTHORIZATION_CODE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^[A-Za-z0-9_-]{20,}#[A-Za-z0-9_-]{20,}$").expect("Claude authorization code regex")
+#[cfg(any(target_os = "macos", test))]
+static CLAUDE_AUTHORIZATION_CODE_SEARCH_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"[A-Za-z0-9_-]{20,}#[A-Za-z0-9_-]{20,}")
+        .expect("Claude authorization code search regex")
 });
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -404,79 +403,10 @@ impl Drop for AuthMonitor {
     }
 }
 
-pub struct ClaudeKeychainGuard {
-    credential: Option<ClaudeKeychainCredential>,
-    armed: bool,
-}
-
+#[cfg(target_os = "macos")]
 struct ClaudeKeychainCredential {
-    #[cfg(target_os = "macos")]
     account: String,
-    #[cfg(target_os = "macos")]
     blob: SecretString,
-}
-
-impl std::fmt::Debug for ClaudeKeychainGuard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClaudeKeychainGuard")
-            .field(
-                "credential",
-                &self.credential.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field("armed", &self.armed)
-            .finish()
-    }
-}
-
-impl ClaudeKeychainGuard {
-    /// Preserve the Claude credential active before managed-account login.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when macOS refuses the Keychain query or the existing
-    /// credential cannot be decoded.
-    pub fn preserve() -> Result<Self, AuthError> {
-        Ok(Self {
-            credential: read_claude_keychain_credential()?,
-            armed: true,
-        })
-    }
-
-    /// Restore the credential that was active before managed-account login.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when macOS rejects the Keychain update.
-    pub fn restore(mut self) -> Result<(), AuthError> {
-        let result = restore_claude_keychain_blob(self.credential.as_ref());
-        if result.is_ok() {
-            self.armed = false;
-            self.credential.take();
-        }
-        result
-    }
-}
-
-impl Drop for ClaudeKeychainGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            if let Err(error) = restore_claude_keychain_blob(self.credential.as_ref()) {
-                warn!(%error, "failed to restore Claude Keychain credential");
-            }
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct BrowserControllerEnvelope {
-    is_error: bool,
-    structured_output: Option<BrowserControllerResult>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BrowserControllerResult {
-    status: String,
-    authorization_code: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -1369,6 +1299,7 @@ impl AuthBroker for GhAuthBroker {
 pub struct ClaudeAuthBroker {
     config_dir: PathBuf,
     keychain_fallback: bool,
+    login_hint: Option<String>,
 }
 
 impl Default for ClaudeAuthBroker {
@@ -1376,21 +1307,32 @@ impl Default for ClaudeAuthBroker {
         Self {
             config_dir: home_dir_or_cwd().join(".claude"),
             keychain_fallback: true,
+            login_hint: None,
         }
     }
 }
 
 impl ClaudeAuthBroker {
-    fn for_profile(config_dir: PathBuf) -> Self {
+    fn for_profile(config_dir: PathBuf, login_hint: Option<String>) -> Self {
         Self {
             config_dir,
             keychain_fallback: false,
+            login_hint,
         }
     }
 
     fn command(&self) -> Command {
         let mut command = Command::new("claude");
         command.env("CLAUDE_CONFIG_DIR", &self.config_dir);
+        command
+    }
+
+    fn login_command(&self) -> Command {
+        let mut command = self.command();
+        command.args(["auth", "login"]);
+        if let Some(login_hint) = self.login_hint.as_deref() {
+            command.args(["--email", login_hint]);
+        }
         command
     }
 }
@@ -1402,8 +1344,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = self.command();
-        command.args(["auth", "login"]);
+        let mut command = self.login_command();
         command.env("BROWSER", "echo");
         command.env("CLAUDE_BROWSER", "echo");
 
@@ -1450,7 +1391,7 @@ impl AuthBroker for ClaudeAuthBroker {
     async fn extract_token(&self) -> Option<ProviderToken> {
         extract_claude_token_from_config_dir(&self.config_dir).or_else(|| {
             if self.keychain_fallback {
-                read_claude_keychain_token()
+                read_claude_keychain_token(&self.config_dir)
             } else {
                 None
             }
@@ -1539,10 +1480,22 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        Ok(match extract_codex_token_from_home(&self.codex_home) {
-            Some(token) => AuthStatus::Active { login: token.login },
-            None => AuthStatus::None,
-        })
+        let Some(mut token) = extract_codex_token_from_home(&self.codex_home) else {
+            return Ok(AuthStatus::None);
+        };
+        if provider_token_refresh_due(&token, now_unix()) {
+            if self.refresh_access_token().await.is_err() {
+                return Ok(AuthStatus::None);
+            }
+            let Some(refreshed) = extract_codex_token_from_home(&self.codex_home) else {
+                return Ok(AuthStatus::None);
+            };
+            token = refreshed;
+            if provider_token_refresh_due(&token, now_unix()) {
+                return Ok(AuthStatus::None);
+            }
+        }
+        Ok(AuthStatus::Active { login: token.login })
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
@@ -1570,9 +1523,13 @@ impl AuthBroker for CodexAuthBroker {
 fn provider_account_broker(
     provider: Provider,
     provider_home: PathBuf,
+    login_hint: Option<&str>,
 ) -> Result<Arc<dyn AuthBroker>, AuthError> {
     match provider {
-        Provider::Claude => Ok(Arc::new(ClaudeAuthBroker::for_profile(provider_home))),
+        Provider::Claude => Ok(Arc::new(ClaudeAuthBroker::for_profile(
+            provider_home,
+            login_hint.map(String::from),
+        ))),
         Provider::Codex => Ok(Arc::new(CodexAuthBroker::for_profile(provider_home))),
         _ => Err(AuthError::UnsupportedProvider(provider.to_string())),
     }
@@ -1581,8 +1538,9 @@ fn provider_account_broker(
 pub async fn start_provider_account_auth(
     provider: Provider,
     provider_home: PathBuf,
+    login_hint: Option<&str>,
 ) -> Result<AuthFlowHandle, AuthError> {
-    provider_account_broker(provider, provider_home)?
+    provider_account_broker(provider, provider_home, login_hint)?
         .start_auth()
         .await
 }
@@ -1591,7 +1549,7 @@ pub async fn provider_account_auth_status(
     provider: Provider,
     provider_home: PathBuf,
 ) -> Result<AuthStatus, AuthError> {
-    provider_account_broker(provider, provider_home)?
+    provider_account_broker(provider, provider_home, None)?
         .check_status()
         .await
 }
@@ -1600,7 +1558,7 @@ pub async fn disconnect_provider_account_auth(
     provider: Provider,
     provider_home: PathBuf,
 ) -> Result<(), AuthError> {
-    provider_account_broker(provider, provider_home)?
+    provider_account_broker(provider, provider_home, None)?
         .disconnect()
         .await
 }
@@ -1611,7 +1569,7 @@ pub(crate) async fn prepare_provider_account_access_token(
 ) -> Result<Option<String>, AuthError> {
     let token = match provider {
         Provider::Claude => {
-            let broker = ClaudeAuthBroker::for_profile(provider_home.to_path_buf());
+            let broker = ClaudeAuthBroker::for_profile(provider_home.to_path_buf(), None);
             broker.extract_token().await
         }
         Provider::Codex => {
@@ -1849,109 +1807,88 @@ fn kill_auth_process_group(pid: u32) {
     crate::engine::platform::kill_process(pid);
 }
 
-/// Ask the connected Claude-in-Chrome bridge to complete a Claude OAuth page.
+/// Read Claude's one-time handoff from the visible Chrome page on macOS.
 ///
-/// `Ok(None)` means the browser controller is unavailable and the caller should
-/// use its interactive fallback.
+/// The human still approves the provider page. Loopflow temporarily copies the
+/// rendered page, restores the clipboard inside the same AppleScript command,
+/// and keeps the handoff only in process memory.
 ///
 /// # Errors
 ///
-/// Returns an error for an untrusted URL, malformed controller output, or
-/// controller process I/O failure.
-pub async fn drive_claude_browser_authorization(
+/// Returns an error for an untrusted authorization URL or browser-control I/O
+/// failure. `Ok(None)` means native Chrome control is unavailable or timed out.
+pub async fn capture_claude_authorization_code_from_chrome(
     verification_url: &str,
-    controller_profile: Option<&Path>,
-    browser_profile_label: Option<&str>,
+    _browser_profile_label: &str,
 ) -> Result<Option<SecretString>, AuthError> {
     validate_claude_authorization_url(verification_url)?;
 
-    let browser_instruction = match browser_profile_label {
-        Some(label) => format!(
-            " Use only the connected browser whose profile or account label exactly matches {}. Select it explicitly; if it is absent, return status unavailable.",
-            serde_json::to_string(label).expect("Chrome profile label should serialize")
-        ),
-        None => String::new(),
-    };
-    let prompt = format!(
-        "Act only as Loopflow's Claude OAuth browser controller. Load the claude-in-chrome skill. First list connected browsers. If none are connected, return status unavailable.{browser_instruction} Otherwise open this exact URL in a new tab: {verification_url}\nOnly interact with claude.com and platform.claude.com. If an already signed-in account can continue, click Authorize. Do not sign in, create an account, handle MFA or CAPTCHA, or change account settings. After the callback page appears, read its complete one-time code#state handoff. Return status authorized with that value. Never include the handoff in prose."
-    );
-
-    let mut command = Command::new("claude");
-    command.args([
-        "--chrome",
-        "--print",
-        "--model",
-        "haiku",
-        "--output-format",
-        "json",
-        "--no-session-persistence",
-        "--permission-mode",
-        "dontAsk",
-        "--allowedTools",
-        CLAUDE_BROWSER_ALLOWED_TOOLS,
-        "--max-budget-usd",
-        "1",
-        "--json-schema",
-        CLAUDE_BROWSER_OUTPUT_SCHEMA,
-    ]);
-    if let Some(profile) = controller_profile {
-        command.env("CLAUDE_CONFIG_DIR", profile);
-    }
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(unix)]
-    command.process_group(0);
-
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(AuthError::CommandSpawn {
-                provider: Provider::Claude,
-                source,
-            });
+    #[cfg(target_os = "macos")]
+    {
+        let deadline = Instant::now() + CLAUDE_BROWSER_AUTH_TIMEOUT;
+        while Instant::now() < deadline {
+            let output = ProcessCommand::new("osascript")
+                .args(["-e", CLAUDE_VISIBLE_PAGE_SCRIPT])
+                .env("LF_CHROME_PROFILE_LABEL", _browser_profile_label)
+                .output()
+                .map_err(|source| AuthError::CommandIo {
+                    provider: Provider::Claude,
+                    source,
+                })?;
+            if !output.status.success() {
+                return Ok(None);
+            }
+            let page = String::from_utf8_lossy(&output.stdout);
+            if let Some(code) = claude_authorization_code_from_page(&page) {
+                return Ok(Some(code));
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
-    };
-    let process_group = AuthProcessGroup::new(child.id());
-    let mut stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
-        provider: Provider::Claude,
-        message: "browser controller did not expose stdin".to_string(),
-    })?;
-    stdin
-        .write_all(prompt.as_bytes())
-        .await
-        .map_err(|source| AuthError::CommandIo {
-            provider: Provider::Claude,
-            source,
-        })?;
-    stdin
-        .shutdown()
-        .await
-        .map_err(|source| AuthError::CommandIo {
-            provider: Provider::Claude,
-            source,
-        })?;
-    drop(stdin);
-
-    let output = tokio::time::timeout(CLAUDE_BROWSER_AUTH_TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| AuthError::CommandFailed {
-            provider: Provider::Claude,
-            message: "browser controller timed out".to_string(),
-        })?
-        .map_err(|source| AuthError::CommandIo {
-            provider: Provider::Claude,
-            source,
-        })?;
-    process_group.complete();
-    if !output.status.success() {
-        return Ok(None);
+        Ok(None)
     }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(None)
+    }
+}
 
-    parse_browser_controller_output(&output.stdout)
+#[cfg(target_os = "macos")]
+const CLAUDE_VISIBLE_PAGE_SCRIPT: &str = r#"
+set savedClipboard to the clipboard
+try
+    set profileLabel to system attribute "LF_CHROME_PROFILE_LABEL"
+    tell application "Google Chrome" to activate
+    tell application "System Events"
+        tell process "Google Chrome"
+            set authWindows to every window whose name contains "Authentication code | Claude Platform"
+            set pageText to ""
+            repeat with authWindow in authWindows
+                if name of authWindow contains "(" & profileLabel & ")" then
+                    perform action "AXRaise" of authWindow
+                    delay 0.2
+                    keystroke "a" using command down
+                    delay 0.1
+                    keystroke "c" using command down
+                    delay 0.2
+                    set pageText to the clipboard as text
+                    exit repeat
+                end if
+            end repeat
+        end tell
+    end tell
+    set the clipboard to savedClipboard
+    return pageText
+on error
+    set the clipboard to savedClipboard
+    error
+end try
+"#;
+
+#[cfg(any(target_os = "macos", test))]
+fn claude_authorization_code_from_page(page: &str) -> Option<SecretString> {
+    CLAUDE_AUTHORIZATION_CODE_SEARCH_RE
+        .find(page)
+        .map(|value| SecretString::new(value.as_str().to_string()))
 }
 
 fn validate_claude_authorization_url(verification_url: &str) -> Result<(), AuthError> {
@@ -1966,30 +1903,6 @@ fn validate_claude_authorization_url(verification_url: &str) -> Result<(), AuthE
         });
     }
     Ok(())
-}
-
-fn parse_browser_controller_output(output: &[u8]) -> Result<Option<SecretString>, AuthError> {
-    let envelope: BrowserControllerEnvelope =
-        serde_json::from_slice(output).map_err(|_| AuthError::CommandFailed {
-            provider: Provider::Claude,
-            message: "browser controller returned invalid JSON".to_string(),
-        })?;
-    if envelope.is_error {
-        return Ok(None);
-    }
-    let Some(result) = envelope.structured_output else {
-        return Ok(None);
-    };
-    match (result.status.as_str(), result.authorization_code) {
-        ("unavailable", _) => Ok(None),
-        ("authorized", Some(code)) if CLAUDE_AUTHORIZATION_CODE_RE.is_match(&code) => {
-            Ok(Some(SecretString::new(code)))
-        }
-        _ => Err(AuthError::CommandFailed {
-            provider: Provider::Claude,
-            message: "browser controller returned a malformed authorization handoff".to_string(),
-        }),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2384,7 +2297,7 @@ pub(crate) fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
     // The file is absent on machines where Claude Code stashed its OAuth blob in
     // the macOS keychain (service "Claude Code-credentials", JSON under
     // `.claudeAiOauth`). Fall back to reading it there.
-    read_claude_keychain_token()
+    read_claude_keychain_token(&config_dir)
 }
 
 fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderToken> {
@@ -2425,24 +2338,41 @@ fn claude_token_from_credentials_json(content: &str) -> Option<ProviderToken> {
     })
 }
 
-/// Copy Claude's current macOS Keychain credential into an isolated profile.
+/// Keep Claude's completed login in its isolated profile.
 ///
-/// Non-macOS Claude installations already write the native credentials file,
-/// so this is a no-op there.
+/// Claude may write the native credentials file directly. On macOS versions
+/// that use Keychain instead, copy that credential into the isolated profile.
 ///
 /// # Errors
 ///
 /// Returns an error when the Keychain credential is missing or the private
 /// profile file cannot be written atomically.
 pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthError> {
+    let native = config_dir.join(".credentials.json");
+    if fs::read_to_string(native)
+        .ok()
+        .and_then(|content| claude_token_from_credentials_json(&content))
+        .is_some()
+    {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     {
-        let credential = read_claude_keychain_credential()?.ok_or_else(|| {
-            AuthError::Filesystem(
-                "Claude completed login without a readable macOS Keychain credential".to_string(),
-            )
-        })?;
-        write_claude_profile_credentials(config_dir, &credential.blob)
+        let service = claude_keychain_service(config_dir);
+        let deadline = Instant::now() + CLAUDE_KEYCHAIN_WRITE_TIMEOUT;
+        loop {
+            if let Some(credential) = read_claude_keychain_credential(&service)? {
+                write_claude_profile_credentials(config_dir, &credential.blob)?;
+                return delete_claude_keychain_credential(&service, &credential.account);
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        Err(AuthError::Filesystem(
+            "Claude completed login without a readable macOS Keychain credential".to_string(),
+        ))
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -2451,62 +2381,44 @@ pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthE
     }
 }
 
-/// Copy the ambient Codex OAuth credential into an isolated profile.
+/// Copy the ambient Claude login into an isolated profile.
 ///
 /// # Errors
 ///
-/// Returns an error when the ambient credential is missing, is not a ChatGPT
-/// OAuth credential, or cannot be written into the private profile.
-pub fn capture_codex_profile_credentials(codex_home: &Path) -> Result<(), AuthError> {
-    let source = home_dir_or_cwd().join(".codex/auth.json");
-    let credential = SecretString::new(fs::read_to_string(&source).map_err(|error| {
-        AuthError::Filesystem(format!("read ambient Codex credential: {error}"))
-    })?);
-    write_codex_profile_credentials(codex_home, &credential)
-}
-
-fn write_codex_profile_credentials(
-    codex_home: &Path,
-    credential: &SecretString,
-) -> Result<(), AuthError> {
-    let json = serde_json::from_str(credential.expose_secret()).map_err(|error| {
-        AuthError::Filesystem(format!("parse ambient Codex credential: {error}"))
-    })?;
-    if codex_token_from_auth_json(&json).is_none() {
-        return Err(AuthError::Filesystem(
-            "ambient Codex credential does not contain a ChatGPT OAuth access token".to_string(),
-        ));
+/// Returns an error when the ambient credential is missing or cannot be copied.
+pub fn import_ambient_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthError> {
+    let ambient = home_dir_or_cwd().join(".claude");
+    if let Ok(content) = fs::read_to_string(ambient.join(".credentials.json")) {
+        if claude_token_from_credentials_json(&content).is_some() {
+            return write_claude_profile_credentials(config_dir, &SecretString::new(content));
+        }
     }
-    fs::create_dir_all(codex_home).map_err(|error| {
-        AuthError::Filesystem(format!("create {}: {error}", codex_home.display()))
-    })?;
-    let destination = codex_home.join("auth.json");
-    let mut temporary = tempfile::NamedTempFile::new_in(codex_home).map_err(|error| {
-        AuthError::Filesystem(format!("create private Codex credential file: {error}"))
-    })?;
-    temporary
-        .write_all(credential.expose_secret().as_bytes())
-        .map_err(|error| {
-            AuthError::Filesystem(format!("write private Codex credential file: {error}"))
-        })?;
-    temporary.as_file().sync_all().map_err(|error| {
-        AuthError::Filesystem(format!("sync private Codex credential file: {error}"))
-    })?;
-    temporary.persist(&destination).map_err(|error| {
-        AuthError::Filesystem(format!("install private Codex credential file: {error}"))
-    })?;
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     {
-        use std::os::unix::fs::PermissionsExt;
-
-        fs::set_permissions(&destination, fs::Permissions::from_mode(0o600)).map_err(|error| {
-            AuthError::Filesystem(format!("protect {}: {error}", destination.display()))
-        })?;
+        let credential =
+            read_claude_keychain_credential_for_config(&ambient)?.ok_or_else(|| {
+                AuthError::Filesystem(
+                    "the ambient Claude login has no readable macOS Keychain credential"
+                        .to_string(),
+                )
+            })?;
+        write_claude_profile_credentials(config_dir, &credential.blob)
     }
-    Ok(())
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(AuthError::Filesystem(
+            "the ambient Claude login has no native credential file".to_string(),
+        ))
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
+fn claude_keychain_service(config_dir: &Path) -> String {
+    let digest = Sha256::digest(config_dir.to_string_lossy().as_bytes());
+    let suffix = format!("{digest:x}");
+    format!("Claude Code-credentials-{}", &suffix[..8])
+}
+
 fn write_claude_profile_credentials(
     config_dir: &Path,
     credential: &SecretString,
@@ -2546,47 +2458,21 @@ fn write_claude_profile_credentials(
 }
 
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>, AuthError> {
-    let mut search = ItemSearchOptions::new();
-    search
-        .class(ItemClass::generic_password())
-        .service(CLAUDE_KEYCHAIN_SERVICE)
-        .load_attributes(true)
-        .limit(1);
-    let items = match search.search() {
-        Ok(items) => items,
-        Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => return Ok(None),
-        Err(error) => {
-            return Err(AuthError::Filesystem(format!(
-                "read Claude Keychain credential metadata: {error}"
-            )))
-        }
+fn read_claude_keychain_credential(
+    service: &str,
+) -> Result<Option<ClaudeKeychainCredential>, AuthError> {
+    let Some(account) = read_claude_keychain_account_with_security(service)? else {
+        return Ok(None);
     };
-    let account = items.into_iter().find_map(|item| {
-        item.simplify_dict()
-            .and_then(|attributes| attributes.get("acct").cloned())
-    });
-    let Some(account) = account else {
-        return Err(AuthError::Filesystem(
-            "Claude Keychain credential is missing its account metadata".to_string(),
-        ));
-    };
-    let blob = match security_framework::passwords::get_generic_password(
-        CLAUDE_KEYCHAIN_SERVICE,
-        &account,
-    ) {
-        Ok(blob) => blob,
-        Err(native_error) => read_claude_keychain_blob_with_security().map_err(
-            |fallback_error| {
-                AuthError::Filesystem(format!(
-                    "read Claude Keychain credential: {native_error}; security fallback: {fallback_error}"
-                ))
-            },
-        )?,
-    };
+    let blob = read_claude_keychain_blob_with_security(service).map_err(|error| {
+        AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
+    })?;
     let blob = String::from_utf8(blob).map_err(|_| {
         AuthError::Filesystem("Claude Keychain credential is not valid UTF-8".to_string())
     })?;
+    if claude_token_from_credentials_json(&blob).is_none() {
+        return Ok(None);
+    }
     Ok(Some(ClaudeKeychainCredential {
         account,
         blob: SecretString::new(blob),
@@ -2594,68 +2480,115 @@ fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>,
 }
 
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_blob_with_security() -> Result<Vec<u8>, String> {
+fn read_claude_keychain_credential_for_config(
+    config_dir: &Path,
+) -> Result<Option<ClaudeKeychainCredential>, AuthError> {
+    let scoped_service = claude_keychain_service(config_dir);
+    if let Some(credential) = read_claude_keychain_credential(&scoped_service)? {
+        return Ok(Some(credential));
+    }
+    let ambient = home_dir_or_cwd().join(".claude");
+    if config_dir == ambient {
+        return read_claude_keychain_credential(LEGACY_CLAUDE_KEYCHAIN_SERVICE);
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn read_claude_keychain_account_with_security(service: &str) -> Result<Option<String>, AuthError> {
     let output = ProcessCommand::new("security")
-        .args(["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"])
+        .args(["find-generic-password", "-s", service])
+        .output()
+        .map_err(|error| {
+            AuthError::Filesystem(format!("read Claude Keychain metadata: {error}"))
+        })?;
+    if !output.status.success() {
+        if security_item_not_found(&output) {
+            return Ok(None);
+        }
+        return Err(AuthError::Filesystem(format!(
+            "read Claude Keychain metadata: security exited with {}",
+            output.status
+        )));
+    }
+    let metadata = String::from_utf8(output.stdout).map_err(|_| {
+        AuthError::Filesystem("Claude Keychain metadata is not valid UTF-8".to_string())
+    })?;
+    parse_security_keychain_account(&metadata)
+        .map(Some)
+        .ok_or_else(|| {
+            AuthError::Filesystem(
+                "Claude Keychain credential is missing its account metadata".to_string(),
+            )
+        })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_security_keychain_account(metadata: &str) -> Option<String> {
+    metadata.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("\"acct\"<blob>=\"")?
+            .strip_suffix('"')
+            .map(String::from)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn read_claude_keychain_blob_with_security(service: &str) -> Result<Vec<u8>, String> {
+    let output = ProcessCommand::new("security")
+        .args(["find-generic-password", "-s", service, "-w"])
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
         return Err(format!("security exited with {}", output.status));
     }
-    Ok(output.stdout)
+    Ok(trim_security_password_output(output.stdout))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn read_claude_keychain_credential() -> Result<Option<ClaudeKeychainCredential>, AuthError> {
-    Ok(None)
+#[cfg(any(target_os = "macos", test))]
+fn trim_security_password_output(mut output: Vec<u8>) -> Vec<u8> {
+    if output.last() == Some(&b'\n') {
+        output.pop();
+        if output.last() == Some(&b'\r') {
+            output.pop();
+        }
+    }
+    output
 }
 
 #[cfg(target_os = "macos")]
-fn restore_claude_keychain_blob(
-    credential: Option<&ClaudeKeychainCredential>,
-) -> Result<(), AuthError> {
-    match credential {
-        Some(credential) => security_framework::passwords::set_generic_password(
-            CLAUDE_KEYCHAIN_SERVICE,
-            &credential.account,
-            credential.blob.expose_secret().as_bytes(),
-        )
+fn security_item_not_found(output: &std::process::Output) -> bool {
+    String::from_utf8_lossy(&output.stderr).contains("could not be found")
+}
+
+#[cfg(target_os = "macos")]
+fn delete_claude_keychain_credential(service: &str, account: &str) -> Result<(), AuthError> {
+    let output = ProcessCommand::new("security")
+        .args(["delete-generic-password", "-a", account, "-s", service])
+        .output()
         .map_err(|error| {
-            AuthError::Filesystem(format!("restore Claude Keychain credential: {error}"))
-        }),
-        None => {
-            let Some(current) = read_claude_keychain_credential()? else {
-                return Ok(());
-            };
-            match security_framework::passwords::delete_generic_password(
-                CLAUDE_KEYCHAIN_SERVICE,
-                &current.account,
-            ) {
-                Ok(()) => Ok(()),
-                Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
-                Err(error) => Err(AuthError::Filesystem(format!(
-                    "clear Claude Keychain credential: {error}"
-                ))),
-            }
-        }
+            AuthError::Filesystem(format!("clear Claude Keychain credential: {error}"))
+        })?;
+    if output.status.success() || security_item_not_found(&output) {
+        Ok(())
+    } else {
+        Err(AuthError::Filesystem(format!(
+            "clear Claude Keychain credential: security exited with {}",
+            output.status
+        )))
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn restore_claude_keychain_blob(
-    _credential: Option<&ClaudeKeychainCredential>,
-) -> Result<(), AuthError> {
-    Ok(())
-}
-
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_token() -> Option<ProviderToken> {
-    let credential = read_claude_keychain_credential().ok().flatten()?;
+fn read_claude_keychain_token(config_dir: &Path) -> Option<ProviderToken> {
+    let credential = read_claude_keychain_credential_for_config(config_dir)
+        .ok()
+        .flatten()?;
     claude_token_from_credentials_json(credential.blob.expose_secret())
 }
 
 #[cfg(not(target_os = "macos"))]
-fn read_claude_keychain_token() -> Option<ProviderToken> {
+fn read_claude_keychain_token(_config_dir: &Path) -> Option<ProviderToken> {
     None
 }
 
@@ -2667,10 +2600,6 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
     let auth_path = codex_home.join("auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    codex_token_from_auth_json(&json)
-}
-
-fn codex_token_from_auth_json(json: &serde_json::Value) -> Option<ProviderToken> {
     // Store OAuth access tokens only.
     // Never capture manual API keys from Codex auth state.
     let token = json
@@ -2682,15 +2611,16 @@ fn codex_token_from_auth_json(json: &serde_json::Value) -> Option<ProviderToken>
                 .and_then(|v| v.as_str())
         })?;
     let expires_at = read_json_expires_at(
-        json,
+        &json,
         &[
             "expires_at",
             "expiresAt",
             "accessTokenExpiresAt",
             "access_token_expires_at",
         ],
-    );
-    let login = codex_login_from_auth(json);
+    )
+    .or_else(|| jwt_claims(token)?.get("exp")?.as_i64());
+    let login = codex_login_from_auth(&json);
     Some(ProviderToken {
         provider: "codex".to_string(),
         access_token: token.to_string(),
@@ -2712,13 +2642,17 @@ fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
                 .and_then(|tokens| tokens.get("id_token"))
                 .and_then(serde_json::Value::as_str)
         })?;
-    let payload = id_token.split('.').nth(1)?.trim_end_matches('=');
-    let claims = URL_SAFE_NO_PAD.decode(payload).ok()?;
-    let claims = serde_json::from_slice::<serde_json::Value>(&claims).ok()?;
+    let claims = jwt_claims(id_token)?;
     claims
         .get("email")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
+}
+
+fn jwt_claims(token: &str) -> Option<serde_json::Value> {
+    let payload = token.split('.').nth(1)?.trim_end_matches('=');
+    let claims = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    serde_json::from_slice(&claims).ok()
 }
 
 async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> {
@@ -3933,31 +3867,22 @@ mod tests {
     }
 
     #[test]
-    fn browser_controller_returns_only_valid_structured_handoffs() {
-        let expected = "abcdefghijklmnopqrstuvwxyz0123456789#ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        let output = serde_json::to_vec(&serde_json::json!({
-            "is_error": false,
-            "structured_output": {
-                "status": "authorized",
-                "authorization_code": expected,
-            }
-        }))
-        .expect("controller output");
+    fn visible_claude_page_parser_extracts_only_a_complete_handoff() {
+        let expected = "abcdefghijklmnopqrstuvwxyz#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let page = format!("Authorization complete\n{expected}\nCopy this code");
 
-        let code = parse_browser_controller_output(&output)
-            .expect("valid controller output")
-            .expect("authorization code");
+        let code = claude_authorization_code_from_page(&page).expect("authorization handoff");
+
         assert_eq!(code.expose_secret(), expected);
+        assert!(claude_authorization_code_from_page("short#code").is_none());
+    }
 
-        let malformed = serde_json::to_vec(&serde_json::json!({
-            "is_error": false,
-            "structured_output": {
-                "status": "authorized",
-                "authorization_code": "explanation instead of a handoff",
-            }
-        }))
-        .expect("malformed controller output");
-        assert!(parse_browser_controller_output(&malformed).is_err());
+    #[test]
+    fn claude_keychain_service_is_scoped_to_the_config_directory() {
+        assert_eq!(
+            claude_keychain_service(Path::new("/tmp/claude-profile")),
+            "Claude Code-credentials-7182514b"
+        );
     }
 
     #[test]
@@ -3987,6 +3912,21 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&path).expect("replacement credential file"),
             replacement
+        );
+    }
+
+    #[test]
+    fn completed_claude_login_accepts_a_native_profile_credential() {
+        let temp = tempdir().expect("tempdir");
+        let payload =
+            r#"{"claudeAiOauth":{"accessToken":"profile-token","expiresAt":4102444800000}}"#;
+        fs::write(temp.path().join(".credentials.json"), payload).expect("profile credential");
+
+        capture_claude_profile_credentials(temp.path()).expect("accept native credential");
+
+        assert_eq!(
+            fs::read_to_string(temp.path().join(".credentials.json")).unwrap(),
+            payload
         );
     }
 
@@ -4096,6 +4036,50 @@ mod tests {
         assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
     }
 
+    #[test]
+    fn managed_claude_login_preselects_the_profile_email() {
+        let broker = ClaudeAuthBroker::for_profile(
+            PathBuf::from("/tmp/managed-claude"),
+            Some("engineering@example.com".to_string()),
+        );
+        let command = broker.login_command();
+        let args: Vec<_> = command
+            .as_std()
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(
+            args,
+            ["auth", "login", "--email", "engineering@example.com"]
+        );
+    }
+
+    #[test]
+    fn keychain_metadata_parser_reads_the_account_without_the_password() {
+        let metadata = r#"keychain: "/Users/operator/Library/Keychains/login.keychain-db"
+attributes:
+    "acct"<blob>="operator"
+    "svce"<blob>="Claude Code-credentials""#;
+
+        assert_eq!(
+            parse_security_keychain_account(metadata).as_deref(),
+            Some("operator")
+        );
+    }
+
+    #[test]
+    fn security_password_output_keeps_internal_newlines() {
+        assert_eq!(
+            trim_security_password_output(b"{\n  \"token\": \"value\"\n}\n".to_vec()),
+            b"{\n  \"token\": \"value\"\n}".to_vec()
+        );
+        assert_eq!(
+            trim_security_password_output(b"single-line\r\n".to_vec()),
+            b"single-line".to_vec()
+        );
+    }
+
     #[tokio::test]
     async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
         let temp = tempdir().expect("tempdir");
@@ -4106,7 +4090,7 @@ mod tests {
         fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
         fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
 
-        let broker = ClaudeAuthBroker::for_profile(temp.path().join(".claude"));
+        let broker = ClaudeAuthBroker::for_profile(temp.path().join(".claude"), None);
         broker.disconnect().await.expect("disconnect");
 
         assert!(claude_dir.join("settings.json").exists());
@@ -4529,42 +4513,26 @@ mod tests {
     }
 
     #[test]
-    fn write_codex_profile_credentials_installs_private_oauth_state() {
+    fn extract_codex_token_reads_expiry_from_the_access_token() {
         let tmp = tempdir().expect("tempdir");
-        let claims = URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
-        let id_token = format!("header.{claims}.signature");
-        let credential = SecretString::new(
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        let claims = URL_SAFE_NO_PAD.encode(r#"{"exp":4102444800}"#);
+        let access_token = format!("header.{claims}.signature");
+        fs::write(
+            codex_dir.join("auth.json"),
             serde_json::json!({
-                "auth_mode": "chatgpt",
                 "tokens": {
-                    "access_token": "nested-oauth-token",
-                    "id_token": id_token,
+                    "access_token": access_token,
                 }
             })
             .to_string(),
-        );
+        )
+        .expect("write auth json");
 
-        write_codex_profile_credentials(tmp.path(), &credential).expect("install Codex credential");
+        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
 
-        let token = extract_codex_token_from_home(tmp.path()).expect("OAuth token");
-        assert_eq!(token.login.as_deref(), Some("engineering@example.com"));
-        let permissions = fs::metadata(tmp.path().join("auth.json"))
-            .expect("credential metadata")
-            .permissions()
-            .mode();
-        assert_eq!(permissions & 0o777, 0o600);
-    }
-
-    #[test]
-    fn write_codex_profile_credentials_rejects_manual_api_keys() {
-        let tmp = tempdir().expect("tempdir");
-        let credential = SecretString::new(r#"{"api_key":"manual-key"}"#.to_string());
-
-        let error = write_codex_profile_credentials(tmp.path(), &credential)
-            .expect_err("manual API key must not be imported");
-
-        assert!(error.to_string().contains("ChatGPT OAuth access token"));
-        assert!(!tmp.path().join("auth.json").exists());
+        assert_eq!(token.expires_at, Some(4_102_444_800));
     }
 
     #[test]

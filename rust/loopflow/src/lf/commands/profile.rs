@@ -58,14 +58,17 @@ async fn create_profile(
         .transpose()
         .map_err(anyhow::Error::msg)?;
     if let Some(chrome_profile) = &chrome_profile {
-        if !chrome_profile
-            .label
-            .eq_ignore_ascii_case(profile_id.as_str())
-        {
+        let login = chrome_profile.login.as_deref().ok_or_else(|| {
+            anyhow!(
+                "Chrome profile '{}' has no signed-in account",
+                raw_chrome_profile.expect("resolved Chrome profile has an input")
+            )
+        })?;
+        if !login.eq_ignore_ascii_case(profile_id.as_str()) {
             return Err(anyhow!(
                 "Chrome profile '{}' is signed in as '{}', not '{}'",
                 raw_chrome_profile.expect("resolved Chrome profile has an input"),
-                chrome_profile.label,
+                login,
                 profile_id
             ));
         }

@@ -637,7 +637,7 @@ pub async fn resolve_provider_account(
                         })?;
                     if !retain_authenticated_account(&store, &selection.account, &status).await? {
                         unauthenticated.push(format!(
-                            "'{account_id}' with `lf auth connect {provider} --account {account_id}`"
+                            "'{account_id}' with `lf auth connect {provider} --profile {profile_id}`"
                         ));
                         continue;
                     }

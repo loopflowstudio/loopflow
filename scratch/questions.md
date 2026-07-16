@@ -82,7 +82,37 @@ The prior draft's three open questions are all answered against the tree at
    owner: if the intent is that an outage suppresses the wake, that is a
    behavior change, not a test fix.
 
-2. **`lf pr publish` can loop forever on a scratch-only branch — worth filing
+2. **`cargo test` was red inside a Task Session because `EnvGuard`'s clear-list
+   was one var short — fixed here (1 line).** Not a question; a resolved finding,
+   recorded because this Project has been treating it as a known-unfixable
+   gotcha ("green in CI, red in a Session; don't fix the code").
+
+   The "don't fix the code" instinct was right about *production* code and wrong
+   about the cause. `tests/support/mod.rs`'s `AMBIENT_TASK_ENV` cleared
+   `LF_TASK_SESSION_ID`, `LF_TASK_GENERATION`, `LF_TASK_LEASE_TOKEN` — but not
+   `LF_WAVE_ID`, which `ops/task.rs:395` reads to decide Wave control. So
+   `EnvGuard` was already doing this job and simply missed a var:
+
+   ```
+   Wave 6155f18a… cannot control Task INF-123 owned by Wave 4ca22205…
+        ^ ambient LF_WAVE_ID from my Session      ^ the test's own temp Wave
+   ```
+
+   Adding `"LF_WAVE_ID"` to that array turns both long-red tests green *inside a
+   live Session with every ambient var still set*. Verified: all 11 support-using
+   suites (85 tests) pass in-Session, and in CI the vars are unset so clearing
+   them is a no-op — zero CI risk. `handoff_tests.rs:22` had already patched the
+   same leak ad hoc with `.env_remove("LF_WAVE_ID")` on its subprocess.
+
+   To reproduce CI exactly (still useful for the vars `EnvGuard` doesn't own):
+
+   ```bash
+   env -u LF_WAVE_ID -u LF_TASK_SESSION_ID -u LF_TASK_GENERATION -u LF_TASK_LEASE_TOKEN \
+       -u LF_RUN_ID -u LF_PROCESS_ID -u LF_WAVE_HOME -u LF_CONTROL_HOME -u LF_CONTROL_DB_PATH \
+     cargo test -p loopflow
+   ```
+
+3. **`lf pr publish` can loop forever on a scratch-only branch — worth filing
    under Developer Efficiency.** Hit live during this kickoff (2026-07-16).
    A branch whose only authored commit touches `scratch/` classifies as
    `generated_only` → `reset_to_base`:

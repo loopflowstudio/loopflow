@@ -404,7 +404,7 @@ aggregate-dropping behaviour this design had promoted to its headline test
 | Can an in-crate test reach `arm_ci_fix_wake`? | Yes, if the module is a **descendant of `task::runner`**. Private items are visible to descendant modules. A `#[cfg(test)] mod` in `ops/task.rs` could not. | Module placement is load-bearing: `src/task/runner/ci_fix_lifecycle_tests.rs`, declared from `runner.rs`. |
 | Are `TestRepo` / `tempfile` available in-crate? | Yes. `loopflow-test-support` is a dev-dependency of `loopflow` (`Cargo.toml:79`); `tempfile` is a **normal** dependency (`Cargo.toml:76`). | No new dependency. |
 | Is `tests/support/`'s `EnvGuard` reachable in-crate? | No — `tests/support/mod.rs` compiles into each test binary, not the lib. | The in-crate test needs its own guard. **Correction (review):** I wrote that it "does not need `EnvGuard`'s job" because the test builds its store via `open_store(tempdir)`. That was wrong, and measurably so — see the row below. The guard must do `EnvGuard`'s job, so it is a near-copy, not a smaller primitive. |
-| Does the ambient Session env reach this test? | **Yes, and it fails the test.** Reproduced, not reasoned: `cargo test --test task_github_cache_tests` inside this Session panicked `Wave 6155f18a… cannot control Task INF-123 owned by Wave 4ca22205…`; the same command with the `LF_*` vars cleared passed. The ambient ids reach **production** code on the exact paths this proof drives, via two reads: `resolve_child_command_source` (`ops/util.rs:63`, called from `ops/task.rs:397`) reads `WAVE_ID_ENV` to classify who is issuing a command — it emits that exact error — and `resolve_task_authority` (`ops/task.rs:1113`) reads `LF_TASK_SESSION_ID`. The Task runner exports all ten; CI exports none. | The guard clears the ambient vars, and the doc no longer calls it PATH-only. The trap here is the *obvious* fix: making production code satisfy the test would be reshaping production around a test-environment artifact, in reverse. Nothing is wrong with the code. **Since #1003 this specific failure no longer reproduces** — `EnvGuard` now clears `LF_WAVE_ID` — but the reads are still there, and an in-crate guard does not inherit `EnvGuard`'s list. |
+| Does the ambient Session env reach this test? | **Yes, and it fails the test.** Reproduced, not reasoned: `cargo test --test task_github_cache_tests` inside this Session panicked `Wave 6155f18a… cannot control Task INF-123 owned by Wave 4ca22205…`; the same command with the `LF_*` vars cleared passed. The ambient ids reach **production** code on the exact paths this proof drives, via two reads: `resolve_child_command_source` (`ops/util.rs:63`, called from `ops/task.rs:397`) reads `WAVE_ID_ENV` to classify who is issuing a command — it emits that exact error — and `resolve_task_authority` (`ops/task.rs:1113`) reads `LF_TASK_SESSION_ID`; and `ops/task.rs:377` reads `LF_PROJECT_SESSION_ID` *before* either. The Task runner exports these; CI exports none. | The guard clears the ambient vars by **mirroring `AMBIENT_TASK_ENV`** (decision 9), and the doc no longer calls it PATH-only. The trap here is the *obvious* fix: making production code satisfy the test would be reshaping production around a test-environment artifact, in reverse. Nothing is wrong with the code. **Since #1003 this specific failure no longer reproduces** — `EnvGuard` now clears `LF_WAVE_ID` — but the reads are still there, and an in-crate guard inherits nothing from `tests/support/`. |
 | Why not just clear `PATH` and let the store isolate itself? | Because `resolve_task_authority` calls `open_registry_for_authority()`, which resolves the **global** registry from `LF_CONTROL_HOME`/`LF_CONTROL_DB_PATH`. Left ambient, an in-crate test driving authority reads — and could write — the developer's live control DB. | Decisive. The guard redirects the store home to a temp dir as well. This is exactly `EnvGuard`'s job, which is why the guard converges on it. |
 | Can fake-`gh` serve a scripted fail→pass sequence? | Yes. `read_check_set` calls `gh pr checks <branch> [--required] --json name,bucket,link` and **ignores exit status** — only stdout parses. `GhCheck` fields are `#[serde(default)]` (a deliberately lenient CLI parser). | State-file fake works. |
 | Must the fake distinguish `--required`? | **Yes — though not for the reason I first wrote.** I claimed a flag-ignoring fake yields empty `failing_checks`; traced `from_checks` (`pr.rs:551`) and it doesn't: `failing_leaves` falls back to `full_failing`, then to `gate.failing_checks`, so it's never empty on a real gate failure. The real reason is fidelity: this repo's only required check is the **`tests-result` aggregate**, and the full-set read exists to drop that roll-up in favour of the broken leaves. A single-list fake never exercises that path. | The fake serves distinct required/full lists, and the proof asserts the aggregate is **dropped** (`failing_checks == [cargo-fmt, clippy]`, no `tests-result`) — the assertion that actually has teeth. |
@@ -465,10 +465,38 @@ aggregate-dropping behaviour this design had promoted to its headline test
 9. **The env guard is not PATH-only, and is a near-copy of `EnvGuard` by force.** It must:
 
    - prepend the fake-`gh` temp bin dir to `PATH`;
-   - **clear the ambient Session vars** `LF_WAVE_ID`, `LF_TASK_SESSION_ID`, `LF_TASK_GENERATION`, `LF_TASK_LEASE_TOKEN`, `LF_RUN_ID`, `LF_PROCESS_ID`;
-   - **redirect the store home** — `LF_WAVE_HOME`, `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH`, `LF_HOME`, `LF_DB_PATH` — at a temp dir, so `open_registry_for_authority()` can never reach the developer's live control DB;
+   - **clear the ambient identity vars by mirroring `AMBIENT_TASK_ENV` verbatim** (`tests/support/mod.rs:22`) — do not hand-roll a list:
+
+     ```rust
+     // Mirrors AMBIENT_TASK_ENV in rust/loopflow/tests/support/mod.rs:22.
+     // That is the source of truth; this copy exists only because that module
+     // compiles into each integration test binary, not into the lib. Keep in sync.
+     const AMBIENT_TASK_ENV: [&str; 5] = [
+         "LF_TASK_SESSION_ID", "LF_TASK_GENERATION", "LF_TASK_LEASE_TOKEN",
+         "LF_WAVE_ID", "LF_PROJECT_SESSION_ID",
+     ];
+     ```
+
+   - **redirect the store home** — `LF_HOME`, `LF_DB_PATH`, `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH` — at a temp dir, so `open_registry_for_authority()` can never reach the developer's live control DB. This is a *separate* concern from the identity list, and `EnvGuard` treats it separately too (it clears the four and points `LF_HOME` at a `TempDir`); mirror that structure rather than merging the two lists.
    - hold a process-wide `Mutex` (the lib test binary runs tests in threads, and env is process-global);
    - restore every previous value on `Drop`.
+
+   **An earlier draft of this list was hand-rolled and wrong in both directions**
+   — it carried `LF_RUN_ID`, `LF_PROCESS_ID`, `LF_WAVE_HOME` (**0** read sites in
+   `src/` between them; dead weight) and omitted `LF_PROJECT_SESSION_ID`
+   (**7** read sites). The omission was the dangerous one: `ops/task.rs:377`
+   reads it and gates task control **before** `resolve_child_command_source`
+   (`:397`) is ever consulted, so it is the *first* ambient check on the exact
+   path this proof drives. Mirroring the canonical list is not tidiness — a
+   hand-rolled list drops the var that matters most and keeps three that do
+   nothing.
+
+   Note this Session cannot reproduce that half: a Task launched directly
+   exports no `LF_PROJECT_SESSION_ID` (only ten `LF_*` vars, not this one), so
+   the check at `:377` falls through locally. A Task launched under a Project
+   Session would carry it. **Absence from one environment is not absence of the
+   hazard** — which is the whole argument for mirroring the list rather than
+   deriving it from what happens to be set.
 
    That is `tests/support/mod.rs`'s `EnvGuard` almost exactly, including its `env_lock()` mutex and its temp-bin-dir fake-executable writer. It cannot be reused: `tests/support/mod.rs` compiles into each *integration test binary*, and this proof is in-crate. A `#[cfg(test)]` module in `src/` cannot see it, and a lib test binary is a separate process from every `tests/` binary, so even the mutex would not be shared. **The duplication is forced by Rust's test architecture, not chosen** — and CLAUDE.md's "keep one implementation" is about production code, while its testing section explicitly sanctions test-only modules. Say so in the module's header comment so the next reader doesn't try to DRY the two together.
 

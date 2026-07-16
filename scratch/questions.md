@@ -111,7 +111,34 @@ and in the design's De-risking table.
    a guard in `wake_warranted` itself — which would be the honest fix, since the
    invariant it encodes is "don't repair a PR that no longer exists."
 
-3. **The "green in CI, red in a Session" gotcha is fixed — by #1003 on main, not
+3. **GraphQL exhaustion blocked this Task's own `lf pr publish`. It resets; the
+   asymmetry is the real signal.** Not this Task's scope — recording it because
+   it bit the work and is adjacent to ci-fix observation.
+
+   `lf pr publish` died on `gh pr list --head <branch>` with "GraphQL: API rate
+   limit already exceeded for user ID 37011". Measured 30 minutes later:
+
+   ```
+   core (REST)  4921/5000      graphql  4968/5000   (was 0/5000)
+   ```
+
+   So it is transient — retry after the reset window rather than treating a
+   publish failure as broken state. The durable finding is the **asymmetry**: the
+   PR-enumeration path burns GraphQL to nothing while REST sits ~98% idle. Worth
+   knowing that `observe_pr_by_number` — the read this design's lifecycle drives
+   — uses `gh api repos/{nwo}/pulls/{n}`, which is **REST**, while `gh pr list` /
+   `gh pr checks` are GraphQL. The observation path is on the budget that isn't
+   exhausted; the enumeration path is on the one that is.
+
+   Two consequences worth carrying: a local reproduction cannot be trusted while
+   the installed `lf` (0.11.3) predates #928's
+   `graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration` — the
+   invariant is green on main and absent from the binary actually running, so the
+   already-fixed defect still bites. And this proof is structurally immune: its
+   operational boundary is **zero network requests** (fake `gh`, `cat`-ing local
+   files), so no rate limit can make it flaky or green-when-it-should-be-red.
+
+4. **The "green in CI, red in a Session" gotcha is fixed — by #1003 on main, not
    by me. Retire the workaround.** Worth recording precisely, because this
    Project has carried it as a known-unfixable fact of life ("don't fix the code,
    it's the environment").
@@ -145,15 +172,22 @@ and in the design's De-risking table.
    dangling into the next sentence. Repaired here, since it is the comment that
    explains the whole trap.)
 
-   The `env -u` form, if a future var escapes `EnvGuard`'s list:
+   The `env -u` form, if a future var escapes `EnvGuard`'s list — clear exactly
+   `AMBIENT_TASK_ENV` (`tests/support/mod.rs:22`), not an invented set:
 
    ```bash
-   env -u LF_WAVE_ID -u LF_TASK_SESSION_ID -u LF_TASK_GENERATION -u LF_TASK_LEASE_TOKEN \
-       -u LF_RUN_ID -u LF_PROCESS_ID -u LF_WAVE_HOME -u LF_CONTROL_HOME -u LF_CONTROL_DB_PATH \
+   env -u LF_TASK_SESSION_ID -u LF_TASK_GENERATION -u LF_TASK_LEASE_TOKEN \
+       -u LF_WAVE_ID -u LF_PROJECT_SESSION_ID \
      cargo test -p loopflow
    ```
 
-4. **`lf pr publish` can loop forever on a scratch-only branch — worth filing
+   Measured, so the list stops being folklore: `LF_RUN_ID`, `LF_PROCESS_ID` and
+   `LF_WAVE_HOME` have **zero** read sites in `src/` — clearing them is cargo
+   cult. `LF_PROJECT_SESSION_ID` has **seven**, and `ops/task.rs:377` gates task
+   control on it *before* the Wave check at `:397`, so it is the one an invented
+   list is most likely to miss and least able to afford.
+
+5. **`lf pr publish` can loop forever on a scratch-only branch — worth filing
    under Developer Efficiency.** Hit live during this kickoff (2026-07-16).
    A branch whose only authored commit touches `scratch/` classifies as
    `generated_only` → `reset_to_base`:
@@ -223,7 +257,7 @@ and in the design's De-risking table.
    `lf pr publish` — i.e. precisely the manual git surgery the KR says should
    never be necessary.
 
-5. **Two `write_gh_script` helpers already diverge** (`pr_tests.rs:13` is
+6. **Two `write_gh_script` helpers already diverge** (`pr_tests.rs:13` is
    permissive and `exit 0`s on unknown calls; `release_tests.rs:13` fails loudly),
    and this proof adds a third fake in-crate. The in-crate one cannot reuse
    either — they are per-test-binary modules. Unifying them into

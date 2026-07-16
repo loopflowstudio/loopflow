@@ -338,6 +338,22 @@ impl CiObservation {
     }
 }
 
+/// The last attempt to refresh one persisted GitHub PR. This metadata lives on
+/// `TaskPr` beside the cached PR fields: it bounds repeated reads across `lf`
+/// processes without making GitHub the source of truth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubObservation {
+    pub checked_at: OffsetDateTime,
+    pub result: GithubObservationResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum GithubObservationResult {
+    Fresh,
+    Degraded { reason: String },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -426,6 +442,9 @@ pub struct TaskPr {
     /// until the head has been observed; ignored once the head moves past
     /// `CiObservation::head_sha`.
     pub ci_observation: Option<CiObservation>,
+    /// Last GitHub refresh attempt. A fresh result coalesces reads briefly; a
+    /// degraded result opens a longer circuit while the durable PR fields stand.
+    pub github_observation: Option<GithubObservation>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -572,21 +591,27 @@ pub enum PmWritebackState {
     },
 }
 
-/// Freshness of the last GitHub observation behind a Task's PR state. GitHub is
-/// a reconciliation input, not the store of record: when a bounded remote read
-/// fails (quota, network, or a GitHub error), the cached Task/PR row stands and
-/// the freshness degrades rather than erroring the control command. This is
-/// transient runtime state — recomputed each reconcile, never persisted.
+/// Freshness of the GitHub observation behind the Task's returned PR state.
+/// The durable attempt metadata lives on `TaskPr`; this derived view tells one
+/// caller whether it read GitHub, reused a recent reading, or opened a degraded
+/// circuit while preserving the cached PR fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Observation {
-    /// The cached PR state reflects a successful remote read, or no remote read
-    /// was required — an unpublished working PR has no number to observe.
+    /// No remote read applies, as for an unpublished working PR.
     #[default]
-    Fresh,
-    /// A bounded remote read failed; the cached PR state is preserved and
-    /// `reason` names the degraded cause for the operator.
-    Degraded { reason: String },
+    NotRequired,
+    /// GitHub answered during this reconcile.
+    Fresh { observed_at: OffsetDateTime },
+    /// A recent successful reading was reused without spending another request.
+    Cached { observed_at: OffsetDateTime },
+    /// A bounded read failed. The reason and retry boundary are durable, so
+    /// later local controls reuse the cached state without hammering GitHub.
+    Degraded {
+        reason: String,
+        cached_as_of: OffsetDateTime,
+        retry_at: OffsetDateTime,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -635,8 +660,7 @@ pub struct TaskSession {
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
-    /// Freshness of the most recent PR observation. Transient: set by reconcile,
-    /// never persisted (the store maps columns explicitly and skips it).
+    /// Per-command view derived from the active PR's durable observation cache.
     #[serde(skip)]
     pub observation: Observation,
 }
@@ -1141,7 +1165,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
-            observation: crate::task::Observation::Fresh,
+            observation: crate::task::Observation::NotRequired,
         }
     }
 
@@ -1254,6 +1278,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             ci_observation: None,
+            github_observation: None,
         };
         assert_eq!(pr.phase(), PrPhase::Working);
 
@@ -1307,6 +1332,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             ci_observation: None,
+            github_observation: None,
         };
         assert!(pr.validate().is_err());
 
@@ -1366,6 +1392,7 @@ mod tests {
             merge_commit: None,
             abandoned_at: None,
             ci_observation: observation,
+            github_observation: None,
             created_at: now,
             updated_at: now,
         }

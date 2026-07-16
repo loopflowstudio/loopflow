@@ -383,6 +383,8 @@ pub(crate) fn observe_pr_by_number(repo: &Path, number: u32, branch: &str) -> Pr
         .current_dir(repo)
         .args([
             "api",
+            "--cache",
+            "60s",
             "-H",
             "Accept: application/vnd.github+json",
             &endpoint,

@@ -645,8 +645,21 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
                 placement,
             );
         }
-        if let loopflow::task::Observation::Degraded { reason } = &snapshot.observation {
-            println!("  PR observation: degraded — {reason} (showing cached state)");
+        match &snapshot.observation {
+            loopflow::task::Observation::Cached { observed_at } => {
+                println!("  PR observation: cached from {observed_at}");
+            }
+            loopflow::task::Observation::Degraded {
+                reason,
+                cached_as_of,
+                retry_at,
+            } => {
+                println!(
+                    "  PR observation: degraded — {reason} (cached from {cached_as_of}; retry after {retry_at})"
+                );
+            }
+            loopflow::task::Observation::NotRequired
+            | loopflow::task::Observation::Fresh { .. } => {}
         }
     }
     Ok(())
@@ -670,6 +683,22 @@ fn print_task_control(
             result.state.as_str(),
             effect
         );
+        match &result.observation {
+            loopflow::task::Observation::Cached { observed_at } => {
+                println!("PR observation: cached from {observed_at}");
+            }
+            loopflow::task::Observation::Degraded {
+                reason,
+                cached_as_of,
+                retry_at,
+            } => {
+                println!(
+                    "PR observation: degraded — {reason} (cached from {cached_as_of}; retry after {retry_at})"
+                );
+            }
+            loopflow::task::Observation::NotRequired
+            | loopflow::task::Observation::Fresh { .. } => {}
+        }
     }
     Ok(())
 }

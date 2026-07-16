@@ -251,6 +251,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "session_body_provenance",
         sql: include_str!("migrations/0.11.018_session_body_provenance.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 19,
+        },
+        name: "task_pr_github_observation",
+        sql: include_str!("migrations/0.11.019_task_pr_github_observation.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1311,7 +1320,8 @@ mod tests {
                 "0.11.015_interaction_reviews".to_string(),
                 "0.11.016_task_linear_observations".to_string(),
                 "0.11.017_migration_provenance".to_string(),
-                "0.11.018_session_body_provenance".to_string()
+                "0.11.018_session_body_provenance".to_string(),
+                "0.11.019_task_pr_github_observation".to_string()
             ]
         );
     }
@@ -1325,11 +1335,11 @@ mod tests {
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.017_migration_provenance")
+            Some("0.11.018_session_body_provenance")
         );
-        assert!(!columns(&conn, "task_sessions")
+        assert!(!columns(&conn, "task_prs")
             .iter()
-            .any(|column| column == "process_provenance_json"));
+            .any(|column| column == "github_observation"));
     }
 
     #[test]

@@ -1082,7 +1082,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
-            observation: crate::task::Observation::Fresh,
+            observation: crate::task::Observation::NotRequired,
         }
     }
 
@@ -1099,6 +1099,7 @@ mod tests {
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
+            github_observation: None,
             created_at: session.created_at,
             updated_at: session.updated_at,
         }
@@ -2647,7 +2648,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_pr_persists_head_sha_and_ci_observation() {
+    async fn task_pr_persists_github_and_ci_observations() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
             .await
@@ -2680,6 +2681,12 @@ mod tests {
             observed_at: OffsetDateTime::now_utc(),
             woken_failure_set: None,
         });
+        pr.github_observation = Some(crate::task::GithubObservation {
+            checked_at: OffsetDateTime::now_utc(),
+            result: crate::task::GithubObservationResult::Degraded {
+                reason: "GitHub API rate limit exhausted".to_string(),
+            },
+        });
         pr.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&pr).await.unwrap();
 
@@ -2688,6 +2695,7 @@ mod tests {
         let ci = read.fresh_ci().expect("reading matches the current head");
         assert_eq!(ci.state, crate::task::CiState::Failing);
         assert_eq!(ci.failing_checks[0].name, "build");
+        assert_eq!(read.github_observation, pr.github_observation);
     }
 
     #[tokio::test]
@@ -2731,6 +2739,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             ci_observation: None,
+            github_observation: None,
         };
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
@@ -2768,6 +2777,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             ci_observation: None,
+            github_observation: None,
         };
         assert!(store
             .settle_task_pr(&abandoned, Some(&conflicting))
@@ -2831,6 +2841,7 @@ mod tests {
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
+            github_observation: None,
             created_at: now,
             updated_at: now,
         };

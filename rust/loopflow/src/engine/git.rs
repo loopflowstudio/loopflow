@@ -157,6 +157,58 @@ pub fn checkout_new_branch_from(
     Ok(())
 }
 
+/// Cherry-pick the commit range `from..to` (exclusive of `from`, inclusive of
+/// `to`) onto the current HEAD. On conflict the pick is aborted and HEAD is left
+/// unchanged, so a rotation never lands a half-applied range — the caller can
+/// report a clean, named failure. Requires a clean index (stash first).
+pub fn cherry_pick_range(repo: &Path, from: &str, to: &str) -> Result<(), GitError> {
+    let range = format!("{from}..{to}");
+    let output = run_git(repo, &["cherry-pick", &range])?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let conflicts = list_conflicts(repo)?;
+    let _ = run_git(repo, &["cherry-pick", "--abort"]);
+    let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !conflicts.is_empty() {
+        let names = conflicts
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        stderr.push_str(&format!(" (conflicts: {names})"));
+    }
+    Err(GitError::CommandFailed {
+        command: format!("git cherry-pick {range}"),
+        stderr,
+    })
+}
+
+/// Stash the working tree including untracked files. Returns `true` when
+/// something was stashed, `false` when the tree was already clean.
+pub fn stash_including_untracked(repo: &Path) -> Result<bool, GitError> {
+    if is_clean(repo)? {
+        return Ok(false);
+    }
+    git_stdout(
+        repo,
+        &[
+            "stash",
+            "push",
+            "--include-untracked",
+            "-m",
+            "lf-rotate-carry",
+        ],
+    )?;
+    Ok(true)
+}
+
+/// Reapply the most recent stash and drop it.
+pub fn stash_pop(repo: &Path) -> Result<(), GitError> {
+    git_stdout(repo, &["stash", "pop"])?;
+    Ok(())
+}
+
 pub fn ref_exists(repo: &Path, ref_name: &str) -> Result<bool, GitError> {
     Ok(
         run_git(repo, &["rev-parse", "--verify", "--quiet", ref_name])?

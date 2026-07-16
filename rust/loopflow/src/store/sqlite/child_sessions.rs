@@ -30,10 +30,10 @@ use crate::session_context::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    AfterMerge, CiObservation, GithubPr, LinearObservationApply, LinearObservationOutcome, PrPhase,
-    PrPublication, TaskEvent, TaskEventKind, TaskLifecyclePhase, TaskLifecyclePlan,
-    TaskLinearObservation, TaskPhasePlan, TaskPr, TaskPrId, TaskSession, TaskSessionId,
-    TaskSessionStatus,
+    AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
+    LinearObservationOutcome, PrPhase, PrPublication, TaskEvent, TaskEventKind, TaskLifecyclePhase,
+    TaskLifecyclePlan, TaskLinearObservation, TaskPhasePlan, TaskPr, TaskPrId, TaskSession,
+    TaskSessionId, TaskSessionStatus,
 };
 
 use super::SqliteStore;
@@ -2954,13 +2954,13 @@ const TASK_PR_COLUMNS: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
-    github_head_sha, ci_observation, parent_pr_id
+    github_head_sha, ci_observation, parent_pr_id, github_observation
     FROM task_prs";
 const TASK_PR_SELECT: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
-    github_head_sha, ci_observation, parent_pr_id
+    github_head_sha, ci_observation, parent_pr_id, github_observation
     FROM task_prs WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
@@ -3382,8 +3382,9 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             id, task_session_id, sequence, slug, branch, base_commit,
             publication_requested_at, after_merge, next_slug,
             github_number, github_url, merge_commit, abandoned_at,
-            created_at, updated_at, github_head_sha, ci_observation, parent_pr_id
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            created_at, updated_at, github_head_sha, ci_observation, parent_pr_id,
+            github_observation
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             pr.id.as_str(),
             pr.task_session_id.as_str(),
@@ -3403,6 +3404,7 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             github.and_then(|github| github.head_sha.as_deref()),
             task_pr_ci_json(pr)?,
             pr.parent_pr_id.as_ref().map(TaskPrId::as_str),
+            task_pr_github_observation_json(pr)?,
         ],
     )?;
     Ok(())
@@ -3417,7 +3419,7 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             publication_requested_at=?7, after_merge=?8, next_slug=?9,
             github_number=?10, github_url=?11, merge_commit=?12,
             abandoned_at=?13, updated_at=?15, github_head_sha=?16,
-            ci_observation=?17, parent_pr_id=?18
+            ci_observation=?17, parent_pr_id=?18, github_observation=?19
          WHERE id=?1 AND task_session_id=?2 AND sequence=?3 AND slug=?4
            AND branch=?5 AND base_commit=?6 AND created_at=?14",
         params![
@@ -3439,6 +3441,7 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             github.and_then(|github| github.head_sha.as_deref()),
             task_pr_ci_json(pr)?,
             pr.parent_pr_id.as_ref().map(TaskPrId::as_str),
+            task_pr_github_observation_json(pr)?,
         ],
     )
     .map_err(StoreError::from)
@@ -3467,6 +3470,14 @@ fn heal_task_pr_base(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
 /// or `None` when the head has not been observed.
 fn task_pr_ci_json(pr: &TaskPr) -> StoreResult<Option<String>> {
     pr.ci_observation
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(StoreError::from)
+}
+
+fn task_pr_github_observation_json(pr: &TaskPr) -> StoreResult<Option<String>> {
+    pr.github_observation
         .as_ref()
         .map(serde_json::to_string)
         .transpose()
@@ -3684,9 +3695,9 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
-        // Freshness is transient runtime state; a loaded row starts Fresh and
-        // reconcile recomputes it against GitHub.
-        observation: crate::task::Observation::Fresh,
+        // Runtime freshness is derived when reconciliation decides whether the
+        // durable GitHub observation can be reused.
+        observation: crate::task::Observation::NotRequired,
     })
 }
 
@@ -3705,6 +3716,11 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
         .map(|json| serde_json::from_str::<CiObservation>(&json))
         .transpose()
         .map_err(|error| invalid_column(16, error))?;
+    let github_observation = row
+        .get::<_, Option<String>>(18)?
+        .map(|json| serde_json::from_str::<GithubObservation>(&json))
+        .transpose()
+        .map_err(|error| invalid_column(18, error))?;
     let publication = match (publication_requested_at, after_merge) {
         (Some(requested_at), Some(after_merge)) => Some(PrPublication {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -3753,6 +3769,7 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
             .get::<_, Option<i64>>(12)?
             .map(crate::store::rows::unix_to_datetime),
         ci_observation,
+        github_observation,
         created_at: crate::store::rows::unix_to_datetime(row.get(13)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(14)?),
     };

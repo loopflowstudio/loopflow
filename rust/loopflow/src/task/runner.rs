@@ -2115,7 +2115,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
-            observation: crate::task::Observation::Fresh,
+            observation: crate::task::Observation::NotRequired,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
@@ -2131,6 +2131,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             ci_observation: None,
+            github_observation: None,
         };
         store.create_task_session(&session, &pr).await.unwrap();
         session.begin_generation(format!("task-{provider}"));
@@ -2409,6 +2410,7 @@ mod tests {
                 observed_at: now,
                 woken_failure_set: None,
             }),
+            github_observation: None,
             created_at: now,
             updated_at: now,
         };

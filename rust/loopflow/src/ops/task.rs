@@ -3534,6 +3534,7 @@ mod tests {
             started_at: now - time::Duration::hours(1),
             state: lease_state,
             outcome: None,
+            provenance: None,
         });
         let pr = TaskPr {
             id: TaskPrId::new(),

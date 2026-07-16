@@ -1285,14 +1285,30 @@ pub enum PmCommand {
         #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
         wave_flag: Option<String>,
         /// Initialize all waves under wave/
-        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
+        #[arg(
+            long,
+            conflicts_with_all = ["wave", "wave_flag", "role", "create"]
+        )]
         all: bool,
-        /// Team key = Task prefix (e.g. PRD). Defaults from the wave name.
+        /// Author and connect a Wave using a standard operating archetype
+        #[arg(
+            long,
+            value_enum,
+            conflicts_with_all = ["all", "create", "team_name"]
+        )]
+        role: Option<crate::ops::pm::StandardWaveRole>,
+        /// Author a missing custom Wave before connecting it
+        #[arg(long, conflicts_with_all = ["all", "role"])]
+        create: bool,
+        /// Durable 3-letter Task prefix. Required for a new noncanonical Wave.
         #[arg(long = "team-key")]
         team_key: Option<String>,
         /// Team display name. Defaults to the title-cased wave name.
         #[arg(long = "team-name")]
         team_name: Option<String>,
+        /// Emit the connected Wave as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Read the wave's local Project and task snapshot
     Show {
@@ -2842,8 +2858,11 @@ mod tests {
                     wave,
                     wave_flag,
                     all,
+                    role,
+                    create,
                     team_key,
                     team_name,
+                    json,
                 },
         }) = cli.command
         else {
@@ -2853,8 +2872,11 @@ mod tests {
         assert_eq!(wave, None);
         assert_eq!(wave_flag, None);
         assert!(all);
+        assert_eq!(role, None);
+        assert!(!create);
         assert_eq!(team_key, None);
         assert_eq!(team_name, None);
+        assert!(!json);
     }
 
     #[test]
@@ -2885,6 +2907,108 @@ mod tests {
 
         assert_eq!(team_key.as_deref(), Some("PRD"));
         assert_eq!(team_name.as_deref(), Some("Product"));
+    }
+
+    #[test]
+    fn pm_init_accepts_standard_role_without_wave_name() {
+        let cli = Cli::try_parse_from(["lf", "pm", "init", "--role", "product", "--json"])
+            .expect("parse role init");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Init {
+                    wave,
+                    wave_flag,
+                    role,
+                    create,
+                    json,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(wave, None);
+        assert_eq!(wave_flag, None);
+        assert_eq!(role, Some(crate::ops::pm::StandardWaveRole::Product));
+        assert!(!create);
+        assert!(json);
+    }
+
+    #[test]
+    fn pm_init_accepts_archetype_for_a_named_wave() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "pm",
+            "init",
+            "game",
+            "--role",
+            "product",
+            "--team-key",
+            "GAM",
+            "--json",
+        ])
+        .expect("parse named role init");
+        let Some(Commands::Pm {
+            cmd: PmCommand::Init { wave, role, .. },
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("game"));
+        assert_eq!(role, Some(crate::ops::pm::StandardWaveRole::Product));
+    }
+
+    #[test]
+    fn pm_init_accepts_custom_wave_creation() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "pm",
+            "init",
+            "support",
+            "--create",
+            "--team-key",
+            "SUP",
+            "--json",
+        ])
+        .expect("parse custom init");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Init {
+                    wave,
+                    role,
+                    create,
+                    json,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm init command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("support"));
+        assert_eq!(role, None);
+        assert!(create);
+        assert!(json);
+    }
+
+    #[test]
+    fn pm_init_role_rejects_bulk_create_and_team_name_overrides() {
+        assert!(Cli::try_parse_from(["lf", "pm", "init", "--role", "product", "--all"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "pm", "init", "--role", "product", "--create"]).is_err()
+        );
+        assert!(Cli::try_parse_from([
+            "lf",
+            "pm",
+            "init",
+            "--role",
+            "product",
+            "--team-name",
+            "Other"
+        ])
+        .is_err());
     }
 
     #[test]

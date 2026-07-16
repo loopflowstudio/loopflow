@@ -175,7 +175,9 @@ id. Duplicate titles fail loudly.
 Then read and edit tasks:
 
 ```bash
-lf pm init --wave infra --team-key INF                              # connect or rebind Initiative + team
+lf pm init --role infrastructure                                    # author Infrastructure with durable ENG identity
+lf pm init game --role product --team-key GAM                       # Product archetype with Game/GAM identity
+lf pm init --wave infra --team-key INF                              # connect; on an existing Wave, start a migration
 lf pm reteam --wave infra --apply                                   # move the hierarchy only when no Task body is writing
 lf pm sync --wave infra                                             # refresh SQLite
 lf pm status                                                        # show linked waves and task counts

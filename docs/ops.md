@@ -140,7 +140,7 @@ lf pm task update --id 1207... --title "Refine dark mode"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 lf pm task move --id 1207... --wave designer --project api
 lf pm rename --wave designer --title "Designer"                  # rename the backing Linear Initiative
-lf pm init --wave designer --team-key DSG                        # connect or rebind Initiative + team
+lf pm init --wave designer --team-key DSG                        # connect; on an existing Wave, start a migration
 lf pm reteam --wave designer --apply                             # move the hierarchy only when no Task body is writing
 ```
 
@@ -156,7 +156,7 @@ lf pm reteam --wave designer --apply                             # move the hier
 | `sync` | Fetch Linear Initiatives, Projects, KRs, and Issues into SQLite |
 | `sync --plan` | Report Initiative/Project drift without writing SQLite |
 | `rename` | Rename the Linear Initiative backing a wave |
-| `init` | Create or connect the Wave's Linear Initiative and team; an explicit team key rebinds an existing Wave |
+| `init` | Create or connect the Wave's Linear Initiative and team; an explicit key on an existing Wave starts a team migration |
 
 | Flag | Description |
 |------|-------------|
@@ -181,9 +181,10 @@ pm:
 When the id is absent, init derives the Initiative title from the wave name.
 It links one exact match, creates one when none exists, and fails when the title
 is ambiguous. It also binds a Wave-owned team whose key prefixes new Issues.
-Passing an explicit `--team-key` replaces an existing team binding after
-adopting or creating that exact team. Later commands use persisted ids, never
-mutable titles.
+That three-letter prefix is durable Wave identity across Projects, Tasks,
+links, and Sessions. Passing a new `--team-key` on an existing Wave starts a costly
+migration by adopting or creating the exact team; finish it with `lf pm reteam`.
+Later commands use persisted ids, never mutable titles.
 
 Linear's Projects view is flat, so provider titles use `<Wave> — <Project>`.
 Loopflow removes that display prefix while reading and keeps the canonical name

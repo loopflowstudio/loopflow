@@ -138,6 +138,38 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
 
 struct CliProgress;
 
+#[derive(Debug, serde::Serialize)]
+struct PmInitOutput {
+    wave: String,
+    team_key: Option<String>,
+}
+
+fn role_team_identity(
+    role: crate::ops::pm::StandardWaveRole,
+    wave: &str,
+    team_key: Option<&str>,
+) -> Result<(String, String)> {
+    if wave == role.wave() {
+        if let Some(team_key) = team_key {
+            let team_key = crate::ops::pm::new_wave_team_key(Some(team_key))?;
+            if team_key != role.team_key() {
+                return Err(anyhow!(
+                    "wave/{} uses the canonical {} team key; omit --team-key or pass {}",
+                    role.wave(),
+                    role.title(),
+                    role.team_key()
+                ));
+            }
+        }
+        Ok((role.team_key().to_string(), role.title().to_string()))
+    } else {
+        Ok((
+            crate::ops::pm::new_wave_team_key(team_key)?,
+            crate::ops::pm::wave_title(wave),
+        ))
+    }
+}
+
 impl Progress for CliProgress {
     fn status(&self, msg: &str) {
         println!("{}", msg);
@@ -505,18 +537,53 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             wave,
             wave_flag,
             all,
+            role,
+            create,
             team_key,
             team_name,
+            json,
         } => {
             if *all && (team_key.is_some() || team_name.is_some()) {
                 return Err(anyhow!(
-                    "--team-key/--team-name apply to one wave; omit them with --all so each wave keys off its own name"
+                    "--all only rechecks existing bindings; initialize each unbound Wave individually"
                 ));
             }
-            let targets = if *all {
-                list_all_waves()?
+            let explicit = wave.as_deref().or(wave_flag.as_deref());
+            let (targets, init_team_key, init_team_name) = if *all {
+                let targets = list_all_waves()?;
+                let missing: Vec<_> = targets
+                    .iter()
+                    .filter(|wave| !crate::ops::pm::wave_has_pm_team(&repo_root, wave))
+                    .cloned()
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(anyhow!(
+                        "--all cannot invent durable Task tags; initialize these Waves individually with --team-key: {}",
+                        missing.join(", ")
+                    ));
+                }
+                (targets, team_key.clone(), team_name.clone())
+            } else if let Some(role) = role {
+                let selected = crate::ops::resolve_wave_name(explicit.or(Some(role.wave())))
+                    .ok_or_else(|| anyhow!("invalid wave name"))?;
+                let (key, name) = role_team_identity(*role, &selected, team_key.as_deref())?;
+                let objective = role.objective(&selected);
+                crate::ops::pm::author_wave_scaffold(&repo_root, &selected, &objective)?;
+                (vec![selected], Some(key), Some(name))
+            } else if *create {
+                let selected = explicit.ok_or_else(|| {
+                    anyhow!("--create needs a Wave name: `lf pm init <name> --create`")
+                })?;
+                let selected = crate::ops::resolve_wave_name(Some(selected))
+                    .ok_or_else(|| anyhow!("invalid wave name: `{selected}`"))?;
+                let key = crate::ops::pm::new_wave_team_key(team_key.as_deref())?;
+                let objective = crate::ops::pm::provisional_wave_objective(&selected);
+                crate::ops::pm::author_wave_scaffold(&repo_root, &selected, &objective)?;
+                let name = team_name
+                    .clone()
+                    .unwrap_or_else(|| crate::ops::pm::wave_title(&selected));
+                (vec![selected], Some(key), Some(name))
             } else {
-                let explicit = wave.as_deref().or(wave_flag.as_deref());
                 // pm init is a creation flow: an explicit --wave may name a
                 // wave not yet registered (it links a wave directory to
                 // Linear, not a registry row). Normalize-only for explicit;
@@ -528,28 +595,52 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     ambient_wave(None)?
                         .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?
                 };
-                vec![name]
+                (vec![name], team_key.clone(), team_name.clone())
             };
+            let mut outputs = Vec::with_capacity(targets.len());
             for wave in targets {
-                let result = crate::ops::pm::pm_init(
-                    &repo_root,
-                    &crate::ops::pm::PmInitOptions {
-                        wave: Some(wave),
-                        team_key: team_key.clone(),
-                        team_name: team_name.clone(),
-                    },
-                    progress,
-                )?;
-                let initiative_state = if result.created { "created" } else { "linked" };
-                let team_state = match (&result.team_key, result.team_created) {
-                    (Some(key), true) => format!(", team {} created ({key}-*)", result.team_id),
-                    (Some(key), false) => format!(", team {} adopted ({key}-*)", result.team_id),
-                    (None, _) => format!(", team {} linked", result.team_id),
+                let options = crate::ops::pm::PmInitOptions {
+                    wave: Some(wave),
+                    team_key: init_team_key.clone(),
+                    team_name: init_team_name.clone(),
                 };
-                println!(
-                    "{}: Linear Initiative {} ({initiative_state}){team_state}",
-                    result.wave, result.initiative_id
-                );
+                let result = if *json {
+                    crate::ops::pm::pm_init(&repo_root, &options, &crate::ops::NullProgress)?
+                } else {
+                    crate::ops::pm::pm_init(&repo_root, &options, progress)?
+                };
+                if *json {
+                    outputs.push(PmInitOutput {
+                        wave: result.wave,
+                        team_key: result.team_key,
+                    });
+                } else {
+                    let initiative_state = if result.created { "created" } else { "linked" };
+                    let team_state = match (&result.team_key, result.team_created) {
+                        (Some(key), true) => {
+                            format!(", team {} created ({key}-*)", result.team_id)
+                        }
+                        (Some(key), false) => {
+                            format!(", team {} adopted ({key}-*)", result.team_id)
+                        }
+                        (None, _) => format!(", team {} linked", result.team_id),
+                    };
+                    println!(
+                        "{}: Linear Initiative {} ({initiative_state}){team_state}",
+                        result.wave, result.initiative_id
+                    );
+                }
+            }
+            if *json {
+                if *all {
+                    println!("{}", serde_json::to_string(&outputs)?);
+                } else {
+                    let output = outputs
+                        .into_iter()
+                        .next()
+                        .expect("a single-wave pm init always produces one output");
+                    println!("{}", serde_json::to_string(&output)?);
+                }
             }
         }
         PmCommand::Show {
@@ -1002,8 +1093,38 @@ fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
 
 #[cfg(test)]
 mod pm_output_tests {
-    use super::format_pm_task_table;
+    use super::{format_pm_task_table, role_team_identity, PmInitOutput};
+    use crate::ops::pm::StandardWaveRole;
     use crate::pm::PmItem;
+
+    #[test]
+    fn pm_init_json_exposes_the_canonical_wave() {
+        let output = PmInitOutput {
+            wave: "product".to_string(),
+            team_key: Some("PRD".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(output).expect("serialize pm init output"),
+            serde_json::json!({ "wave": "product", "team_key": "PRD" })
+        );
+    }
+
+    #[test]
+    fn role_team_identity_defaults_only_the_canonical_wave() {
+        assert_eq!(
+            role_team_identity(StandardWaveRole::Product, "product", None)
+                .expect("canonical identity"),
+            ("PRD".to_string(), "Product".to_string())
+        );
+        assert!(role_team_identity(StandardWaveRole::Product, "product", Some("GAM")).is_err());
+        assert!(role_team_identity(StandardWaveRole::Product, "game", None).is_err());
+        assert_eq!(
+            role_team_identity(StandardWaveRole::Product, "game", Some("gam"))
+                .expect("domain identity"),
+            ("GAM".to_string(), "Game".to_string())
+        );
+    }
 
     #[test]
     fn task_table_is_aligned_complete_and_open_first() {

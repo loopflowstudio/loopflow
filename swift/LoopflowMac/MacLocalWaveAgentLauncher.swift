@@ -32,6 +32,56 @@ struct TaskStartReceipt: Decodable, Sendable, Equatable {
     let wave: String
 }
 
+func normalizedWaveTeamKey(_ raw: String) -> String {
+    String(raw.uppercased().filter {
+        $0.isASCII && ($0.isLetter || $0.isNumber)
+    }.prefix(3))
+}
+
+func suggestedWaveTeamKey(for waveName: String) -> String {
+    normalizedWaveTeamKey(waveName)
+}
+
+func isValidWaveTeamKey(_ value: String) -> Bool {
+    value.count == 3
+        && value == value.uppercased()
+        && value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+}
+
+enum WaveBootstrapRole: String, CaseIterable, Identifiable, Sendable {
+    case product
+    case infrastructure
+    case intelligence
+    case operations
+
+    var id: String { rawValue }
+
+    var title: String {
+        rawValue.capitalized
+    }
+
+    var teamKey: String {
+        switch self {
+        case .product: "PRD"
+        case .infrastructure: "ENG"
+        case .intelligence: "SCI"
+        case .operations: "OPS"
+        }
+    }
+}
+
+enum WaveBootstrapChoice: Sendable, Equatable {
+    case role(WaveBootstrapRole)
+    case custom(name: String, teamKey: String, teamName: String)
+}
+
+/// The smallest stable contract the Mac app needs from `lf pm init --json`.
+/// The CLI owns naming and slug normalization; the app only opens the Wave it
+/// was told it created.
+struct WaveBootstrapReceipt: Decodable, Sendable, Equatable {
+    let wave: String
+}
+
 enum LocalWaveAgentLauncher {
     private static let resolutionCache = ResolvedLfCache()
 
@@ -121,6 +171,27 @@ enum LocalWaveAgentLauncher {
         return try taskStartReceipt(stdout)
     }
 
+    /// Create the first Wave through the CLI's canonical init path. This
+    /// replaces the old app-only GOAL.md authoring path.
+    static func bootstrapWave(
+        repoPath: String,
+        choice: WaveBootstrapChoice
+    ) throws -> WaveBootstrapReceipt {
+        if case .custom(_, let teamKey, _) = choice,
+           !isValidWaveTeamKey(teamKey) {
+            throw WaveLaunchError.launchFailed(
+                "Task tag must be exactly three uppercase letters or numbers."
+            )
+        }
+        let origin = WaveOrigin.resolve(repoPath)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let stdout = try runCheckedOutput(
+            waveBootstrapCommand(lfPath: lfPath, choice: choice),
+            cwd: origin
+        )
+        return try waveBootstrapReceipt(stdout)
+    }
+
     /// Restart the existing Task Session without creating another worktree or
     /// status record.
     static func resumeTask(repoPath: String, issue: String) throws {
@@ -184,6 +255,34 @@ enum LocalWaveAgentLauncher {
         } catch {
             throw WaveLaunchError.launchFailed(
                 "lf task start returned an invalid receipt: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    static func waveBootstrapCommand(
+        lfPath: String,
+        choice: WaveBootstrapChoice
+    ) -> [String] {
+        switch choice {
+        case .role(let role):
+            return [lfPath, "pm", "init", "--role", role.rawValue, "--json"]
+        case .custom(let name, let teamKey, let teamName):
+            return [
+                lfPath, "pm", "init", name,
+                "--create",
+                "--team-key", teamKey,
+                "--team-name", teamName,
+                "--json",
+            ]
+        }
+    }
+
+    static func waveBootstrapReceipt(_ stdout: String) throws -> WaveBootstrapReceipt {
+        do {
+            return try JSONDecoder().decode(WaveBootstrapReceipt.self, from: Data(stdout.utf8))
+        } catch {
+            throw WaveLaunchError.launchFailed(
+                "lf pm init returned an invalid receipt: \(error.localizedDescription)"
             )
         }
     }

@@ -649,11 +649,15 @@ pm:
 When no id is pinned, `lf pm init` links one exact Initiative-title match,
 creates one when none exists, and fails on duplicates. It also adopts or creates
 the wave's Linear **team** — the team key becomes each Task's prefix, so every
-wave owns its own identifiers (`PRD-1`, `INF-1`, `INT-1`) instead of sharing one.
+wave owns its own identifiers (`PRD-1`, `ENG-1`, `SCI-1`, `OPS-1`) instead of
+sharing one.
 `--team-key` sets the prefix; a conflicting key or reused name is refused with a
 recovery action rather than guessed. Both ids are stable provider identity;
-keys and titles stay mutable presentation. Passing `--team-key` explicitly on
-an already-bound Wave adopts that team and replaces the old binding.
+the three-letter Task prefix is durable Wave identity across Projects, Tasks,
+links, and Sessions. Changing it later is a costly migration: adopt the new team,
+then move open work with `lf pm reteam`. Team titles remain presentation.
+Canonical role quick starts choose PRD/ENG/SCI/OPS. Every other new Wave must
+choose its tag explicitly; bare init and `--all` never derive one from its name.
 
 Creation fails closed: `lf pm project create` and `lf pm task create` require a
 bound `pm.linear_team` and error with the `lf pm init` recovery rather than
@@ -661,8 +665,11 @@ silently attaching work to a shared team. Reads stay team-agnostic — an unboun
 wave still syncs its existing issues.
 
 ```bash
+lf pm init --role product --json          # author Product + connect PRD
+lf pm init game --role product --team-key GAM --json  # Product archetype, Game/GAM identity
+lf pm init support --create --team-key SUP --json     # author and connect a custom Wave
 lf pm init --wave designer --team-key DSG  # connect the wave to its Initiative + team
-lf pm init --wave designer                 # same, defaulting the team key from the name
+lf pm init --wave designer                 # recheck an already-bound Wave; never invent a tag
 lf pm sync --wave designer                # refresh the local SQLite snapshot
 lf pm show --wave designer                # read; refresh when the snapshot is stale
 lf pm show --wave designer --no-sync      # cache-only read for agents and apps

@@ -680,7 +680,7 @@ Split the always-on operating guidance by concern:
   resident, or an explicit Wave-shaping skill. Project/Task pursuit and direct
   execution do not receive portfolio doctrine after ownership is decided.
 
-`WAVES.md` defines four useful root roles without requiring four empty records:
+`WAVES.md` defines four useful archetypes without requiring four empty records:
 
 | Role | Default prefix | Owns |
 | --- | --- | --- |
@@ -706,9 +706,12 @@ What kind of work are we starting?
 ```
 
 Choosing a default role creates that Wave with its standard name and prefix.
-`Name a Wave` asks only for a name; it does not force the work into one of the
-four roles. The app selects and starts the new Wave, then reveals the ordinary
-Chat composer with one focused prompt:
+`Name a Wave` asks for a truthful domain name and an editable three-letter Task
+prefix. The app suggests a prefix from the name, but the user confirms it
+explicitly because changing it after Tasks exist is a real identity migration.
+The custom path does not force the work into one of the four roles. The app
+selects and starts the new Wave, then reveals the ordinary Chat composer with
+one focused prompt:
 
 ```text
 What should Product accomplish first?
@@ -723,26 +726,18 @@ of making Swift generate planning content.
 Wave creation itself is one shared CLI operation, not a Swift sequence of
 filesystem and Linear mutations.
 
-```rust
-#[derive(Debug, Serialize)]
-pub struct WaveCreateRequest {
-    pub role: Option<WaveRole>,
-    pub wave_name: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct WaveCreateResult {
-    pub wave: WaveSummary,
-    pub team_key: String,
-}
+```bash
+lf pm init --role product --json
+lf pm init game --role product --team-key GAM --json
 ```
 
 The create operation:
 
 1. writes `wave/<slug>/GOAL.md` with a concise initial objective;
 2. connects or creates the Wave's Linear Initiative and role team;
-3. registers the Wave and returns enough identity for the app to select it;
-4. the app launches it through the existing Wave launcher and attaches Chat.
+3. returns the Wave name and durable Task tag;
+4. the app launches it through the existing Wave launcher, which registers it,
+   then attaches Chat.
 
 If launch fails, the authored Wave and PM binding remain valid and the selected
 pane offers the normal Start Wave recovery. The first Wave turn must create a
@@ -765,4 +760,5 @@ messages yet,” not “no Wave structure,” and should show a normal composer.
 5. Infrastructure, Intelligence, and Operations remain suggestions until
    actual work materializes them.
 6. Choosing a custom name produces the same one-Wave, one-Project result
-   without assigning a false default role.
+   without assigning a false default role, and its confirmed three-letter Task
+   prefix is used from the first Task onward.

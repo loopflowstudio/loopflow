@@ -89,6 +89,72 @@ struct LocalWaveAgentLauncherTests {
         ])
     }
 
+    @Test("the four first-Wave roles use the typed pm init contract")
+    func firstWaveRoleCommandShapes() {
+        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
+        #expect(WaveBootstrapRole.allCases.map(\.teamKey) == ["PRD", "ENG", "SCI", "OPS"])
+
+        for role in WaveBootstrapRole.allCases {
+            #expect(LocalWaveAgentLauncher.waveBootstrapCommand(
+                lfPath: lf,
+                choice: .role(role)
+            ) == [
+                lf, "pm", "init", "--role", role.rawValue, "--json",
+            ])
+        }
+    }
+
+    @Test("existing canonical Waves are omitted from the add-Wave choices")
+    func existingCanonicalWavesAreNotOfferedAgain() {
+        #expect(availableWaveBootstrapRoles(
+            existingWaveNames: ["infrastructure", "intelligence", "game"]
+        ) == [.product, .operations])
+    }
+
+    @Test("a named first Wave asks the CLI to create that name")
+    func namedFirstWaveCommandShape() {
+        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
+
+        #expect(LocalWaveAgentLauncher.waveBootstrapCommand(
+            lfPath: lf,
+            choice: .custom(
+                name: "music-theory",
+                teamKey: "MUS",
+                teamName: "Music Theory"
+            )
+        ) == [
+            lf, "pm", "init", "music-theory",
+            "--create",
+            "--team-key", "MUS",
+            "--team-name", "Music Theory",
+            "--json",
+        ])
+    }
+
+    @Test("custom Task tags are suggested, normalized, and validated explicitly")
+    func customTeamKeyRules() {
+        #expect(suggestedWaveTeamKey(for: "music-theory") == "MUS")
+        #expect(normalizedWaveTeamKey("m-2 xyz") == "M2X")
+        #expect(isValidWaveTeamKey("M2X"))
+        #expect(!isValidWaveTeamKey("MX"))
+        #expect(!isValidWaveTeamKey("m2x"))
+        #expect(!isValidWaveTeamKey("M-X"))
+    }
+
+    @Test("first-Wave receipt requires the canonical Wave name")
+    func firstWaveReceiptShape() throws {
+        #expect(try LocalWaveAgentLauncher.waveBootstrapReceipt(
+            #"{"wave":"product"}"#
+        ) == WaveBootstrapReceipt(wave: "product"))
+
+        #expect {
+            try LocalWaveAgentLauncher.waveBootstrapReceipt(#"{"name":"product"}"#)
+        } throws: { error in
+            guard case let WaveLaunchError.launchFailed(detail) = error else { return false }
+            return detail.contains("invalid receipt")
+        }
+    }
+
     @Test("PR review delegates to lf pr open rather than opening a URL itself")
     func pullRequestReviewDelegatesToCLI() {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"

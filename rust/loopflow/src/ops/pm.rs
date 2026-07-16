@@ -33,10 +33,66 @@ use crate::task::{TaskSession, TaskSessionStatus};
 #[derive(Debug, Clone, Default)]
 pub struct PmInitOptions {
     pub wave: Option<String>,
-    /// Team key (Task prefix, e.g. `PRD`). Defaults to one derived from the wave.
+    /// Durable three-letter Task prefix (e.g. `PRD`). Required when unbound.
     pub team_key: Option<String>,
     /// Team display name. Defaults to the title-cased wave name.
     pub team_name: Option<String>,
+}
+
+/// An operating archetype that can seed a canonical or domain-named Wave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum StandardWaveRole {
+    Product,
+    Infrastructure,
+    Intelligence,
+    Operations,
+}
+
+impl StandardWaveRole {
+    pub const fn wave(self) -> &'static str {
+        match self {
+            Self::Product => "product",
+            Self::Infrastructure => "infrastructure",
+            Self::Intelligence => "intelligence",
+            Self::Operations => "operations",
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Product => "Product",
+            Self::Infrastructure => "Infrastructure",
+            Self::Intelligence => "Intelligence",
+            Self::Operations => "Operations",
+        }
+    }
+
+    pub const fn team_key(self) -> &'static str {
+        match self {
+            Self::Product => "PRD",
+            Self::Infrastructure => "ENG",
+            Self::Intelligence => "SCI",
+            Self::Operations => "OPS",
+        }
+    }
+
+    pub fn objective(self, wave: &str) -> String {
+        let title = title_case(wave);
+        match self {
+            Self::Product => {
+                format!("{title} turns user needs into a coherent, useful experience.")
+            }
+            Self::Infrastructure => format!(
+                "{title} keeps development, delivery, and the systems beneath the product reliable."
+            ),
+            Self::Intelligence => format!(
+                "{title} turns real work into better context, decisions, and agent behavior."
+            ),
+            Self::Operations => format!(
+                "{title} keeps the product and its supporting services healthy in daily use."
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -616,6 +672,12 @@ fn wave_has_pm_initiative(repo: &Path, wave: &str) -> bool {
         .is_some_and(|provider| read_initiative(repo, wave, provider).is_some())
 }
 
+pub(crate) fn wave_has_pm_team(repo: &Path, wave: &str) -> bool {
+    resolve_provider(repo, wave)
+        .ok()
+        .is_some_and(|provider| read_team(repo, wave, provider).is_some())
+}
+
 async fn build_client(
     _repo: &Path,
     provider: PmProviderKind,
@@ -975,6 +1037,61 @@ async fn refresh_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsRes
 
 // ── init ────────────────────────────────────────────────────────────
 
+const PROJECTS_OWNERSHIP_NOTE: &str = "Projects and tasks live in Linear and sync into the local SQLite registry.\nProjects do not own memory, cadence, or child projects.";
+
+pub(crate) fn author_wave_scaffold(repo: &Path, wave: &str, objective: &str) -> OpsResult<()> {
+    let wave = resolve_wave(Some(wave))?;
+    let wave_dir = repo.join("wave").join(&wave);
+    std::fs::create_dir_all(&wave_dir)?;
+
+    let goal = wave_dir.join("GOAL.md");
+    if !goal.exists() {
+        std::fs::write(
+            &goal,
+            format!(
+                "---\npm:\n  provider: linear\n---\n\n## Objective\n\n{}\n\n## Projects\n\n{}\n",
+                objective.trim(),
+                PROJECTS_OWNERSHIP_NOTE
+            ),
+        )?;
+    }
+
+    let memory = wave_dir.join("MEMORY.md");
+    if !memory.exists() {
+        std::fs::write(&memory, "")?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn provisional_wave_objective(wave: &str) -> String {
+    let title = title_case(wave);
+    format!(
+        "{title} owns a focused area of work in this repository; refine this objective as its first project takes shape."
+    )
+}
+
+pub(crate) fn wave_title(wave: &str) -> String {
+    title_case(wave)
+}
+
+pub(crate) fn new_wave_team_key(team_key: Option<&str>) -> OpsResult<String> {
+    let team_key = team_key.ok_or_else(|| {
+        OpsError::Message("new Waves need an explicit three-letter --team-key".to_string())
+    })?;
+    let normalized = team_key.trim().to_ascii_uppercase();
+    if normalized.len() != 3
+        || !normalized
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return Err(OpsError::Message(format!(
+            "team key `{team_key}` must be exactly three letters or digits"
+        )));
+    }
+    Ok(normalized)
+}
+
 pub fn pm_init(
     repo: &Path,
     options: &PmInitOptions,
@@ -1000,7 +1117,24 @@ async fn pm_init_async(
     let existing_initiative = read_initiative(repo, &wave, provider);
     let existing_team = read_team(repo, &wave, provider);
 
-    let explicit_team = options.team_key.is_some() || options.team_name.is_some();
+    if options.team_name.is_some() && options.team_key.is_none() {
+        return Err(OpsError::Message(
+            "--team-name requires the Wave's durable three-letter --team-key".to_string(),
+        ));
+    }
+    let requested_team_key = options
+        .team_key
+        .as_deref()
+        .map(|team_key| new_wave_team_key(Some(team_key)))
+        .transpose()?;
+    if existing_team.is_none() && requested_team_key.is_none() {
+        return Err(OpsError::Message(format!(
+            "wave/{wave} has no team binding. Choose its durable three-letter Task tag with \
+             `lf pm init --wave {wave} --team-key ABC`; for a canonical Wave, use \
+             `lf pm init --role <product|infrastructure|intelligence|operations>`."
+        )));
+    }
+    let explicit_team = requested_team_key.is_some();
 
     // Full no-op fast path: both bindings present and the caller did not ask
     // to adopt a different team. An explicit team selection is a rebind.
@@ -1058,15 +1192,14 @@ async fn pm_init_async(
         write_initiative_to_goal(repo, &wave, provider, &initiative_id)?;
     }
 
-    // Team: an explicit key/name rebinds an existing Wave; otherwise keep its
-    // binding or create the default one when missing.
+    // Team: an explicit key/name binds or rebinds; otherwise keep the existing
+    // binding. Missing bindings were rejected before any provider call.
     let resolve_requested_team = explicit_team || existing_team.is_none();
     let (team_id, team_key, team_created) = if resolve_requested_team {
         let name = options.team_name.clone().unwrap_or_else(|| title.clone());
-        let key = options
-            .team_key
+        let key = requested_team_key
             .clone()
-            .unwrap_or_else(|| default_team_key(&wave));
+            .expect("resolving a requested team requires an explicit key");
         progress.status(&format!(
             "resolving {provider} team `{name}` (key {key}) for wave/{wave}"
         ));
@@ -2399,22 +2532,6 @@ fn write_team_to_goal(
     .map_err(OpsError::Message)
 }
 
-/// A default team key (Task prefix) derived from the wave name: the first three
-/// alphanumeric characters, uppercased. `--team-key` overrides it.
-fn default_team_key(wave: &str) -> String {
-    let key: String = wave
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .take(3)
-        .collect::<String>()
-        .to_ascii_uppercase();
-    if key.len() >= 2 {
-        key
-    } else {
-        "LF".to_string()
-    }
-}
-
 fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
     Ok(crate::engine::wave_config::read_wave_summary(repo, wave)?)
 }
@@ -2748,11 +2865,163 @@ mod tests {
     }
 
     #[test]
-    fn default_team_key_derives_from_wave_name() {
-        assert_eq!(default_team_key("product"), "PRO");
-        assert_eq!(default_team_key("infrastructure"), "INF");
-        assert_eq!(default_team_key("intelligence"), "INT");
-        assert_eq!(default_team_key("x"), "LF");
+    fn standard_roles_own_canonical_waves_and_team_prefixes() {
+        let roles = [
+            (StandardWaveRole::Product, "product", "Product", "PRD"),
+            (
+                StandardWaveRole::Infrastructure,
+                "infrastructure",
+                "Infrastructure",
+                "ENG",
+            ),
+            (
+                StandardWaveRole::Intelligence,
+                "intelligence",
+                "Intelligence",
+                "SCI",
+            ),
+            (
+                StandardWaveRole::Operations,
+                "operations",
+                "Operations",
+                "OPS",
+            ),
+        ];
+
+        for (role, wave, title, team_key) in roles {
+            assert_eq!(role.wave(), wave);
+            assert_eq!(role.title(), title);
+            assert_eq!(role.team_key(), team_key);
+            assert!(!role.objective(wave).is_empty());
+        }
+        assert_eq!(
+            StandardWaveRole::Product.objective("game"),
+            "Game turns user needs into a coherent, useful experience."
+        );
+    }
+
+    #[test]
+    fn new_wave_team_key_is_explicit_normalized_and_three_characters() {
+        assert_eq!(
+            new_wave_team_key(Some(" gam ")).expect("normalize key"),
+            "GAM"
+        );
+        assert!(new_wave_team_key(None).is_err());
+        assert!(new_wave_team_key(Some("GA")).is_err());
+        assert!(new_wave_team_key(Some("GAME")).is_err());
+        assert!(new_wave_team_key(Some("G-M")).is_err());
+    }
+
+    #[test]
+    fn pm_init_requires_a_deliberate_tag_before_contacting_linear() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        author_wave_scaffold(repo.path(), "designer", "Designer owns the experience.")
+            .expect("author wave");
+
+        let error = pm_init(
+            repo.path(),
+            &PmInitOptions {
+                wave: Some("designer".to_string()),
+                ..PmInitOptions::default()
+            },
+            &NullProgress,
+        )
+        .expect_err("an unbound Wave needs a deliberate tag");
+
+        assert!(error.to_string().contains("--team-key ABC"));
+        assert!(error.to_string().contains("--role <product|"));
+    }
+
+    #[test]
+    fn pm_init_keeps_an_existing_team_binding_without_a_tag_argument() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "designer",
+            "pm:\n  provider: linear\n  linear_initiative: initiative-designer\n  linear_team: team-designer\n",
+        );
+
+        let result = pm_init(
+            repo.path(),
+            &PmInitOptions {
+                wave: Some("designer".to_string()),
+                ..PmInitOptions::default()
+            },
+            &NullProgress,
+        )
+        .expect("bound Wave is a no-op");
+
+        assert_eq!(result.initiative_id, "initiative-designer");
+        assert_eq!(result.team_id, "team-designer");
+        assert_eq!(result.team_key, None);
+    }
+
+    #[test]
+    fn team_binding_detection_keeps_bulk_init_from_inventing_tags() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "bound",
+            "pm:\n  provider: linear\n  linear_team: team-bound\n",
+        );
+        author_wave_scaffold(repo.path(), "unbound", "Unbound owns focused work.")
+            .expect("author unbound wave");
+
+        assert!(wave_has_pm_team(repo.path(), "bound"));
+        assert!(!wave_has_pm_team(repo.path(), "unbound"));
+    }
+
+    #[test]
+    fn wave_scaffold_authors_goal_and_empty_memory_without_overwriting() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        author_wave_scaffold(
+            repo.path(),
+            "product",
+            &StandardWaveRole::Product.objective("product"),
+        )
+        .expect("author scaffold");
+
+        let wave_dir = repo.path().join("wave/product");
+        let goal = std::fs::read_to_string(wave_dir.join("GOAL.md")).expect("read goal");
+        assert!(goal.contains("pm:\n  provider: linear"));
+        assert!(goal.contains("## Objective\n\nProduct turns user needs"));
+        assert!(goal.contains(PROJECTS_OWNERSHIP_NOTE));
+        assert_eq!(
+            std::fs::read_to_string(wave_dir.join("MEMORY.md")).expect("read memory"),
+            ""
+        );
+
+        std::fs::write(wave_dir.join("GOAL.md"), "hand-authored goal\n").expect("customize goal");
+        std::fs::write(wave_dir.join("MEMORY.md"), "remember this\n").expect("customize memory");
+        author_wave_scaffold(repo.path(), "product", "replacement").expect("retry scaffold");
+        assert_eq!(
+            std::fs::read_to_string(wave_dir.join("GOAL.md")).expect("read preserved goal"),
+            "hand-authored goal\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(wave_dir.join("MEMORY.md")).expect("read preserved memory"),
+            "remember this\n"
+        );
+    }
+
+    #[test]
+    fn wave_scaffold_completes_a_partial_local_wave() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        let wave_dir = repo.path().join("wave/support");
+        std::fs::create_dir_all(&wave_dir).expect("create partial wave");
+        std::fs::write(wave_dir.join("MEMORY.md"), "prior memory\n").expect("write memory");
+
+        let objective = provisional_wave_objective("support");
+        author_wave_scaffold(repo.path(), "support", &objective)
+            .expect("complete partial scaffold");
+
+        assert!(std::fs::read_to_string(wave_dir.join("GOAL.md"))
+            .expect("read goal")
+            .contains(&objective));
+        assert_eq!(
+            std::fs::read_to_string(wave_dir.join("MEMORY.md")).expect("read memory"),
+            "prior memory\n"
+        );
     }
 
     #[test]

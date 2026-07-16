@@ -100,48 +100,6 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["goals"], "a dev worktree sees its origin's registry row")
     }
 
-    @Test("createWave writes GOAL.md at the origin repo, not the worktree")
-    func createWaveWritesAtOrigin() async throws {
-        // Authoring from a worktree rail must land wave/<name>/GOAL.md at the
-        // ORIGIN — every reader (endpoint discovery, launcher, probe) resolves
-        // the origin, so a worktree-local GOAL.md is a wave nobody finds.
-        // Real git, like WaveOriginTests: the origin resolution is the point.
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("create-wave-\(UUID().uuidString)", isDirectory: true)
-        let origin = root.appendingPathComponent("repo", isDirectory: true)
-        let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
-        try FileManager.default.createDirectory(at: origin, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        func git(_ args: [String], at dir: URL) throws {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["git", "-C", dir.path] + args
-            process.standardOutput = Pipe()
-            process.standardError = Pipe()
-            try process.run()
-            process.waitUntilExit()
-            try #require(process.terminationStatus == 0, "git \(args.joined(separator: " "))")
-        }
-        try git(["init", "-q"], at: origin)
-        try git(
-            ["-c", "user.email=t@t", "-c", "user.name=t",
-             "commit", "--allow-empty", "-q", "-m", "init"],
-            at: origin
-        )
-        try git(["worktree", "add", "-q", worktree.path], at: origin)
-
-        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo)
-        try await state.createWave(name: "goals")
-
-        let originGoal = origin.appendingPathComponent("wave/goals/GOAL.md")
-        let worktreeGoal = worktree.appendingPathComponent("wave/goals/GOAL.md")
-        #expect(FileManager.default.fileExists(atPath: originGoal.path), "GOAL.md lands at the origin")
-        #expect(FileManager.default.fileExists(atPath: origin.appendingPathComponent("wave/goals/MEMORY.md").path))
-        #expect(!FileManager.default.fileExists(atPath: worktreeGoal.path), "nothing written into the worktree")
-    }
-
     private func makeWave(id: String, repoPath: String, status: WaveStatus) -> Wave {
         Wave(
             id: id,

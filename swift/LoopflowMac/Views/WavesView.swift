@@ -41,11 +41,31 @@ struct WavesView: View {
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
+    @State private var didLoadWaveInventory = false
     @State private var didApplyInitialRepo = false
     @State private var didRestoreStickyRepo = false
 
     /// Synthetic id prefix for an authored Wave without a registry row yet.
     private static let authoredIdPrefix = "authored:"
+
+    init(portfolioService: PortfolioService, initialRepoPath: String? = nil) {
+        self.portfolioService = portfolioService
+        self.initialRepoPath = initialRepoPath
+
+        // The empty-repository UI fixture must be complete before the first
+        // body pass. Seeding it from `.task` briefly rendered the live Roadmap
+        // and made the screenshot depend on async scheduling.
+        if AppTestMode.current() == .emptyWorkspaces {
+            let repo = PortfolioRepo(
+                path: MockWaveFixture.emptyRepoPath,
+                lastOpened: Date(),
+                displayNameOverride: "empty-repo"
+            )
+            _repos = State(initialValue: [repo])
+            _selection = State(initialValue: .repo(repo.path))
+            _didLoadWaveInventory = State(initialValue: true)
+        }
+    }
 
     /// All waves across every repo: registry rows merged with Waves authored on
     /// disk that have not been served yet.
@@ -147,10 +167,14 @@ struct WavesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
         .sheet(isPresented: $isShowingCreate) {
-            CreateWaveSheet(
+            FirstWaveQuickStartSheet(
                 repos: repos,
                 initialRepoPath: defaultCreatePath,
-                onCreate: createWave,
+                emptyRepoPaths: Set(repos.filter { mergedWaves(for: $0).isEmpty }.map(\.path)),
+                existingWaveNamesByRepo: Dictionary(uniqueKeysWithValues: repos.map { repo in
+                    (repo.path, Set(mergedWaves(for: repo).map(\.name)))
+                }),
+                onStart: bootstrapWave,
                 onCancel: { isShowingCreate = false }
             )
             .environment(\.palette, palette)
@@ -162,11 +186,15 @@ struct WavesView: View {
             if let initialMain, !didApplyInitialRepo {
                 didApplyInitialRepo = true
                 selection = .repo(initialMain)
+            } else if AppTestMode.current() == .emptyWorkspaces,
+                      let emptyRepo = repos.first {
+                selection = .repo(emptyRepo.path)
             } else {
                 restoreStickyRepoSelectionIfNeeded()
             }
             ensureRepoStates()
             await syncRepoStates()
+            didLoadWaveInventory = true
             await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
@@ -280,25 +308,12 @@ struct WavesView: View {
     }
 
     private var emptyWaveState: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(repos.isEmpty ? "No repositories found." : "No waves yet.")
-                .font(Typography.caption())
-                .foregroundStyle(.white.opacity(0.55))
-            if !repos.isEmpty {
-                Button {
-                    isShowingCreate = true
-                } label: {
-                    Label("New wave", systemImage: "plus")
-                        .font(Typography.caption())
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityIdentifier("wave-empty-create")
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.md)
+        Text(repos.isEmpty ? "No repositories found." : "No waves yet.")
+            .font(Typography.caption())
+            .foregroundStyle(.white.opacity(0.55))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
     }
 
     // MARK: - Wave detail (WaveChat)
@@ -312,12 +327,29 @@ struct WavesView: View {
                 onClose: { selectedWaveId = nil }
             )
             .id(waveSelectionId(wave))
+        } else if let repo = selectedEmptyRepo {
+            FirstWaveQuickStartView(repositoryName: repo.displayName) { choice in
+                try await bootstrapWave(repo.path, choice)
+            }
         } else {
             RoadmapView(
                 repoPath: roadmapRepoPath,
                 onOpenWave: openRoadmapWave
             )
         }
+    }
+
+    /// The quick start is only truthful after authored files and the local work
+    /// inventory have both loaded for one concrete repository. A failed query
+    /// keeps the normal Roadmap error surface instead of claiming the repo is empty.
+    private var selectedEmptyRepo: PortfolioRepo? {
+        guard didLoadWaveInventory,
+              case .repo(let path) = selection,
+              let repo = repos.first(where: { $0.path.normalizedFilePath == path.normalizedFilePath }),
+              mergedWaves(for: repo).isEmpty
+        else { return nil }
+        if AppTestMode.current() == .emptyWorkspaces { return repo }
+        return repoStates[repo.path]?.isConnected == true ? repo : nil
     }
 
     private var roadmapRepoPath: String? {
@@ -378,12 +410,38 @@ struct WavesView: View {
         PortfolioRepoState.wavePlanKey(repoPath: repoPath, waveName: waveName)
     }
 
-    private func createWave(repoPath: String, name: String) async throws {
-        ensureRepoStates()
-        guard let state = repoStates[repoPath] else {
+    private func bootstrapWave(
+        _ repoPath: String,
+        _ choice: WaveBootstrapChoice
+    ) async throws {
+        guard repos.contains(where: { $0.path.normalizedFilePath == repoPath.normalizedFilePath }) else {
             throw PortfolioRepoError.unknownRepo(repoPath)
         }
-        try await state.createWave(name: name)
+
+        let receipt = try await Task.detached {
+            try LocalWaveAgentLauncher.bootstrapWave(repoPath: repoPath, choice: choice)
+        }.value
+
+        await refreshAuthoredWaves()
+        await syncRepoStates()
+
+        let selectionId = Self.wavePlanKey(
+            repoPath: WaveOrigin.resolve(repoPath),
+            waveName: receipt.wave
+        )
+        guard allWaves.contains(where: { waveSelectionId($0) == selectionId }) else {
+            throw WaveLaunchError.launchFailed(
+                "Loopflow created '\(receipt.wave)' but it did not appear in this repository."
+            )
+        }
+
+        try await Task.detached {
+            try LocalWaveAgentLauncher.launchWave(repoPath: repoPath, waveName: receipt.wave)
+        }.value
+
+        selection = .repo(repoPath)
+        selectedWaveId = selectionId
+        isShowingCreate = false
     }
 
     /// Register the launch-provided repo so it shows in the rail, and return its
@@ -425,6 +483,14 @@ struct WavesView: View {
     /// (worktree included) as a single row labeled with the main-repo name.
     /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
+        if AppTestMode.current() == .emptyWorkspaces {
+            repos = [PortfolioRepo(
+                path: MockWaveFixture.emptyRepoPath,
+                lastOpened: Date(),
+                displayNameOverride: "empty-repo"
+            )]
+            return
+        }
         if AppTestMode.shouldBypassRegistry {
             repos = portfolioService.repos
             return
@@ -670,124 +736,61 @@ struct WavesView: View {
 }
 
 
-/// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
-/// the Wave files through `PortfolioRepoState.createWave`.
-private struct CreateWaveSheet: View {
+/// The same role-first bootstrap used by an empty repository, with repository
+/// scope added because the global New button can be invoked from All Repos.
+private struct FirstWaveQuickStartSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?
-    let onCreate: (_ repoPath: String, _ name: String) async throws -> Void
+    let emptyRepoPaths: Set<String>
+    let existingWaveNamesByRepo: [String: Set<String>]
+    let onStart: (_ repoPath: String, _ choice: WaveBootstrapChoice) async throws -> Void
     let onCancel: () -> Void
 
     @Environment(\.palette) private var palette
 
     @State private var selectedRepoPath: String = ""
-    @State private var waveName = ""
-    @State private var isCreating = false
-    @State private var errorMessage: String?
-    @FocusState private var isNameFocused: Bool
 
-    private var trimmedName: String {
-        waveName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var selectedRepo: PortfolioRepo? {
+        repos.first { $0.path == selectedRepoPath }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("New wave")
-                .font(Typography.sectionTitle(20))
-                .foregroundStyle(palette.text)
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Repository")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-
+        VStack(spacing: 0) {
+            HStack(spacing: Spacing.md) {
                 Picker("Repository", selection: $selectedRepoPath) {
                     ForEach(repos) { repo in
                         Text(repo.displayName).tag(repo.path)
                     }
                 }
-                .labelsHidden()
                 .pickerStyle(.menu)
-                .font(Typography.body())
-                .tint(palette.accent)
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.surfaceMuted)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                .disabled(isCreating)
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Wave name")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-
-                TextField("Wave name", text: $waveName)
-                    .textFieldStyle(.plain)
-                    .font(Typography.body())
-                    .foregroundStyle(palette.text)
-                    .padding(Spacing.md)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                    .focused($isNameFocused)
-                    .onSubmit(submit)
-                    .disabled(isCreating)
-            }
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(Typography.caption())
-                    .foregroundStyle(Color.statusError)
-            }
-
-            HStack(spacing: Spacing.md) {
+                .accessibilityIdentifier("first-wave-repo-picker")
                 Spacer()
-
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.plain)
                     .foregroundStyle(palette.textSecondary)
-                    .disabled(isCreating)
+            }
+            .padding(.horizontal, Spacing.xl)
+            .padding(.vertical, Spacing.md)
 
-                Button {
-                    submit()
-                } label: {
-                    if isCreating {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("Create wave")
-                    }
+            Divider()
+
+            if let selectedRepo {
+                FirstWaveQuickStartView(
+                    repositoryName: selectedRepo.displayName,
+                    isFirstWave: emptyRepoPaths.contains(selectedRepo.path),
+                    existingWaveNames: existingWaveNamesByRepo[selectedRepo.path] ?? []
+                ) { choice in
+                    try await onStart(selectedRepo.path, choice)
                 }
-                .buttonStyle(DarkButtonStyle())
-                .disabled(isCreating || trimmedName.isEmpty || selectedRepoPath.isEmpty)
             }
         }
-        .padding(Spacing.xl)
-        .frame(width: 420)
+        .frame(width: 640, height: 680)
         .background(palette.background)
         .onAppear {
             selectedRepoPath = initialRepoPath ?? repos.first?.path ?? ""
-            isNameFocused = true
         }
     }
 
-    private func submit() {
-        guard !isCreating, !trimmedName.isEmpty, !selectedRepoPath.isEmpty else { return }
-        isCreating = true
-        errorMessage = nil
-        let repoPath = selectedRepoPath
-        let name = trimmedName
-
-        Task {
-            defer { isCreating = false }
-            do {
-                try await onCreate(repoPath, name)
-                onCancel()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
 }
 
 #Preview {

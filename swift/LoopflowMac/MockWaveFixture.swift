@@ -17,6 +17,7 @@ enum MockWaveFixture {
     /// A path that need not exist: `mock-waves` gates off the on-disk authored
     /// scan, so nothing reads this directory.
     static let repoPath = "/src/loopflow"
+    static let emptyRepoPath = "/src/empty-repo"
 
     /// The Wave whose detail hierarchy is populated from `detailJSON`.
     static let detailWaveName = "infrastructure"

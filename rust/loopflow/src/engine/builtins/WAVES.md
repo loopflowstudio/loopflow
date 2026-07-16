@@ -16,6 +16,18 @@ These four durable roles are useful defaults when the work calls for them:
 - **Intelligence (`SCI`)** — learning, evaluation, research, and informed adaptation.
 - **Operations (`OPS`)** — recurring execution and organizational reliability.
 
+Treat these as archetypes, not reserved names. Prefer a truthful domain name
+when it already communicates the role: a Game Wave may own Product work, and a
+Rules Wave may own Infrastructure. The role guides routing; it does not flatten
+useful product language.
+
+Give every Wave one deliberately chosen three-letter Task prefix when it is
+created. The canonical defaults are `Product / PRD`, `Infrastructure / ENG`,
+`Intelligence / SCI`, and `Operations / OPS`. A domain Wave keeps its own
+optimized identity (`Game / GAM`, not `Game / PRD`). Treat changing a prefix
+after Tasks exist as a costly migration across links, sessions, and history,
+not as a naming preference.
+
 Create these Waves lazily. Do not materialize or run all four in advance. The
 first time work clearly belongs to one, create or refine that Wave's objective
 and its Project definition and KRs while solving the work. Name a different Wave

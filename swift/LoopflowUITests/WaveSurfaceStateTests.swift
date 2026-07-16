@@ -86,8 +86,30 @@ final class WaveSurfaceStateTests: XCTestCase {
     @MainActor
     func testEmptyStateShowsCalmCreateSurface() {
         forEachWidth(mode: "empty-workspaces") { app in
-            XCTAssertTrue(waitFor(app, id: "wave-empty-create"),
-                          "empty must offer a calm create surface")
+            XCTAssertTrue(waitFor(app, id: "first-wave-quick-start"),
+                          "an empty repository must open the calm first-Wave surface")
+            let canonicalRoles = [
+                "product": "PRD",
+                "infrastructure": "ENG",
+                "intelligence": "SCI",
+                "operations": "OPS",
+            ]
+            for (role, tag) in canonicalRoles {
+                let choice = app.descendants(matching: .any)["first-wave-role-\(role)"]
+                XCTAssertTrue(choice.exists, "the first-Wave surface must offer \(role)")
+                XCTAssertTrue(choice.label.contains(tag),
+                              "\(role)'s durable \(tag) tag must be visible before the click")
+            }
+            let custom = app.descendants(matching: .any)["first-wave-custom"]
+            XCTAssertTrue(custom.exists, "the fifth choice must allow a custom Wave name")
+            custom.click()
+            let customName = app.descendants(matching: .any)["first-wave-custom-name"]
+            XCTAssertTrue(customName.waitForExistence(timeout: 8),
+                          "the custom path must ask for the Wave name")
+            XCTAssertTrue(exists(app, id: "first-wave-custom-tag"),
+                          "the custom path must require an explicit durable Task tag")
+            XCTAssertTrue(exists(app, id: "first-wave-custom-submit"),
+                          "the custom path must have one clear Start action")
             XCTAssertEqual(waveRows(app).count, 0, "empty has no Wave rows")
         }
     }

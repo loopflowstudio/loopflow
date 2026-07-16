@@ -102,13 +102,12 @@ pub fn placed_channel_name(wave_name: &str, run_id: &RunId) -> String {
     )
 }
 
-/// The Wave a managed run is attributed to.
+/// The Wave a managed run is attributed to, through the shared resolver: a
+/// durable `LF_WAVE_ID` UUID maps to its registry name, a hand-set name is used
+/// directly. Attribution is non-fatal, so a `NoContext`/`StaleIdentity`/registry
+/// error is `None` (the caller falls back to the worktree name).
 pub fn resolve_run_wave_name() -> Option<String> {
-    std::env::var(WAVE_ID_ENV)
-        .ok()
-        .map(|id| id.trim().to_string())
-        .filter(|id| !id.is_empty())
-        .and_then(|id| wave_name_for_id(&id))
+    resolve_managed_wave_name_sync(None).ok()
 }
 
 /// Resolve a top-level `--wave` to the durable Wave row used by prompt,
@@ -292,23 +291,26 @@ fn query_repo_origin(repo_root: &Path) -> PathBuf {
         .unwrap_or_else(|| repo_root.to_path_buf())
 }
 
-/// Map a wave id from the env to its name through the shared store. The
-/// store API is async and context assembly is sync (sometimes already inside
-/// a runtime — flow skills), so the lookup runs on a scratch thread. No store
-/// or unknown id → `None`, and resolution falls back to the worktree.
+/// Map an ambient `LF_WAVE_ID` value to its durable Wave name through the shared
+/// [`resolve_managed_wave_name`] rule: a UUID maps through the store, a hand-set
+/// name is used directly. The store API is async and context assembly is sync
+/// (sometimes already inside a runtime — flow skills), so it runs on a scratch
+/// thread. Any resolve error (`StaleIdentity`, registry I/O) → `None`, and
+/// resolution falls back to the worktree.
 fn wave_name_for_id(id: &str) -> Option<String> {
-    let id: WaveId = id.parse().ok()?;
+    let id = id.to_string();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().ok()?;
         rt.block_on(async {
-            let store = crate::store::open_existing_store().await?;
-            store.get_wave(&id).await.ok().flatten()
+            let store = crate::store::open_existing_store().await;
+            resolve_managed_wave_name(store.as_ref(), None, Some(&id))
+                .await
+                .ok()
         })
     })
     .join()
     .ok()
     .flatten()
-    .map(|wave| wave.name().to_string())
 }
 
 /// The origin repo a wave's state lives under: the main checkout when
@@ -625,6 +627,27 @@ mod tests {
             Some(AmbientChannelRef::WaveId("wave-1".to_string()))
         );
         assert_eq!(resolve_ambient_channel(None, None), None);
+    }
+
+    /// Trace attribution and `lf home` read the ambient wave through
+    /// [`resolve_run_wave_name`]. A hand-set `LF_WAVE_ID=<name>` (not a UUID)
+    /// now resolves to that name — the fix — while an absent env is `None` so
+    /// the caller falls back to the worktree. The name arm touches no store.
+    #[test]
+    fn run_wave_name_resolves_a_hand_set_name_and_none_without_context() {
+        let _lock = crate::journal::test_env_lock();
+        let previous = std::env::var(WAVE_ID_ENV).ok();
+
+        std::env::set_var(WAVE_ID_ENV, "product");
+        assert_eq!(resolve_run_wave_name(), Some("product".to_string()));
+
+        std::env::remove_var(WAVE_ID_ENV);
+        assert_eq!(resolve_run_wave_name(), None);
+
+        match previous {
+            Some(value) => std::env::set_var(WAVE_ID_ENV, value),
+            None => std::env::remove_var(WAVE_ID_ENV),
+        }
     }
 
     #[test]

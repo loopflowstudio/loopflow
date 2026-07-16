@@ -47,7 +47,7 @@ async fn follow(channel: Option<&str>, json: bool) -> Result<()> {
     };
     let prefix = match channel {
         Some(channel) => channel.to_string(),
-        None => match ambient_channel(&context, &store).await {
+        None => match ambient_channel(&context, &store).await? {
             Some(channel) => channel,
             None => {
                 eprintln!("no wave here; nothing to tune in to");

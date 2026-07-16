@@ -18,6 +18,16 @@ it used to launch this session
 Directive v1 was acknowledged this way. Ordinary implementation (edit, build,
 `cargo test`, commit) is unaffected — it does not touch the store.
 
+## Environment (disk, worked around)
+
+Mid-build the root volume hit 100% (163Mi free) — `cargo build` failed with
+"No space left on device". The consumers were stale `/tmp` build/test scratch
+from a sibling project (Cadenza DerivedData, benchmark zips, screenshots), tens
+of GB, mostly >12h old. Removed the largest dirs older than ~12h (avoiding
+anything from the last few hours in case a peer run was active); freed ~8G.
+These regenerate — but a longer-term fix (a `/tmp` sweeper, or per-project tmp
+quotas) belongs to the host-bootstrap work, not this Task.
+
 ## Assumptions taken (reversible, simpler path)
 
 - **Directive text for an edit** carries the new title + description verbatim,

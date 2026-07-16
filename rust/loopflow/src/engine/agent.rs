@@ -1880,6 +1880,8 @@ trust_level = "trusted"
         let cmd = build_agent_command(&launch, &process, &AgentCapabilities::default());
         assert_eq!(cmd[0], "opencode");
         assert_eq!(cmd[1], "run");
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"opencode/glm-5.2".to_string()));
         assert_eq!(*cmd.last().unwrap(), "fix the bug");
     }
 

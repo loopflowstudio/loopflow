@@ -110,8 +110,8 @@ fn emit_build_provenance(manifest_dir: &Path) {
             .display()
             .to_string()
     };
-    let migration_authority = env::var("LOOPFLOW_MIGRATION_AUTHORITY")
-        .unwrap_or_else(|_| "validation_only".to_string());
+    let migration_authority =
+        env::var("LOOPFLOW_MIGRATION_AUTHORITY").unwrap_or_else(|_| "validation_only".to_string());
     if !matches!(
         migration_authority.as_str(),
         "published" | "validation_only"

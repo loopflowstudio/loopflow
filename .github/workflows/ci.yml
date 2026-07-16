@@ -67,6 +67,8 @@ jobs:
       - name: Fetch canonical migration history
         run: git fetch --no-tags origin main:refs/remotes/origin/main
       - name: Verify migration namespaces
+        env:
+          LOOPFLOW_REQUIRE_ORIGIN_MAIN: "1"
         run: uv run python scripts/check_migrations.py
 
   python-test:

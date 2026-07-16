@@ -206,7 +206,7 @@ def _check_current_main(local: dict[tuple[int, int, int], str]) -> None:
     """Main is already durable history even before its next release tag."""
     canonical = _migrations_at_ref("origin/main")
     if not canonical:
-        if os.environ.get("GITHUB_ACTIONS") == "true":
+        if os.environ.get("LOOPFLOW_REQUIRE_ORIGIN_MAIN") == "1":
             _fail("origin/main is unavailable in CI; the integration-history check cannot run")
         print("origin/main unavailable — skipping the integration-history check")
         return

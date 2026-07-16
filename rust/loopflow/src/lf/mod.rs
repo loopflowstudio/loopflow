@@ -1343,14 +1343,8 @@ pub enum AuthCommand {
     Connect {
         /// Provider name
         provider: String,
-        /// Create or reconnect an isolated OAuth account profile
+        /// Connect and bind this Loopflow profile
         #[arg(long)]
-        account: Option<String>,
-        /// Chrome profile directory, name, or signed-in email for browser OAuth
-        #[arg(long, requires = "account", conflicts_with = "profile")]
-        chrome_profile: Option<String>,
-        /// Use this Loopflow profile's host-local Chrome binding
-        #[arg(long, requires = "account")]
         profile: Option<String>,
     },
     /// Adopt an existing Claude login into a managed account
@@ -1571,12 +1565,15 @@ mod tests {
                 "auth help is missing {flow}"
             );
         }
-        for flow in ["connect", "disconnect"] {
-            let subcommand = auth.find_subcommand(flow).expect("auth flow exists");
-            assert!(subcommand
-                .get_arguments()
-                .any(|argument| argument.get_long() == Some("account")));
-        }
+        let connect = auth
+            .find_subcommand("connect")
+            .expect("connect flow exists");
+        assert!(connect
+            .get_arguments()
+            .any(|argument| argument.get_long() == Some("profile")));
+        assert!(!connect
+            .get_arguments()
+            .any(|argument| argument.get_long() == Some("account")));
     }
 
     #[test]
@@ -1664,50 +1661,24 @@ mod tests {
     }
 
     #[test]
-    fn auth_connect_accepts_managed_account_slug() {
-        let cli = Cli::try_parse_from(["lf", "auth", "connect", "claude", "--account", "primary"])
-            .expect("parse managed account login");
-
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Auth {
-                cmd: AuthCommand::Connect {
-                    provider,
-                    account,
-                    chrome_profile: None,
-                    profile: None,
-                }
-            }) if provider == "claude" && account.as_deref() == Some("primary")
-        ));
+    fn auth_connect_rejects_an_account_selector() {
+        assert!(
+            Cli::try_parse_from(["lf", "auth", "connect", "claude", "--account", "primary",])
+                .is_err()
+        );
     }
 
     #[test]
-    fn auth_connect_accepts_matching_chrome_profile() {
-        let cli = Cli::try_parse_from([
+    fn auth_connect_rejects_a_direct_chrome_profile() {
+        assert!(Cli::try_parse_from([
             "lf",
             "auth",
             "connect",
             "claude",
-            "--account",
-            "loopflow",
             "--chrome-profile",
             "operator@example.com",
         ])
-        .expect("parse Chrome profile pairing");
-
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Auth {
-                cmd: AuthCommand::Connect {
-                    provider,
-                    account,
-                    chrome_profile: Some(chrome_profile),
-                    profile: None,
-                }
-            }) if provider == "claude"
-                && account.as_deref() == Some("loopflow")
-                && chrome_profile == "operator@example.com"
-        ));
+        .is_err());
     }
 
     #[test]
@@ -1717,8 +1688,6 @@ mod tests {
             "auth",
             "connect",
             "claude",
-            "--account",
-            "primary",
             "--profile",
             "personal@example.com",
         ])
@@ -1729,12 +1698,9 @@ mod tests {
             Some(Commands::Auth {
                 cmd: AuthCommand::Connect {
                     provider,
-                    account,
-                    chrome_profile: None,
                     profile: Some(profile),
                 }
             }) if provider == "claude"
-                && account.as_deref() == Some("primary")
                 && profile == "personal@example.com"
         ));
     }
@@ -1746,8 +1712,6 @@ mod tests {
             "auth",
             "connect",
             "codex",
-            "--account",
-            "engineering",
             "--profile",
             "engineering@example.com",
         ])
@@ -1758,12 +1722,9 @@ mod tests {
             Some(Commands::Auth {
                 cmd: AuthCommand::Connect {
                     provider,
-                    account,
-                    chrome_profile: None,
                     profile: Some(profile),
                 }
             }) if provider == "codex"
-                && account.as_deref() == Some("engineering")
                 && profile == "engineering@example.com"
         ));
     }

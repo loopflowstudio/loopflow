@@ -11,21 +11,40 @@ Operations and utilities that do not launch a prompt.
 
 ## Git Workflow
 
-## lf pr open
+## lf pr publish
 
-Create or update a PR, open in browser.
+Push and create or refresh a PR, then print its state and URL. Opens no browser
+— this is the headless publication command agents use.
 
 ```bash
-lf -m codex pr open
-lf pr open -m codex
+lf -m codex pr publish
+lf pr publish -m codex
+lf pr publish --title "area: short title" --body "## Summary ..."
+```
+
+Use `-m/--model` for a one-off agent override when copy generation needs a
+different harness than your configured default. When omitted, `lf pr publish`
+uses `agent:` from `.lf/config.yaml` or `~/.lf/config.yaml`. Use `lf pr` to
+generate `--title`/`--body` with agent judgment.
+
+Before publishing, Loopflow syncs the default branch in the main repo so the PR
+is based on current upstream state even when you run it from a sibling worktree.
+Push or GitHub failure returns an error and presents nothing.
+
+## lf pr open
+
+Publish the PR (same as `lf pr publish`), then open it for review — the GitHub
+page in the browser. This is the explicit, human-initiated review action; agents
+use `publish`, `submit`, or `land` instead.
+
+```bash
+lf pr open
 lf pr open --title "area: short title" --body "## Summary ..."
 ```
 
-Use `-m/--model` for a one-off agent override when `lf pr open` needs a different harness than your configured default. When omitted, `lf pr open` uses `agent:` from `.lf/config.yaml` or `~/.lf/config.yaml`.
-
-`--title` and `--body` are always required. Use `lf pr` to generate them with agent judgment.
-
-Before opening or updating the PR, Loopflow syncs the default branch in the main repo so the PR is based on current upstream state even when you run `lf pr open` from a sibling worktree.
+If launching the review surface fails, only `lf pr open` fails — the PR is
+already published and its URL is printed. An absent presentation preference uses
+the GitHub browser default.
 
 ## lf pr land
 

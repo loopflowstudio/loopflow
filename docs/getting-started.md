@@ -139,7 +139,8 @@ lf audit    # runs your custom skill
 ### Shipping
 
 ```bash
-lf pr open      # create or update PR
+lf pr publish   # push + create or update PR (no browser)
+lf pr open      # publish, then open the PR for review
 lf pr land    # submit to merge queue
 ```
 

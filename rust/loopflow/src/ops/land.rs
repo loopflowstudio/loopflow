@@ -359,7 +359,6 @@ fn finalize_remote(
 
     if let Some(url) = current_pr_url(repo_root)? {
         progress.status(&format!("\n{url}\n"));
-        open_url(&url);
     }
 
     Ok(())
@@ -538,8 +537,4 @@ fn current_pr_url(repo: &Path) -> OpsResult<Option<String>> {
     } else {
         Ok(Some(url))
     }
-}
-
-fn open_url(url: &str) {
-    crate::engine::platform::open_url(url);
 }

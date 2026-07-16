@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::engine::agent::AgentConfig;
+use crate::engine::agent::{register_interrupt_cleanup, AgentConfig};
 use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
@@ -20,6 +20,23 @@ use crate::harness::{
 };
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
+
+/// SIGKILL an entire process group. `opencode serve` spawns descendants
+/// (MCP servers, model proxies, npm-shim grandchildren) that a bare
+/// `start_kill` of the direct child leaves running as orphans. The harness
+/// spawns the server in its own group (`process_group(0)`), so the group id is
+/// the child pid and this reaches the whole tree. Shared by `stop()` and the
+/// interrupt-cleanup hook.
+fn kill_process_group(pid: u32) {
+    #[cfg(unix)]
+    // SAFETY: a negative pid targets the process group we created for the
+    // child at spawn (process_group(0)); plain syscall, no pointers.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL)
+    };
+    #[cfg(not(unix))]
+    let _ = pid;
+}
 
 pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
@@ -32,6 +49,10 @@ pub struct OpenCodeHarness {
     shutdown_requested: Arc<AtomicBool>,
     interrupt_requested: Arc<AtomicBool>,
     child: Option<Child>,
+    /// The spawned server's process-group id (== its pid under
+    /// `process_group(0)`). 0 while no server is running.
+    child_group: Arc<AtomicU32>,
+    interrupt_hook_registered: bool,
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
@@ -57,6 +78,8 @@ impl OpenCodeHarness {
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             interrupt_requested: Arc::new(AtomicBool::new(false)),
             child: None,
+            child_group: Arc::new(AtomicU32::new(0)),
+            interrupt_hook_registered: false,
             stderr_task: None,
             sse_task: None,
             server_base_url: None,
@@ -73,10 +96,20 @@ impl OpenCodeHarness {
             .arg(port.to_string())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped());
+            .stderr(std::process::Stdio::piped())
+            // Dropping the harness (e.g. a run task is aborted) must not leak a
+            // live server. The direct-child kill this fires is a backstop; the
+            // group kill in `stop()` and the interrupt hook are what reach the
+            // descendants.
+            .kill_on_drop(true);
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
         }
+        // Own process group so `stop()` and the interrupt hook can kill the
+        // whole tree — `opencode serve` spawns descendants (MCP servers, model
+        // proxies, npm-shim grandchildren) that a direct-child kill orphans.
+        #[cfg(unix)]
+        command.process_group(0);
         super::configure_vendor_tokio_env(&mut command)?;
 
         let mut child = command
@@ -235,6 +268,7 @@ impl OpenCodeHarness {
 
         let opencode_pid = child.id();
         if let Some(pid) = opencode_pid {
+            self.child_group.store(pid, Ordering::Release);
             if let Err(err) = opencode_runtime::register_opencode_server(pid) {
                 tracing::warn!(
                     opencode_pid = pid,
@@ -242,6 +276,22 @@ impl OpenCodeHarness {
                     "failed to register OpenCode server runtime metadata"
                 );
             }
+        }
+
+        // The signal handler (SIGINT/SIGTERM/SIGHUP — see bin/lf.rs) exits the
+        // process before destructors run, so `kill_on_drop` never fires on
+        // that path. This hook is what keeps `tmux kill-session` (SIGHUP) and a
+        // Ctrl+C from orphaning the server's descendant tree. Registered once
+        // per harness; restarts just update the atomic.
+        if !self.interrupt_hook_registered {
+            self.interrupt_hook_registered = true;
+            let group = Arc::clone(&self.child_group);
+            register_interrupt_cleanup(move || {
+                let pid = group.swap(0, Ordering::AcqRel);
+                if pid != 0 {
+                    kill_process_group(pid);
+                }
+            });
         }
 
         self.child = Some(child);
@@ -360,10 +410,17 @@ impl Harness for OpenCodeHarness {
         }
 
         let opencode_pid = self.child.as_ref().and_then(|child| child.id());
+        if let Some(pid) = opencode_pid {
+            // Kill the whole process group before awaiting the direct child,
+            // so descendants (MCP servers, model proxies, npm-shim
+            // grandchildren) come down with the server instead of orphaning.
+            kill_process_group(pid);
+        }
         if let Some(child) = self.child.as_mut() {
             shutdown_child(child).await;
         }
         self.child = None;
+        self.child_group.store(0, Ordering::Release);
         if let Some(pid) = opencode_pid {
             if let Err(err) = opencode_runtime::unregister_opencode_server(pid) {
                 tracing::warn!(
@@ -401,6 +458,11 @@ impl Harness for OpenCodeHarness {
 
     fn provider_session_id(&self) -> Option<String> {
         self.provider_session_id.clone()
+    }
+
+    fn process_group_id(&self) -> Option<u32> {
+        let group = self.child_group.load(Ordering::Acquire);
+        (group > 1).then_some(group)
     }
 
     fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
@@ -738,5 +800,32 @@ mod tests {
                 "modelID": "glm-5.2"
             }))
         );
+    }
+
+    // The npm-shim / descendant shape: the direct child backgrounds a
+    // grandchild (same process group) and exits. The grandchild touches a flag
+    // file after a short sleep; the group kill `stop()` fires must take it down
+    // before the sleep finishes, so the flag never appears. This is the same
+    // kill the interrupt hook fires on SIGINT/SIGTERM/SIGHUP.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_process_group_reaches_the_grandchild() {
+        let tmp = tempfile::tempdir().unwrap();
+        let flag = tmp.path().join("survived");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!("(sleep 1 && touch {}) &", flag.display()));
+        command.process_group(0);
+        let mut child = command.spawn().unwrap();
+        let pid = child.id().unwrap();
+        // Let the shell fork the grandchild and exit.
+        let _ = child.wait().await;
+
+        kill_process_group(pid);
+
+        // Past the grandchild's sleep: if it leaked, the flag would exist.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(!flag.exists(), "grandchild outlived the group kill");
     }
 }

@@ -47,6 +47,20 @@ use crate::wave::WAVE_SERVER_ENDPOINT_ENV;
 
 /// Enter the resident half of `lf wave <name>` until its listener disappears.
 pub fn run(name: &str) -> Result<()> {
+    // A previous resident that crashed (SIGKILL, panic, `tmux kill-session`)
+    // leaves its `opencode serve` tree orphaned. Sweep the registry before
+    // this resident can add its own server, so a fresh boot starts clean. The
+    // sweep reaps the whole process group per entry — descendants come down
+    // with the server — and prunes entries whose owner loopflow is gone.
+    let reaped = crate::harness::opencode_runtime::reap_orphaned_opencode_servers();
+    if reaped.reaped != 0 || reaped.errors != 0 {
+        tracing::info!(
+            reaped = reaped.reaped,
+            errors = reaped.errors,
+            "startup OpenCode orphan sweep"
+        );
+    }
+
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave =

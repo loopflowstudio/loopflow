@@ -47,19 +47,22 @@ struct ContextLabTests {
             now: 3_000_000
         ).query
 
-        #expect(contextSourceBelongsToSelectedRepo(
+        #expect(contextRelativeSourcePath(
             "/src/loopflow/rust/loopflow/src/engine/builtins/build/skill/refine.md",
-            query: query
-        ))
-        #expect(!contextSourceBelongsToSelectedRepo("/src/loopflow-other/refine.md", query: query))
-        #expect(contextSourceBelongsToRepo(
+            repoPath: query.repoPaths[0]
+        ) == "rust/loopflow/src/engine/builtins/build/skill/refine.md")
+        #expect(contextRelativeSourcePath(
+            "/src/loopflow-other/refine.md",
+            repoPath: query.repoPaths[0]
+        ) == nil)
+        #expect(contextRelativeSourcePath(
             #filePath,
             repoPath: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
                 .path
-        ))
+        ) == "swift/LoopflowTests/ContextLabTests.swift")
     }
 
     @Test("Selected-source sorting uses share rather than raw token load")
@@ -181,10 +184,7 @@ struct ContextLabTests {
             currentRevisionOnly: true
         )
         let route = TaskWorkspaceRoute(
-            wave: "intelligence",
             issue: "INT-42",
-            repoPath: "/src/loopflow",
-            initialSection: .terminal,
             context: ContextLabRoute(
                 query: query,
                 selectedNodeId: "revision-1",
@@ -203,7 +203,8 @@ struct ContextLabTests {
         #expect(decoded.context.query.steeredOnly)
         #expect(decoded.context.query.currentRevisionOnly)
         #expect(decoded.context.selectedNodeId == "revision-1")
-        #expect(decoded.initialSection == .terminal)
+        #expect(decoded.wave == "intelligence")
+        #expect(decoded.repoPath == "/src/loopflow")
     }
 
     @Test("Refinement uses the Wave's sole Project or its remembered Task destination")

@@ -159,7 +159,7 @@ struct LoopflowApp: App {
         .defaultSize(width: 1420, height: 900)
 
         WindowGroup("Task workspace", id: "task-workspace", for: TaskWorkspaceRoute.self) { $route in
-            if let route {
+            if let route, route.context.isWaveScoped {
                 TaskWorkspaceWindow(route: route)
                     .tint(.loopflowBurgundy)
                     .preferredColorScheme(theme.preferredScheme)

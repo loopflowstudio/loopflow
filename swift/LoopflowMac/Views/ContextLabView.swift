@@ -48,11 +48,11 @@ private struct ContextLabSavedView: Codable, Hashable {
 }
 
 struct TaskWorkspaceRoute: Codable, Hashable {
-    let wave: String
     let issue: String
-    let repoPath: String
-    let initialSection: TaskWorkspaceSection
     let context: ContextLabRoute
+
+    var wave: String { context.query.waves[0] }
+    var repoPath: String { context.query.repoPaths[0] }
 }
 
 struct ContextLabRoute: Codable, Hashable {
@@ -948,9 +948,11 @@ struct ContextLabView: View {
         guard evidence.isEditable,
               let sourcePath = evidence.sourcePath,
               query.waves.count == 1,
+              query.repoPaths.count == 1,
+              let repoPath = query.repoPaths.first,
               refinementProjectId != nil
         else { return false }
-        return contextSourceBelongsToSelectedRepo(sourcePath, query: query)
+        return contextRelativeSourcePath(sourcePath, repoPath: repoPath) != nil
     }
 
     private func refinementHelp(_ evidence: SourceEvidence, in query: SessionSetQuery) -> String {
@@ -968,7 +970,7 @@ struct ContextLabView: View {
         guard query.repoPaths.count == 1, let repoPath = query.repoPaths.first else {
             return "Narrow the session set to one repo before refining this source."
         }
-        guard contextSourceBelongsToRepo(sourcePath, repoPath: repoPath) else {
+        guard contextRelativeSourcePath(sourcePath, repoPath: repoPath) != nil else {
             return "This source is outside the selected repo and cannot be changed in its Task worktree."
         }
         return "Create a trace-linked Task in \(query.waves[0]) and open its running agent"
@@ -1057,10 +1059,7 @@ struct ContextLabView: View {
                 )
             }
             openWindow(id: "task-workspace", value: TaskWorkspaceRoute(
-                wave: wave,
                 issue: receipt.issueIdentifier,
-                repoPath: repoPath,
-                initialSection: .agent,
                 context: ContextLabRoute(
                     query: snapshot.query,
                     selectedNodeId: currentEvidence.nodeId,
@@ -1343,18 +1342,14 @@ struct ContextLabView: View {
     }
 }
 
-func contextSourceBelongsToSelectedRepo(_ sourcePath: String, query: SessionSetQuery) -> Bool {
-    guard query.repoPaths.count == 1, let selectedRepo = query.repoPaths.first else { return false }
-    return contextSourceBelongsToRepo(sourcePath, repoPath: selectedRepo)
-}
-
-func contextSourceBelongsToRepo(_ sourcePath: String, repoPath: String) -> Bool {
+func contextRelativeSourcePath(_ sourcePath: String, repoPath: String) -> String? {
     let source = sourcePath.normalizedFilePath
     let normalizedRepo = repoPath.normalizedFilePath
     let repo = normalizedRepo.count > 1 && normalizedRepo.hasSuffix("/")
         ? String(normalizedRepo.dropLast())
         : normalizedRepo
-    return source == repo || source.hasPrefix(repo + "/")
+    guard source.hasPrefix(repo + "/") else { return nil }
+    return String(source.dropFirst(repo.count + 1))
 }
 
 private struct ContextSourceDocumentView: View {

@@ -141,7 +141,7 @@ struct TaskWorkspaceWindow: View {
                     attention: task.attention,
                     repoPath: route.repoPath,
                     terminalStore: TaskTerminalStore.shared,
-                    initialSection: route.initialSection
+                    initialSection: .agent
                 )
             } else if let errorMessage {
                 ContentUnavailableView(
@@ -204,17 +204,12 @@ func contextRefinementProject(
 }
 
 func contextRefinementSourcePath(sourcePath: String, repoPath: String) throws -> String {
-    let source = URL(fileURLWithPath: sourcePath).standardizedFileURL.path
-    let normalizedRepo = URL(fileURLWithPath: repoPath).standardizedFileURL.path
-    let repo = normalizedRepo.count > 1 && normalizedRepo.hasSuffix("/")
-        ? String(normalizedRepo.dropLast())
-        : normalizedRepo
-    guard source.hasPrefix(repo + "/") else {
+    guard let relativePath = contextRelativeSourcePath(sourcePath, repoPath: repoPath) else {
         throw ContextRefinementError(
             "The selected source is outside this Wave's repo and cannot seed its Task worker."
         )
     }
-    return String(source.dropFirst(repo.count + 1))
+    return relativePath
 }
 
 func contextRefinementTaskTitle(label: String, contentSha256: String) -> String {

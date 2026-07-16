@@ -156,6 +156,18 @@ then repeats its inner loop and gate until the gate approves the pending
 outcome. Material gate repairs return the same Task Session to another inner
 loop cycle.
 
+Run every phase without blocking on a human:
+
+```bash
+lf task run INF-123 --headless
+```
+
+The default policy requires a human for kickoff and gate while deferring
+interactive inner-loop steps to the owning Project. `--headless` defers every
+interactive step to that Project instead. It runs the same kickoff, inner-loop,
+and gate skills; it does not skip them. Re-run an idle Task with `--headless` to
+mark its remaining lifecycle headless.
+
 Start dependent work without sharing the parent's worktree:
 
 ```bash

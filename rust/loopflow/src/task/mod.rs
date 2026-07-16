@@ -137,9 +137,24 @@ impl TaskLifecyclePlan {
 
     pub fn headless(iterate_flow: impl Into<String>) -> Self {
         let mut plan = Self::standard(iterate_flow);
-        plan.kickoff.interaction_policy = InteractionPolicy::Defer;
-        plan.gate.interaction_policy = InteractionPolicy::Defer;
+        plan.defer_all_interactions();
         plan
+    }
+
+    pub fn defer_all_interactions(&mut self) {
+        self.kickoff.interaction_policy = InteractionPolicy::Defer;
+        self.iterate.interaction_policy = InteractionPolicy::Defer;
+        self.gate.interaction_policy = InteractionPolicy::Defer;
+    }
+
+    pub fn all_interactions_deferred(&self) -> bool {
+        [
+            self.kickoff.interaction_policy,
+            self.iterate.interaction_policy,
+            self.gate.interaction_policy,
+        ]
+        .into_iter()
+        .all(|policy| policy == InteractionPolicy::Defer)
     }
 
     pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
@@ -1233,5 +1248,19 @@ mod tests {
         assert_eq!(session.lifecycle_cycle(), 2);
         assert_eq!(session.gate_proposal, None);
         assert_eq!(session.phase_epoch, 4);
+    }
+
+    #[test]
+    fn headless_policy_defers_every_phase_without_changing_its_flows() {
+        let mut plan = TaskLifecyclePlan::standard("code");
+        assert!(!plan.all_interactions_deferred());
+
+        plan.defer_all_interactions();
+
+        assert!(plan.all_interactions_deferred());
+        assert_eq!(plan.kickoff.flow, "task-kickoff");
+        assert_eq!(plan.iterate.flow, "code");
+        assert_eq!(plan.gate.flow, "task-gate");
+        assert_eq!(plan, TaskLifecyclePlan::headless("code"));
     }
 }

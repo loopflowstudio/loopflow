@@ -48,6 +48,7 @@ pub struct TaskLaunchOptions {
     pub flow: Option<String>,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
+    pub headless: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -381,12 +382,35 @@ fn command_source_for_wave(
     }
 }
 
+fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {
+    if session.lifecycle.all_interactions_deferred() {
+        return Ok(false);
+    }
+    if session.status.is_terminal() {
+        return Err(task_error(format!(
+            "Task {} is {}; terminal Tasks cannot change interaction policy",
+            session.launch.issue.identifier,
+            session.status.as_str()
+        )));
+    }
+    if session.status.is_process_active() {
+        return Err(task_error(format!(
+            "Task {} has an active body; interrupt or wait for it before marking the Task headless",
+            session.launch.issue.identifier
+        )));
+    }
+    session.lifecycle.defer_all_interactions();
+    session.updated_at = time::OffsetDateTime::now_utc();
+    Ok(true)
+}
+
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSession> {
     let TaskLaunchOptions {
         name,
         flow,
         stack_on,
         directive,
+        headless,
     } = options;
     let directive = directive
         .map(|directive| {
@@ -400,11 +424,11 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         .transpose()?;
     if let Some(existing) = block_on_task(async {
         let store = task_store().await?;
-        let existing = store
+        let mut existing = store
             .get_task_session_by_issue(issue)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
-        if let Some(session) = &existing {
+        if let Some(session) = &mut existing {
             if let Some(requested) = name.as_deref() {
                 let requested = parse_workspace_slug(requested)?;
                 if requested.as_str() != session.workspace_slug {
@@ -470,6 +494,12 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                         session.launch.issue.identifier,
                     )));
                 }
+            }
+            if headless && _defer_task_interactions(session)? {
+                store
+                    .update_task_session(session)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
             }
         }
         Ok(existing)
@@ -607,7 +637,11 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             status_at: now,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard(resolved_flow),
+            lifecycle: if headless {
+                crate::task::TaskLifecyclePlan::headless(resolved_flow)
+            } else {
+                crate::task::TaskLifecyclePlan::standard(resolved_flow)
+            },
             lifecycle_phase: crate::task::TaskLifecyclePhase::Kickoff,
             phase_epoch: 1,
             phase_cursor: 0,
@@ -2896,10 +2930,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::{
-        changes_snapshot, command_source_for_wave, derive_workspace_slug, diff_snapshot,
-        ensure_working_pr, ensure_working_pr_with_authority, file_snapshot, parse_pr_slug,
-        parse_workspace_slug, project_context, resolve_task_flow, RotateOptions, TaskControlResult,
-        TaskWorkspace,
+        _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
+        diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
+        parse_pr_slug, parse_workspace_slug, project_context, resolve_task_flow, RotateOptions,
+        TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
     use crate::id::WaveId;
@@ -3126,6 +3160,25 @@ mod tests {
             project_context(&project),
             "Definition:\nEvery task has one durable session.\n\nKRs:\n- [x] Review resumes the same session\n- [ ] Merge wakes the Wave"
         );
+    }
+
+    #[tokio::test]
+    async fn idle_task_can_defer_its_remaining_interactive_steps() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, _store, mut session, _pr) =
+            rotation_task(&repo, "jack/task-headless", &base).await;
+
+        assert!(_defer_task_interactions(&mut session).unwrap());
+        assert!(session.lifecycle.all_interactions_deferred());
+        assert!(!_defer_task_interactions(&mut session).unwrap());
+
+        session.lifecycle = crate::task::TaskLifecyclePlan::standard("task");
+        session.status = TaskSessionStatus::Completed;
+        assert!(_defer_task_interactions(&mut session)
+            .unwrap_err()
+            .to_string()
+            .contains("terminal Tasks cannot change interaction policy"));
     }
 
     #[test]

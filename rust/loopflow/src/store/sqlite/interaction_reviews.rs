@@ -201,11 +201,21 @@ impl SqliteStore {
             ChildCommandSource::Project(project_session_id.clone()),
             ChildCommandKind::FollowUp {
                 text: format!(
-                    "<interaction_review_message review_id=\"{review_id}\" from=\"reviewer\">\n{text}\n</interaction_review_message>"
+                    "<interaction_review_message review_id=\"{review_id}\" from=\"reviewer\">\n{text}\n\nReply with `lf task review reply {review_id} \"<answer and evidence>\"`.\n</interaction_review_message>"
                 ),
             },
         );
         insert_child_command(&transaction, &command)?;
+        insert_task_event_in(
+            &transaction,
+            &session,
+            &TaskEventKind::CommandChanged {
+                command_id: command.id.clone(),
+                state: crate::child_session::ChildCommandState::Persisted,
+                effect: command.effect,
+                error: None,
+            },
+        )?;
         insert_task_event_in(
             &transaction,
             &session,
@@ -344,6 +354,16 @@ impl SqliteStore {
             TASK_SESSION_SELECT,
             [review.task_session_id.as_str()],
             map_task_session_row,
+        )?;
+        insert_task_event_in(
+            &transaction,
+            &session,
+            &TaskEventKind::CommandChanged {
+                command_id: command.id.clone(),
+                state: crate::child_session::ChildCommandState::Persisted,
+                effect: command.effect,
+                error: None,
+            },
         )?;
         insert_task_event_in(
             &transaction,

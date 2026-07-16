@@ -9,8 +9,6 @@ use crate::task::{TaskSession, TaskSessionId};
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    // The Task runner begins calling this in the routing slice stacked on this protocol.
-    #[allow(dead_code)]
     pub(crate) async fn open_interaction_review(
         &self,
         session: &TaskSession,

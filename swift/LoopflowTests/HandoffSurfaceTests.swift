@@ -180,15 +180,38 @@ struct HandoffSurfaceTests {
 
     @Test("only a user-initiated, successful attach launch records a preference")
     func preferenceRecordingRule() {
-        // The one case that advances memory.
-        #expect(handoffPreferenceShouldRecord(reach: .attach, userInitiated: true, launchSucceeded: true))
+        var memory = HandoffSurfaceMemory()
+        let recordedAttach = memory.recordLaunch(
+            .warp,
+            provider: "claude",
+            home: "jack@local",
+            reach: .attach,
+            userInitiated: true,
+            launchSucceeded: true
+        )
+        #expect(recordedAttach)
+        #expect(memory.preferred(provider: "claude", home: "jack@local") == .warp)
 
-        // A worktree-only launch never overwrites the last valid attach preference.
-        #expect(!handoffPreferenceShouldRecord(reach: .worktreeOnly, userInitiated: true, launchSucceeded: true))
-        // An auto-resolved default never rewrites memory.
-        #expect(!handoffPreferenceShouldRecord(reach: .attach, userInitiated: false, launchSucceeded: true))
-        // A failed launch never records.
-        #expect(!handoffPreferenceShouldRecord(reach: .attach, userInitiated: true, launchSucceeded: false))
+        // Failed and automatically-resolved launches do not replace that success.
+        let recordedAutomatic = memory.recordLaunch(
+            .ghostty,
+            provider: "claude",
+            home: "jack@local",
+            reach: .attach,
+            userInitiated: false,
+            launchSucceeded: true
+        )
+        let recordedFailure = memory.recordLaunch(
+            .ghostty,
+            provider: "claude",
+            home: "jack@local",
+            reach: .attach,
+            userInitiated: true,
+            launchSucceeded: false
+        )
+        #expect(!recordedAutomatic)
+        #expect(!recordedFailure)
+        #expect(memory.preferred(provider: "claude", home: "jack@local") == .warp)
     }
 
     @Test("a worktree-only IDE success leaves the remembered attach surface intact")
@@ -196,11 +219,17 @@ struct HandoffSurfaceTests {
         var memory = HandoffSurfaceMemory()
         memory.record(.warp, provider: "claude", home: "jack@local")
 
-        // The human opens Cursor (worktree-only). The rule refuses to record it,
-        // so the next Open still resolves to the remembered Warp attach.
-        if handoffPreferenceShouldRecord(reach: .worktreeOnly, userInitiated: true, launchSucceeded: true) {
-            memory.record(.cursor, provider: "claude", home: "jack@local")
-        }
+        // Exercise the same mutation production uses. A successful folder open
+        // returns false and leaves the prior attach surface untouched.
+        let recorded = memory.recordLaunch(
+            .cursor,
+            provider: "claude",
+            home: "jack@local",
+            reach: .worktreeOnly,
+            userInitiated: true,
+            launchSucceeded: true
+        )
+        #expect(!recorded)
         #expect(memory.preferred(provider: "claude", home: "jack@local") == .warp)
     }
 
@@ -209,9 +238,15 @@ struct HandoffSurfaceTests {
         var memory = HandoffSurfaceMemory()
         memory.record(.ghostty, provider: "claude", home: "jack@local")
 
-        if handoffPreferenceShouldRecord(reach: .attach, userInitiated: true, launchSucceeded: true) {
-            memory.record(.warp, provider: "claude", home: "jack@local")
-        }
+        let recorded = memory.recordLaunch(
+            .warp,
+            provider: "claude",
+            home: "jack@local",
+            reach: .attach,
+            userInitiated: true,
+            launchSucceeded: true
+        )
+        #expect(recorded)
         #expect(memory.preferred(provider: "claude", home: "jack@local") == .warp)
         #expect(memory.overallPreferred == .warp)
     }

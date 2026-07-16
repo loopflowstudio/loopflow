@@ -95,11 +95,13 @@ struct HandoffSurfaceLauncherTests {
 
     @Test("descriptor host classifies local versus remote Home")
     func remoteHomeDetection() {
-        #expect(!HandoffSurfaceLauncher.isRemoteHome("jack@local"))
-        #expect(!HandoffSurfaceLauncher.isRemoteHome("local"))
         #expect(!HandoffSurfaceLauncher.isRemoteHome("localhost"))
+        #expect(!HandoffSurfaceLauncher.isRemoteHome("127.0.0.1"))
+        // The attach DTO emits a bare hostname for a remote Home.
+        #expect(HandoffSurfaceLauncher.isRemoteHome("mini"))
+        #expect(HandoffSurfaceLauncher.isRemoteHome("mini.local.net"))
+        #expect(HandoffSurfaceLauncher.isRemoteHome("mini.local.net:2222"))
         #expect(HandoffSurfaceLauncher.isRemoteHome("ssh://jack@mini"))
-        #expect(HandoffSurfaceLauncher.isRemoteHome("jack@mini.local.net"))
     }
 
     @Test("a remote Home is never locally workspace-proven")
@@ -111,6 +113,45 @@ struct HandoffSurfaceLauncherTests {
         #expect(!capability.workspaceProven)
         #expect(capability.reach(.vscode) == .unavailable)
         #expect(capability.reach(.cursor) == .unavailable)
+    }
+
+    @Test("a local descriptor stays byte-for-byte unchanged")
+    func localDescriptorCommandIsExact() {
+        let attach = InteractiveHandoffAttach(
+            sessionId: "ih_local",
+            status: .attached,
+            cwd: "/src/repo",
+            host: "localhost",
+            environment: ["LF_WAVE_ID": "w_42"],
+            argv: argv
+        )
+        let command = HandoffSurfaceLauncher.command(for: attach)
+        #expect(command.cwd == attach.cwd)
+        #expect(command.argv == attach.argv)
+        #expect(command.environment == attach.environment)
+    }
+
+    @Test("a remote descriptor executes cwd, environment, and argv on its host")
+    func remoteDescriptorUsesSSH() {
+        let attach = InteractiveHandoffAttach(
+            sessionId: "ih_remote",
+            status: .attached,
+            cwd: "/remote/repo",
+            host: "mini.example:2222",
+            environment: ["LF_WAVE_ID": "w_42", "TERM": "xterm-256color"],
+            argv: argv
+        )
+        let command = HandoffSurfaceLauncher.command(for: attach, home: "ssh://jack@mini.example:2222")
+        #expect(command.cwd == "/")
+        #expect(command.environment.isEmpty)
+        #expect(command.argv == [
+            "ssh",
+            "-p",
+            "2222",
+            "jack@mini.example",
+            "cd '/remote/repo' && exec 'env' 'LF_WAVE_ID=w_42' 'TERM=xterm-256color' "
+                + "'claude' '--resume' 'sess_abc123' '--cwd' '/src/repo'",
+        ])
     }
 }
 #endif

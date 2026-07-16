@@ -75,9 +75,9 @@ public struct HandoffSurfaceOption: Codable, Sendable, Hashable, Identifiable {
 ///
 /// The descriptor's Home matters: on a **remote** Home the worktree lives on
 /// another host, so a local editor or a plain local window cannot reach it.
-/// Ghostty and a command-bearing Warp still attach — they run the shared argv,
-/// which carries its own transport (e.g. ssh) — but local worktree-only actions
-/// become unavailable rather than opening a path that is not there.
+/// Ghostty and a command-bearing Warp still attach — the launcher transports the
+/// shared argv to the descriptor's host — but local worktree-only actions become
+/// unavailable rather than opening a path that is not there.
 public struct HandoffSurfaceCapability: Sendable, Hashable {
     /// External apps installed on the current Home. Ghostty is embedded, so it is
     /// never listed here and is always available.
@@ -108,8 +108,8 @@ public struct HandoffSurfaceCapability: Sendable, Hashable {
     public func reach(_ surface: HandoffSurface) -> HandoffSurfaceReach {
         switch surface {
         case .ghostty:
-            // Embedded and required: runs the shared argv (which carries its own
-            // transport), so it attaches on a local or a remote Home alike.
+            // Embedded and required: the launcher runs the shared argv locally or
+            // transports it to the descriptor host, so it attaches on either Home.
             return .attach
         case .warp:
             guard installedApps.contains(.warp) else { return .unavailable }
@@ -170,6 +170,23 @@ public struct HandoffSurfaceMemory: Codable, Sendable, Hashable {
         byProviderHome[Self.key(provider: provider, home: home)] = surface
         overall = surface
     }
+
+    /// Record a launch only when it earned the right to become Open's default.
+    /// Folder-only IDE opens, automatic resolution, and failed launches leave the
+    /// last attach-capable preference untouched.
+    @discardableResult
+    public mutating func recordLaunch(
+        _ surface: HandoffSurface,
+        provider: String,
+        home: String,
+        reach: HandoffSurfaceReach,
+        userInitiated: Bool,
+        launchSucceeded: Bool
+    ) -> Bool {
+        guard userInitiated, launchSucceeded, reach == .attach else { return false }
+        record(surface, provider: provider, home: home)
+        return true
+    }
 }
 
 /// The outcome of resolving Open's default surface: the chosen surface plus, when
@@ -225,18 +242,4 @@ public enum HandoffSurfaceResolver {
             fallbackReason: "\(why) — using the embedded terminal."
         )
     }
-}
-
-/// Whether a completed launch should advance the remembered preference. The rule
-/// is pure so the view cannot drift from it: record only a **user-initiated**,
-/// **successful**, **attach** launch. An auto-resolved default never rewrites
-/// memory (or a briefly-unavailable app could never return), and a worktree-only
-/// launch never overwrites the last valid *attach* preference (opening a folder
-/// is not the surface the human attaches through).
-public func handoffPreferenceShouldRecord(
-    reach: HandoffSurfaceReach,
-    userInitiated: Bool,
-    launchSucceeded: Bool
-) -> Bool {
-    userInitiated && launchSucceeded && reach == .attach
 }

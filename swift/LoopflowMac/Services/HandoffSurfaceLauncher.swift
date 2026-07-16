@@ -26,8 +26,22 @@ final class HandoffSurfacePreferences {
         }
     }
 
-    func record(_ surface: HandoffSurface, provider: String, home: String) {
-        memory.record(surface, provider: provider, home: home)
+    func recordLaunch(
+        _ surface: HandoffSurface,
+        provider: String,
+        home: String,
+        reach: HandoffSurfaceReach,
+        userInitiated: Bool,
+        launchSucceeded: Bool
+    ) {
+        guard memory.recordLaunch(
+            surface,
+            provider: provider,
+            home: home,
+            reach: reach,
+            userInitiated: userInitiated,
+            launchSucceeded: launchSucceeded
+        ) else { return }
         if let data = try? JSONEncoder().encode(memory) {
             defaults.set(data, forKey: key)
         }
@@ -39,6 +53,12 @@ final class HandoffSurfacePreferences {
 /// out to `NSWorkspace` and the filesystem. It never creates or names a Session
 /// — it runs the exact shared attach command the store handed back.
 enum HandoffSurfaceLauncher {
+    struct Command: Equatable {
+        let cwd: String
+        let argv: [String]
+        let environment: [String: String]
+    }
+
     private static func bundleId(_ surface: HandoffSurface) -> String? {
         switch surface {
         case .ghostty: nil
@@ -57,23 +77,40 @@ enum HandoffSurfaceLauncher {
         Set([HandoffSurface.warp, .vscode, .cursor].filter { appURL($0) != nil })
     }
 
-    /// Whether the descriptor's Home is on another host. A local Home is this
-    /// machine (`…@local`, `localhost`, or a bare local address); anything with an
-    /// `ssh://` scheme or a real remote host is remote, so a local worktree path
-    /// cannot be assumed.
+    /// Whether the descriptor's execution host is another machine. Rust emits
+    /// `localhost` for a local Home and the bare hostname (optionally with port)
+    /// for a remote Home. A bare non-local token is therefore remote, not a local
+    /// alias whose worktree may be probed on this machine.
     static func isRemoteHome(_ host: String) -> Bool {
         let trimmed = host.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasPrefix("ssh://") { return true }
-        if trimmed.hasSuffix("@local") || trimmed == "local" || trimmed == "localhost" {
-            return false
+        return !trimmed.isEmpty
+            && trimmed != "localhost"
+            && trimmed != "local"
+            && trimmed != "127.0.0.1"
+            && trimmed != "::1"
+    }
+
+    /// Adapt the store's host-local descriptor for this presentation Home. Local
+    /// descriptors remain byte-for-byte unchanged. Remote descriptors run the
+    /// exact cwd/environment/argv on their declared host instead of probing or
+    /// executing the remote path on this Mac.
+    static func command(for attach: InteractiveHandoffAttach, home: String? = nil) -> Command {
+        guard isRemoteHome(attach.host) else {
+            return Command(cwd: attach.cwd, argv: attach.argv, environment: attach.environment)
         }
-        // `user@host` with a non-local host is remote; a bare token with no host
-        // part is treated as local.
-        if let at = trimmed.firstIndex(of: "@") {
-            let hostPart = trimmed[trimmed.index(after: at)...]
-            return !(hostPart == "local" || hostPart == "localhost")
+
+        var remoteTokens = ["env"]
+        for key in attach.environment.keys.sorted() {
+            remoteTokens.append("\(key)=\(attach.environment[key] ?? "")")
         }
-        return false
+        remoteTokens.append(contentsOf: attach.argv)
+        let remoteCommand = "cd \(shellQuote(attach.cwd)) && exec "
+            + remoteTokens.map(shellQuote).joined(separator: " ")
+        return Command(
+            cwd: "/",
+            argv: sshArgv(host: attach.host, home: home, remoteCommand: remoteCommand),
+            environment: [:]
+        )
     }
 
     /// Probe the machine and handoff into the pure capability the resolver reads.
@@ -103,6 +140,7 @@ enum HandoffSurfaceLauncher {
     static func launch(
         _ surface: HandoffSurface,
         attach: InteractiveHandoffAttach,
+        home: String,
         reach: HandoffSurfaceReach
     ) async -> Bool {
         switch surface {
@@ -110,18 +148,22 @@ enum HandoffSurfaceLauncher {
             // Embedded terminal is presented by the view, not launched here.
             return true
         case .warp:
-            return launchWarp(attach: attach, attaching: reach == .attach)
+            return launchWarp(attach: attach, home: home, attaching: reach == .attach)
         case .vscode, .cursor:
             return await openWorkspace(surface, cwd: attach.cwd)
         }
     }
 
-    private static func launchWarp(attach: InteractiveHandoffAttach, attaching: Bool) -> Bool {
+    private static func launchWarp(
+        attach: InteractiveHandoffAttach,
+        home: String,
+        attaching: Bool
+    ) -> Bool {
         if attaching {
             // Attach only if the command-bearing config actually gets written; a
             // failed write returns false so the caller falls back to the embedded
             // terminal rather than opening a bare window and calling it "attached".
-            guard let launchURL = writeWarpLaunchConfig(attach: attach) else { return false }
+            guard let launchURL = writeWarpLaunchConfig(attach: attach, home: home) else { return false }
             return NSWorkspace.shared.open(launchURL)
         }
         // Worktree-only: open a window at the worktree with no command. Weaker,
@@ -178,15 +220,16 @@ enum HandoffSurfaceLauncher {
 
     /// Write the launch configuration, returning its `warp://launch` URL, or nil
     /// if it could not be written so the caller can fall back visibly.
-    private static func writeWarpLaunchConfig(attach: InteractiveHandoffAttach) -> URL? {
+    private static func writeWarpLaunchConfig(attach: InteractiveHandoffAttach, home: String) -> URL? {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".warp/launch_configurations", isDirectory: true)
         let name = warpLaunchConfigName(sessionId: attach.sessionId)
+        let command = command(for: attach, home: home)
         let yaml = warpLaunchConfigYAML(
             name: name,
-            cwd: attach.cwd,
-            argv: attach.argv,
-            environment: attach.environment
+            cwd: command.cwd,
+            argv: command.argv,
+            environment: command.environment
         )
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -220,6 +263,44 @@ enum HandoffSurfaceLauncher {
 
     private static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func sshArgv(host: String, home: String?, remoteCommand: String) -> [String] {
+        let (hostname, port) = splitHostAndPort(host)
+        let destination: String
+        if let home,
+           home.hasPrefix("ssh://"),
+           let at = home.dropFirst("ssh://".count).firstIndex(of: "@") {
+            let owner = home.dropFirst("ssh://".count)[..<at]
+            destination = "\(owner)@\(hostname)"
+        } else {
+            destination = hostname
+        }
+        var argv = ["ssh"]
+        if let port {
+            argv.append(contentsOf: ["-p", port])
+        }
+        argv.append(contentsOf: [destination, remoteCommand])
+        return argv
+    }
+
+    private static func splitHostAndPort(_ host: String) -> (String, String?) {
+        if host.hasPrefix("["), let bracket = host.firstIndex(of: "]") {
+            let destination = String(host[host.index(after: host.startIndex) ..< bracket])
+            let suffix = host[host.index(after: bracket)...]
+            if suffix.hasPrefix(":"), suffix.dropFirst().allSatisfy(\.isNumber) {
+                return (destination, String(suffix.dropFirst()))
+            }
+            return (destination, nil)
+        }
+        guard host.filter({ $0 == ":" }).count == 1,
+              let colon = host.lastIndex(of: ":"),
+              host[host.index(after: colon)...].allSatisfy(\.isNumber)
+        else { return (host, nil) }
+        return (
+            String(host[..<colon]),
+            String(host[host.index(after: colon)...])
+        )
     }
 
     private static func yamlQuote(_ value: String) -> String {

@@ -428,10 +428,11 @@ private struct HandoffAttachSheet: View {
     @ViewBuilder
     private var content: some View {
         if let attach, surface == .ghostty {
+            let command = HandoffSurfaceLauncher.command(for: attach, home: handoff.home)
             GhosttyTerminalView(
-                workingDirectory: attach.cwd,
-                argv: attach.argv,
-                env: attach.environment,
+                workingDirectory: command.cwd,
+                argv: command.argv,
+                env: command.environment,
                 sessionId: "handoff-\(attach.sessionId)"
             )
             .id(attach.sessionId)
@@ -507,7 +508,12 @@ private struct HandoffAttachSheet: View {
             return
         }
 
-        let launched = await HandoffSurfaceLauncher.launch(target, attach: attach, reach: reach)
+        let launched = await HandoffSurfaceLauncher.launch(
+            target,
+            attach: attach,
+            home: handoff.home,
+            reach: reach
+        )
         if launched {
             surface = target
             externalNote = reach == .attach
@@ -529,12 +535,14 @@ private struct HandoffAttachSheet: View {
         userInitiated: Bool,
         launched: Bool
     ) {
-        guard handoffPreferenceShouldRecord(
+        preferences.recordLaunch(
+            surface,
+            provider: handoff.provider,
+            home: handoff.home,
             reach: reach,
             userInitiated: userInitiated,
             launchSucceeded: launched
-        ) else { return }
-        preferences.record(surface, provider: handoff.provider, home: handoff.home)
+        )
     }
 }
 

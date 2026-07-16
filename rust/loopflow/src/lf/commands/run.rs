@@ -343,6 +343,7 @@ fn skill_launch_seed(
     let system_components = PromptComponents {
         surface,
         operate: loopflow,
+        include_waves: loopflow && crate::engine::prompt::skill_includes_wave_guidance(skill_name),
         ..Default::default()
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
@@ -573,16 +574,28 @@ pub(crate) fn attributed_context(
     };
 
     if components.operate {
-        let source_path = std::path::Path::new(&components.repo_root)
+        let builtins = std::path::Path::new(&components.repo_root)
             .join("rust/loopflow/src/engine/builtins/LOOPFLOW.md");
         push(
             &crate::engine::prompt::loopflow_section(),
             Kind::OperatingInstructions,
             Scope::Global,
             "LOOPFLOW.md".to_string(),
-            source_path
+            builtins
                 .is_file()
-                .then(|| source_path.to_string_lossy().to_string()),
+                .then(|| builtins.to_string_lossy().to_string()),
+            "operate",
+        );
+    }
+    if components.operate && components.include_waves {
+        let waves = std::path::Path::new(&components.repo_root)
+            .join("rust/loopflow/src/engine/builtins/WAVES.md");
+        push(
+            &crate::engine::prompt::waves_section(),
+            Kind::OperatingInstructions,
+            Scope::Global,
+            "WAVES.md".to_string(),
+            waves.is_file().then(|| waves.to_string_lossy().to_string()),
             "operate",
         );
     }
@@ -933,6 +946,8 @@ mod tests {
         let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, &[]);
         assert!(!seed.contains("<lf:loopflow>"));
         assert!(!seed.contains("lf commit"));
+        assert!(!seed.contains("<lf:waves>"));
+        assert!(!seed.contains("Product (`PRD`)"));
     }
 
     #[test]
@@ -941,6 +956,7 @@ mod tests {
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("lf commit"));
         assert!(seed.contains("</lf:loopflow>"));
+        assert!(!seed.contains("<lf:waves>"));
         assert_eq!(
             seed.matches("<lf:loopflow>").count(),
             1,
@@ -950,6 +966,14 @@ mod tests {
         assert!(seed.contains("lf memory add"));
         assert!(!seed.contains("lf pm show"));
         assert!(!seed.contains("--detach"));
+    }
+
+    #[test]
+    fn skill_launch_seed_includes_waves_for_wave_shaping_skill() {
+        let seed = skill_launch_seed("claude", Surface::Headless, "init", None, true, &[]);
+        assert_eq!(seed.matches("<lf:loopflow>").count(), 1);
+        assert_eq!(seed.matches("<lf:waves>").count(), 1);
+        assert!(seed.contains("Product (`PRD`)"));
     }
 
     #[test]
@@ -1022,6 +1046,22 @@ mod tests {
             .assets
             .iter()
             .all(|asset| asset.kind != ContextAssetKind::Assembly));
+    }
+
+    #[test]
+    fn attributed_context_keeps_wave_guidance_as_its_own_document() {
+        let components = PromptComponents {
+            operate: true,
+            include_waves: true,
+            ..PromptComponents::default()
+        };
+        let system = crate::engine::prompt::format_system_sections(&components).join("\n\n");
+
+        let prepared = attributed_context(&components, &system, "", &[]);
+        let assets = prepared.system.expect("system context").assets;
+
+        assert!(assets.iter().any(|asset| asset.label == "LOOPFLOW.md"));
+        assert!(assets.iter().any(|asset| asset.label == "WAVES.md"));
     }
 
     #[test]

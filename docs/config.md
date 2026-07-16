@@ -41,7 +41,7 @@ The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
+| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/`; `WAVES.md` in Wave-shaping contexts | `--no-loopflow` drops both built-in guides |
 | **scratch** | `scratch/` design artifacts | always included |
 | **wave** | `wave/` docs | always included |
 | **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
@@ -109,14 +109,14 @@ Flows are YAML files in `.lf/flows/`:
 
 ### Loopflow Guidance
 
-Ambient operating guidance for inline execution and mechanical git/PR operations. Injected by default; tier skills add scoped delegation.
+Ambient guidance for inline execution and mechanical git/PR operations. Wave-shaping skills also receive `WAVES.md`; tier skills add scoped delegation.
 
 | | |
 |---|---|
 | **CLI** | `--no-loopflow` |
 | **Default** | included |
 
-Use `--no-loopflow` when you want a leaner prompt without loopflow-specific process guidance.
+Use `--no-loopflow` when you want a leaner prompt without `LOOPFLOW.md` or `WAVES.md`.
 
 ### Docs
 

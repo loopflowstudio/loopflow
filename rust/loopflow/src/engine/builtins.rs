@@ -3,9 +3,11 @@
 //! Registration is automatic: drop a file into the right builtins/
 //! subdirectory and build.rs generates the HashMap entries.
 
-/// Bundled LOOPFLOW.md - the one loopflow operating document every launched
-/// agent receives, including the speech vocabulary (`lf chat`, `lf memory`).
+/// Bundled LOOPFLOW.md - mechanical operating guidance every launched agent receives.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
+
+/// Bundled WAVES.md - the repository and Wave planning model for high-level contexts.
+pub const WAVES_DOC: &str = include_str!("builtins/WAVES.md");
 
 /// Headless preamble — the only surface that needs one (no user is present).
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
@@ -286,6 +288,14 @@ mod tests {
         assert!(LOOPFLOW_DOC.contains("Execute Here First"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
+
+        assert!(WAVES_DOC.contains("repository is the root coordination boundary"));
+        assert!(WAVES_DOC.contains("Product (`PRD`)"));
+        assert!(WAVES_DOC.contains("Infrastructure (`ENG`)"));
+        assert!(WAVES_DOC.contains("Intelligence (`SCI`)"));
+        assert!(WAVES_DOC.contains("Operations (`OPS`)"));
+        assert!(WAVES_DOC.contains("Create these Waves lazily"));
+        assert!(WAVES_DOC.contains("Create a child Wave only"));
 
         let wave = get_builtin_skill("wave_pursue").expect("wave pursue");
         assert!(wave.contains("lf task run <issue-id>"));

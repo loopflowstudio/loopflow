@@ -188,6 +188,8 @@ pub struct PromptComponents {
     pub wave_chat: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
+    /// Include high-level repository and Wave planning guidance.
+    pub include_waves: bool,
     /// User message (positional args after skill/flow name)
     pub message: Option<String>,
     /// Semantic attribution for generated intent carried in `message`.
@@ -482,6 +484,10 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     );
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
+    let include_waves = opts.operate
+        && skill
+            .as_ref()
+            .is_some_and(|skill| skill_includes_wave_guidance(&skill.name));
     Ok(GatheredContext(PromptComponents {
         surface: opts.surface,
         docs,
@@ -496,6 +502,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         wave: opts.wave.clone(),
         wave_chat,
         operate: opts.operate,
+        include_waves,
         message: opts.message.clone(),
         message_context: None,
         diff_tier,
@@ -1537,12 +1544,15 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// Render system-safe reference sections (instructions only, no user content).
 ///
 /// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: loopflow, surface.
+/// third-party app classifiers: loopflow, optional Wave planning, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
     if components.operate {
         parts.push(loopflow_section());
+    }
+    if components.operate && components.include_waves {
+        parts.push(waves_section());
     }
 
     let instructions = components.surface.instructions();
@@ -1553,14 +1563,35 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     parts
 }
 
-/// The one loopflow operating document (including the Speak vocabulary) as a
-/// prompt section. Emitted exactly once per prompt: assembled prompts get it
-/// from [`format_system_sections`]; the wave loop's seed bypasses assembly
-/// and appends the same section itself.
+/// Mechanical loopflow operating guidance as a prompt section.
 pub fn loopflow_section() -> String {
     format!(
         "<lf:loopflow>\n{}\n</lf:loopflow>",
         crate::engine::builtins::LOOPFLOW_DOC
+    )
+}
+
+/// Repository and Wave planning guidance as a prompt section.
+pub fn waves_section() -> String {
+    format!(
+        "<lf:waves>\n{}\n</lf:waves>",
+        crate::engine::builtins::WAVES_DOC
+    )
+}
+
+/// Whether a skill makes repository-level Wave structure decisions.
+pub fn skill_includes_wave_guidance(skill: &str) -> bool {
+    matches!(
+        skill,
+        "init"
+            | "design"
+            | "split-wave"
+            | "project-promote"
+            | "update-wave"
+            | "mutate"
+            | "wave_clarify"
+            | "wave_pursue"
+            | "wave_mutate"
     )
 }
 
@@ -2069,6 +2100,7 @@ mod tests {
         assert!(prompt.contains("<lf:loopflow>"));
         assert!(prompt.contains("lf commit"));
         assert!(prompt.contains("</lf:loopflow>"));
+        assert!(!prompt.contains("<lf:waves>"));
     }
 
     #[test]
@@ -2082,6 +2114,8 @@ mod tests {
         assert!(!prompt.contains("<lf:loopflow>"));
         assert!(!prompt.contains("lf commit"));
         assert!(!prompt.contains("lf chat"));
+        assert!(!prompt.contains("<lf:waves>"));
+        assert!(!prompt.contains("Product (`PRD`)"));
     }
 
     /// A bare flow/skill run gets the universal execution floor, not wave or
@@ -2096,12 +2130,56 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+        assert!(!prompt.contains("<lf:waves>"));
         assert!(prompt.contains("Execute Here First"));
         assert!(prompt.contains("lf pr land"));
         assert!(prompt.contains("lf memory add"));
         assert!(!prompt.contains("lf pm show"));
         assert!(!prompt.contains("lf loop <flow>"));
         assert!(!prompt.contains("tmux attach"));
+    }
+
+    #[test]
+    fn wave_shaping_prompt_carries_wave_guidance_once() {
+        let components = PromptComponents {
+            operate: true,
+            include_waves: true,
+            skill: Some(Skill::named("init")),
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+        assert_eq!(prompt.matches("<lf:waves>").count(), 1);
+        assert!(prompt.contains("Product (`PRD`)"));
+    }
+
+    #[test]
+    fn wave_guidance_is_limited_to_portfolio_shaping_skills() {
+        for skill in [
+            "init",
+            "design",
+            "split-wave",
+            "project-promote",
+            "update-wave",
+            "mutate",
+            "wave_clarify",
+            "wave_pursue",
+            "wave_mutate",
+        ] {
+            assert!(skill_includes_wave_guidance(skill), "{skill}");
+        }
+        for skill in [
+            "implement",
+            "task_clarify",
+            "task_pursue",
+            "task_mutate",
+            "project_clarify",
+            "project_pursue",
+            "project_mutate",
+        ] {
+            assert!(!skill_includes_wave_guidance(skill), "{skill}");
+        }
     }
 
     #[test]
@@ -2257,6 +2335,7 @@ mod tests {
         };
         let prompt = render_full_prompt(components);
         assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+        assert!(!prompt.contains("<lf:waves>"));
     }
 
     #[test]

@@ -23,7 +23,7 @@ struct Args {
     #[arg(long)]
     surface: Option<Surface>,
 
-    /// Exclude loopflow operating guidance
+    /// Exclude loopflow operating and Wave planning guidance
     #[arg(long = "no-loopflow")]
     no_loopflow: bool,
 

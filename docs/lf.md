@@ -89,7 +89,7 @@ level stays there. Put `--` before literal arguments that look like flags.
 
 | Flag | Description |
 |------|-------------|
-| `--no-loopflow` | Omit `LOOPFLOW.md` operating guidance |
+| `--no-loopflow` | Omit `LOOPFLOW.md` and `WAVES.md` guidance |
 
 ### Clipboard
 
@@ -453,9 +453,9 @@ lf implement -d ux,clarity
 lf gate --no-loopflow
 ```
 
-`LOOPFLOW.md` carries loopflow-specific guidance for inline execution and
-mechanical git/PR operations. Tier skills add scoped delegation. Use
-`--no-loopflow` for a leaner prompt.
+`LOOPFLOW.md` carries inline execution and mechanical git/PR guidance;
+`WAVES.md` carries the repository and Wave planning model. Tier skills add
+scoped delegation. Use `--no-loopflow` for a leaner prompt without either.
 
 ### Include clipboard content
 

@@ -116,10 +116,10 @@ or PR-limit counter to clear.
 
 **Symptom:** Task fails with context/token limit errors.
 
-The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`; Wave-shaping runs also receive `WAVES.md`. Reduce further:
 
 ```bash
-lf qa --no-loopflow         # skip LOOPFLOW.md
+lf qa --no-loopflow         # skip LOOPFLOW.md and WAVES.md
 lf qa --docs src/small/     # limit --docs to a narrower path or glob
 ```
 

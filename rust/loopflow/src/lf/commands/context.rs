@@ -1356,6 +1356,12 @@ fn discover_instruction_sources(query: &SessionSetQuery) -> Vec<CatalogInstructi
             "LOOPFLOW.md".to_string(),
             builtins.join("LOOPFLOW.md"),
         );
+        add_catalog_source(
+            &mut sources,
+            ContextAssetKind::OperatingInstructions,
+            "WAVES.md".to_string(),
+            builtins.join("WAVES.md"),
+        );
         add_markdown_catalog(
             &mut sources,
             ContextAssetKind::SurfaceInstructions,

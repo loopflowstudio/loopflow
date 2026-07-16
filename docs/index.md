@@ -233,7 +233,7 @@ wave/                     # Wave plans (persists)
 
 ### What's Auto-Included
 
-Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPFLOW.md`, `scratch/`, and `wave/`. Nothing else — pull in extra docs with `--docs`, branch file bodies with `--diff-files`, and raw patches with `--diff`.
+Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPFLOW.md`, `scratch/`, and `wave/`. Bootstrap and Wave-shaping skills also see `WAVES.md`. Nothing else — pull in extra docs with `--docs`, branch file bodies with `--diff-files`, and raw patches with `--diff`.
 
 ---
 

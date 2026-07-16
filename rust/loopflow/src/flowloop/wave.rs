@@ -172,16 +172,17 @@ pub fn path_for_children() -> OsString {
 }
 
 /// One pass's seed: the rendered goal seed, the orchestration discipline,
-/// the shared loopflow operating document (pass seeds bypass context
-/// assembly, so the `<lf:loopflow>` section is appended here), and the
+/// the shared loopflow operating documents (pass seeds bypass context
+/// assembly, so both operating sections are appended here), and the
 /// wake that opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN
 /// repo (reads are free; writes go through the listener's doors).
 fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
     let seed = build_goal_seed(origin_repo, wave);
     format!(
-        "{seed}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
+        "{seed}\n\n{}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
         orchestration_discipline(wave),
-        crate::engine::prompt::loopflow_section()
+        crate::engine::prompt::loopflow_section(),
+        crate::engine::prompt::waves_section()
     )
 }
 
@@ -1746,6 +1747,8 @@ mod tests {
 
         assert!(seed.contains("Ship the thing."));
         assert!(seed.contains("<lf:loopflow>"));
+        assert!(seed.contains("<lf:waves>"));
+        assert!(seed.contains("Product (`PRD`)"));
         assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
         assert_eq!(
             LoopConfig::default().heartbeat_idle,

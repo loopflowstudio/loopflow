@@ -95,7 +95,7 @@ pub struct Cli {
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
 
-    /// Exclude loopflow operating guidance
+    /// Exclude loopflow operating and Wave planning guidance
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
 }

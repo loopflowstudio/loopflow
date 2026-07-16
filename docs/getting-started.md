@@ -46,7 +46,7 @@ clipboard        634 ▏
 
 The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance, scratch notes, and clipboard—and passes it to the coding agent. Add repo docs explicitly with `--docs` and changed file bodies with `--diff-files`.
 
-`LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
+`LOOPFLOW.md` ships as default operating guidance. Bootstrap and Wave-shaping runs also receive `WAVES.md`; opt out with `--no-loopflow`.
 
 Or try the demo repo:
 

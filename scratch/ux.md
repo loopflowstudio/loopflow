@@ -649,3 +649,120 @@ This design is larger than one Task: it changes the main Swift information
 architecture, Chat behavior, a shared status projection, and the runtime Session
 contract. The task graph above keeps the model changes owned by Loopflow API and
 Auditability while Mac Surface UX owns their presentation and dogfood proof.
+
+## Repository Wave bootstrap
+
+> The default user flow should basically be:
+>
+> - make sure there is one project for one wave asap so you can start executing
+>   standard operating procedure tasks
+> - you should look for opportunities to create a structure something similar
+>   to these 4 at the root, and then to subdivide at will.
+> - you need not spin up all waves all the time, but the first time you try to
+>   solve a bug that rightly belongs to one of these waves, its worth iterating
+>   on the Goals, KRs, etc while also solving the bug
+
+> This is probably its own .md file. WAVES.md to go alongside LOOPFLOW.md as
+> autoinclude. Maybe the empty screen chat has a selector that basically quick
+> starts one of these specifically or allows you to name your own first wave.
+
+The repository is the portfolio root. Do not manufacture a root Wave whose
+Project and KRs merely summarize other Waves. That creates a second
+representation of the repository without a concrete operating objective.
+
+Split the always-on operating guidance by concern:
+
+- `LOOPFLOW.md` explains how an agent works safely through Loopflow.
+- `WAVES.md` explains how a repository grows its operating structure.
+- Both are built-ins, but they have different inclusion scopes. Every Loopflow
+  execution receives `LOOPFLOW.md`; `WAVES.md` enters only a high-level context
+  that can create or reshape the Wave portfolio: repository bootstrap, a Wave
+  resident, or an explicit Wave-shaping skill. Project/Task pursuit and direct
+  execution do not receive portfolio doctrine after ownership is decided.
+
+`WAVES.md` defines four useful root roles without requiring four empty records:
+
+| Role | Default prefix | Owns |
+| --- | --- | --- |
+| Product | `PRD` | User value, behavior, interaction, and product quality |
+| Infrastructure | `ENG` | Technical architecture, developer flow, reliability, and release machinery |
+| Intelligence | `SCI` | Evaluation, learning, model behavior, and research |
+| Operations | `OPS` | Recurring service operation, external coordination, and portfolio hygiene |
+
+These are routing defaults, not a required org chart. Materialize a role when
+the first real outcome belongs there. A repository may start with only Product,
+or with a custom domain Wave when that is more truthful. Child Waves appear
+when a domain needs durable memory, chat, cadence, budget, or independent
+Project selection; Project nesting is never used as a substitute.
+
+### Empty Chat bootstrap
+
+When a selected repository has no authored Waves, the main pane stays a Chat
+surface and replaces the disabled composer with a small first-run prompt:
+
+```text
+What kind of work are we starting?
+[ Product ] [ Infrastructure ] [ Intelligence ] [ Operations ] [ Name a Wave ]
+```
+
+Choosing a default role creates that Wave with its standard name and prefix.
+`Name a Wave` asks only for a name; it does not force the work into one of the
+four roles. The app selects and starts the new Wave, then reveals the ordinary
+Chat composer with one focused prompt:
+
+```text
+What should Product accomplish first?
+```
+
+The first send is a normal durable Chat message. The Wave resident receives
+`WAVES.md` and makes the smallest executable structure its first move: create
+one outcome-shaped Project with initial proof KRs, then pursue the work. This
+keeps KR authorship in the high-level agent that can exercise judgment instead
+of making Swift generate planning content.
+
+Wave creation itself is one shared CLI operation, not a Swift sequence of
+filesystem and Linear mutations.
+
+```rust
+#[derive(Debug, Serialize)]
+pub struct WaveCreateRequest {
+    pub role: Option<WaveRole>,
+    pub wave_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WaveCreateResult {
+    pub wave: WaveSummary,
+    pub team_key: String,
+}
+```
+
+The create operation:
+
+1. writes `wave/<slug>/GOAL.md` with a concise initial objective;
+2. connects or creates the Wave's Linear Initiative and role team;
+3. registers the Wave and returns enough identity for the app to select it;
+4. the app launches it through the existing Wave launcher and attaches Chat.
+
+If launch fails, the authored Wave and PM binding remain valid and the selected
+pane offers the normal Start Wave recovery. The first Wave turn must create a
+concrete Project while answering the user's outcome; it must never create “Set
+up Product,” “Root,” or another administrative placeholder Project.
+
+Existing repositories skip first-run bootstrap. Their empty Chat means “no
+messages yet,” not “no Wave structure,” and should show a normal composer.
+
+### Bootstrap done when
+
+1. Bootstrap and Wave-shaping sessions receive `WAVES.md`; ordinary Project,
+   Task, and direct execution sessions do not.
+2. A new repository opens to the five choices above, not “No registered
+   Waves.”
+3. Choosing Product produces exactly one Product Wave, selects it, and starts
+   its normal durable Chat.
+4. Sending the first outcome produces one outcome-shaped Project with
+   proof-shaped KRs before implementation Tasks are delegated.
+5. Infrastructure, Intelligence, and Operations remain suggestions until
+   actual work materializes them.
+6. Choosing a custom name produces the same one-Wave, one-Project result
+   without assigning a false default role.

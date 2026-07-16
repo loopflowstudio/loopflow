@@ -8,7 +8,7 @@ reproduces each `.md` exactly.
 uv run python tests/goldens/update_goldens.py   # regenerate all .md snapshots
 ```
 
-Run this whenever you edit an embedded prompt source — `LOOPFLOW.md`, anything
+Run this whenever you edit an embedded prompt source — `LOOPFLOW.md`, `WAVES.md`, anything
 under `rust/loopflow/src/engine/builtins/` (surfaces, skills, directions), or the
 assembly code in `engine/`. Skipping it leaves the golden stale and fails
 `rust-test` in CI. `*.actual.md` files are test debris; don't commit them.

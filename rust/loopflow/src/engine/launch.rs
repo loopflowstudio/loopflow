@@ -104,6 +104,12 @@ pub fn prepare_launch_prompt(
     let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
     let diff = source_overrides.diff.unwrap_or(config.diff);
     let clipboard = source_overrides.clipboard.unwrap_or(config.paste);
+    let include_waves = !no_loopflow
+        && resolved_skill
+            .as_ref()
+            .map(|skill| skill.name.as_str())
+            .or(skill.as_deref())
+            .is_some_and(crate::engine::prompt::skill_includes_wave_guidance);
 
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
@@ -129,6 +135,7 @@ pub fn prepare_launch_prompt(
     if let Some(skill) = resolved_skill {
         gathered.components_mut().skill = Some(skill);
     }
+    gathered.components_mut().include_waves = include_waves;
     let deduplicated_docs = drop_native_instruction_docs(gathered.components_mut(), &repo_root);
 
     if let Some(summary) = summary {
@@ -319,6 +326,7 @@ Test skill body.
         )
         .expect("prepare prompt");
         assert!(prepared.prompt.contains("<lf:loopflow>"));
+        assert!(!prepared.prompt.contains("<lf:waves>"));
         assert!(prepared.config.system_prompt.contains("lf commit"));
         assert!(prepared.config.system_prompt.contains("Execute Here First"));
         assert!(!prepared.config.system_prompt.contains("lf pm show"));
@@ -335,6 +343,7 @@ Test skill body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
+                skill: Some("init".to_string()),
                 surface: Surface::Headless,
                 no_loopflow: true,
                 ..LaunchPromptInput::default()
@@ -342,7 +351,27 @@ Test skill body.
         )
         .expect("prepare prompt");
         assert!(!prepared.prompt.contains("<lf:loopflow>"));
+        assert!(!prepared.prompt.contains("<lf:waves>"));
         assert!(!prepared.config.system_prompt.contains("lf commit"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_includes_waves_for_wave_shaping_skill() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("init".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare prompt");
+        assert!(prepared.prompt.contains("<lf:waves>"));
+        assert!(prepared.prompt.contains("Product (`PRD`)"));
     }
 
     #[test]

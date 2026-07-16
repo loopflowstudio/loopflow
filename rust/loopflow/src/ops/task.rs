@@ -1665,9 +1665,6 @@ pub(crate) async fn reconcile_process_liveness(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<()> {
-    if !session.status.is_process_active() {
-        return Ok(());
-    }
     if session
         .latest_process
         .as_ref()
@@ -1684,6 +1681,10 @@ pub(crate) async fn reconcile_process_liveness(
     if alive {
         return Ok(());
     }
+    // A dead lease is reaped regardless of Session status. A Waiting or Failed
+    // Session can still carry a stale Legacy/Reserved/Active lease from a body
+    // that vanished without recording a terminal outcome; an explicit resume
+    // must revoke it here, or the fresh process can never reserve the slot.
     let lost_reason = "task process disappeared before recording a terminal outcome";
     if session.latest_process.as_ref().is_some_and(|process| {
         matches!(
@@ -1708,6 +1709,12 @@ pub(crate) async fn reconcile_process_liveness(
             )
             .await?,
         );
+    }
+    // Only a Session whose status still claims a live process needs a terminal
+    // transition here. One already Waiting or Failed keeps its status; the
+    // resume that follows relaunches it against the now-reaped lease.
+    if !session.status.is_process_active() {
+        return Ok(());
     }
     let active = store
         .active_task_pr(&session.id)
@@ -3169,9 +3176,9 @@ mod tests {
     use super::{
         _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
         diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
-        parse_pr_slug, parse_workspace_slug, project_context, refuse_if_canonical_ahead,
-        resolve_task_flow, resolve_upstream_base, verify_task_pr_range_with_authority,
-        RotateOptions, TaskControlResult, TaskWorkspace,
+        parse_pr_slug, parse_workspace_slug, project_context, reconcile_process_liveness,
+        refuse_if_canonical_ahead, resolve_task_flow, resolve_upstream_base,
+        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
     use crate::id::WaveId;
@@ -3417,6 +3424,129 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("terminal Tasks cannot change interaction policy"));
+    }
+
+    /// Seed a second Task under the rotation scaffolding whose durable state is a
+    /// non-active status still carrying a dead lease — the exact shape an explicit
+    /// resume must reconcile before it can reserve a fresh body.
+    async fn dead_lease_task(
+        repo: &TestRepo,
+        branch: &str,
+        base: &str,
+        status: TaskSessionStatus,
+        lease_state: crate::child_session::ChildLeaseState,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession) {
+        let (home, store, base_session, _pr) = rotation_task(repo, branch, base).await;
+        let now = OffsetDateTime::now_utc();
+        let mut session = base_session.clone();
+        session.id = TaskSessionId::new();
+        session.workspace_slug = "dead-lease-proof".to_string();
+        // Distinct worktree and issue: both columns are UNIQUE and the base Task
+        // already holds the repo root and the rotation issue.
+        session.worktree = repo.path().join(format!("dead-{}", session.id));
+        session.launch.issue.id =
+            LinearIssueId::new(format!("issue-{}", session.id)).expect("issue id");
+        session.launch.issue.identifier = format!("INF-DEAD-{}", session.id);
+        session.set_status(status, "recovered from a vanished body");
+        session.latest_process = Some(ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            process_group_id: None,
+            // A name no tmux server knows, so the liveness probe reads it as dead.
+            tmux_name: format!("dead-lease-{}", session.id),
+            agent: session.agent.clone(),
+            provider: session.provider.clone(),
+            provider_session_id: None,
+            started_at: now - time::Duration::hours(1),
+            state: lease_state,
+            outcome: None,
+        });
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: session.workspace_slug.clone(),
+            branch: format!("{branch}-dead"),
+            base_commit: base.to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+            ci_observation: None,
+        };
+        store
+            .create_task_session(&session, &pr)
+            .await
+            .expect("create dead-lease Task");
+        (home, store, session)
+    }
+
+    #[tokio::test]
+    async fn resume_revokes_a_dead_legacy_lease_on_a_waiting_task() {
+        // W2-135: a Waiting Task still pinned by a Legacy lease whose body vanished.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, mut session) = dead_lease_task(
+            &repo,
+            "jack/w2-135",
+            &base,
+            TaskSessionStatus::Waiting,
+            crate::child_session::ChildLeaseState::Legacy,
+        )
+        .await;
+
+        reconcile_process_liveness(&store, &mut session)
+            .await
+            .expect("reconcile a waiting task with a dead legacy lease");
+
+        // The dead lease is reaped so the resume can reserve a fresh body...
+        assert_eq!(
+            session.latest_process.as_ref().map(|process| process.state),
+            Some(crate::child_session::ChildLeaseState::Finished)
+        );
+        // ...while the Session keeps its Waiting status for the resume that follows.
+        assert_eq!(session.status, TaskSessionStatus::Waiting);
+
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted.latest_process.map(|process| process.state),
+            Some(crate::child_session::ChildLeaseState::Finished)
+        );
+        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+    }
+
+    #[tokio::test]
+    async fn resume_revokes_a_dead_active_lease_on_a_failed_task() {
+        // W2-122: a Failed Task still holding an Active lease whose body vanished.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, mut session) = dead_lease_task(
+            &repo,
+            "jack/w2-122",
+            &base,
+            TaskSessionStatus::Failed,
+            crate::child_session::ChildLeaseState::Active,
+        )
+        .await;
+
+        reconcile_process_liveness(&store, &mut session)
+            .await
+            .expect("reconcile a failed task with a dead active lease");
+
+        assert_eq!(
+            session.latest_process.as_ref().map(|process| process.state),
+            Some(crate::child_session::ChildLeaseState::Finished)
+        );
+        assert_eq!(session.status, TaskSessionStatus::Failed);
+
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted.latest_process.map(|process| process.state),
+            Some(crate::child_session::ChildLeaseState::Finished)
+        );
+        assert_eq!(persisted.status, TaskSessionStatus::Failed);
     }
 
     #[test]

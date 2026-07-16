@@ -784,7 +784,21 @@ async fn inspect_outcome(
         if task.status.is_terminal() {
             continue;
         }
+        // Refuse unsafe worktree/branch state before moving any durable
+        // ownership. One bad branch no longer aborts the whole project
+        // observation: the Task is left untouched and the rest keep moving.
+        if let Err(error) = crate::ops::task::task_recovery_adoption(store, task).await {
+            tracing::warn!(
+                task = %task.launch.issue.identifier,
+                %error,
+                "supervisor skipped Task recovery: unsafe worktree/branch state"
+            );
+            continue;
+        }
         let observed = crate::ops::task::reconcile_task_pr(store, task)
+            .await
+            .map_err(|error| anyhow!(error.to_string()))?;
+        crate::ops::task::refuse_dirty_between_prs(store, task)
             .await
             .map_err(|error| anyhow!(error.to_string()))?;
         crate::ops::task::reconcile_process_liveness(store, task)

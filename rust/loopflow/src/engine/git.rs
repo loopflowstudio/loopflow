@@ -917,6 +917,36 @@ pub fn abort_rebase(worktree: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
+/// `Some(kind)` when the worktree is mid-rebase, merge, cherry-pick, revert, or
+/// bisect — a crash boundary a Task recovery must not adopt. Reads the
+/// worktree's own git dir (`git rev-parse --absolute-git-dir`) so linked
+/// worktrees inspect their private state, not the shared main repo.
+pub fn intervention_state(worktree: &Path) -> Result<Option<&'static str>, GitError> {
+    let git_dir = git_dir(worktree)?;
+    let present = |name: &str| std::fs::metadata(git_dir.join(name)).is_ok();
+    if present("rebase-merge") || present("rebase-apply") {
+        return Ok(Some("rebase"));
+    }
+    if present("MERGE_HEAD") {
+        return Ok(Some("merge"));
+    }
+    if present("CHERRY_PICK_HEAD") {
+        return Ok(Some("cherry-pick"));
+    }
+    if present("REVERT_HEAD") {
+        return Ok(Some("revert"));
+    }
+    if present("BISECT_LOG") {
+        return Ok(Some("bisect"));
+    }
+    Ok(None)
+}
+
+fn git_dir(worktree: &Path) -> Result<PathBuf, GitError> {
+    let raw = git_stdout(worktree, &["rev-parse", "--absolute-git-dir"])?;
+    Ok(PathBuf::from(raw.trim()))
+}
+
 pub fn create_branch(worktree: &Path, name: &str) -> Result<BranchInfo, GitError> {
     let old_branch = git_stdout(worktree, &["rev-parse", "--abbrev-ref", "HEAD"])?
         .trim()

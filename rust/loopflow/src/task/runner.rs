@@ -8,18 +8,23 @@ use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
-use crate::chat::types::{ConversationEvent, Lifecycle};
+use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input, input_is_current,
     reconcile_stale_deliveries, ChildTarget, CommandStop, DecisionResolution, PendingInput,
 };
 use crate::child_session::{
-    task_write_lease_from_env, unincorporated_directive_version, BoundaryResult, ChildBodyOutcome,
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDirective, ChildLeaseState, ChildRef, ChildWriteLease,
+    task_write_lease_from_env, unincorporated_directive_version, BoundaryResult,
+    ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandId,
+    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
+    ChildRef, ChildWriteLease,
 };
+use crate::engine::wave_config::read_wave_config;
 use crate::engine::InteractionPolicy;
-use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
+use crate::harness::{
+    classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
+    ApprovalPolicy, Harness, RecoveryDecision,
+};
 use crate::interaction_review::{
     InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
     InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
@@ -274,6 +279,7 @@ The durable reviewer outcome is:\n{}",
     let mut command_poll = tokio::time::interval(Duration::from_millis(200));
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
+    let mut turn_had_durable_side_effect = false;
     'runner: loop {
         tokio::select! {
             line = attachment_rx.recv() => {
@@ -333,32 +339,32 @@ The durable reviewer outcome is:\n{}",
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
+                    ConversationEvent::TurnStarted { .. } => {
+                        turn_had_durable_side_effect = false;
+                    }
+                    ConversationEvent::ItemCompleted { item, .. } => {
+                        if matches!(
+                            item,
+                            ConversationItem::Command { .. } | ConversationItem::File { .. }
+                        ) {
+                            turn_had_durable_side_effect = true;
+                        }
+                    }
                     ConversationEvent::TurnCompleted { status, .. } => {
                         provider_turn_active = false;
                         if status == Lifecycle::Failed {
-                            // A provider outage during a PR/ci-fix iteration is
-                            // an infrastructure blocker, not an unhandled
-                            // failure: keep the PR attached and block
-                            // actionably so a resume when the provider recovers
-                            // picks up the same PR. Without a PR, fall back to
-                            // the generic failed path.
-                            if store.active_task_pr(&session.id).await?.is_some() {
-                                return finish_infra_blocked(
-                                    &store,
-                                    &mut session,
-                                    lease,
-                                    harness.as_mut(),
-                                    "provider",
-                                    "provider turn failed; resume when the provider recovers",
-                                )
-                                .await;
-                            }
-                            return finish_failed(
+                            let reason = drain_turn_failure_reason(
+                                &mut event_rx,
+                                "provider turn failed",
+                            );
+                            return handle_body_failure(
                                 &store,
                                 &mut session,
                                 lease,
                                 harness.as_mut(),
-                                "provider turn failed",
+                                &wave,
+                                &reason,
+                                turn_had_durable_side_effect,
                             )
                             .await;
                         }
@@ -913,18 +919,20 @@ The durable reviewer outcome is:\n{}",
                         }
                     }
                     ConversationEvent::Error { code, message } => {
-                        return finish_failed(
+                        let reason = format!("{code}: {message}");
+                        return handle_body_failure(
                             &store,
                             &mut session,
                             lease,
                             harness.as_mut(),
-                            &format!("{code}: {message}"),
-                        ).await;
+                            &wave,
+                            &reason,
+                            turn_had_durable_side_effect,
+                        )
+                        .await;
                     }
-                    ConversationEvent::TurnStarted { .. }
-                    | ConversationEvent::ItemStarted { .. }
+                    ConversationEvent::ItemStarted { .. }
                     | ConversationEvent::ItemUpdated { .. }
-                    | ConversationEvent::ItemCompleted { .. }
                     | ConversationEvent::ReasoningDelta { .. }
                     | ConversationEvent::DiffUpdated { .. }
                     | ConversationEvent::TurnUsage { .. }
@@ -1879,6 +1887,83 @@ async fn finish_infra_blocked(
     Ok(())
 }
 
+/// Handle a body failure with disconnect-class recovery: classify the failure,
+/// and if it's a disconnect/hollow-body with a configured backup agent, hand
+/// the next generation to the backup instead of leaving the body failed for
+/// the supervisor to respawn the same flaky provider.
+async fn handle_body_failure(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    harness: &mut dyn Harness,
+    wave: &Wave,
+    reason: &str,
+    turn_had_durable_side_effect: bool,
+) -> Result<()> {
+    let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
+    let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
+    let decision = classify_disconnect_recovery(
+        reason,
+        &session.agent,
+        turn_had_durable_side_effect,
+        backup_agent,
+    );
+
+    match decision {
+        RecoveryDecision::HandoffToBackup { agent, provider } => {
+            let _ = harness.stop().await;
+            set_and_record_status(store, session, lease, TaskSessionStatus::Failed, reason).await?;
+            store
+                .append_task_event_for_lease(
+                    &session.id,
+                    lease,
+                    &TaskEventKind::Failed {
+                        error: reason.to_string(),
+                        resumable: true,
+                    },
+                )
+                .await?;
+            if let Some(process) = &mut session.latest_process {
+                process.state = ChildLeaseState::Finished;
+                process.outcome = Some(ChildBodyOutcome::Failed {
+                    reason: reason.to_string(),
+                });
+            }
+            store.finish_task_process(session, lease).await?;
+
+            let request = ChildBodyHandoffRequest {
+                agent: agent.clone(),
+                provider: provider.clone(),
+                reason: format!(
+                    "disconnect-class failure; handing off from {} to {agent}",
+                    session.agent
+                ),
+            };
+            *session = store.handoff_task_body(&session.id, &request).await?;
+            Ok(())
+        }
+        RecoveryDecision::Stop => {
+            let non_convergence = format!(
+                "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
+            );
+            finish_failed(store, session, lease, harness, &non_convergence).await
+        }
+        RecoveryDecision::AllowRetry => finish_failed(store, session, lease, harness, reason).await,
+        RecoveryDecision::Normal => {
+            // Not a disconnect-class failure — a provider outage during a
+            // PR/ci-fix iteration is an infrastructure blocker: keep the PR
+            // attached and block actionably so a resume when the provider
+            // recovers picks up the same PR. Without a PR, fall back to the
+            // generic failed path.
+            if store.active_task_pr(&session.id).await?.is_some() {
+                return finish_infra_blocked(store, session, lease, harness, "provider", reason)
+                    .await;
+            }
+            finish_failed(store, session, lease, harness, reason).await
+        }
+    }
+}
+
 async fn finish_abandoned(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -2081,9 +2166,9 @@ mod tests {
 
     use super::{
         absorb_commands, apply_input, apply_next_pending, ci_fix_seed, handle_attachment,
-        human_interaction_review_protocol, infra_blocked_reason, interaction_review_prompt,
-        prepare_task_flow_step, progress_summary, resume_task_phase, start_prepared_task_step,
-        task_seed, CommandStop, PreparedTaskStep,
+        handle_body_failure, human_interaction_review_protocol, infra_blocked_reason,
+        interaction_review_prompt, prepare_task_flow_step, progress_summary, resume_task_phase,
+        start_prepared_task_step, task_seed, CommandStop, PreparedTaskStep,
     };
     use crate::child_session::{
         ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
@@ -3241,5 +3326,200 @@ mod tests {
         // resume can reconcile the handoff outcome.
         let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
         assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+    }
+
+    /// A disconnect-class failure with `backup_agent` configured hands the
+    /// next generation to the backup, records `BodyHandedOff`, retains the
+    /// failed opencode generation, and fences out a late write from the dead
+    /// body — all in one test so the recovery contract is visible end-to-end.
+    #[tokio::test]
+    async fn disconnect_failure_with_backup_hands_off_and_fences_old_writer() {
+        let repo = tempfile::tempdir().unwrap();
+        let wave_name = "wave-opencode";
+        let wave_dir = repo.path().join("wave").join(wave_name);
+        std::fs::create_dir_all(&wave_dir).unwrap();
+        std::fs::write(
+            wave_dir.join("GOAL.md"),
+            "---\nbackup_agent: claude:opus\n---\n\n# Goal\n",
+        )
+        .unwrap();
+
+        let store_path = repo.path().join("registry.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(store_path))
+                .await
+                .unwrap(),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            wave_name.to_string(),
+            repo.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+
+        let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
+            .unwrap();
+        let project_snapshot = LinearProjectSnapshot {
+            id: LinearProjectId::new("project-opencode").unwrap(),
+            slug: "control".to_string(),
+            name: "Control".to_string(),
+            prompt_context: "test".to_string(),
+        };
+        let project = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: project_snapshot.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Created,
+            status_reason: "reserved".to_string(),
+            status_at: now,
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "opencode".to_string(),
+            provider: "opencode".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project_session(&project).await.unwrap();
+
+        let mut session = TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new("issue-opencode").unwrap(),
+                    identifier: "OP-123".to_string(),
+                    title: "Conformance".to_string(),
+                    description: "test".to_string(),
+                },
+                project: project_snapshot,
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_session_id: project.id,
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Waiting,
+            status_reason: "ready".to_string(),
+            status_at: now,
+            worktree: PathBuf::from(repo.path().join("worktree").display().to_string()),
+            workspace_slug: "test-opencode".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "opencode:glm-5.2".to_string(),
+            provider: "opencode".to_string(),
+            provider_session_id: Some("provider-session".to_string()),
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: crate::task::Observation::NotRequired,
+        };
+        let pr = crate::task::TaskPr {
+            id: crate::task::TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: session.workspace_slug.clone(),
+            branch: "test/opencode".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+        };
+        store.create_task_session(&session, &pr).await.unwrap();
+        session.begin_generation("lf-task-opencode".to_string());
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut session.latest_process {
+            process.state = crate::child_session::ChildLeaseState::Active;
+        }
+        session.set_status(TaskSessionStatus::Running, "provider active");
+        store.activate_task_process(&session, &lease).await.unwrap();
+
+        // Drive a disconnect-class failure with the backup configured.
+        let mut harness = ScriptedHarness::new(false);
+        let result = handle_body_failure(
+            &store,
+            &mut session,
+            &lease,
+            &mut harness,
+            &wave,
+            "opencode_disconnected: stream died mid-turn",
+            true, // durable side effect → backup is the preferred path
+        )
+        .await;
+
+        // The body handed off, not failed — Ok(()) so the supervisor
+        // relaunches with the backup agent.
+        assert!(result.is_ok(), "handoff should return Ok");
+
+        // The session now carries the backup agent.
+        assert_eq!(session.agent, "claude:opus");
+        assert_eq!(session.provider, "claude");
+        assert_eq!(
+            session.provider_session_id, None,
+            "provider session cleared on cross-provider handoff"
+        );
+
+        // The failed opencode generation is retained as evidence.
+        let process = session.latest_process.as_ref().expect("process retained");
+        assert_eq!(
+            process.state,
+            crate::child_session::ChildLeaseState::Finished
+        );
+        assert!(matches!(
+            &process.outcome,
+            Some(crate::child_session::ChildBodyOutcome::Failed { reason })
+                if reason.contains("opencode_disconnected")
+        ));
+
+        // The BodyHandedOff event is in the ledger.
+        let events = store.task_events_after(&session.id, 0).await.unwrap();
+        assert!(
+            events.iter().any(|event| matches!(
+                &event.kind,
+                TaskEventKind::BodyHandedOff { handoff }
+                    if handoff.from_agent == "opencode:glm-5.2"
+                        && handoff.to_agent == "claude:opus"
+                        && handoff.reason.contains("disconnect-class failure")
+            )),
+            "BodyHandedOff event must be recorded; events: {events:?}"
+        );
+
+        // Fencing: a late write from the dead opencode body is rejected.
+        // The process is Finished, so the old lease can no longer update.
+        let mut late_session = store.get_task_session(&session.id).await.unwrap().unwrap();
+        late_session.status_reason = "late write from dead body".to_string();
+        let write_result = store
+            .update_task_session_for_lease(&late_session, &lease)
+            .await;
+        assert!(
+            write_result.is_err(),
+            "a late write from the dead generation must be fenced out"
+        );
     }
 }

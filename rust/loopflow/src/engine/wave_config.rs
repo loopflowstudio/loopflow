@@ -47,6 +47,14 @@ pub struct WaveConfig {
     /// commands. Absent means the current user's local Home.
     #[serde(default)]
     pub home: Option<String>,
+    /// Backup agent for disconnect-class body failures: when an opencode body
+    /// goes hollow or the SSE stream disconnects, the next generation is handed
+    /// to this agent instead of retrying the same flaky provider. Example:
+    /// `backup_agent: claude:opus`. Absent → no auto-handoff (the body fails
+    /// and the supervisor respawns the same agent if replay-safe, or stops).
+    /// Re-read live from GOAL.md, not the registry row.
+    #[serde(default)]
+    pub backup_agent: Option<String>,
 }
 
 impl WaveConfig {

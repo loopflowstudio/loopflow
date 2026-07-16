@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
-use crate::chat::types::{ConversationEvent, Lifecycle};
+use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input,
     reconcile_stale_deliveries, take_current_input as take_child_input, ChildTarget, CommandStop,
@@ -16,11 +16,15 @@ use crate::child_control::{
 };
 use crate::child_session::{
     project_write_lease_from_env, unincorporated_directive_version, BoundaryResult,
-    ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState, ChildRef,
-    ChildWriteLease,
+    ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandId,
+    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
+    ChildRef, ChildWriteLease,
 };
-use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
+use crate::engine::wave_config::read_wave_config;
+use crate::harness::{
+    classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
+    ApprovalPolicy, Harness, RecoveryDecision,
+};
 use crate::project_session::{
     ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
@@ -182,6 +186,7 @@ async fn run_project_session_inner(
     let mut task_supervision = tokio::time::interval(TASK_SUPERVISION_INTERVAL);
     task_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
+    let mut turn_had_durable_side_effect = false;
     loop {
         tokio::select! {
             line = attachment_rx.recv() => {
@@ -238,9 +243,33 @@ async fn run_project_session_inner(
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
+                    ConversationEvent::TurnStarted { .. } => {
+                        turn_had_durable_side_effect = false;
+                    }
+                    ConversationEvent::ItemCompleted { item, .. } => {
+                        if matches!(
+                            item,
+                            ConversationItem::Command { .. } | ConversationItem::File { .. }
+                        ) {
+                            turn_had_durable_side_effect = true;
+                        }
+                    }
                     ConversationEvent::TurnCompleted { status, .. } => {
                         if status == Lifecycle::Failed {
-                            return finish_failed(&store, &mut session, lease, harness.as_mut(), "provider turn failed").await;
+                            let reason = drain_turn_failure_reason(
+                                &mut event_rx,
+                                "provider turn failed",
+                            );
+                            return handle_body_failure(
+                                &store,
+                                &mut session,
+                                lease,
+                                harness.as_mut(),
+                                &wave,
+                                &reason,
+                                turn_had_durable_side_effect,
+                            )
+                            .await;
                         }
                         if let Err(error) =
                             verify_control_plane_checkout(Path::new(wave.repo()))
@@ -462,18 +491,20 @@ async fn run_project_session_inner(
                         ));
                     }
                     ConversationEvent::Error { code, message } => {
-                        return finish_failed(
+                        let reason = format!("{code}: {message}");
+                        return handle_body_failure(
                             &store,
                             &mut session,
                             lease,
                             harness.as_mut(),
-                            &format!("{code}: {message}"),
-                        ).await;
+                            &wave,
+                            &reason,
+                            turn_had_durable_side_effect,
+                        )
+                        .await;
                     }
-                    ConversationEvent::TurnStarted { .. }
-                    | ConversationEvent::ItemStarted { .. }
+                    ConversationEvent::ItemStarted { .. }
                     | ConversationEvent::ItemUpdated { .. }
-                    | ConversationEvent::ItemCompleted { .. }
                     | ConversationEvent::ReasoningDelta { .. }
                     | ConversationEvent::DiffUpdated { .. }
                     | ConversationEvent::TurnUsage { .. }
@@ -1034,6 +1065,72 @@ async fn finish_failed(
     }
     store.finish_project_process(session, lease).await?;
     anyhow::bail!(error.to_string())
+}
+
+/// Handle a body failure with disconnect-class recovery: classify the failure,
+/// and if it's a disconnect/hollow-body with a configured backup agent, hand
+/// the next generation to the backup instead of leaving the body failed for
+/// the supervisor to respawn the same flaky provider.
+async fn handle_body_failure(
+    store: &SharedStore,
+    session: &mut ProjectSession,
+    lease: &ChildWriteLease,
+    harness: &mut dyn Harness,
+    wave: &Wave,
+    reason: &str,
+    turn_had_durable_side_effect: bool,
+) -> Result<()> {
+    let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
+    let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
+    let decision = classify_disconnect_recovery(
+        reason,
+        &session.agent,
+        turn_had_durable_side_effect,
+        backup_agent,
+    );
+
+    match decision {
+        RecoveryDecision::HandoffToBackup { agent, provider } => {
+            let _ = harness.stop().await;
+            set_and_record_status(store, session, lease, ProjectSessionStatus::Failed, reason)
+                .await?;
+            store
+                .append_project_event_for_lease(
+                    &session.id,
+                    lease,
+                    &ProjectEventKind::Failed {
+                        error: reason.to_string(),
+                        resumable: true,
+                    },
+                )
+                .await?;
+            if let Some(process) = &mut session.latest_process {
+                process.state = ChildLeaseState::Finished;
+                process.outcome = Some(ChildBodyOutcome::Failed {
+                    reason: reason.to_string(),
+                });
+            }
+            store.finish_project_process(session, lease).await?;
+
+            let request = ChildBodyHandoffRequest {
+                agent: agent.clone(),
+                provider: provider.clone(),
+                reason: format!(
+                    "disconnect-class failure; handing off from {} to {agent}",
+                    session.agent
+                ),
+            };
+            *session = store.handoff_project_body(&session.id, &request).await?;
+            Ok(())
+        }
+        RecoveryDecision::Stop => {
+            let non_convergence = format!(
+                "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
+            );
+            finish_failed(store, session, lease, harness, &non_convergence).await
+        }
+        _ => finish_failed(store, session, lease, harness, reason).await,
+    }
 }
 
 async fn finish_abandoned(

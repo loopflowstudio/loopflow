@@ -19,7 +19,7 @@ use crate::harness::{
     RawProviderEvent,
 };
 
-const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
+pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
 /// SIGKILL an entire process group. `opencode serve` spawns descendants
 /// (MCP servers, model proxies, npm-shim grandchildren) that a bare
@@ -257,11 +257,36 @@ impl OpenCodeHarness {
             }
 
             turn_in_progress.store(false, Ordering::SeqCst);
-            send_disconnect_error(
-                &event_tx,
-                &shutdown_requested,
-                "OpenCode event stream disconnected",
-            );
+
+            // Capture phase before closing the orphaned turn — close_orphaned_turn
+            // takes the turn id, so turn_is_open() would read false afterwards.
+            let turn_was_open = state.turn_is_open();
+            let turn_had_content = state.turn_has_content();
+
+            // Close any turn left open when the stream died so every TurnStarted
+            // gets a terminal TurnCompleted and the journal never carries an open
+            // turn past a disconnect. The body still fails once via the Error
+            // handler below — this is ledger honesty, not a second failure.
+            if turn_was_open {
+                for event in state.close_orphaned_turn() {
+                    let _ = event_tx.send(event);
+                }
+            }
+
+            // Phase-aware reason so the durable Failed record names where the
+            // stream died, not just that it did. A mid-turn disconnect is
+            // already failed by the consumer's Error handler; this makes the
+            // evidence actionable (pre-content vs mid-stream truncation).
+            let reason = if turn_was_open {
+                if turn_had_content {
+                    "OpenCode event stream disconnected mid-stream after partial output"
+                } else {
+                    "OpenCode event stream disconnected before the turn produced any output"
+                }
+            } else {
+                "OpenCode event stream disconnected"
+            };
+            send_disconnect_error(&event_tx, &shutdown_requested, reason);
         });
 
         let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
@@ -877,6 +902,259 @@ mod tests {
         assert!(
             !child_flag.exists(),
             "provider-child descendant outlived the group kill"
+        );
+    }
+
+    // -- Fake-SSE disconnect matrix --
+
+    use crate::chat::types::ConversationItem;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// Where the fake SSE stream dies relative to the turn lifecycle.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum DisconnectCase {
+        /// Stream closes before any event — no TurnStarted.
+        PreContent,
+        /// Stream closes after `session.status: active` but before any content.
+        AfterActive,
+        /// Stream closes after a tool call starts but before it completes.
+        MidTool,
+        /// Stream closes after a durable tool completion (Command) — the
+        /// side-effecting case that is NOT replay-safe.
+        AfterDurable,
+    }
+
+    const SESSION_ID: &str = "test_session";
+
+    fn scripted_sse_events(case: DisconnectCase) -> Vec<&'static str> {
+        let active = r#"data: {"type":"session.status","properties":{"sessionID":"test_session","status":"active"}}"#;
+        let text = r#"data: {"type":"message.part.updated","properties":{"sessionID":"test_session","part":{"id":"p1","type":"TextPart","delta":"working"}}}"#;
+        let tool_running = r#"data: {"type":"message.part.updated","properties":{"sessionID":"test_session","part":{"id":"tool_1","type":"ToolPart","state":"running","name":"Bash","command":["echo","ok"]}}}"#;
+        let tool_completed = r#"data: {"type":"message.part.updated","properties":{"sessionID":"test_session","part":{"id":"tool_1","type":"ToolPart","state":"completed","name":"Bash","command":["echo","ok"],"output":"ok"}}}"#;
+
+        match case {
+            DisconnectCase::PreContent => vec![],
+            DisconnectCase::AfterActive => vec![active],
+            DisconnectCase::MidTool => vec![active, tool_running],
+            DisconnectCase::AfterDurable => vec![active, text, tool_completed],
+        }
+    }
+
+    /// Drive the fake SSE stream through the same pipeline the harness SSE task
+    /// uses: SseParser → map_event → close_orphaned_turn + Error on disconnect.
+    async fn process_fake_sse(case: DisconnectCase) -> Vec<ConversationEvent> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}/event");
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = socket.read(&mut buf).await;
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+                .await
+                .unwrap();
+            for event in scripted_sse_events(case) {
+                socket
+                    .write_all(format!("{event}\n\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            drop(socket);
+        });
+
+        let client = reqwest::Client::new();
+        let mut response = client
+            .get(&url)
+            .header(reqwest::header::ACCEPT, "text/event-stream")
+            .send()
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<ConversationEvent>();
+        let mut state = opencode_mapping::ReaderState::new(SESSION_ID.to_string());
+        let mut parser = SseParser::default();
+
+        while let Ok(Some(chunk)) = response.chunk().await {
+            for payload in parser.push(&chunk) {
+                if payload.trim().is_empty() || payload.trim() == "[DONE]" {
+                    continue;
+                }
+                if let Ok(raw) = serde_json::from_str::<Value>(&payload) {
+                    let mapped = opencode_mapping::map_event(&raw, &mut state);
+                    for event in mapped.events {
+                        let _ = tx.send(event);
+                    }
+                }
+            }
+        }
+
+        let turn_was_open = state.turn_is_open();
+        let turn_had_content = state.turn_has_content();
+        if turn_was_open {
+            for event in state.close_orphaned_turn() {
+                let _ = tx.send(event);
+            }
+        }
+        let reason = if turn_was_open {
+            if turn_had_content {
+                "OpenCode event stream disconnected mid-stream after partial output"
+            } else {
+                "OpenCode event stream disconnected before the turn produced any output"
+            }
+        } else {
+            "OpenCode event stream disconnected"
+        };
+        let _ = tx.send(ConversationEvent::Error {
+            code: OPENCODE_DISCONNECTED_CODE.to_string(),
+            message: reason.to_string(),
+        });
+
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+        events
+    }
+
+    fn assert_no_false_completed(events: &[ConversationEvent]) {
+        let false_completed = events.iter().any(|event| {
+            matches!(
+                event,
+                ConversationEvent::TurnCompleted {
+                    status: Lifecycle::Completed,
+                    ..
+                }
+            )
+        });
+        assert!(
+            !false_completed,
+            "a disconnect must never produce a Completed turn; events: {events:?}"
+        );
+    }
+
+    fn assert_every_started_turn_closed(events: &[ConversationEvent]) {
+        let started = events
+            .iter()
+            .filter(|e| matches!(e, ConversationEvent::TurnStarted { .. }))
+            .count();
+        let closed = events
+            .iter()
+            .filter(|e| matches!(e, ConversationEvent::TurnCompleted { .. }))
+            .count();
+        assert_eq!(
+            started, closed,
+            "every TurnStarted must get a terminal TurnCompleted; events: {events:?}"
+        );
+    }
+
+    fn assert_disconnect_error_present(events: &[ConversationEvent]) {
+        let has_error = events.iter().any(|event| {
+            matches!(
+                event,
+                ConversationEvent::Error { code, .. }
+                    if code == OPENCODE_DISCONNECTED_CODE
+            )
+        });
+        assert!(
+            has_error,
+            "a disconnect must emit an Error with opencode_disconnected; events: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fake_sse_pre_content_disconnect() {
+        let events = process_fake_sse(DisconnectCase::PreContent).await;
+        assert_no_false_completed(&events);
+        assert_every_started_turn_closed(&events);
+        assert_disconnect_error_present(&events);
+        // No turn was started, so no TurnCompleted.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, ConversationEvent::TurnCompleted { .. })),
+            "pre-content disconnect should not close a turn that never started"
+        );
+    }
+
+    #[tokio::test]
+    async fn fake_sse_after_active_disconnect() {
+        let events = process_fake_sse(DisconnectCase::AfterActive).await;
+        assert_no_false_completed(&events);
+        assert_every_started_turn_closed(&events);
+        assert_disconnect_error_present(&events);
+        // Turn started but produced no content → pre-content reason.
+        let error = events.iter().find_map(|e| match e {
+            ConversationEvent::Error { message, .. } => Some(message.as_str()),
+            _ => None,
+        });
+        assert!(
+            error.is_some_and(|m| m.contains("before the turn")),
+            "pre-content disconnect reason, got: {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fake_sse_mid_tool_disconnect() {
+        let events = process_fake_sse(DisconnectCase::MidTool).await;
+        assert_no_false_completed(&events);
+        assert_every_started_turn_closed(&events);
+        assert_disconnect_error_present(&events);
+        // Tool started → content seen → mid-stream reason.
+        let error = events.iter().find_map(|e| match e {
+            ConversationEvent::Error { message, .. } => Some(message.as_str()),
+            _ => None,
+        });
+        assert!(
+            error.is_some_and(|m| m.contains("mid-stream")),
+            "mid-stream disconnect reason, got: {error:?}"
+        );
+        // The tool item was started but not completed.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ConversationEvent::ItemStarted { .. })),
+            "tool start should be visible before the disconnect"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, ConversationEvent::ItemCompleted { .. })),
+            "tool should not have completed before the mid-tool disconnect"
+        );
+    }
+
+    #[tokio::test]
+    async fn fake_sse_after_durable_disconnect() {
+        let events = process_fake_sse(DisconnectCase::AfterDurable).await;
+        assert_no_false_completed(&events);
+        assert_every_started_turn_closed(&events);
+        assert_disconnect_error_present(&events);
+        // A durable tool (Command) completed before the disconnect.
+        let has_completed_command = events.iter().any(|e| {
+            matches!(
+                e,
+                ConversationEvent::ItemCompleted {
+                    item: ConversationItem::Command { .. },
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_completed_command,
+            "the durable Command completion must be visible before the disconnect; events: {events:?}"
+        );
+        // Still no false Completed — the turn closes Failed.
+        let turn_close = events.iter().find_map(|e| match e {
+            ConversationEvent::TurnCompleted { status, .. } => Some(*status),
+            _ => None,
+        });
+        assert_eq!(
+            turn_close,
+            Some(Lifecycle::Failed),
+            "turn must close Failed even after a durable completion"
         );
     }
 }

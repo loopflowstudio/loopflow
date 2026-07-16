@@ -82,6 +82,10 @@ pub fn create_or_update_pr(
         None => pr_target(repo, &main_repo, &default_branch)?,
     };
 
+    // Prove the Task PR range is uncontaminated before the first GitHub side
+    // effect (commit_workflow pushes). No-op for non-Task worktrees.
+    crate::ops::task::verify_task_pr_range(repo)?;
+
     // Commit the feature branch before syncing so PR context reflects pushed state.
     let commit_options = CommitOptions {
         add: true,
@@ -119,6 +123,11 @@ pub fn create_or_update_pr(
             crate::ops::task::record_stack_rebase(stack, &new_base, stack.parent_branch.is_none())?;
         }
     }
+
+    // The rebase advanced the fork point. Re-run the proof to heal the recorded
+    // base forward, so `lf task changes` and the GitHub range describe the same
+    // commits before publication state is written.
+    crate::ops::task::verify_task_pr_range(repo)?;
 
     let copy = resolve_pr_copy(repo, options, progress)?;
     let title = copy.title.trim();

@@ -11,6 +11,17 @@ use loopflow::session_context::{
     ProjectLaunchReceipt, TaskLaunchReceipt,
 };
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
+
+/// Ambient Task-Session env vars a live `lf __task` process exports. When the
+/// test suite itself runs inside a Task Session, these leak in and steer
+/// `task_for_worktree` at the wrong (real) session's store. Every EnvGuard
+/// clears them so task-aware tests resolve by worktree path, restoring them on
+/// drop.
+const AMBIENT_TASK_ENV: [&str; 3] = [
+    "LF_TASK_SESSION_ID",
+    "LF_TASK_GENERATION",
+    "LF_TASK_LEASE_TOKEN",
+];
 use loopflow::task::{
     PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
 };
@@ -89,6 +100,7 @@ pub struct EnvGuard {
     previous_db_path: Option<OsString>,
     previous_control_home: Option<OsString>,
     previous_control_db_path: Option<OsString>,
+    previous_ambient_task: Vec<(&'static str, Option<OsString>)>,
     _bin: TempDir,
     _lf_home: TempDir,
 }
@@ -120,6 +132,14 @@ impl EnvGuard {
         let previous_db_path = env::var_os("LF_DB_PATH");
         let previous_control_home = env::var_os(CONTROL_HOME_ENV);
         let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
+        let previous_ambient_task = AMBIENT_TASK_ENV
+            .iter()
+            .map(|name| {
+                let prev = env::var_os(name);
+                env::remove_var(name);
+                (*name, prev)
+            })
+            .collect();
         let lf_home = TempDir::new().expect("temp lf home dir");
         env::remove_var("LF_HOME");
         env::remove_var("LF_DB_PATH");
@@ -139,6 +159,7 @@ impl EnvGuard {
             previous_db_path,
             previous_control_home,
             previous_control_db_path,
+            previous_ambient_task,
             _bin: bin,
             _lf_home: lf_home,
         }
@@ -179,6 +200,12 @@ impl Drop for EnvGuard {
         match &self.previous_control_db_path {
             Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
             None => env::remove_var(CONTROL_DB_PATH_ENV),
+        }
+        for (name, prev) in &self.previous_ambient_task {
+            match prev {
+                Some(prev) => env::set_var(name, prev),
+                None => env::remove_var(name),
+            }
         }
     }
 }

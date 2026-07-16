@@ -186,7 +186,7 @@ Inspect exactly what an agent received and what Loopflow observed:
 
 ```bash
 lf runs                         # skill calls with context, tokens, and cost
-lf top                          # last-hour throughput and live lf processes
+lf top                          # last-hour provider throughput and live sessions
 lf execs                        # every lf process, including lookups
 lf trace <exec-or-trace-id>
 lf trace <exec-or-trace-id> --events

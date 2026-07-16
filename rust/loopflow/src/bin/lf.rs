@@ -8,7 +8,8 @@ use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{
-    Cli, Commands, ProjectCommand, ProjectReviewCommand, TaskCommand, TaskReviewCommand,
+    Cli, Commands, ProjectCommand, ProjectReviewCommand, RunsCommand, TaskCommand,
+    TaskReviewCommand,
 };
 
 #[derive(Clone, Default)]
@@ -1553,7 +1554,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Roadmap { wave, json }) => {
                 loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json)
             }
-            Some(Commands::Runs { json }) => loopflow::lf::commands::runs::list(*json),
+            Some(Commands::Runs { json, cmd }) => match cmd {
+                Some(RunsCommand::Reconcile { apply, all, json }) => {
+                    loopflow::lf::commands::runs::reconcile(*apply, *all, *json)
+                }
+                None => loopflow::lf::commands::runs::list(*json),
+            },
             Some(Commands::Execs { json }) => loopflow::lf::commands::runs::list_execs(*json),
             Some(Commands::Trace {
                 exec_id,

@@ -287,6 +287,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_session_successors",
         sql: include_str!("migrations/0.11.022_task_session_successors.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 23,
+        },
+        name: "capture_pruned_state",
+        sql: include_str!("migrations/0.11.023_capture_pruned_state.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1256,6 +1265,30 @@ mod tests {
             .unwrap()
     }
 
+    /// Insert one `agent_launches` row carrying `capture_status`, reporting
+    /// whether the table's CHECK constraint accepted it. Rolls the probe row
+    /// back so callers can reuse the connection.
+    fn capture_status_accepts(conn: &rusqlite::Connection, capture_status: &str) -> bool {
+        let id = format!("probe-{capture_status}");
+        let inserted = conn
+            .execute(
+                "INSERT INTO agent_launches (
+                     id, run_id, process_id, started_at, repo, worktree, provider,
+                     surface, capture_status, outcome, artifact_dir,
+                     conversation_path, conversation_event_count, conversation_bytes
+                 ) VALUES (?1, 'run-probe', 'proc-probe', 100, '/repo', '/repo',
+                     'codex', 'headless', ?2, 'completed', 'probe/dir',
+                     'probe/conversation.jsonl', 1, 10)",
+                rusqlite::params![id, capture_status],
+            )
+            .is_ok();
+        if inserted {
+            conn.execute("DELETE FROM agent_launches WHERE id = ?1", [&id])
+                .unwrap();
+        }
+        inserted
+    }
+
     fn find_backup(directory: &std::path::Path, prefix: &str) -> std::path::PathBuf {
         std::fs::read_dir(directory)
             .unwrap()
@@ -1351,7 +1384,8 @@ mod tests {
                 "0.11.019_task_pr_github_observation".to_string(),
                 "0.11.020_task_pr_linear_linkage".to_string(),
                 "0.11.021_provider_deliveries".to_string(),
-                "0.11.022_task_session_successors".to_string()
+                "0.11.022_task_session_successors".to_string(),
+                "0.11.023_capture_pruned_state".to_string()
             ]
         );
     }
@@ -1365,11 +1399,94 @@ mod tests {
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.021_provider_deliveries")
+            Some("0.11.022_task_session_successors")
         );
-        assert!(!columns(&conn, "task_sessions")
-            .iter()
-            .any(|column| column == "predecessor_session_id"));
+        assert!(!capture_status_accepts(&conn, "pruned"));
+    }
+
+    #[test]
+    fn capture_pruned_migration_widens_the_enum_and_keeps_existing_launches() {
+        // SQLite bakes CHECK into the table, so `pruned` arrives via a table
+        // rebuild. The rebuild must carry every historical launch across —
+        // those rows are the token and spend accounting we tombstone rather
+        // than delete.
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        assert!(
+            !capture_status_accepts(&conn, "pruned"),
+            "pruned must not be a legal status before the migration"
+        );
+        conn.execute_batch(
+            "INSERT INTO agent_launches (
+                 id, run_id, process_id, started_at, ended_at, repo, worktree,
+                 provider, surface, capture_status, outcome, artifact_dir,
+                 conversation_path, conversation_event_count, conversation_bytes
+             ) VALUES ('al_history', 'run_history', 'proc_history', 100, 200,
+                 '/repo', '/repo', 'codex', 'headless', 'complete', 'completed',
+                 'history/dir', 'history/conversation.jsonl', 7, 4096)",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        let (status, events, bytes) = conn
+            .query_row(
+                "SELECT capture_status, conversation_event_count, conversation_bytes
+                 FROM agent_launches WHERE id = 'al_history'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(status, "complete");
+        assert_eq!((events, bytes), (7, 4096));
+        assert!(capture_status_accepts(&conn, "pruned"));
+        assert!(
+            !capture_status_accepts(&conn, "invented"),
+            "the rebuild must keep the enum closed, not drop the CHECK"
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_key_check", [], |row| row
+                .get::<_, String>(0))
+                .optional()
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn the_capture_pruned_rebuild_restores_every_launch_index() {
+        // A rebuild drops the table, and with it its indexes. Losing one would
+        // silently degrade every `lf runs`/`lf trace` lookup.
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+
+        let mut indexes = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_launches'")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        indexes.sort();
+        indexes.retain(|name| !name.starts_with("sqlite_autoindex"));
+
+        assert_eq!(
+            indexes,
+            vec![
+                "idx_agent_launches_process",
+                "idx_agent_launches_project",
+                "idx_agent_launches_run",
+                "idx_agent_launches_task",
+                "idx_agent_launches_wave",
+            ]
+        );
     }
 
     #[test]

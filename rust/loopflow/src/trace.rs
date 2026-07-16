@@ -1355,12 +1355,11 @@ fn validate_input_op(value: &str) -> StoreResult<()> {
 }
 
 pub fn trace_root() -> PathBuf {
-    if let Ok(home) = std::env::var("LF_HOME") {
-        return PathBuf::from(home).join("traces");
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lf/traces")
+    // Resolve through the same home logic as the store so capture-time and
+    // doctor-time roots never diverge. lf_home_dir() honors LF_HOME, plus
+    // LF_CONTROL_HOME and the dev/release provenance split; anchoring traces on
+    // it keeps a reference resolvable wherever the store that names it lives.
+    crate::store::lf_home_dir().join("traces")
 }
 
 fn artifact_relative(root: &Path, path: &Path) -> StoreResult<String> {
@@ -1858,5 +1857,23 @@ mod tests {
         assert!(resolve_artifact("run/process/launch/conversation.jsonl").is_ok());
         assert!(resolve_artifact("../outside").is_err());
         assert!(resolve_artifact("/absolute").is_err());
+    }
+
+    #[test]
+    fn the_trace_root_follows_the_home_that_owns_the_store() {
+        // A reference is only resolvable if capture and doctor agree on the
+        // root. When traces answered to LF_HOME alone while the store also
+        // honored the control-home and dev/release split, a dev build wrote its
+        // artifacts into the release trace root and its rows into a dev store —
+        // manufacturing "orphan" artifacts and dangling references out of runs
+        // that had in fact captured perfectly.
+        let guard = crate::journal::TestLedgerGuard::new();
+
+        assert_eq!(super::trace_root(), guard.home().join("traces"));
+        assert_eq!(
+            super::trace_root(),
+            crate::store::lf_home_dir().join("traces"),
+            "the trace root must be derived from the store's home resolver"
+        );
     }
 }

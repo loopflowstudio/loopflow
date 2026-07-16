@@ -206,7 +206,16 @@ fn check_capture(
 
     let mut failures = Vec::new();
     let mut prompt_only = 0;
+    let mut pruned = 0;
     for launch in &launches {
+        if launch.capture_status == "pruned" {
+            // Tombstoned by `lf runs reconcile`: the artifact is known-absent
+            // and the absence is acknowledged. Counted, never a failure — must
+            // short-circuit before the file-resolution checks below, which would
+            // otherwise flag the known-absent file as a fresh failure.
+            pruned += 1;
+            continue;
+        }
         if crate::trace::resolve_artifact(&launch.artifact_dir).is_err()
             || crate::trace::resolve_artifact(&launch.conversation_path).is_err()
             || launch
@@ -369,11 +378,16 @@ fn check_capture(
             "process {process_id} reports provider spend but has no launch"
         ));
     }
+    let pruned_clause = if pruned > 0 {
+        format!(", {pruned} pruned")
+    } else {
+        String::new()
+    };
     if !failures.is_empty() {
         return Ok(Check::fail(
             "capture",
             format!(
-                "{} failure(s); {} launches, {} turns, {} bytes: {}",
+                "{} failure(s); {} launches, {} turns, {} bytes{pruned_clause}: {}",
                 failures.len(),
                 launches.len(),
                 turns.len(),
@@ -389,7 +403,7 @@ fn check_capture(
         return Ok(Check::warn(
             "capture",
             format!(
-                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only",
+                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only{pruned_clause}",
                 launches.len(),
                 turns.len()
             ),
@@ -398,7 +412,7 @@ fn check_capture(
     Ok(Check::ok(
         "capture",
         format!(
-            "{} launches, {} turns, {} assets, {} bytes",
+            "{} launches, {} turns, {} assets, {} bytes{pruned_clause}",
             launches.len(),
             turns.len(),
             assets.len(),
@@ -923,6 +937,93 @@ mod tests {
         let error = report.migration_error.unwrap();
         assert!(error.contains("9.0.001_divergent"), "{error}");
         assert!(error.contains("latest known"), "{error}");
+    }
+
+    /// Drive a real capture to `complete`, returning its launch id and the
+    /// conversation artifact on disk. Uses the production write path so the
+    /// tombstone tests act on genuinely-shaped rows.
+    fn captured_launch(
+        guard: &crate::journal::TestLedgerGuard,
+        skill: &str,
+    ) -> (String, std::path::PathBuf) {
+        let capture = crate::trace::CaptureHandle::begin(
+            crate::trace::TraceCaptureContext {
+                run_id: crate::id::RunId::new(),
+                process_id: crate::id::ProcessId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: Some("infrastructure".to_string()),
+                project: None,
+                task: Some("W2-235".to_string()),
+                flow: None,
+                skill: Some(skill.to_string()),
+            },
+            crate::trace::PreparedTurnContext::from_prompts("system", "task"),
+            crate::trace::CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+            },
+        )
+        .unwrap();
+        capture.begin_turn("message", "follow up").unwrap();
+        capture.finish("completed", false).unwrap();
+
+        let store = crate::journal::open_ledger().unwrap();
+        let launch = store
+            .agent_launches_since(0)
+            .unwrap()
+            .into_iter()
+            .find(|launch| launch.skill.as_deref() == Some(skill))
+            .expect("the capture we just drove must be in the ledger");
+        assert_eq!(launch.capture_status, "complete");
+        let conversation = crate::trace::resolve_artifact(&launch.conversation_path).unwrap();
+        assert!(conversation.is_file());
+        (launch.id, conversation)
+    }
+
+    #[test]
+    fn a_tombstoned_capture_is_counted_while_fresh_loss_still_fails() {
+        // The whole point of W2-235: acknowledged historical loss goes green
+        // and stays visible as a count, but the surface must remain sensitive
+        // to a capture that goes missing afterwards.
+        let guard = crate::journal::TestLedgerGuard::new();
+        let (historical, historical_file) = captured_launch(&guard, "kickoff");
+        let store = crate::journal::open_ledger().unwrap();
+        assert_eq!(check_capture(&store, &[]).unwrap().status, Status::Ok);
+
+        // The artifact vanishes out of band — the disk-reclaim shape that
+        // produced the 235 dangling references on the release host.
+        std::fs::remove_file(&historical_file).unwrap();
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Fail, "{}", check.detail);
+        assert!(check.detail.contains("1 failure(s)"), "{}", check.detail);
+
+        // Acknowledge it the way `lf runs reconcile --apply` does.
+        store
+            .reconcile_launch_capture(
+                &historical,
+                "pruned",
+                Some("conversation artifact absent at reconcile"),
+                500,
+            )
+            .unwrap();
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+        assert!(check.detail.contains("1 pruned"), "{}", check.detail);
+
+        // A *new* capture loss must still be a failure — un-acknowledged loss
+        // is the actionable signal a red capture check is supposed to carry.
+        let (_, fresh_file) = captured_launch(&guard, "implement");
+        std::fs::remove_file(&fresh_file).unwrap();
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Fail, "{}", check.detail);
+        assert!(check.detail.contains("1 failure(s)"), "{}", check.detail);
+        assert!(check.detail.contains("1 pruned"), "{}", check.detail);
     }
 
     fn row(run_id: &str, ts: i64, node: &str, event: &str) -> RunEventRow {

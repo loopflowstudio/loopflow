@@ -1505,6 +1505,34 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Reconcile a launch's capture lifecycle from `lf runs reconcile`: either
+    /// tombstone a terminal launch whose artifact is gone (`pruned`) or
+    /// finalize an orphaned `capturing` launch (`partial`). `ended_at` is
+    /// preserved when already set and filled from `ended_at_fallback`
+    /// otherwise (an orphaned `capturing` launch has no `ended_at` yet).
+    pub fn reconcile_launch_capture(
+        &self,
+        launch_id: &str,
+        capture_status: &str,
+        incomplete_reason: Option<&str>,
+        ended_at_fallback: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_launches
+             SET capture_status = ?2, incomplete_reason = ?3,
+                 ended_at = COALESCE(ended_at, ?4)
+             WHERE id = ?1",
+            params![
+                launch_id,
+                capture_status,
+                incomplete_reason,
+                ended_at_fallback
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn trace_capture_required_after(&self) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(

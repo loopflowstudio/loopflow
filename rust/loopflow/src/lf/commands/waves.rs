@@ -18,8 +18,8 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child_session::{
-    observe, BodyEvidence, BodyObservation, ChildRef, DirectiveKind, ObservationRecipient,
-    DEFAULT_STALL_AFTER,
+    body_progress_age, observe, BodyEvidence, BodyObservation, ChildRef, DirectiveKind,
+    ObservationRecipient, DEFAULT_STALL_AFTER,
 };
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
@@ -1002,20 +1002,6 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     })
 }
 
-/// Seconds of no durable progress, measured from the freshest of the last event
-/// and the last status change. Clamped at zero so clock skew never reads as
-/// negative age. This is the signal that separates a working body from a stalled
-/// one (G3): a live body silent past its deadline is stalled, not working.
-fn progress_age(
-    latest_event_at: Option<time::OffsetDateTime>,
-    status_at: time::OffsetDateTime,
-    now: time::OffsetDateTime,
-) -> std::time::Duration {
-    let progress_at = latest_event_at.map_or(status_at, |event_at| event_at.max(status_at));
-    let seconds = (now - progress_at).whole_seconds().max(0);
-    std::time::Duration::from_secs(seconds as u64)
-}
-
 async fn snapshot_task_runtime(
     store: &SharedStore,
     task: &TaskSession,
@@ -1035,7 +1021,7 @@ async fn snapshot_task_runtime(
         intent: task.status.body_intent(),
         observable: liveness.liveness() == Liveness::Observable,
         process_alive,
-        progress_age: progress_age(latest_event_at, task.status_at, now),
+        progress_age: body_progress_age(latest_event_at, task.status_at, now),
         step: Some(task.lifecycle_phase.as_str().to_string()),
         reason: task.status_reason.clone(),
     };
@@ -1077,7 +1063,7 @@ async fn snapshot_project_runtime(
         intent: project.status.body_intent(),
         observable: liveness.liveness() == Liveness::Observable,
         process_alive,
-        progress_age: progress_age(latest_event_at, project.status_at, now),
+        progress_age: body_progress_age(latest_event_at, project.status_at, now),
         step: Some(format!("iteration {}", project.iteration)),
         reason: project.status_reason.clone(),
     };

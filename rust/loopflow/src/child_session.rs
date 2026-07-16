@@ -733,6 +733,57 @@ pub struct BodyEvidence {
 /// this is the honest coarse bound the read model can prove.
 pub const DEFAULT_STALL_AFTER: Duration = Duration::from_secs(30 * 60);
 
+/// Age of the freshest durable progress evidence, clamped at zero so clock
+/// skew never turns a future event into a negative duration.
+pub(crate) fn body_progress_age(
+    latest_event_at: Option<OffsetDateTime>,
+    status_at: OffsetDateTime,
+    now: OffsetDateTime,
+) -> Duration {
+    let progress_at = latest_event_at.map_or(status_at, |event_at| event_at.max(status_at));
+    let seconds = (now - progress_at).whole_seconds().max(0);
+    Duration::from_secs(seconds as u64)
+}
+
+/// What supervision may do after observing a stalled body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BodyRecoveryPlan {
+    /// The observation is not a stall, so recovery has no work.
+    LeaveAlone,
+    /// No provider delivery is ambiguous; revoke, reap, and start generation+1.
+    Restart,
+    /// Delivery began without a recorded outcome. Reap the body, preserve these
+    /// commands as uncertain, and wait for a human instead of replaying them.
+    NeedsInput { commands: Vec<ChildCommandId> },
+}
+
+pub(crate) fn plan_body_recovery(
+    observation: &BodyObservation,
+    commands: &[ChildCommand],
+    generation: u32,
+) -> BodyRecoveryPlan {
+    if observation.category != BodyCategory::Stalled {
+        return BodyRecoveryPlan::LeaveAlone;
+    }
+    let uncertain = commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command.state,
+                ChildCommandState::Delivering | ChildCommandState::Uncertain
+            ) && command.claimed_by_generation == Some(generation)
+        })
+        .map(|command| command.id.clone())
+        .collect::<Vec<_>>();
+    if uncertain.is_empty() {
+        BodyRecoveryPlan::Restart
+    } else {
+        BodyRecoveryPlan::NeedsInput {
+            commands: uncertain,
+        }
+    }
+}
+
 /// Derive the observed body state from durable intent and body evidence.
 ///
 /// Liveness (a body exists) and progress (it advanced) are separate inputs;
@@ -842,9 +893,11 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
 #[cfg(test)]
 mod tests {
     use super::{
-        observe, unincorporated_directive_version, BodyCategory, BodyControl, BodyEvidence,
-        BodyIntent, BodyOwner, ChildCommandId, ChildDecisionId, ChildDirectiveId, ChildLeaseState,
-        ChildLeaseToken, ChildProcessGeneration, ChildWriteLease, Duration, DEFAULT_STALL_AFTER,
+        body_progress_age, observe, plan_body_recovery, unincorporated_directive_version,
+        BodyCategory, BodyControl, BodyEvidence, BodyIntent, BodyOwner, BodyRecoveryPlan,
+        ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+        ChildDecisionId, ChildDirectiveId, ChildLeaseState, ChildLeaseToken,
+        ChildProcessGeneration, ChildRef, ChildWriteLease, Duration, DEFAULT_STALL_AFTER,
     };
 
     fn evidence(intent: BodyIntent, alive: bool, progress: Duration) -> BodyEvidence {
@@ -910,6 +963,108 @@ mod tests {
             )
             .category,
             BodyCategory::Stalled,
+        );
+    }
+
+    #[test]
+    fn progress_age_uses_the_freshest_durable_evidence() {
+        let status_at = time::OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(10);
+        let event_at = status_at + time::Duration::seconds(5);
+        let now = status_at + time::Duration::seconds(20);
+
+        assert_eq!(
+            body_progress_age(Some(event_at), status_at, now),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            body_progress_age(Some(now + time::Duration::seconds(5)), status_at, now),
+            Duration::ZERO,
+        );
+    }
+
+    #[test]
+    fn stalled_recovery_refuses_to_replay_an_ambiguous_delivery() {
+        let observation = observe(
+            &evidence(BodyIntent::Active, true, Duration::from_secs(31 * 60)),
+            DEFAULT_STALL_AFTER,
+        );
+        let target = ChildRef::Task(crate::task::TaskSessionId::new());
+        let mut delivering = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "ship it".to_string(),
+            },
+        );
+        delivering.state = ChildCommandState::Delivering;
+        delivering.claimed_by_generation = Some(7);
+        let mut claimed = ChildCommand::new(
+            target,
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
+                text: "then verify".to_string(),
+            },
+        );
+        claimed.state = ChildCommandState::Claimed;
+        claimed.claimed_by_generation = Some(7);
+
+        assert_eq!(
+            plan_body_recovery(&observation, &[delivering.clone(), claimed], 7),
+            BodyRecoveryPlan::NeedsInput {
+                commands: vec![delivering.id],
+            }
+        );
+    }
+
+    #[test]
+    fn stalled_recovery_restarts_only_from_a_replay_safe_boundary() {
+        let stalled = observe(
+            &evidence(BodyIntent::Active, true, Duration::from_secs(31 * 60)),
+            DEFAULT_STALL_AFTER,
+        );
+        let working = observe(
+            &evidence(BodyIntent::Active, true, Duration::from_secs(1)),
+            DEFAULT_STALL_AFTER,
+        );
+        let mut claimed = ChildCommand::new(
+            ChildRef::Task(crate::task::TaskSessionId::new()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
+                text: "safe to reclaim".to_string(),
+            },
+        );
+        claimed.state = ChildCommandState::Claimed;
+        claimed.claimed_by_generation = Some(7);
+
+        assert_eq!(
+            plan_body_recovery(&stalled, &[claimed.clone()], 7),
+            BodyRecoveryPlan::Restart,
+        );
+        assert_eq!(
+            plan_body_recovery(&working, &[claimed], 7),
+            BodyRecoveryPlan::LeaveAlone,
+        );
+    }
+
+    #[test]
+    fn uncertainty_from_an_older_generation_does_not_poison_its_successor() {
+        let stalled = observe(
+            &evidence(BodyIntent::Active, true, Duration::from_secs(31 * 60)),
+            DEFAULT_STALL_AFTER,
+        );
+        let mut old = ChildCommand::new(
+            ChildRef::Task(crate::task::TaskSessionId::new()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "already adjudicated".to_string(),
+            },
+        );
+        old.state = ChildCommandState::Uncertain;
+        old.claimed_by_generation = Some(6);
+
+        assert_eq!(
+            plan_body_recovery(&stalled, &[old], 7),
+            BodyRecoveryPlan::Restart,
         );
     }
 

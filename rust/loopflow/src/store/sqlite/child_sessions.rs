@@ -275,6 +275,79 @@ impl SqliteStore {
         Ok(process)
     }
 
+    /// Revoke a body only if the progress evidence a supervisor observed is
+    /// still current. The immediate transaction closes the gap between the
+    /// final progress check and lease revocation: a body that completed or
+    /// appended an event in that gap wins, and supervision leaves it alone.
+    pub(crate) fn revoke_task_process_if_unchanged(
+        &self,
+        session_id: &TaskSessionId,
+        generation: u32,
+        status_at: OffsetDateTime,
+        latest_event_id: Option<i64>,
+        outcome: &ChildBodyOutcome,
+    ) -> StoreResult<Option<ChildProcessGeneration>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut session = transaction
+            .query_row(
+                TASK_SESSION_SELECT,
+                params![session_id.as_str()],
+                map_task_session_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        let current_event_id: Option<i64> = transaction.query_row(
+            "SELECT MAX(id) FROM task_events WHERE session_id = ?1",
+            params![session_id.as_str()],
+            |row| row.get(0),
+        )?;
+        if session.status_at != status_at
+            || current_event_id != latest_event_id
+            || !session.status.is_process_active()
+        {
+            transaction.commit()?;
+            return Ok(None);
+        }
+        let Some(process) = session.latest_process.as_mut() else {
+            transaction.commit()?;
+            return Ok(None);
+        };
+        if process.generation != generation || process.state != ChildLeaseState::Active {
+            transaction.commit()?;
+            return Ok(None);
+        }
+        process.state = ChildLeaseState::Revoked;
+        process.outcome = Some(outcome.clone());
+        let outcome_json = serde_json::to_string(outcome)?;
+        if transaction.execute(
+            "UPDATE task_sessions
+             SET process_lease_state='revoked', process_outcome_json=?3
+             WHERE id=?1 AND process_generation=?2
+               AND process_lease_state='active' AND status_at=?4",
+            params![
+                session_id.as_str(),
+                i64::from(generation),
+                outcome_json,
+                status_at.unix_timestamp(),
+            ],
+        )? == 0
+        {
+            transaction.commit()?;
+            return Ok(None);
+        }
+        let process = process.clone();
+        insert_task_event_in(
+            &transaction,
+            &session,
+            &TaskEventKind::BodyLeaseChanged {
+                process: process.clone(),
+            },
+        )?;
+        transaction.commit()?;
+        Ok(Some(process))
+    }
+
     pub(crate) fn finish_revoked_task_process(
         &self,
         session_id: &TaskSessionId,
@@ -1715,6 +1788,18 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         Ok(seconds.map(crate::store::rows::unix_to_datetime))
+    }
+
+    pub fn latest_task_event(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskEvent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT id, session_id, kind_json, created_at
+             FROM task_events WHERE session_id = ?1 ORDER BY id DESC LIMIT 1",
+            params![session_id.as_str()],
+            map_task_event_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
     }
 
     // Project Sessions are durable KR-pursuit children. They share the same

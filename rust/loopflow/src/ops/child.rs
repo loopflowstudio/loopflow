@@ -1078,6 +1078,9 @@ mod tests {
             abandoned_at: None,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: task.created_at,
             updated_at: task.updated_at,
         }

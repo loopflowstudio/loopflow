@@ -260,6 +260,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_pr_github_observation",
         sql: include_str!("migrations/0.11.019_task_pr_github_observation.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 20,
+        },
+        name: "task_pr_linear_linkage",
+        sql: include_str!("migrations/0.11.020_task_pr_linear_linkage.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1321,7 +1330,8 @@ mod tests {
                 "0.11.016_task_linear_observations".to_string(),
                 "0.11.017_migration_provenance".to_string(),
                 "0.11.018_session_body_provenance".to_string(),
-                "0.11.019_task_pr_github_observation".to_string()
+                "0.11.019_task_pr_github_observation".to_string(),
+                "0.11.020_task_pr_linear_linkage".to_string()
             ]
         );
     }

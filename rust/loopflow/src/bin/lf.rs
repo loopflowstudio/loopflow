@@ -596,6 +596,35 @@ fn format_child_body(
     )
 }
 
+/// One PR's line in `lf task status`. A degraded Linear linkage is named here
+/// because this reading is where an operator already looks for writeback health —
+/// the session's `PM writeback` line sits directly above. Silence means linked.
+fn format_task_pr_line(pr: &loopflow::task::TaskPr) -> String {
+    let provider = pr
+        .github()
+        .map(|github| format!("GitHub #{}", github.number))
+        .unwrap_or_else(|| "not opened on GitHub".to_string());
+    let placement = pr
+        .parent_pr_id
+        .as_ref()
+        .map(|parent| format!("  stacked on {parent}"))
+        .unwrap_or_default();
+    let linkage = pr
+        .linear_link_error
+        .as_ref()
+        .map(|error| format!("  Linear link degraded: {error}"))
+        .unwrap_or_default();
+    format!(
+        "  PR {}: {}  {}  {}{}{}",
+        pr.sequence,
+        pr.phase().as_str(),
+        provider,
+        pr.branch,
+        placement,
+        linkage,
+    )
+}
+
 fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyhow::Result<()> {
     let snapshot = loopflow::ops::task::task_snapshot(session)?;
     if json {
@@ -652,23 +681,7 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             );
         }
         for pr in &snapshot.prs {
-            let provider = pr
-                .github()
-                .map(|github| format!("GitHub #{}", github.number))
-                .unwrap_or_else(|| "not opened on GitHub".to_string());
-            let placement = pr
-                .parent_pr_id
-                .as_ref()
-                .map(|parent| format!("  stacked on {parent}"))
-                .unwrap_or_default();
-            println!(
-                "  PR {}: {}  {}  {}{}",
-                pr.sequence,
-                pr.phase().as_str(),
-                provider,
-                pr.branch,
-                placement,
-            );
+            println!("{}", format_task_pr_line(pr));
         }
         match &snapshot.observation {
             loopflow::task::Observation::Cached { observed_at } => {
@@ -1636,10 +1649,64 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{arg_tables, reorder_args};
+    use super::{arg_tables, format_task_pr_line, reorder_args};
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
+    use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionId};
+
+    fn published_pr() -> TaskPr {
+        let now = time::OffsetDateTime::now_utc();
+        TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "linear-pr-linkage".to_string(),
+            branch: "jack/linear-pr-linkage".to_string(),
+            base_commit: "abc".to_string(),
+            parent_pr_id: None,
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number: 931,
+                    url: "https://github.com/loopflowstudio/loopflow/pull/931".to_string(),
+                    head_sha: None,
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// A healthy linkage says nothing: silence on the happy path keeps the status
+    /// reading quiet enough that a degraded one stands out.
+    #[test]
+    fn task_pr_line_is_quiet_when_the_linear_link_is_healthy() {
+        let line = format_task_pr_line(&published_pr());
+        assert!(line.contains("GitHub #931"), "{line}");
+        assert!(!line.contains("Linear"), "{line}");
+    }
+
+    /// A degraded Linear writeback is named in the same reading that already
+    /// carries `PM writeback`, so an expired token cannot fail silently forever.
+    #[test]
+    fn task_pr_line_names_a_degraded_linear_link() {
+        let mut pr = published_pr();
+        pr.linear_link_error = Some("linear token expired".to_string());
+        let line = format_task_pr_line(&pr);
+        assert!(line.contains("Linear link degraded"), "{line}");
+        assert!(line.contains("linear token expired"), "{line}");
+        // The publication reading survives alongside the degraded linkage.
+        assert!(line.contains("GitHub #931"), "{line}");
+    }
 
     /// The derived tables cover everything the old hand lists carried, plus
     /// the uppercase short aliases those lists had drifted away from.

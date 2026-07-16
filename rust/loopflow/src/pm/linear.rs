@@ -246,6 +246,22 @@ const CREATE_WEBHOOK_MUTATION: &str = r#"mutation CreateWebhook($url: String!, $
   }
 }"#;
 
+const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $body: String!) {
+  commentUpdate(id: $id, input: { body: $body }) {
+    comment {
+      id
+    }
+  }
+}"#;
+
+const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: String!, $url: String!, $title: String!, $subtitle: String!) {
+  attachmentLinkURL(issueId: $issueId, url: $url, title: $title, subtitle: $subtitle) {
+    attachment {
+      id
+    }
+  }
+}"#;
+
 // One issue's human-editable content plus a `createdAt`-ordered page of its
 // comments. Each comment carries `user { id }` (the human author) but not
 // `botActor`, so an integration-authored comment decodes to a null author and is
@@ -265,6 +281,14 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
           id
         }
       }
+    }
+  }
+}"#;
+
+const UPDATE_ATTACHMENT_MUTATION: &str = r#"mutation UpdateAttachment($id: String!, $title: String!, $subtitle: String!) {
+  attachmentUpdate(id: $id, input: { title: $title, subtitle: $subtitle }) {
+    attachment {
+      id
     }
   }
 }"#;
@@ -769,13 +793,70 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn comment(&self, item_id: &str, body: &str) -> PmResult<()> {
-        let _: Value = self
+    /// Post a new comment and return its Linear id so callers can update it in
+    /// place later instead of posting a duplicate.
+    pub async fn comment(&self, item_id: &str, body: &str) -> PmResult<String> {
+        let response: CommentData = self
             .graphql(
                 CREATE_COMMENT_MUTATION,
                 json!({
                     "issueId": item_id,
                     "body": body,
+                }),
+            )
+            .await?;
+        Ok(response.comment_create.comment.id)
+    }
+
+    pub async fn update_comment(&self, comment_id: &str, body: &str) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                UPDATE_COMMENT_MUTATION,
+                json!({
+                    "id": comment_id,
+                    "body": body,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Link an external URL to an issue as a first-class attachment. Returns the
+    /// attachment id for in-place updates on later publishes.
+    pub async fn link_attachment(
+        &self,
+        issue_id: &str,
+        url: &str,
+        title: &str,
+        subtitle: &str,
+    ) -> PmResult<String> {
+        let response: AttachmentLinkData = self
+            .graphql(
+                LINK_ATTACHMENT_MUTATION,
+                json!({
+                    "issueId": issue_id,
+                    "url": url,
+                    "title": title,
+                    "subtitle": subtitle,
+                }),
+            )
+            .await?;
+        Ok(response.attachment_link_url.attachment.id)
+    }
+
+    pub async fn update_attachment(
+        &self,
+        attachment_id: &str,
+        title: &str,
+        subtitle: &str,
+    ) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                UPDATE_ATTACHMENT_MUTATION,
+                json!({
+                    "id": attachment_id,
+                    "title": title,
+                    "subtitle": subtitle,
                 }),
             )
             .await?;
@@ -929,6 +1010,28 @@ struct InitiativePayload {
 #[derive(Deserialize)]
 struct IssuePayload {
     issue: IdNode,
+}
+
+#[derive(Deserialize)]
+struct CommentData {
+    #[serde(rename = "commentCreate")]
+    comment_create: CommentPayload,
+}
+
+#[derive(Deserialize)]
+struct CommentPayload {
+    comment: IdNode,
+}
+
+#[derive(Deserialize)]
+struct AttachmentLinkData {
+    #[serde(rename = "attachmentLinkURL")]
+    attachment_link_url: AttachmentPayload,
+}
+
+#[derive(Deserialize)]
+struct AttachmentPayload {
+    attachment: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -1801,6 +1904,67 @@ mod tests {
                 "description": "Build the GraphQL adapter and tests",
             })
         );
+    }
+
+    #[tokio::test]
+    async fn pr_linkage_maps_to_attachment_and_comment_mutations() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "attachmentLinkURL": { "attachment": { "id": "att-1" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "attachmentUpdate": { "attachment": { "id": "att-1" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "commentUpdate": { "comment": { "id": "comment-1" } } } }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let attachment_id = client
+            .link_attachment("issue-1", "https://example/pr/7", "GitHub PR #7", "Open")
+            .await
+            .expect("link attachment succeeds");
+        assert_eq!(attachment_id, "att-1");
+        client
+            .update_attachment("att-1", "GitHub PR #7", "Merged")
+            .await
+            .expect("update attachment succeeds");
+        client
+            .update_comment("comment-1", "updated body")
+            .await
+            .expect("update comment succeeds");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 3);
+
+        let link: Value = serde_json::from_str(&requests[0].body).expect("link body is json");
+        assert!(link["query"]
+            .as_str()
+            .expect("query present")
+            .contains("attachmentLinkURL"));
+        assert_eq!(link["variables"]["issueId"], json!("issue-1"));
+        assert_eq!(link["variables"]["url"], json!("https://example/pr/7"));
+
+        let update: Value =
+            serde_json::from_str(&requests[1].body).expect("attachment update body is json");
+        assert!(update["query"]
+            .as_str()
+            .expect("query present")
+            .contains("attachmentUpdate"));
+        assert_eq!(update["variables"]["subtitle"], json!("Merged"));
+
+        let comment: Value =
+            serde_json::from_str(&requests[2].body).expect("comment update body is json");
+        assert!(comment["query"]
+            .as_str()
+            .expect("query present")
+            .contains("commentUpdate"));
+        assert_eq!(comment["variables"]["id"], json!("comment-1"));
     }
 
     #[tokio::test]

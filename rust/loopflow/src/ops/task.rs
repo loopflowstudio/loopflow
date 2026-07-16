@@ -713,6 +713,9 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             abandoned_at: None,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: now,
             updated_at: now,
         };
@@ -1558,6 +1561,10 @@ pub(crate) fn attach_task_github_pr(
             url: url.clone(),
             head_sha: github_pr.head_sha.clone(),
         });
+        // Idempotently link the PR on its owning Linear issue. This never fails
+        // the attach: a degraded writeback is recorded on the PR and retried by
+        // the next publication command.
+        link_pr_to_linear(&store, &session, &mut pr).await;
         pr.updated_at = time::OffsetDateTime::now_utc();
         match lease.as_ref() {
             Some(lease) => store.update_task_pr_for_lease(&pr, lease).await,
@@ -3010,6 +3017,9 @@ async fn ensure_working_pr_with_authority(
         abandoned_at: None,
         ci_observation: None,
         github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
         created_at: now,
         updated_at: now,
     };
@@ -3207,6 +3217,72 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
         .map_err(|error| task_error(error.to_string()))?;
         Ok(session)
     })
+}
+
+/// The concise publication-state label carried by a PR's Linear linkage. Derived
+/// purely from the PR model — its phase and after-merge disposition — so the label
+/// is a projection of the source of truth, not a second state.
+fn pr_link_state_label(pr: &TaskPr) -> String {
+    match pr.phase() {
+        PrPhase::Merged => "Merged".to_string(),
+        PrPhase::Abandoned => "Abandoned".to_string(),
+        _ => {
+            let completes = pr
+                .publication
+                .as_ref()
+                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask);
+            if completes {
+                "Open · completes task on merge".to_string()
+            } else {
+                "Open · in review".to_string()
+            }
+        }
+    }
+}
+
+/// Idempotently refresh the PR's Linear linkage (attachment + managed comment) and
+/// record the outcome on the PR. Best-effort: a degraded writeback lands in
+/// `linear_link_error` and leaves the GitHub result intact; the next publication
+/// command retries. Does nothing for a PR with no GitHub URL yet.
+async fn link_pr_to_linear(store: &SharedStore, session: &TaskSession, pr: &mut TaskPr) {
+    let Some(github) = pr.github().cloned() else {
+        return;
+    };
+    let state = pr_link_state_label(pr);
+    let title = format!("GitHub PR #{}", github.number);
+    let body = format!("[GitHub PR #{}]({}) — {}", github.number, github.url, state);
+    let wave = match owning_wave(store, session).await {
+        Ok(wave) => wave,
+        Err(error) => {
+            pr.linear_link_error = Some(error.to_string());
+            return;
+        }
+    };
+    let prior = crate::ops::pm::PrLinkageIds {
+        attachment_id: pr.linear_attachment_id.clone(),
+        comment_id: pr.linear_comment_id.clone(),
+    };
+    let request = crate::ops::pm::PrLinkRequest {
+        issue_id: session.launch.issue.id.as_str().to_string(),
+        url: github.url.clone(),
+        title,
+        subtitle: state,
+        body,
+    };
+    let outcome =
+        crate::ops::pm::pm_link_pr_async(&session.worktree, wave.name(), &request, &prior).await;
+    // Say so at publish time. The PR line in `lf task status` carries the durable
+    // reading, but an operator running `lf pr open` should not have to go looking.
+    if let Some(error) = &outcome.error {
+        tracing::warn!(
+            issue = session.launch.issue.identifier,
+            pr = github.number,
+            "Linear link degraded; the GitHub PR is published and the next publish retries: {error}"
+        );
+    }
+    pr.linear_attachment_id = outcome.ids.attachment_id;
+    pr.linear_comment_id = outcome.ids.comment_id;
+    pr.linear_link_error = outcome.error;
 }
 
 fn writeback_state(result: OpsResult<()>) -> PmWritebackState {
@@ -4383,6 +4459,9 @@ mod tests {
             updated_at: now,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
         };
         store.create_wave(&wave).await.expect("create wave");
         store

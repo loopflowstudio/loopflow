@@ -1140,6 +1140,9 @@ mod tests {
             abandoned_at: None,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: session.created_at,
             updated_at: session.updated_at,
         }
@@ -3087,6 +3090,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_pr_persists_linear_linkage() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let session = make_task_session(&wave, &project);
+        let mut pr = make_task_pr(&session);
+        store.create_task_session(&session, &pr).await.unwrap();
+
+        pr.linear_attachment_id = Some("att-1".to_string());
+        pr.linear_comment_id = Some("comment-1".to_string());
+        pr.linear_link_error = Some("linear is down".to_string());
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&pr).await.unwrap();
+
+        let read = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        assert_eq!(read.linear_attachment_id.as_deref(), Some("att-1"));
+        assert_eq!(read.linear_comment_id.as_deref(), Some("comment-1"));
+        assert_eq!(read.linear_link_error.as_deref(), Some("linear is down"));
+    }
+
+    #[tokio::test]
     async fn task_prs_are_ordered_and_rotation_is_atomic() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -3128,6 +3157,9 @@ mod tests {
             updated_at: now,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
         };
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
         store.settle_task_pr(&first, Some(&second)).await.unwrap();
@@ -3166,6 +3198,9 @@ mod tests {
             updated_at: now,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
         };
         assert!(store
             .settle_task_pr(&abandoned, Some(&conflicting))
@@ -3230,6 +3265,9 @@ mod tests {
             abandoned_at: None,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: now,
             updated_at: now,
         };

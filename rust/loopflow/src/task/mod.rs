@@ -445,6 +445,17 @@ pub struct TaskPr {
     /// Last GitHub refresh attempt. A fresh result coalesces reads briefly; a
     /// degraded result opens a longer circuit while the durable PR fields stand.
     pub github_observation: Option<GithubObservation>,
+    /// Id of the first-class Linear attachment linking this PR on its owning
+    /// issue. `None` until the PR is first published; carried forward so later
+    /// publishes update the same attachment in place.
+    pub linear_attachment_id: Option<String>,
+    /// Id of the loopflow-managed Linear comment carrying the PR URL and state.
+    /// Its presence switches the writeback from `commentCreate` to `commentUpdate`.
+    pub linear_comment_id: Option<String>,
+    /// `None` when the last Linear linkage writeback succeeded; the last error
+    /// string when it degraded. The GitHub publication still succeeded — this only
+    /// records that the Linear side is behind, and is cleared on the next success.
+    pub linear_link_error: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -1279,6 +1290,9 @@ mod tests {
             updated_at: now,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
         };
         assert_eq!(pr.phase(), PrPhase::Working);
 
@@ -1333,6 +1347,9 @@ mod tests {
             updated_at: now,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
         };
         assert!(pr.validate().is_err());
 
@@ -1393,6 +1410,9 @@ mod tests {
             abandoned_at: None,
             ci_observation: observation,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: now,
             updated_at: now,
         }

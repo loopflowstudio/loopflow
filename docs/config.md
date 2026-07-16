@@ -200,6 +200,10 @@ Default model for all skills.
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
 
+Loopflow starts every Codex CLI and Session run on the standard service tier,
+even when the user's Codex config selects Fast mode. In an interactive Codex
+TUI, run `/fast` to opt into Fast mode for that session.
+
 Gemini is supported for direct `lf` commands. Wave, Project, and Task Sessions
 require `claude`, `codex`, or `opencode`.
 

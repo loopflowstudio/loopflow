@@ -2,11 +2,11 @@
 
 ## Status
 
-The linkage itself is **implemented and tested** on this branch (3 commits, pushed).
-One directive clause is **not yet met**: "surface degraded writeback clearly." That
-is the remaining pursue target — see *Remaining work*.
+**Done.** All directive clauses are met: linkage, idempotent updates, Linear
+failure tolerance, degraded-writeback surfacing, and end-to-end tests for
+initial publication, retries, state transitions, and an existing linked PR.
 
-PR 1 (`jack-heart/linear-pr-linkage`) is not yet opened on GitHub.
+PR 1 (`jack-heart/linear-pr-linkage`) is publishing now.
 
 ## User-visible outcome
 
@@ -67,30 +67,18 @@ between the Linear call and the local persist.
 State label (`ops/task.rs::pr_link_state_label`): `Merged` / `Abandoned` /
 `Open · completes task on merge` (after_merge = CompleteTask) / `Open · in review`.
 
-## Remaining work — surface degraded writeback
+## Shipped — surface degraded writeback
 
-The directive requires degraded writeback to be surfaced clearly. Today
-`linear_link_error` persists and rides `lf task status --json` (via
-`TaskSessionSnapshot.prs`), but the **human-facing** surface does not show it:
-`bin/lf.rs` renders each PR as `PR {seq}: {phase}  {provider}  {branch}{placement}`
-and never mentions linkage health. An operator whose Linear token expired sees a
+`format_task_pr_line` (`bin/lf.rs`) appends `Linear link degraded: {error}` to the
+PR line when `linear_link_error` is set, and is silent when the link is healthy —
+the same reading that already carries the session-level `PM writeback` line. An
+operator whose Linear token expired sees the failure named inline rather than a
 clean status line while every publish silently fails to link.
 
-**Target:** the PR line names a degraded linkage. Precedent to mirror is the
-session-level `PM writeback: {state}` line already printed directly above it — the
-same status command already surfaces the *completion* writeback's health, so the
-per-PR linkage health belongs in the same reading.
-
-**Proof:** a `TaskPr` carrying `linear_link_error` renders a status line that names
-the failure; one with `linear_link_error: None` renders unchanged (no noise on the
-healthy path). Covered by a `bin/lf.rs`-level test of the PR line, or by driving
-`lf task status` against a store row with the error set.
-
-Optional, only if it stays small: have the publish command warn once when linkage
-degrades. `ops/pr.rs` and `ops/land.rs` both hold a `progress` handle at the
-`attach_task_github_pr` call, so surfacing it there means threading `&impl Progress`
-into that function. Status rendering is the durable surface and comes first; the
-transient warning is a nicety, not the requirement.
+**Proof:** `task_pr_line_names_a_degraded_linear_link` asserts the degraded line
+names both the failure and the GitHub reading; `task_pr_line_is_quiet_when_the_linear_link_is_healthy`
+asserts the healthy line stays silent. Both are `bin/lf.rs`-level tests of the PR
+line renderer.
 
 ## Absent and error states
 

@@ -4980,6 +4980,9 @@ mod tests {
             updated_at: now,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
         };
         store
             .create_task_session(&session, &pr)
@@ -5427,6 +5430,9 @@ mod tests {
                 checked_at: now - time::Duration::seconds(59),
                 result: GithubObservationResult::Fresh,
             }),
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: now,
             updated_at: now - time::Duration::hours(1),
         };
@@ -6226,6 +6232,9 @@ mod tests {
             abandoned_at: None,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: now,
             updated_at: now,
         };

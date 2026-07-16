@@ -1678,6 +1678,7 @@ mod tests {
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
+            github_observation: None,
             linear_attachment_id: None,
             linear_comment_id: None,
             linear_link_error: None,

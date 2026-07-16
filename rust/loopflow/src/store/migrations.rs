@@ -1345,11 +1345,11 @@ mod tests {
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.018_session_body_provenance")
+            Some("0.11.019_task_pr_github_observation")
         );
         assert!(!columns(&conn, "task_prs")
             .iter()
-            .any(|column| column == "github_observation"));
+            .any(|column| column == "linear_attachment_id"));
     }
 
     #[test]

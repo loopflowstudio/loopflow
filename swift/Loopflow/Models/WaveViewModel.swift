@@ -21,22 +21,28 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var displayName: String { name }
 
+    /// The stable id of this Wave's parent, when one exists. Drives future
+    /// ancestry indentation in the navigation list.
+    public var parentWaveId: String? { api.parentWaveId }
+
+    /// Open Tasks the registry counts as active for this Wave.
+    public var openTaskCount: Int { api.activeTasks }
+
+    /// The operational lens for this row. Provisional projection until W2-123
+    /// lands the shared attention field; see `WaveLens.provisional`.
+    public var lens: WaveLens {
+        WaveLens.provisional(
+            live: api.live,
+            status: status,
+            activeTasks: api.activeTasks,
+            activeProjects: api.activeProjects
+        )
+    }
+
     public var objectiveTagline: String? {
         guard let objective = plan?.objective else { return nil }
         return objective.components(separatedBy: .newlines)
             .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?
             .trimmingCharacters(in: .whitespaces)
-    }
-
-    public var statusText: String {
-        switch status {
-        case .running: "Running"
-        case .idle: "Idle"
-        case .paused: "Paused"
-        }
-    }
-
-    public var statusIndicator: (icon: String, color: Color) {
-        (status.icon, status.color)
     }
 }

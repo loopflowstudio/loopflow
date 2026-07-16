@@ -124,22 +124,11 @@ final class PortfolioRepoState {
         "\(repoPath.normalizedFilePath)#\(waveName)"
     }
 
+    /// One stable alphabetical list. The row's lens carries state, so rows never
+    /// reorder as processes start and stop.
     private static func sortWaves(_ waves: [WaveViewModel]) -> [WaveViewModel] {
-        waves.sorted { lhs, rhs in
-            let lhsPriority = statusPriority(lhs.status)
-            let rhsPriority = statusPriority(rhs.status)
-            if lhsPriority != rhsPriority {
-                return lhsPriority < rhsPriority
-            }
-            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-        }
-    }
-
-    private static func statusPriority(_ status: WaveStatus) -> Int {
-        switch status {
-        case .running: 0
-        case .paused: 1
-        case .idle: 2
+        waves.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
     }
 

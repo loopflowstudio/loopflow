@@ -10,13 +10,14 @@ struct WaveTests {
             id: "wave-123",
             name: "infrastructure",
             repo: "/tmp/repo",
-            status: .running
+            status: .running,
+            live: true
         ))
 
         #expect(wave.id == "wave-123")
         #expect(wave.displayName == "infrastructure")
         #expect(wave.repo == "/tmp/repo")
-        #expect(wave.statusText == "Running")
+        #expect(wave.lens.color == .green)
         #expect(wave.isRegistered)
     }
 

@@ -86,15 +86,10 @@ struct WaveDetailPane: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            Image(systemName: wave.statusIndicator.icon)
-                .foregroundStyle(wave.statusIndicator.color)
-                .accessibilityLabel(wave.statusText)
+            WaveLensView(lens: wave.lens)
             Text(wave.displayName)
                 .font(Typography.sectionTitle())
                 .foregroundStyle(palette.text)
-            Text("WaveChat")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
 
             Spacer()
 
@@ -171,6 +166,7 @@ private struct WavePlanView: View {
                         terminalStore: terminalStore
                     )
                 }
+                liveStatusFooter
             }
             .padding(Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,20 +180,58 @@ private struct WavePlanView: View {
         }
     }
 
-    private var objective: some View {
-        let text = workMap?.objective ?? plan.objective
-        return VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Objective")
-                .font(Typography.caption(10))
-                .fontWeight(.medium)
-                .foregroundStyle(palette.textSecondary)
+    private var objectiveText: String { workMap?.objective ?? plan.objective }
 
-            Text(text.isEmpty ? "No objective written yet." : text)
-                .font(Typography.body(14))
+    /// Lead with one sentence, prominent. The full objective is disclosure, not
+    /// clipped prose — and the lead is a deterministic excerpt, never a
+    /// generated summary that could disagree with GOAL.md.
+    private var objective: some View {
+        let full = objectiveText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lead = Self.firstSentence(full)
+        return VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(full.isEmpty ? "No objective written yet." : lead)
+                .font(Typography.sectionTitle(20))
                 .foregroundStyle(palette.text)
                 .lineSpacing(3)
                 .textSelection(.enabled)
+                .accessibilityIdentifier("wave-objective-lead")
+
+            if !full.isEmpty, full != lead {
+                DisclosureGroup {
+                    Text(full)
+                        .font(Typography.body(13))
+                        .foregroundStyle(palette.textSecondary)
+                        .lineSpacing(3)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, Spacing.xs)
+                } label: {
+                    Text("Full objective")
+                        .font(Typography.caption(11))
+                        .foregroundStyle(palette.textSecondary)
+                }
+                .tint(palette.accent)
+            }
         }
+    }
+
+    /// Deterministic one-sentence excerpt: flatten newlines, then cut at the
+    /// first sentence terminator followed by a space or end of text.
+    static func firstSentence(_ text: String) -> String {
+        let flat = text.split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard !flat.isEmpty else { return "" }
+        let terminators: Set<Character> = [".", "!", "?"]
+        let chars = Array(flat)
+        var result = ""
+        for (i, c) in chars.enumerated() {
+            result.append(c)
+            guard terminators.contains(c) else { continue }
+            let next = i + 1 < chars.count ? chars[i + 1] : " "
+            if next == " " { return result.trimmingCharacters(in: .whitespaces) }
+        }
+        return result.trimmingCharacters(in: .whitespaces)
     }
 
     private var projects: some View {
@@ -218,13 +252,6 @@ private struct WavePlanView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
 
-            if let errorMessage = reading.errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle")
-                    .font(Typography.caption(11))
-                    .foregroundStyle(Color.statusError)
-                    .textSelection(.enabled)
-            }
-
             if let workMap, !workMap.projects.isEmpty {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
                     ForEach(workMap.projects) { project in
@@ -235,7 +262,7 @@ private struct WavePlanView: View {
                     }
                 }
             } else if plan.projects.isEmpty {
-                Text("No live projects.")
+                Text("No projects yet.")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
             } else {
@@ -245,6 +272,29 @@ private struct WavePlanView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Live-status failures are operational detail, not primary hierarchy: a
+    /// quiet footer says the plan is showing cached and hides the raw reason
+    /// behind disclosure. The plan above still renders from the cached `WavePlan`.
+    @ViewBuilder
+    private var liveStatusFooter: some View {
+        if let errorMessage = reading.errorMessage {
+            DisclosureGroup {
+                Text(errorMessage)
+                    .font(Typography.caption(10))
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, Spacing.xxs)
+            } label: {
+                Label("Showing cached plan · live status unavailable", systemImage: "arrow.triangle.2.circlepath")
+                    .font(Typography.caption(10))
+                    .foregroundStyle(palette.textSecondary)
+            }
+            .tint(palette.textSecondary)
+            .accessibilityIdentifier("wave-live-status-footer")
         }
     }
 
@@ -279,10 +329,24 @@ private struct WaveProjectWorkView: View {
                 Text(project.project.name)
                     .font(Typography.sectionTitle(17))
                     .foregroundStyle(palette.text)
-                Spacer()
-                Text(project.runtime?.status.rawValue ?? "unstarted")
+
+                Text(openTaskLabel)
                     .font(Typography.caption(10))
+                    .fontWeight(.medium)
                     .foregroundStyle(palette.textSecondary)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(palette.surfaceMuted)
+                    .clipShape(Capsule())
+                    .accessibilityIdentifier("project-open-tasks")
+
+                Spacer()
+
+                if let status = project.runtime?.status.rawValue {
+                    Text(status)
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                }
             }
 
             if !project.project.definition.isEmpty {
@@ -332,6 +396,11 @@ private struct WaveProjectWorkView: View {
 
     private var isSelected: Bool {
         selection == WaveWorkSelection(kind: .project, id: project.project.slug)
+    }
+
+    private var openTaskLabel: String {
+        let open = project.tasks.filter { !$0.task.completed }.count
+        return open == 1 ? "1 open task" : "\(open) open tasks"
     }
 
     private func directiveStatus(_ directive: WorkDirectiveSnapshot) -> some View {

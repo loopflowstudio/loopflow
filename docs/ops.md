@@ -141,7 +141,7 @@ lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 lf pm task move --id 1207... --wave designer --project api
 lf pm rename --wave designer --title "Designer"                  # rename the backing Linear Initiative
 lf pm init --wave designer --team-key DSG                        # connect or rebind Initiative + team
-lf pm reteam --wave designer --apply                             # move Projects, then open Issues without a writing body
+lf pm reteam --wave designer --apply                             # move the hierarchy only when no Task body is writing
 ```
 
 | Command | What it does |

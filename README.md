@@ -641,6 +641,11 @@ recovery action rather than guessed. Both ids are stable provider identity;
 keys and titles stay mutable presentation. Passing `--team-key` explicitly on
 an already-bound Wave adopts that team and replaces the old binding.
 
+Creation fails closed: `lf pm project create` and `lf pm task create` require a
+bound `pm.linear_team` and error with the `lf pm init` recovery rather than
+silently attaching work to a shared team. Reads stay team-agnostic — an unbound
+wave still syncs its existing issues.
+
 ```bash
 lf pm init --wave designer --team-key DSG  # connect the wave to its Initiative + team
 lf pm init --wave designer                 # same, defaulting the team key from the name

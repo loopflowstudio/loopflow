@@ -275,6 +275,7 @@ async fn pm_create_project_async(
     title: &str,
 ) -> OpsResult<PmResolvedProject> {
     let wave = resolve_wave(wave)?;
+    require_creation_team(repo, &wave, resolve_provider(repo, &wave)?)?;
     let ctx = resolve_context(repo, &wave).await?;
     let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
     if let Some(project) = projects
@@ -550,6 +551,23 @@ fn read_team(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String
 fn resolve_team(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
     read_team(repo, wave, provider)
         .or_else(|| load_config_or_default(Some(repo)).linear.team.clone())
+}
+
+/// The team *creation* must act in. Fail closed: creation resolves a wave's
+/// explicit `pm.linear_team` binding and never borrows `config.linear.team` or
+/// Linear's auto-created default team, so a Project/Task cannot silently land
+/// on a foreign team. An unbound wave errors with the exact recovery and no
+/// Linear side effect; reads keep [`resolve_team`]'s fallback so an unbound
+/// wave still syncs its existing issues.
+fn require_creation_team(repo: &Path, wave: &str, provider: PmProviderKind) -> OpsResult<String> {
+    read_team(repo, wave, provider).ok_or_else(|| {
+        OpsError::Message(format!(
+            "wave/{wave}/GOAL.md has no `pm.{key}`, so creating work would fall \
+             back to the shared team. Bind the wave's team first: \
+             `lf pm init --wave {wave} --team-key <KEY>`.",
+            key = provider.team_key()
+        ))
+    })
 }
 
 /// Whether a wave has a Linear Initiative pinned for its resolved provider.
@@ -1139,6 +1157,7 @@ async fn pm_create_task_idempotent_async(
     marker: &str,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
+    require_creation_team(repo, wave, resolve_provider(repo, wave)?)?;
     let ctx = resolve_context(repo, wave).await?;
     let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
     let project = find_project(&projects, wave, project_slug)?;
@@ -1207,6 +1226,11 @@ pub(crate) async fn pm_update_async(
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
+    // A create (no `--id`) must bind an explicit team; an update on an existing
+    // issue does not attach to a team, so it stays team-agnostic.
+    if options.id.is_none() {
+        require_creation_team(repo, &wave, resolve_provider(repo, &wave)?)?;
+    }
     let ctx = resolve_context(repo, &wave).await?;
     let result = apply_update(&wave, options.project.as_deref(), &ctx, options, progress).await?;
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
@@ -1954,6 +1978,11 @@ async fn pm_project_write_async(
     progress: &impl Progress,
 ) -> OpsResult<PmProjectWriteResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
+    // Creating a Project (no `--project` slug to update) must bind an explicit
+    // team; updating an existing Project does not move it between teams.
+    if options.project.is_none() {
+        require_creation_team(repo, &wave, resolve_provider(repo, &wave)?)?;
+    }
     let ctx = resolve_context(repo, &wave).await?;
     let krs = options
         .krs
@@ -2493,6 +2522,31 @@ mod tests {
             resolve_team(repo.path(), "unbound", PmProviderKind::Linear),
             None
         );
+    }
+
+    #[test]
+    fn require_creation_team_fails_closed_on_an_unbound_wave() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "product",
+            "pm:\n  provider: linear\n  linear_team: \"team-prd\"\n",
+        );
+
+        // A bound wave yields its explicit team — never a fallback.
+        assert_eq!(
+            require_creation_team(repo.path(), "product", PmProviderKind::Linear)
+                .expect("bound wave resolves a team"),
+            "team-prd"
+        );
+
+        // An unbound wave errors with the `lf pm init` recovery instead of
+        // silently borrowing the shared team.
+        let err = require_creation_team(repo.path(), "unbound", PmProviderKind::Linear)
+            .expect_err("unbound wave fails closed");
+        let message = err.to_string();
+        assert!(message.contains("lf pm init --wave unbound"));
+        assert!(message.contains("linear_team"));
     }
 
     #[test]

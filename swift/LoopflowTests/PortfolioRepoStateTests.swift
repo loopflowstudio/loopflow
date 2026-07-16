@@ -23,6 +23,23 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
+    @Test("registered rows without an authored Wave are hidden")
+    func staleRegisteredWavesAreHidden() {
+        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-authored")
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let state = PortfolioRepoState(repo: repo)
+
+        state.applyConnectedWaves(
+            [
+                makeWave(id: "infrastructure", repoPath: repo.path, status: .running),
+                makeWave(id: "list", repoPath: repo.path, status: .idle),
+            ],
+            authoredWaveNames: ["infrastructure"]
+        )
+
+        #expect(state.waves.map(\.id) == ["infrastructure"])
+    }
+
     @Test("waves hold one stable alphabetical order, not a status regrouping")
     func wavesSortStableAlphabetical() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")

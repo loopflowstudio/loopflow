@@ -609,7 +609,14 @@ struct WavesView: View {
             let plans = await buildWavePlanCache(registryWaves: waves)
             plansByWaveKey = plans
             for state in repoStates.values {
-                state.applyConnectedWaves(waves, plans: plans)
+                let authoredNames = Set(
+                    (authoredWavesByRepo[state.repo.path] ?? []).map(\.name)
+                )
+                state.applyConnectedWaves(
+                    waves,
+                    plans: plans,
+                    authoredWaveNames: authoredNames
+                )
             }
             selectRequestedWaveIfNeeded()
         } catch {
@@ -718,8 +725,8 @@ struct WavesView: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
             if Task.isCancelled { return }
-            await syncRepoStates()
             await refreshAuthoredWaves()
+            await syncRepoStates()
         }
     }
 

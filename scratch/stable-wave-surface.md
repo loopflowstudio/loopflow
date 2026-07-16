@@ -136,7 +136,15 @@ harness) plus pure-projection tests cover:
   red Task; unknown never collapsing to black);
 - an unregistered Wave rendering unknown-with-reason;
 - row `indentLevel` (future child), compact empty state, one-sentence objective
-  lead, per-Project open-Task count, stable alphabetical ordering.
+  lead, per-Project open-Task count, stable alphabetical ordering;
+- **the populated detail hierarchy against the real `lf status --json` wire
+  fixture** (`WaveDetailReadingTests`): decoding `wave_detail.json` → `workMap`,
+  then asserting the objective leads, the Project's KR list + open-Task count are
+  present, the Project row lens folds its Tasks' attention verbatim (red
+  `waiting for review` wins over black), and each Task row lens equals
+  `WaveLensColor(attention.level)` + reason verbatim. This is the mockup
+  hierarchy proven at the data layer — the achievable substitute for the live
+  populated render, which this machine's registry can't serve (see `questions.md`).
 
 Manually: opening Product shows its objective, all Projects with KR lists +
 open-Task counts, every Project/Task row wearing the shared lens, and Chat, with

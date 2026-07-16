@@ -93,8 +93,8 @@ mod tests {
     use crate::engine::wave_home::WaveHome;
     use crate::id::WaveId;
     use crate::interactive_handoff::{
-        InteractiveHandoffOutcome, InteractiveHandoffParent, InteractiveHandoffStatus,
-        OpenInteractiveHandoff,
+        InteractiveHandoff, InteractiveHandoffOutcome, InteractiveHandoffParent,
+        InteractiveHandoffStatus, OpenInteractiveHandoff,
     };
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{
@@ -394,5 +394,56 @@ mod tests {
             .claim_interactive_handoff_wake(&handoff.id, 2)
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn list_row_maps_census_fields_and_active_filter_drops_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let task = task_parent(&store, dir.path()).await;
+        let (handoff, _) = store
+            .open_interactive_handoff(open_for(
+                InteractiveHandoffParent::Task(task.id.clone()),
+                task.worktree.clone(),
+            ))
+            .await
+            .unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        let row = handoff.list_row(now);
+        assert_eq!(row.session_id, handoff.id);
+        assert_eq!(row.parent_kind, "task");
+        assert_eq!(row.parent_id, task.id.as_str());
+        assert_eq!(row.wave_id, task.wave_id);
+        assert_eq!(row.status, InteractiveHandoffStatus::Waiting);
+        assert_eq!(row.home, "jack@local");
+        assert_eq!(row.provider, "codex");
+        // Age is measured, never fabricated; a just-opened row is a few seconds old.
+        assert!(row.age_secs.is_some_and(|age| age >= 0));
+
+        // A waiting handoff is active; a terminal one is filtered by `--active`.
+        assert!(handoff.is_active());
+        let all = store.list_interactive_handoffs(None).await.unwrap();
+        assert_eq!(all.len(), 1);
+        let finished = store
+            .finish_interactive_handoff(
+                &handoff.id,
+                &InteractiveHandoffOutcome::Completed {
+                    summary: "human logged in".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!finished.is_active());
+        let active: Vec<_> = store
+            .list_interactive_handoffs(None)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(InteractiveHandoff::is_active)
+            .collect();
+        assert!(active.is_empty());
     }
 }

@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::engine::wave_home::WaveHome;
 use crate::interactive_handoff::{
     InteractiveHandoff, InteractiveHandoffAttach, InteractiveHandoffId, InteractiveHandoffOutcome,
-    OpenInteractiveHandoff,
+    InteractiveHandoffParent, OpenInteractiveHandoff,
 };
 use crate::lf::HandoffCommand;
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -62,6 +62,41 @@ async fn run_async(command: &HandoffCommand) -> anyhow::Result<()> {
                     handoff.parent,
                     handoff.status.as_str()
                 );
+            }
+        }
+        HandoffCommand::List {
+            active,
+            parent,
+            json,
+        } => {
+            let parent = parent
+                .as_deref()
+                .map(InteractiveHandoffParent::parse)
+                .transpose()?;
+            let mut handoffs = store.list_interactive_handoffs(parent.as_ref()).await?;
+            if *active {
+                handoffs.retain(InteractiveHandoff::is_active);
+            }
+            let now = time::OffsetDateTime::now_utc();
+            let rows: Vec<_> = handoffs
+                .iter()
+                .map(|handoff| handoff.list_row(now))
+                .collect();
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else if rows.is_empty() {
+                println!("no interactive handoffs");
+            } else {
+                for row in &rows {
+                    println!(
+                        "{} {}:{} ({}) — {}",
+                        row.session_id,
+                        row.parent_kind,
+                        row.parent_id,
+                        row.status.as_str(),
+                        row.reason
+                    );
+                }
             }
         }
         HandoffCommand::Status { session_id, json } => {

@@ -141,6 +141,33 @@ struct DTOFixtureTests {
         #expect(decoded == attach)
     }
 
+    @Test("interactive handoff list fixture preserves census identity and age")
+    func interactiveHandoffListFixtureRoundTrips() throws {
+        let data = try loadFixtureData("interactive_handoff_list.json")
+        let rows = try JSONDecoder().decode([InteractiveHandoffListRow].self, from: data)
+
+        #expect(rows.count == 2)
+        let waiting = try #require(rows.first)
+        #expect(waiting.sessionId == "ih_00000000000000000000000000000001")
+        #expect(waiting.parentKind == "task")
+        #expect(waiting.parentId == "ts_00000000000000000000000000000002")
+        #expect(waiting.status == .waiting)
+        #expect(waiting.status.isActive)
+        #expect(waiting.home == "jack@local")
+        #expect(waiting.ageSecs == 90)
+
+        let attached = rows[1]
+        #expect(attached.parentKind == "project")
+        #expect(attached.providerSessionId == nil)
+        // An unreadable timestamp keeps age nil, never a fabricated zero.
+        #expect(attached.ageSecs == nil)
+        #expect(attached.status.isActive)
+
+        let encoded = try JSONEncoder().encode(rows)
+        let decoded = try JSONDecoder().decode([InteractiveHandoffListRow].self, from: encoded)
+        #expect(decoded == rows)
+    }
+
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {
         let data = try loadFixtureData(name, sourceFile: sourceFile)
         let json = try JSONSerialization.jsonObject(with: data)

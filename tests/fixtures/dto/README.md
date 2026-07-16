@@ -19,6 +19,12 @@ fact plus its evidence `receipts`, covering every `EvidenceKind`. Pinned in Rust
 shape. It carries durable identity and structured presentation instructions;
 terminal bytes are deliberately absent. Rust and Swift both round-trip it.
 
+`interactive_handoff_list.json` is the `lf handoff list --json` census shape: a
+row per durable handoff with identity, declared parent, Home, provider, reason,
+and age, but no argv or environment. Two rows exercise both parent kinds, both
+active statuses, an absent provider session, and an unreadable age (`null`, never
+a fabricated zero). Rust and Swift both round-trip it.
+
 `task_attention_states.json` pins the Rust-owned desktop attention fold for
 live advancing, live human wait, dead dirty, dead authored commits, clean
 backlog, completed, stale active intent, and unavailable local evidence. Rust

@@ -140,6 +140,24 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([SkillRunEntry].self, from: stdout)
     }
 
+    /// Every durable interactive handoff still waiting on or attached to a human,
+    /// across the machine. `lf handoff list --active` reads the shared store
+    /// directly; the census attaches each row to the parent it declares, never
+    /// inferring parentage. This does not record attach evidence — Open does.
+    public func activeHandoffs() async throws -> [InteractiveHandoffListRow] {
+        let stdout = try await run(["handoff", "list", "--active", "--json"], nil)
+        return try Self.decode([InteractiveHandoffListRow].self, from: stdout)
+    }
+
+    /// Record first-attach evidence for one handoff and return its structured
+    /// descriptor (argv + environment). Replay-safe: the contract preserves the
+    /// first attach, so repeated Opens return the same Session. Terminal bytes
+    /// stay behind `argv`.
+    public func attachHandoff(sessionId: String) async throws -> InteractiveHandoffAttach {
+        let stdout = try await run(["handoff", "attach", sessionId, "--json"], nil)
+        return try Self.decode(InteractiveHandoffAttach.self, from: stdout)
+    }
+
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
     /// rendering off the network; explicit and scheduled syncs refresh SQLite.
     public func plan(

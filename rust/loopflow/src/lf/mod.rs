@@ -591,6 +591,17 @@ pub enum HandoffCommand {
         #[arg(last = true, required = true)]
         attach_argv: Vec<String>,
     },
+    /// List durable interactive handoffs across the machine
+    List {
+        /// Only handoffs still waiting on or attached to a human
+        #[arg(long)]
+        active: bool,
+        /// Restrict to one parent: wave:<id>, project:<id>, or task:<id>
+        #[arg(long)]
+        parent: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show one durable handoff Session
     Status {
         session_id: String,
@@ -2514,6 +2525,39 @@ mod tests {
                     ..
                 }
             }) if summary == "finish the review fixes headlessly"
+        ));
+
+        let list = Cli::try_parse_from([
+            "lf",
+            "handoff",
+            "list",
+            "--active",
+            "--parent",
+            "wave:00000000-0000-4000-8000-000000000001",
+            "--json",
+        ])
+        .expect("parse handoff list");
+        assert!(matches!(
+            list.command,
+            Some(Commands::Handoff {
+                cmd: HandoffCommand::List {
+                    active: true,
+                    json: true,
+                    parent: Some(parent),
+                }
+            }) if parent == "wave:00000000-0000-4000-8000-000000000001"
+        ));
+
+        let bare_list = Cli::try_parse_from(["lf", "handoff", "list"]).expect("parse bare list");
+        assert!(matches!(
+            bare_list.command,
+            Some(Commands::Handoff {
+                cmd: HandoffCommand::List {
+                    active: false,
+                    json: false,
+                    parent: None,
+                }
+            })
         ));
     }
 

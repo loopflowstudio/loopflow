@@ -2460,6 +2460,7 @@ mod tests {
             provider_session_id: None,
             latest_process: None,
             abandon_intent: None,
+            observation: crate::task::Observation::NotRequired,
             created_at: now,
             updated_at: now,
         }

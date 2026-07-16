@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
-    ChildDecisionId, ChildDirectiveId, ChildExecutionContext, ChildLeaseState,
-    ChildProcessGeneration, DirectiveKind,
+    prefixed_uuid_id, AbandonIntent, ChildCommand, ChildCommandEffect, ChildCommandId,
+    ChildCommandState, ChildDecisionId, ChildDirective, ChildDirectiveId, ChildExecutionContext,
+    ChildLeaseState, ChildProcessGeneration, DirectiveKind,
 };
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
@@ -913,6 +913,62 @@ impl TaskObservation {
             self.session_id, self.issue_identifier, self.event_id, payload
         )
     }
+}
+
+/// The durable cursor for streaming human Linear edits into one Task Session.
+/// It is the exactly-once ledger — what issue revision and comments have already
+/// become Task direction — plus the health of the last observation, so
+/// `lf task status` can show stale reads and their degraded reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLinearObservation {
+    pub session_id: TaskSessionId,
+    /// Linear issue `updatedAt` last folded in. Monotonic: a read whose revision
+    /// is older is dropped as a stale/out-of-order response.
+    pub last_revision: String,
+    /// Content basis for the next title/description diff.
+    pub last_title: String,
+    pub last_description: String,
+    pub last_success_at: OffsetDateTime,
+    /// `Some` after a failed observation (auth/quota/network); `None` is healthy.
+    pub degraded_reason: Option<String>,
+    pub updated_at: OffsetDateTime,
+}
+
+/// One Linear observation, ready to persist atomically as Task direction. The
+/// directive is applied only if the stored title/description still differ
+/// (compare-and-set), and each follow-up becomes a command only on its first
+/// entry into the ledger — so overlapping polls, restarts, and out-of-order
+/// responses never duplicate direction.
+#[derive(Debug, Clone)]
+pub struct LinearObservationApply {
+    pub session_id: TaskSessionId,
+    pub revision: String,
+    pub title: String,
+    pub description: String,
+    pub observed_at: OffsetDateTime,
+    /// A title/description edit to persist: the Steer command and its
+    /// replacement directive. `None` when title and description are unchanged.
+    pub directive: Option<(ChildCommand, ChildDirective)>,
+    /// Human comments observed this pass, oldest first.
+    pub follow_ups: Vec<LinearFollowUp>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinearFollowUp {
+    pub comment_id: String,
+    pub command: ChildCommand,
+}
+
+/// What one [`LinearObservationApply`] actually wrote — enough for the caller to
+/// report receipts without re-reading the store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinearObservationOutcome {
+    /// The Session had no cursor yet: this observation seeded the baseline and
+    /// emitted no direction (existing comments are marked seen, not replayed).
+    pub baselined: bool,
+    pub directive_applied: bool,
+    pub superseded: Vec<ChildCommandId>,
+    pub follow_ups_created: Vec<ChildCommandId>,
 }
 
 #[cfg(test)]

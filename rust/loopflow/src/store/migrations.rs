@@ -224,6 +224,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "interaction_reviews",
         sql: include_str!("migrations/0.11.015_interaction_reviews.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 16,
+        },
+        name: "task_linear_observations",
+        sql: include_str!("migrations/0.11.016_task_linear_observations.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1122,7 +1131,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.015_interaction_reviews"
+            "0.11.016_task_linear_observations"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -1149,7 +1158,8 @@ mod tests {
                 "0.11.012_provider_account_lifecycle".to_string(),
                 "0.11.013_task_review_state".to_string(),
                 "0.11.014_task_lifecycle".to_string(),
-                "0.11.015_interaction_reviews".to_string()
+                "0.11.015_interaction_reviews".to_string(),
+                "0.11.016_task_linear_observations".to_string()
             ]
         );
     }
@@ -1171,7 +1181,7 @@ mod tests {
             assert_eq!(
                 latest_version_sqlite(&conn)
                     .unwrap_or_else(|error| panic!("divergent prefix {count}: {error}")),
-                "0.11.015_interaction_reviews"
+                "0.11.016_task_linear_observations"
             );
             assert_eq!(
                 conn.query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
@@ -1743,7 +1753,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.015_interaction_reviews"
+            "0.11.016_task_linear_observations"
         );
     }
 
@@ -1767,7 +1777,7 @@ mod tests {
         );
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.015_interaction_reviews"
+            "0.11.016_task_linear_observations"
         );
     }
 

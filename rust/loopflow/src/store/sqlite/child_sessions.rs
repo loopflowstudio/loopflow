@@ -1087,6 +1087,66 @@ impl SqliteStore {
         Ok((command.clone(), true))
     }
 
+    /// Insert a `ci-fix` wake unless one already exists for the same incident
+    /// identity, in which case return the existing row and `false`.
+    ///
+    /// This is the whole dedup: one (repo, PR, failed head, failure set) wakes
+    /// exactly one body, and the fact is a durable row written before any process
+    /// starts rather than a marker stamped once one has. A repeated observation,
+    /// a coalesced multi-check delivery, and a restart between observation and
+    /// arming all land here and all find the same command.
+    ///
+    /// Terminal state is *not* consulted: an identity that already woke a body
+    /// and accepted must not wake a second one. Re-arming is the job of a new
+    /// identity — a moved head or a changed failure set.
+    pub fn ensure_child_ci_fix_command(
+        &self,
+        command: &ChildCommand,
+    ) -> StoreResult<(ChildCommand, bool)> {
+        let ChildCommandKind::CiFix {
+            incident_identity, ..
+        } = &command.kind
+        else {
+            return Err(StoreError::InvalidData(
+                "ci-fix command required".to_string(),
+            ));
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = {
+            let mut statement = transaction.prepare(&format!(
+                "{CHILD_COMMAND_COLUMNS}
+                 WHERE target_kind=?1 AND session_id=?2
+                 ORDER BY created_at, id"
+            ))?;
+            let rows = statement.query_map(
+                params![command.target.target_kind(), command.target.target_id()],
+                map_child_command_row,
+            )?;
+            let mut existing = None;
+            for row in rows {
+                let candidate = row?;
+                if matches!(
+                    &candidate.kind,
+                    ChildCommandKind::CiFix {
+                        incident_identity: candidate_identity,
+                        ..
+                    } if candidate_identity == incident_identity
+                ) {
+                    existing = Some(candidate);
+                    break;
+                }
+            }
+            existing
+        };
+        if let Some(existing) = existing {
+            return Ok((existing, false));
+        }
+        insert_child_command(&transaction, command)?;
+        transaction.commit()?;
+        Ok((command.clone(), true))
+    }
+
     pub fn supersede_and_insert_child_command(
         &self,
         command: &ChildCommand,

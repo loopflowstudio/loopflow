@@ -17,20 +17,24 @@ hole against the KR. The `Superseded` arm in `absorb_commands` remains as a
 race net, not the normal path. Reversible: dropping the guard later is a
 one-line change if the complete-observation-record argument wins.
 
-**Is `CiFixArmed` a new event a "second state model"?**
-Judged no — it is an event, not a state; no transitions, no queue. It exists
-because the done-when demands "Task status and events expose which failure set
-woke which body", and `CommandChanged` carries only `command_id`. If review
-disagrees, the fallback is to drop the event and require a two-table join
-(`ci_incidents.trigger_command_id` → `child_commands.kind_json`), which is
-strictly worse to read at 2 a.m.
+**Is a `CiFixArmed` event worth its schema surface?** — RESOLVED: no, cut.
+I argued it was evidence rather than a second state model, and that
+`CommandChanged` carries only `command_id`. Both true, and both beside the point:
+every field it carried (`pr_number`, `head_sha`, `failing_checks`) already exists
+on `CiIncident` as `pr_number`/`failed_head_sha`/`failure_set`, joined by the
+`trigger_command_id` this PR fills in. `lf ci` renders the failure set with no
+join at all, so there is no consumer that can read the event but not the
+incident. It was a third copy of agreeing facts plus a Rust/Swift wire surface to
+keep in lockstep, bought for convenience. Evidence is `CommandChanged{claimed}` +
+`trigger_command_id` + `responded_at`.
 
-**Where does `Uncertain` leave a ci-fix wake?**
-Left on the existing semantics deliberately. The `Delivering` window for `CiFix`
-holds no provider call and is a few statements wide — narrower than any live-input
-command's. Wave memory ("Task body recovery is gated on settled") records a real
-strand under an open healthy PR, but that is a recovery-path bug, not this seam.
-Not in scope.
+**Where does `Uncertain` leave a ci-fix wake?** — RESOLVED: it cannot reach it.
+Superseded by the `Claimed`-through-the-turn design. `Uncertain` is only reachable
+from `Delivering`, and a `CiFix` never enters `Delivering` — there is no provider
+call at arm to be ambiguous about. So the wave-memory strand ("Task body recovery
+is gated on settled") and the `plan_body_recovery` → `NeedsInput` trap are both
+structurally out of reach for this variant, rather than merely unlikely. This is
+the KR's "zero durable commands orphaned 'uncertain'" satisfied by construction.
 
 ## Genuinely open — for review
 

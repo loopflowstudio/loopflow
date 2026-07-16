@@ -520,6 +520,19 @@ impl Store {
         .await
     }
 
+    /// Create a `ci-fix` wake unless this incident identity already has one.
+    /// Returns the surviving command and whether it was created.
+    pub async fn ensure_child_ci_fix_command(
+        &self,
+        command: &ChildCommand,
+    ) -> StoreResult<(ChildCommand, bool)> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.ensure_child_ci_fix_command(&command)
+        })
+        .await
+    }
+
     pub async fn supersede_and_create_child_command(
         &self,
         command: &ChildCommand,

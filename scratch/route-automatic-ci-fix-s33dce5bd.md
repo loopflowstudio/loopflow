@@ -67,18 +67,23 @@ Fail a required check on an open Task PR whose body is asleep. Then:
 
 ```
 $ lf ci
-IDENTITY                                  PR    HEAD     FAILURE SET     TRIGGER              RESPONDED
-github:ci:loopflow:1042:a1b2c3d:9f0e…     1042  a1b2c3d  tests-result    cc_7f3a…             12s ago
+IDENTITY                                  PR    HEAD     FAILURE SET     TRIGGER    RESPONDED
+github:ci:loopflow:1042:a1b2c3d:9f0e…     1042  a1b2c3d  tests-result    cc_7f3a…   12s ago
 
 $ lf task status ENG-NN --json | jq .events
-… { "kind": "ci_fix_armed", "command_id": "cc_7f3a…", "pr_number": 1042,
-    "head_sha": "a1b2c3d", "failing_checks": ["tests-result"] }
-… { "kind": "command_changed", "command_id": "cc_7f3a…", "state": "accepted" }
+… { "kind": "command_changed", "command_id": "cc_7f3a…", "state": "claimed" }
 ```
 
-Then re-run the observation twice and restart the Project runner mid-flight —
-`lf ci` still shows exactly one trigger command and one woken body. The wake is
-now something you can name, look up, and count.
+One row answers the whole question: this failure set, on this head, woke this
+command, and a body responded 12s later. `lf ci` needs no join — `CiIncident`
+already carries `pr_number`, `failed_head_sha`, and `failure_set`; the command id
+is the one fact it was missing.
+
+Then kill the body mid-repair. A successor generation reclaims **the same
+`cc_7f3a…`**, selects `ci-fix` again, and `lf ci` still shows one trigger command
+and one incident. The command is `Claimed` throughout — it terminalizes only when
+ENG-19's settlement lands. The wake is now something you can name, look up, and
+count.
 
 ## Approach
 
@@ -98,19 +103,27 @@ Add one variant to `ChildCommandKind` (`child_session.rs:363`). It rides
 /// (repo, PR, failed head, failure set), forever.
 CiFix {
     incident_identity: String,
-    repo: String,
     pr_number: u32,
     head_sha: String,
     failing_checks: Vec<CiCheck>,
 },
 ```
 
+The payload is exactly what the seed needs and nothing more. **No `repo` field:**
+the command's `target` already fixes the Task, its session, and therefore its
+repository, and `incident_identity` encodes the repo a second time
+(`github:ci:{repo}:…`). A third copy could only ever drift from the two that
+already agree, and `ci_fix_seed` never reads it — it takes the PR URL and branch
+from the `TaskPr`.
+
 `ChildCommand::new` gives it `effect: None` — its effect is a launch, not a
 delivery into an existing turn.
 
 It carries `CiCheck` (name + log URL), not bare names, because the seed needs the
 URLs and re-reading them from the observation at boot is exactly the drift this
-change removes.
+change removes. This is the one place the command holds something `CiIncident`
+does not: the incident's `failure_set` is names only, since its identity hashes
+over names.
 
 ### 2. Identity is the dedup key, and it already exists
 
@@ -195,10 +208,23 @@ let launch_intent = match (&kind, &source) {
 };
 ```
 
-Everything after that is the ledger's existing behaviour, unchanged:
-`queue_command`'s tail (`ops/child.rs:740`) launches when inactive; the `!created`
-branch (`:681`) relaunches a non-terminal duplicate and no-ops a terminal one —
-which is exactly the restart semantics we want, for free.
+`queue_command`'s tail (`ops/child.rs:740`) launches when inactive — that is the
+wake.
+
+The `!created` duplicate branch (`:681`) needs one narrow arm. It currently
+relaunches any non-terminal duplicate, which was right when `Accepted` came at
+arm. Now that a CiFix stays `Claimed` for the whole repair turn, a duplicate
+observation against a parked Task would relaunch a body **every supervision
+pass**. So for `CiFix` the retry keys on `Persisted`, not on non-terminal:
+
+- `Persisted` — no generation ever claimed this wake, so the launch that should
+  have consumed it never happened. Retry it.
+- `Claimed` — a generation owns this repair. If it is alive, leave it alone. If
+  it died, **recovery owns the relaunch**, not the observer: W2-267 (#1016) made
+  recovery-launched bodies subject to ci-fix entry deliberately, so the successor
+  generation reclaims this same command and `arm_ci_fix_wake` re-selects the
+  ci-fix flow.
+- terminal — settled; only a new identity re-arms.
 
 Source is `ChildCommandSource::System`. Like `Linear`, it must not be `Human` —
 it must never carry the operator-resume affordance.
@@ -206,37 +232,61 @@ it must never carry the operator-resume affordance.
 `wait_for_resolution = false` for `CiFix`, joining `FollowUp`. The supervision
 pass must not block 2s on a body's boot.
 
-### 6. Arming reads the command, not the observation
+### 6. Arming reads the command, and leaves it `Claimed`
 
 `arm_ci_fix_wake` (`task/runner.rs:1955`) stops re-deriving warrant and instead
-consumes what was claimed:
+consumes what this generation claimed. **It does not settle the command.**
 
 ```rust
 // task/runner.rs — before the harness exists
-async fn arm_ci_fix_wake(...) -> Result<Option<CiFixWake>> {
-    // claim_commands has already run; find the claimed CiFix, if any
-    // begin_delivery (Claimed → Delivering)
+async fn arm_ci_fix_wake(..., claimed: Vec<ChildCommand>)
+    -> Result<(Option<CiFixWake>, Vec<ChildCommand>)>
+{
+    // take the claimed CiFix out of the list, if any and if the bar is legal
     // build the seed from the command payload
-    // accept_command (Delivering → Accepted)
     // stamp CiIncident.responded_at by incident_identity
-    // emit TaskEventKind::CiFixArmed
+    // emit CommandChanged{claimed} — absorb never sees this command, so this
+    //   emit is the only trace the claim leaves
+    // leave the command CLAIMED — ENG-19 settlement owns the terminal transition
 }
 ```
 
-Ordering note: `reconcile_stale_deliveries` runs at `task/runner.rs:115`, before
-this. That ordering is load-bearing and stays — a `Delivering` CiFix from a dead
-generation goes `Uncertain` before the new generation claims, and
-`plan_body_recovery` filters on `claimed_by_generation == Some(generation)`
-(`child_session.rs:760`), so a predecessor's uncertainty does not poison this
-one.
+**`Claimed` for the whole bounded repair turn is the design, not an omission.**
+`claim_child_commands_in` (`sqlite/child_sessions.rs:4462`) reassigns on
+`state IN ('persisted','claimed')`. So a `Claimed` CiFix is *durably re-claimable
+by a successor generation* — and that reclaim is itself the run-kind signal.
+The alternatives are both wrong:
+
+- **Accept at arm.** `Accepted` is terminal, so the claim predicate skips it. A
+  crash mid-repair boots a successor that finds nothing claimable, falls through
+  to `resume_task_phase`, and silently abandons the repair with the PR still
+  red. The wake would survive a crash *before* the body, but not *during* it —
+  which is the window a repair turn actually occupies.
+- **Deliver at arm.** `Delivering` means "a provider call is in flight and a
+  crash from here is ambiguous" (`child_session.rs:395`). It isn't: no provider
+  call happens at arm. Worse, `reconcile_stale_deliveries` (`task/runner.rs:115`)
+  would flip a crashed generation's CiFix to `Uncertain`, and `plan_body_recovery`
+  (`child_session.rs:760`) returns `NeedsInput` when a stalled body holds one —
+  stranding an *automatic* wake on a human. That inverts the Project KR.
+
+Staying `Claimed` means **a CiFix command can never go `Uncertain`**, because it
+never enters `Delivering`. The KR reads *"zero durable commands are left orphaned
+'uncertain' against a dead generation"*; this variant is structurally incapable
+of it. No lifecycle field, no process field, no origin-phase column — the state
+the ledger already has, used for what it already means.
+
+Ordering, now load-bearing: `reconcile_stale_deliveries` (`:115`) → `claim_commands`
+(moved up from `:170`) → `arm_ci_fix_wake` → flow selection → harness →
+`absorb_commands` (stays at `:171`). Claim must precede arm because the flow
+choice needs the command before a harness exists. The armed command is removed
+from the list handed to `absorb_commands`, so absorb never touches the command
+this body was born for.
 
 `ci_fix_seed` (`task/runner.rs:1982`) takes the command payload instead of
-`pr.fresh_ci()`. **The body now repairs the failure that woke it**, not whatever
-the observation row says at boot. This is a correctness fix riding along, and
-worth stating: the seed and the dedup key now describe the same failure.
-
-The `Delivering` window is a few statements wide and contains no provider call
-— narrower than any existing command's.
+`pr.fresh_ci()`, threaded through `prepare_task_flow_step` as
+`Option<&CiFixWake>`. **The body now repairs the failure that woke it**, not
+whatever the observation row says at boot. This is a correctness fix riding
+along: the seed and the dedup key now describe the same failure.
 
 ### 7. Live-body race → `Superseded`
 
@@ -247,18 +297,31 @@ Existing state, existing event, no new concept.
 
 ### 8. Evidence closes the loop
 
+**No new event kind.** The evidence is what already exists, wired up:
+
 - `queue_ci_fix_command` stamps `CiIncident.trigger_command_id` after
   `ensure_` reports `created: true`. New store method
   `mark_ci_incident_triggered(identity, command_id)` beside the existing
   `mark_ci_incident_responded`. No FK on the column (`0.11.024:18`), so no
   ordering constraint — but we write it after creation regardless.
-- `arm_ci_fix_wake` stamps `responded_at` — unchanged milestone, now emitted
-  from the command path.
-- One new event, `TaskEventKind::CiFixArmed { command_id, pr_number, head_sha,
-  failing_checks }`, project-observable. This is what makes *"which failure set
-  woke which body"* answerable from the event stream rather than by joining two
-  tables in your head.
+- `arm_ci_fix_wake` stamps `responded_at` — unchanged milestone, now reached from
+  the command path.
+- `arm_ci_fix_wake` emits `CommandChanged { command_id, state: Claimed }`. This
+  is load-bearing rather than decorative: the armed command is withheld from
+  `absorb_commands` (§6), and `absorb` is what normally calls `record_claimed`,
+  so without this emit the claim would leave no trace at all.
 - `lf ci` (`lf/commands/ci.rs`) renders `trigger_command_id`.
+
+A `TaskEventKind::CiFixArmed { command_id, pr_number, head_sha, failing_checks }`
+was designed and **cut**. Every field duplicated a column `CiIncident` already
+has — `pr_number`, `failed_head_sha`, `failure_set` — joined by the same
+`trigger_command_id` the incident already carries. There is no consumer that can
+read the event but not the incident: `lf ci` renders the failure set today
+without any join. It would have been a third copy of facts that already agree in
+two places, plus a wire surface to hold in lockstep across Rust and Swift for
+convenience alone. `CommandChanged{claimed}` names the command;
+`trigger_command_id` and `responded_at` link it to the failure and the response.
+That is the whole answer to *"which failure set woke which body"*.
 
 **`CiFix` never mints a `ChildDirective`.** A directive would bump
 `current_directive_version`, and `has_pending_directive` (`ops/task.rs:3180`)
@@ -320,6 +383,21 @@ live body via `harness.send_input`. `CiFix` targets a sleeping Task and its
 payload becomes the born body's seed. That's why it is armed before the harness
 exists (`task/runner.rs:122`, ahead of `:141`) and why a live body supersedes it.
 
+**`Claimed` is the run-kind signal.** The command stays `Claimed` for the entire
+bounded repair turn, and the existing claim predicate (`state IN
+('persisted','claimed')`) is what carries it across a crash to a successor
+generation. This is why the change needs no `ci_fix` lifecycle field, no
+origin-phase column, and no process flag: the ledger state that already means
+"a generation owns this" is exactly what "this body exists to repair CI" needs
+to mean. Neither `Delivering` nor `Accepted` can hold that meaning — see §6.
+
+**Exactly-once, stated precisely: one durable command and at most one *live*
+body per failure identity.** Not "one body, ever." A crashed repair is recovered
+by a successor generation servicing the *same* command id, and that is correct
+behaviour, not a dedup violation. The lease CAS in `reserve_task_process` keeps
+"at most one live" true at any instant; the incident identity keeps "one command"
+true forever. Only settlement ends the command's life — never a body's death.
+
 **The seed comes from the command.** `ci_fix_seed` stops reading
 `pr.fresh_ci()`. The body repairs the failure that woke it. Today those can
 differ; that's a latent bug this closes.
@@ -340,22 +418,37 @@ one `ci-fix` flow (`QueuedInvocation::load(&session.worktree, "ci-fix")`,
 ## The ENG-19 seam
 
 ENG-19 (*"Settle one bounded ci-fix turn without entering the generic Task
-gate"*) owns the **exit**; ENG-20 owns the **entry**. The seam is the command's
-terminal state plus `CiIncident.responded_at`:
+gate"*) owns the **exit**; ENG-20 owns the **entry**. The seam is now a single
+named transition rather than a vague predicate:
 
-- ENG-20 guarantees: when a ci-fix body is born, exactly one `CiFix` command is
-  `Accepted` against its generation, its payload named the failure, and
-  `responded_at` is stamped on the matching incident.
-- ENG-19 consumes: at turn end, `arm_ci_fix_wake` returning `Some(CiFixWake)` is
-  the durable, restart-surviving signal that *this generation exists to service
-  one bounded ci-fix turn* — which is exactly the predicate ENG-19 needs to park
-  instead of entering the generic Gate. Today that signal is a `bool` local that
-  dies with the process.
+**ENG-20 guarantees, when a ci-fix body is born:**
 
-ENG-19 stays a narrow follow-up because this PR makes its predicate durable and
-queryable without touching lifecycle. **This PR must not change settlement
-behaviour** — the turn ends exactly as it does today. Landing settlement here
-would merge two bets.
+- exactly one `CiFix` command exists for that failure identity, and it is
+  `Claimed` by this generation for the whole turn;
+- its payload named the failure, and the seed came from that payload;
+- `CiIncident.trigger_command_id` names it and `responded_at` is stamped;
+- `arm_ci_fix_wake` returns `Some(CiFixWake)` — the in-process handle to a
+  *durable* fact. Today that signal is a `bool` local that dies with the
+  process; after this, the fact outlives the body and any successor generation
+  re-derives it by reclaiming the same row.
+
+**ENG-19 owns the terminal transition.** At turn settle: `Accepted` if the
+bounded repair turn settled, or `Failed`/`Superseded` with an actionable reason —
+then park without entering the generic Gate. Until ENG-19 lands, a completed
+repair leaves its command `Claimed`. That is deliberate and safe: the enqueue
+path does not relaunch on `Claimed` (§5), so a parked Task does not spin. The
+Task re-arms only via a new identity — a moved head or a changed failure set —
+which is exactly today's `mark_woken` behaviour, so **behaviour on main does not
+regress while the seam is open**.
+
+The oscillation W2-267 warns about closes across both halves: ENG-20's identity
+dedup keeps one wake from becoming two commands on the entry side; ENG-19's
+parking keeps a settled turn from re-entering on the exit side. The recovery
+attempt budget cannot close it — it is progress-relative, and a ci-fix turn
+writes real durable events that reset it.
+
+**This PR must not change settlement behaviour** — the turn ends exactly as it
+does today. Landing settlement here would merge two bets.
 
 ## Scope
 
@@ -373,15 +466,25 @@ would merge two bets.
 - Delete `woken_failure_set`, `wake_warranted`, `mark_woken`, the carry-forward
   block, and the marker write inside `arm_task_pr_ci_fix_for_lease`.
 - `ci_fix_restart_bar` → legality only.
-- `arm_ci_fix_wake` reads the claimed command; `ci_fix_seed` takes the payload.
-- `TaskEventKind::CiFixArmed`, project-observable.
+- `arm_ci_fix_wake` reads the claimed command, leaves it `Claimed`, and emits
+  `CommandChanged{claimed}`; `ci_fix_seed` takes the payload, threaded through
+  `prepare_task_flow_step` as `Option<&CiFixWake>`.
+- Move `claim_commands` above flow selection; withhold the armed command from
+  `absorb_commands`.
+- `queue_command`'s `!created` CiFix retry keys on `Persisted`.
 - `lf ci` renders the trigger command id.
 - Tests (below).
 
 **Out of scope**
 
+- **Any terminal transition of a `CiFix` command** — `Accepted`, `Failed`, and
+  `Superseded`-at-settle all belong to **ENG-19**. This PR never terminalizes a
+  wake; the only `Superseded` it writes is the live-body race (§7), which is not
+  a settlement.
 - Settlement / parking behaviour at turn end — **ENG-19**.
-- Any lifecycle phase, `ci_fix` plan field, or origin-phase persistence.
+- Any new `TaskEventKind` — cut, see §8.
+- Any lifecycle phase, `ci_fix` plan field, origin-phase persistence, or process
+  field. The `Claimed` state carries the run kind; nothing else is added.
 - Webhook delivery (`webhook_received_at` / `provider_completed_at` stay
   `None` on the poll path — a separate bet).
 - A pending-command list on `TaskSessionSnapshot`.
@@ -396,8 +499,8 @@ would merge two bets.
 didn't move):
 
 - `a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green` (`:580`)
-  — now asserts one `CiFix` command per identity, `Accepted` after arm, and
-  `trigger_command_id` linking incident → command.
+  — now asserts one `CiFix` command per identity, `Claimed` (not `Accepted`)
+  after arm, and `trigger_command_id` linking incident → command.
 - `a_changed_failing_set_on_the_same_head_rearms` (`:683`) — new identity, new
   command.
 - `a_gh_outage_degrades_the_read_without_inventing_a_reading` (`:713`) — no
@@ -413,10 +516,24 @@ didn't move):
 - `duplicate_observation_enqueues_one_ci_fix_command` — reconcile ×3 on one
   failed head ⇒ exactly one command row, one incident, one `trigger_command_id`.
 - `a_restart_before_the_body_boots_delivers_the_same_command` — enqueue, drop
-  the process, reconcile again, boot ⇒ the *same* `command_id` is claimed and
-  accepted; no second row, no second body.
+  the process, reconcile again, boot ⇒ the *same* `command_id` is claimed; no
+  second row, no second body.
+- **`a_crash_after_arm_reclaims_the_same_command_and_reselects_ci_fix`** — the
+  window the whole `Claimed` decision exists for. Arm (command → `Claimed`,
+  generation N), kill the body mid-turn, boot generation N+1 ⇒ the same
+  `command_id` is reclaimed with `claimed_by_generation == N+1`, the flow
+  selected is `ci-fix` again, no second command is minted, and the command never
+  reaches `Uncertain`. This test fails against an accept-at-arm implementation —
+  it is the executable form of §6's argument.
+- `a_ci_fix_command_never_enters_delivering` — asserts the state sequence a
+  ci-fix wake can occupy, so a future edit cannot quietly reintroduce the
+  `Uncertain`/`NeedsInput` strand.
+- `a_claimed_ci_fix_command_does_not_relaunch_a_parked_task` — repeated
+  observation against a parked Task holding a `Claimed` command ⇒ zero launches
+  (the every-supervision-pass spin, §5).
 - `a_delayed_ci_fix_command_survives_until_a_body_claims_it` — command sits
-  `Persisted` across N supervision passes with no body, then boots and accepts.
+  `Persisted` across N supervision passes with no body, then boots and claims it
+  (delayed incorporation; still `Claimed`, never `Accepted`).
 - `a_ci_fix_command_seeds_the_body_from_its_own_payload` — mutate
   `pr.ci_observation` between enqueue and boot; the seed still names the
   command's `head_sha` and `failing_checks`.
@@ -429,9 +546,13 @@ didn't move):
   enqueues rather than launches — the path Explore confirmed has zero tests
   today.
 
+Every test that asserts a post-arm state asserts **`Claimed`**. No test in this
+PR may assert a terminal `CiFix` state — if one does, settlement leaked in from
+ENG-19.
+
 **Observable outcome** — the demo above: `lf ci` names the trigger command, and
-`lf task status --json` shows `ci_fix_armed` + `command_changed{accepted}` for
-the same `command_id`.
+`lf task status --json` shows `command_changed{claimed}` for the same
+`command_id`, before and after a mid-repair crash.
 
 ## Measure
 
@@ -449,15 +570,23 @@ Every incident today has a null trigger — the wake is unattributable, so the K
 cannot see the automatic path at all.
 
 After: every incident with `responded_at != null` carries a
-`trigger_command_id`, and that command is `Accepted` against the generation that
-serviced it. Weekly check:
+`trigger_command_id`, and that command is `Claimed` by the generation currently
+servicing the repair — terminal only once ENG-19's settlement lands. Weekly
+check:
 
 ```bash
 # wakes with no attributable command — target 0
 lf ci --json | jq '[.[] | select(.responded_at != null and .trigger_command_id == null)] | length'
-# incidents whose command went Uncertain against a dead generation — target 0
-lf ci --json | jq '[.[] | select(.trigger_command_id != null)] | length'   # cross-ref child_commands.state
+# incidents responded to but never triggered by a command — target 0 (a bypass survived)
+lf ci --json | jq '[.[] | select(.responded_at != null and .trigger_command_id == null)] | length'
 ```
 
-"Better" = the automatic wake path becomes countable by the same query that
-already counts the human path, and the orphaned-`uncertain` count stays 0.
+The KR's orphaned-`uncertain` count is measured structurally rather than
+empirically here: a `CiFix` never enters `Delivering`, so it cannot become
+`Uncertain`, so the automatic path contributes zero to that count by
+construction. The query worth running weekly is the attribution one above — a
+non-zero result means a wake reached a body without a command, which is the
+bypass this PR removes growing back.
+
+"Better" = the automatic wake path becomes countable by the same ledger that
+already counts the human path.

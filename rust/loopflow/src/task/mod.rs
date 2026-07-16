@@ -298,19 +298,11 @@ pub struct CiObservation {
     pub state: CiState,
     pub failing_checks: Vec<CiCheck>,
     pub observed_at: OffsetDateTime,
-    /// The failing-check set a `ci-fix` wake has already fired for at this head,
-    /// sorted. `None` until a wake fires. This is the dedup key: a wake is
-    /// warranted only when the current failing set differs from it, so a repeated
-    /// poll or a coalesced multi-check delivery never wakes a second body. The
-    /// marker rides this JSON column — absent on readings written before the wake
-    /// landed, hence `serde(default)` rather than a migration.
-    #[serde(default)]
-    pub woken_failure_set: Option<Vec<String>>,
 }
 
 impl CiObservation {
-    /// The current failing required checks by name, sorted — the dedup key's
-    /// content half. Empty unless `state` is `Failing`.
+    /// The current failing required checks by name, sorted — the content half of
+    /// a [`CiIncident`]'s identity. Empty unless `state` is `Failing`.
     pub fn failure_set(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .failing_checks
@@ -322,20 +314,17 @@ impl CiObservation {
         names
     }
 
-    /// Whether this reading warrants a `ci-fix` wake: the head is failing and no
-    /// wake has fired for this exact failing set yet. `false` once a wake for the
-    /// same set is recorded (repeat poll / coalesced delivery) — the wake is
-    /// re-armed only when the head moves (a fresh reading) or the failing set
-    /// changes.
-    pub fn wake_warranted(&self) -> bool {
+    /// Whether this reading makes a `ci-fix` wake *legal*: the current head is
+    /// failing a required check.
+    ///
+    /// This asks only about legality. Whether a wake has already fired for this
+    /// exact failure is a separate question with a separate owner — the durable
+    /// `ChildCommandKind::CiFix` ledger, keyed on the incident identity. Those
+    /// two questions used to be conflated in one mutable JSON marker on this
+    /// struct, which meant the wake was deduplicated by a value re-derived on
+    /// every reconcile and committed only once a body had already been born.
+    pub fn wake_legal(&self) -> bool {
         self.state == CiState::Failing
-            && self.woken_failure_set.as_deref() != Some(self.failure_set().as_slice())
-    }
-
-    /// Record that a wake fired for the current failing set, so the next reading
-    /// with the same `(head, failing set)` does not wake again.
-    pub fn mark_woken(&mut self) {
-        self.woken_failure_set = Some(self.failure_set());
     }
 }
 
@@ -743,11 +732,14 @@ impl TaskSession {
 
     /// The restart bar for an automated `ci-fix` wake. Identical to the supervisor
     /// bar, except an `Open` PR is *permitted* when its current head carries a
-    /// failing required check the wake has not yet fired for
-    /// ([`CiObservation::wake_warranted`]). This is the one automated path allowed
-    /// to restart a submitted Task, and only on fresh current-head failure
-    /// evidence — never a blind wake over passing, pending, or already-woken work,
-    /// and never past the terminal, abandon, or publishing bars.
+    /// failing required check ([`CiObservation::wake_legal`]). This is the one
+    /// automated path allowed to restart a submitted Task, and only on fresh
+    /// current-head failure evidence — never a blind wake over passing or pending
+    /// work, and never past the terminal, abandon, or publishing bars.
+    ///
+    /// The bar answers legality only. "Have we already woken for this failure?"
+    /// is the command ledger's question, answered once by the incident identity
+    /// on `ChildCommandKind::CiFix` — not asked again here.
     pub fn ci_fix_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
             return Some(bar);
@@ -755,9 +747,10 @@ impl TaskSession {
         if let Some(pr) = active_pr {
             match pr.phase() {
                 PrPhase::Publishing => return Some(self.publishing_bar()),
-                // An open PR restarts only with a warranted ci-fix; otherwise it
-                // stays barred exactly as the supervisor bar leaves it.
-                PrPhase::Open if !pr.fresh_ci().is_some_and(CiObservation::wake_warranted) => {
+                // An open PR restarts only on a current-head required-check
+                // failure; otherwise it stays barred exactly as the supervisor
+                // bar leaves it.
+                PrPhase::Open if !pr.fresh_ci().is_some_and(CiObservation::wake_legal) => {
                     return Some(self.open_pr_bar(pr));
                 }
                 PrPhase::Open | PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}

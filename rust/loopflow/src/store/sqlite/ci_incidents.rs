@@ -41,6 +41,26 @@ pub(super) fn mark_ci_incident_responded_on(
     )? > 0)
 }
 
+/// Name the durable command that woke a body for this incident.
+///
+/// `COALESCE` keeps the first trigger: an identity wakes one body, so a second
+/// command claiming the same incident is a bug, not a newer truth. Returns
+/// whether the incident existed.
+pub(super) fn mark_ci_incident_triggered_on(
+    conn: &rusqlite::Connection,
+    identity: &str,
+    command_id: &ChildCommandId,
+    updated_at: OffsetDateTime,
+) -> StoreResult<bool> {
+    let at = timestamp(updated_at);
+    Ok(conn.execute(
+        "UPDATE ci_incidents
+         SET trigger_command_id=COALESCE(trigger_command_id, ?2), updated_at=MAX(updated_at, ?3)
+         WHERE identity=?1",
+        params![identity, command_id.as_str(), at],
+    )? > 0)
+}
+
 fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncidentReportRow> {
     let failure_set_json: String = row.get(6)?;
     let failure_set = serde_json::from_str(&failure_set_json).map_err(|error| {
@@ -148,6 +168,16 @@ impl super::SqliteStore {
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         mark_ci_incident_responded_on(&conn, pr_id, failed_head_sha, failure_set, responded_at)
+    }
+
+    pub fn mark_ci_incident_triggered(
+        &self,
+        identity: &str,
+        command_id: &ChildCommandId,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        mark_ci_incident_triggered_on(&conn, identity, command_id, updated_at)
     }
 
     pub fn mark_ci_incidents_green(

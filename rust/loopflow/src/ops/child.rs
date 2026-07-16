@@ -486,38 +486,17 @@ pub(crate) struct ChildControlResult {
 enum LaunchIntent {
     Supervisor,
     ExplicitResume,
-    /// An automated `ci-fix` wake: allowed past the open-PR bar, but only when
-    /// the active PR carries a warranted current-head required-check failure
-    /// (`TaskSession::ci_fix_restart_bar`).
+    /// An automated `ci-fix` wake, carried by a durable `ChildCommandKind::CiFix`.
+    /// Allowed past the open-PR bar, but only when the active PR carries a
+    /// current-head required-check failure (`TaskSession::ci_fix_restart_bar`).
+    /// The bar decides legality; the command ledger decides whether this wake has
+    /// already fired.
     CiFix,
     /// Automatic recovery of a Session whose body died while its status still
     /// claimed one. Barred only by terminal and abandoning work; the strand
     /// predicate upstream (`plan_stranded_recovery`) is what keeps it off
     /// delivered work.
     Recovery,
-}
-
-/// Wake a Task that is sleeping on an open PR into a bounded `ci-fix` turn.
-///
-/// Launches a fresh generation under [`LaunchIntent::CiFix`], which the
-/// `ci_fix_restart_bar` permits past the open-PR/W2-129 bar only because the
-/// active PR carries a warranted current-head required-check failure. A no-op if
-/// a process is already active — the caller may poll every supervision pass, and
-/// the lease CAS in `reserve_task_process` is the second guard against a double
-/// body. Returns whether a generation was launched.
-pub(crate) async fn wake_task_ci_fix(
-    store: &SharedStore,
-    session: &mut TaskSession,
-) -> OpsResult<bool> {
-    if session.status.is_process_active() {
-        return Ok(false);
-    }
-    let mut child = ChildSession::Task(Box::new(session.clone()));
-    child.launch(store, LaunchIntent::CiFix).await?;
-    if let ChildSession::Task(relaunched) = child {
-        *session = *relaunched;
-    }
-    Ok(true)
 }
 
 /// Re-dispatch a Task Session whose body died, with no human asking.
@@ -618,11 +597,17 @@ pub(crate) async fn queue_command(
         (ChildCommandKind::Resume { .. }, ChildCommandSource::Human) => {
             LaunchIntent::ExplicitResume
         }
+        (ChildCommandKind::CiFix { .. }, _) => LaunchIntent::CiFix,
         _ => LaunchIntent::Supervisor,
     };
 
     let command = ChildCommand::new(session.target(), source, kind);
-    let wait_for_resolution = !matches!(&command.kind, ChildCommandKind::FollowUp { .. });
+    // A ci-fix wake is fire-and-forget like a follow-up: the supervision pass
+    // that observed the failure must not block on a body's boot.
+    let wait_for_resolution = !matches!(
+        &command.kind,
+        ChildCommandKind::FollowUp { .. } | ChildCommandKind::CiFix { .. }
+    );
     let replacement = match &command.kind {
         ChildCommandKind::Steer { text } => Some(text.clone()),
         ChildCommandKind::Interrupt {

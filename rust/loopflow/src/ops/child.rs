@@ -570,6 +570,22 @@ fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHand
     })
 }
 
+/// Whether a deduplicated command should relaunch an inactive Session.
+///
+/// A `Decide` re-sent by a human means "run this" — an unsettled one relaunches.
+/// A `CiFix` is re-sent by a *supervision pass*, not a person, so the same rule
+/// would spin a body on every poll for as long as the repair is unsettled. It
+/// keys on `Persisted` instead: nobody ever claimed that wake, so the launch that
+/// should have consumed it never happened. Once it is `Claimed`, a generation
+/// owns the repair, and a dead one is recovery's problem — recovery re-enters
+/// ci-fix and reclaims this same command.
+fn relaunch_on_duplicate(command: &ChildCommand) -> bool {
+    match &command.kind {
+        ChildCommandKind::CiFix { .. } => command.state == ChildCommandState::Persisted,
+        _ => !command.state.is_terminal(),
+    }
+}
+
 pub(crate) async fn queue_command(
     store: &SharedStore,
     mut session: ChildSession,
@@ -636,6 +652,12 @@ pub(crate) async fn queue_command(
             .await
             .map_err(child_error)?;
         (command, created, Vec::new(), None)
+    } else if matches!(&command.kind, ChildCommandKind::CiFix { .. }) {
+        let (command, created) = store
+            .ensure_child_ci_fix_command(&command)
+            .await
+            .map_err(child_error)?;
+        (command, created, Vec::new(), None)
     } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
         let superseded = store
             .supersede_and_create_child_command(&command)
@@ -663,8 +685,33 @@ pub(crate) async fn queue_command(
         (command, true, Vec::new(), None)
     };
 
+    // Link the wake to its evidence before anything can service it.
+    //
+    // Launching is what leads to a body, and a body stamps `responded_at` the
+    // moment it arms. Linking after the launch returns leaves a window — widened
+    // by `wait_for_resolution = false`, which returns without waiting — where a
+    // crash strands an incident reading "responded, trigger unknown": the one
+    // state the recovery ledger exists to make impossible. The durable order is
+    // incident exists -> command ensure -> trigger link -> launch/claim/respond.
+    //
+    // Runs on the duplicate path too: `ensure_` returned the surviving command, so
+    // this re-links the same id and the COALESCE makes it a no-op.
+    if let ChildCommandKind::CiFix {
+        incident_identity, ..
+    } = &command.kind
+    {
+        store
+            .mark_ci_incident_triggered(
+                incident_identity,
+                &command.id,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .map_err(child_error)?;
+    }
+
     if !created {
-        if !command.state.is_terminal() && !session.is_process_active() {
+        if relaunch_on_duplicate(&command) && !session.is_process_active() {
             session.launch(store, launch_intent).await?;
         }
         let receipt = resolve_receipt(store, &command.id, wait_for_resolution).await?;
@@ -861,8 +908,8 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::child_session::{
-        ChildBodyOutcome, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildLeaseState,
-        ChildProcessGeneration, ChildRef,
+        ChildBodyOutcome, ChildCommand, ChildCommandKind, ChildCommandSource, ChildCommandState,
+        ChildLeaseState, ChildProcessGeneration, ChildRef,
     };
     use crate::id::WaveId;
     use crate::project_session::{
@@ -877,8 +924,8 @@ mod tests {
     use crate::wave::Wave;
 
     use super::{
-        child_body_reservation_is_fresh, handoff_request, queue_command, resume_session,
-        revoke_and_reap_child_body, ChildSession,
+        child_body_reservation_is_fresh, handoff_request, queue_command, relaunch_on_duplicate,
+        resume_session, revoke_and_reap_child_body, ChildSession,
     };
 
     #[test]
@@ -1283,7 +1330,7 @@ mod tests {
         let project = make_project(&wave, ProjectSessionStatus::Running);
         store.create_project_session(&project).await.unwrap();
 
-        let mut task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
         let mut pr = make_task_pr(&task);
         store.create_task_session(&task, &pr).await.unwrap();
         // Open PR, head observed green: no failure warrants a ci-fix wake.
@@ -1302,13 +1349,26 @@ mod tests {
             state: crate::task::CiState::Passing,
             failing_checks: vec![],
             observed_at: pr.updated_at,
-            woken_failure_set: None,
         });
         store.update_task_pr(&pr).await.unwrap();
 
-        let error = super::wake_task_ci_fix(&store, &mut task)
-            .await
-            .expect_err("a green open PR must not wake a ci-fix turn");
+        // Reached through the ledger rather than a bespoke wake call: a `CiFix`
+        // command is the only way to ask for this launch now. The observer never
+        // enqueues one against a green head, so this asks the bar directly —
+        // legality is the bar's question, and a green PR is not legal.
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task.clone())),
+            ChildCommandSource::System,
+            ChildCommandKind::CiFix {
+                incident_identity: "github:ci:loopflow/loopflow:878:h1:0000".to_string(),
+                pr_number: 878,
+                head_sha: "h1".to_string(),
+                failing_checks: vec![],
+            },
+        )
+        .await
+        .expect_err("a green open PR must not wake a ci-fix turn");
         assert!(
             error.to_string().contains("#878"),
             "the refusal names the open PR, got: {error}"
@@ -1316,6 +1376,162 @@ mod tests {
         let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
         assert_eq!(persisted.status, TaskSessionStatus::Waiting);
         assert_eq!(persisted.latest_process, None);
+    }
+
+    /// A duplicate observation must not spin a body on every supervision pass.
+    ///
+    /// A `Decide` re-sent by a human means "run this", so an unsettled one
+    /// relaunches. A `CiFix` is re-sent by a *poll*, not a person: once a
+    /// generation has claimed it, that generation owns the repair, and a dead one
+    /// is recovery's job — recovery re-enters ci-fix and reclaims this same
+    /// command. Only a wake nobody ever claimed is worth retrying.
+    #[test]
+    fn a_claimed_ci_fix_wake_does_not_relaunch_a_parked_task() {
+        let wake = |state| {
+            let mut command = ChildCommand::new(
+                ChildRef::Task(crate::task::TaskSessionId::new()),
+                ChildCommandSource::System,
+                ChildCommandKind::CiFix {
+                    incident_identity: "github:ci:owner/repo:1:h1:d".to_string(),
+                    pr_number: 1,
+                    head_sha: "h1".to_string(),
+                    failing_checks: vec![],
+                },
+            );
+            command.state = state;
+            command
+        };
+        // Nobody claimed it: the launch that should have consumed it never
+        // happened, so retry.
+        assert!(relaunch_on_duplicate(&wake(ChildCommandState::Persisted)));
+        // A generation owns the repair. Relaunching here is the every-pass spin.
+        assert!(!relaunch_on_duplicate(&wake(ChildCommandState::Claimed)));
+        assert!(!relaunch_on_duplicate(&wake(ChildCommandState::Superseded)));
+        assert!(!relaunch_on_duplicate(&wake(ChildCommandState::Accepted)));
+
+        // Every other kind keeps the human-facing rule: unsettled means relaunch.
+        let mut decide = ChildCommand::new(
+            ChildRef::Task(crate::task::TaskSessionId::new()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Decide {
+                decision_id: crate::child_session::ChildDecisionId::new(),
+                choice: "yes".to_string(),
+                message: None,
+            },
+        );
+        decide.state = ChildCommandState::Claimed;
+        assert!(relaunch_on_duplicate(&decide));
+        decide.state = ChildCommandState::Accepted;
+        assert!(!relaunch_on_duplicate(&decide));
+    }
+
+    /// The durable order is incident -> command ensure -> trigger link -> launch.
+    ///
+    /// Asserted at the launch seam, not eventually. Launching leads to a body, and
+    /// a body stamps `responded_at` as soon as it arms; linking after the launch
+    /// returns — which `wait_for_resolution = false` makes a wider window still —
+    /// leaves a crash able to strand an incident reading "responded, trigger
+    /// unknown". Here the launch is *barred*, so nothing downstream of it runs: if
+    /// the link were downstream, it would be missing.
+    #[tokio::test]
+    async fn a_ci_fix_wake_is_attributable_before_anything_can_service_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+
+        let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let mut pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+        // A green head bars the launch, which is exactly the seam we want: the
+        // launch never happens, so only an upstream link survives.
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: crate::task::AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 878,
+                url: "https://github.com/loopflow/loopflow/pull/878".to_string(),
+                head_sha: Some("h1".to_string()),
+            }),
+        });
+        pr.ci_observation = Some(crate::task::CiObservation {
+            head_sha: "h1".to_string(),
+            state: crate::task::CiState::Passing,
+            failing_checks: vec![],
+            observed_at: pr.updated_at,
+        });
+        store.update_task_pr(&pr).await.unwrap();
+
+        let identity = "github:ci:loopflow/loopflow:878:h1:digest".to_string();
+        store
+            .observe_ci_incident(&crate::task::CiIncident {
+                identity: identity.clone(),
+                task_session_id: task.id.clone(),
+                pr_id: pr.id.clone(),
+                repo: "loopflow/loopflow".to_string(),
+                pr_number: 878,
+                failed_head_sha: "h1".to_string(),
+                failure_set: vec!["cargo-fmt".to_string()],
+                provider_completed_at: None,
+                poll_observed_at: Some(pr.updated_at),
+                webhook_received_at: None,
+                trigger_command_id: None,
+                responded_at: None,
+                green_at: None,
+                merged_at: None,
+                blocked_at: None,
+                blocked_reason: None,
+                created_at: pr.updated_at,
+                updated_at: pr.updated_at,
+            })
+            .await
+            .unwrap();
+
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task.clone())),
+            ChildCommandSource::System,
+            ChildCommandKind::CiFix {
+                incident_identity: identity.clone(),
+                pr_number: 878,
+                head_sha: "h1".to_string(),
+                failing_checks: vec![],
+            },
+        )
+        .await
+        .expect_err("the bar refuses the launch");
+        assert!(error.to_string().contains("#878"));
+
+        // The launch failed, and the wake is still attributable.
+        let commands = store
+            .list_child_commands(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(
+            commands.len(),
+            1,
+            "the wake was persisted before the launch"
+        );
+        let incident = store
+            .ci_incidents_since(pr.updated_at - time::Duration::seconds(1), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            incident[0].incident.trigger_command_id.as_ref(),
+            Some(&commands[0].id),
+            "the trigger link is already present at the launch seam, not merely eventually"
+        );
+        assert_eq!(
+            incident[0].incident.responded_at, None,
+            "and nothing responded: no body was ever born"
+        );
     }
 
     /// A human may still answer review on a submitted Task. The bar is on the

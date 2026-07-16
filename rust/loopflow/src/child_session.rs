@@ -1126,6 +1126,58 @@ mod tests {
         assert_eq!(parsed, ChildCommandSource::Linear);
     }
 
+    /// The wake rides `child_commands.kind_json`, so its shape is the migration
+    /// this change did not need. It must survive the trip intact: the payload is
+    /// the body's seed and the identity is the dedup key, and a field lost on the
+    /// wire is a repair aimed at the wrong failure.
+    #[test]
+    fn a_ci_fix_wake_round_trips_its_payload_on_the_wire() {
+        let kind = ChildCommandKind::CiFix {
+            incident_identity: "github:ci:loopflow/loopflow:1042:a1b2c3d:9f0e".to_string(),
+            pr_number: 1042,
+            head_sha: "a1b2c3d".to_string(),
+            failing_checks: vec![
+                crate::task::CiCheck {
+                    name: "cargo-fmt".to_string(),
+                    url: Some("https://ci/fmt".to_string()),
+                },
+                crate::task::CiCheck {
+                    name: "clippy".to_string(),
+                    url: None,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&kind).expect("serialize");
+        assert!(
+            json.contains(r#""kind":"ci_fix""#),
+            "the variant is tagged on `kind` like every other command, got: {json}"
+        );
+        let parsed: ChildCommandKind = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, kind);
+    }
+
+    /// A wake is a command, not a direction. Minting a directive would bump
+    /// `current_directive_version`, and `has_pending_directive` would then block
+    /// Task completion until a body acknowledged a direction no human ever gave.
+    #[test]
+    fn a_ci_fix_wake_has_no_effect_on_a_live_turn() {
+        let command = ChildCommand::new(
+            ChildRef::Task(crate::task::TaskSessionId::new()),
+            ChildCommandSource::System,
+            ChildCommandKind::CiFix {
+                incident_identity: "github:ci:owner/repo:1:h1:d".to_string(),
+                pr_number: 1,
+                head_sha: "h1".to_string(),
+                failing_checks: vec![],
+            },
+        );
+        assert_eq!(
+            command.effect, None,
+            "a wake's effect is a launch, not a delivery into an existing turn"
+        );
+        assert_eq!(command.state, ChildCommandState::Persisted);
+    }
+
     #[test]
     fn a_live_body_that_just_progressed_is_working() {
         let obs = observe(

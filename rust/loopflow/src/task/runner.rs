@@ -28,8 +28,8 @@ use crate::interactive_handoff::{InteractiveHandoffOutcome, InteractiveHandoffPa
 use crate::store::{open_existing_store, SharedStore};
 use crate::task::interactive_rendezvous::{self, Rendezvous};
 use crate::task::{
-    Observation, PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskSession,
-    TaskSessionId, TaskSessionStatus,
+    CiCheck, Observation, PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase,
+    TaskSession, TaskSessionId, TaskSessionStatus,
 };
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
@@ -114,13 +114,20 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         .await?;
     reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id, lease)).await?;
 
-    // A woken open-PR Task whose current head has a fresh required-check failure
+    // Claim before choosing the flow: a durable `CiFix` command is what decides
+    // whether this generation is a ci-fix body, and that choice happens before a
+    // harness exists. The claim also reassigns a predecessor's still-`Claimed`
+    // wake to this generation, which is how a crashed repair resumes on the same
+    // command rather than silently reverting to the lifecycle phase.
+    let mut seen_commands = HashSet::new();
+    let claimed = claim_commands(&store, &session, lease, &mut seen_commands).await?;
+
+    // A woken open-PR Task whose claimed wake still names a failing current head
     // runs the single-step `ci-fix` flow; every other launch resumes the standard
-    // task lifecycle phase. Marking the observation woken here — before any body
-    // starts — makes the wake idempotent: the same `(head, failure set)` never
-    // starts a second ci-fix generation.
-    let ci_fix_wake = arm_ci_fix_wake(&store, &session, lease).await?;
-    let mut flow = if ci_fix_wake {
+    // task lifecycle phase. The wake stays `Claimed` for the whole turn — settling
+    // it belongs to the repair's exit, not its entry.
+    let (ci_fix_wake, commands) = arm_ci_fix_wake(&store, &session, lease, claimed).await?;
+    let mut flow = if ci_fix_wake.is_some() {
         Playhead::new(QueuedInvocation::load(&session.worktree, "ci-fix")?).0
     } else {
         let mut flow = resume_task_phase(&session)?;
@@ -134,8 +141,15 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         }
         flow
     };
-    let mut prepared =
-        prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
+    let mut prepared = prepare_task_flow_step(
+        &store,
+        &mut session,
+        lease,
+        wave.name(),
+        &flow,
+        ci_fix_wake.as_ref(),
+    )
+    .await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -166,8 +180,9 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     };
 
     let mut pending = VecDeque::new();
-    let mut seen_commands = HashSet::new();
-    let commands = claim_commands(&store, &session, lease, &mut seen_commands).await?;
+    // Claimed above, before the flow choice. `commands` is that same batch minus
+    // the ci-fix wake this body was born for, if any — absorb must never see the
+    // command it is already servicing.
     if let Some(stop) = absorb_commands(
         &store,
         &session,
@@ -581,6 +596,7 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     wave.name(),
                                     &flow,
+                                    ci_fix_wake.as_ref(),
                                 )
                                 .await?;
                                 let started = start_prepared_task_step(
@@ -708,6 +724,7 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     wave.name(),
                                     &flow,
+                                    ci_fix_wake.as_ref(),
                                 )
                                 .await?;
                                 let started = start_prepared_task_step(
@@ -755,6 +772,7 @@ The durable reviewer outcome is:\n{}",
                                         lease,
                                         wave.name(),
                                         &flow,
+                                        ci_fix_wake.as_ref(),
                                     )
                                     .await?;
                                     let started = start_prepared_task_step(
@@ -894,6 +912,7 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     wave.name(),
                                     &flow,
+                                    ci_fix_wake.as_ref(),
                                 )
                                 .await?;
                                 let started = start_prepared_task_step(
@@ -942,6 +961,7 @@ async fn prepare_task_flow_step(
     lease: &ChildWriteLease,
     wave_name: &str,
     flow: &Playhead,
+    ci_fix: Option<&CiFixWake>,
 ) -> Result<PreparedTaskStep> {
     let latest = store
         .get_task_session(&session.id)
@@ -986,12 +1006,19 @@ async fn prepare_task_flow_step(
         .active_task_pr(&session.id)
         .await?
         .ok_or_else(|| anyhow!("Task Session {} has no active PR", session.id))?;
-    // The `ci-fix` step gets the failure seed (PR + failing checks); every other
-    // Task-flow step gets the standard task seed.
-    let seed = if step.step == "ci-fix" {
-        ci_fix_seed(session, &pr, wave_name)
-    } else {
-        task_seed(session, &pr, wave_name, directive)
+    // The `ci-fix` step gets the failure seed from the wake command that selected
+    // it; every other Task-flow step gets the standard task seed. The flow and the
+    // wake are chosen together at birth, so a `ci-fix` step without a wake would
+    // mean the runner selected the flow from something other than the ledger.
+    let seed = match (step.step.as_str(), ci_fix) {
+        ("ci-fix", Some(wake)) => ci_fix_seed(session, &pr, wake, wave_name),
+        ("ci-fix", None) => {
+            anyhow::bail!(
+                "Task Session {} is running the ci-fix flow with no claimed ci-fix wake",
+                session.id
+            )
+        }
+        _ => task_seed(session, &pr, wave_name, directive),
     };
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
@@ -1231,7 +1258,7 @@ async fn start_resumed_task_phase(
     wave_name: &str,
 ) -> Result<StartedTaskStep> {
     *flow = resume_task_phase(session)?;
-    let prepared = prepare_task_flow_step(store, session, lease, wave_name, flow).await?;
+    let prepared = prepare_task_flow_step(store, session, lease, wave_name, flow, None).await?;
     start_prepared_task_step(store, session, lease, harness, flow, prepared).await
 }
 
@@ -1948,56 +1975,166 @@ async fn finish_command_stop(
     }
 }
 
-/// Detect a ci-fix wake at generation startup and arm it once. Returns `true`
-/// when this Task's active PR has a fresh required-check failure the wake has not
-/// fired for yet, and stamps the observation woken (persisted) so the same
-/// `(head, failure set)` cannot start a second ci-fix generation.
+/// The durable ci-fix wake this generation was born to service.
+///
+/// Held for the body's life. The command it names stays `Claimed` throughout,
+/// which is exactly what lets a successor generation reclaim it and re-derive
+/// this same handle after a crash.
+#[derive(Debug, Clone)]
+pub(crate) struct CiFixWake {
+    /// Which durable command this body is repairing.
+    ///
+    /// Read by the tests that prove the entry contract — that a body services the
+    /// wake naming the PR's *current* failure, and the same one again after a
+    /// crash. No production reader yet: settling this command is ENG-19's, and
+    /// this PR deliberately changes no settlement behaviour. Deleting it would
+    /// make the contract unassertable, and re-adding it is the whole of ENG-19's
+    /// entry-side dependency.
+    #[allow(dead_code)]
+    pub command_id: ChildCommandId,
+    pub pr_number: u32,
+    pub head_sha: String,
+    pub failing_checks: Vec<CiCheck>,
+}
+
+/// Take the claimed ci-fix wake that names the PR's *current* failure, and arm
+/// the body for it. Returns the wake plus the remaining commands for
+/// `absorb_commands`.
+///
+/// Selection is by incident identity, never by position. Several wakes can be
+/// claimable at once — a head that failed, was pushed to, and failed again mints
+/// a fresh identity each time, and any of those commands can still be unsettled.
+/// Taking the first one would seed the body with an obsolete head and failing
+/// set, and then the *current* wake would be superseded as a stray, spending its
+/// identity for good: `ensure_child_ci_fix_command` would find the spent command
+/// and never relaunch, so the live failure would never be repaired. Every
+/// non-matching wake is superseded here, where the reason is known to be
+/// staleness rather than a live-body race.
+///
+/// The matching command is **left `Claimed`**. It is not delivered and not
+/// accepted: there is no provider call here to be ambiguous about, so
+/// `Delivering` would be a lie that `reconcile_stale_deliveries` later turns into
+/// `Uncertain`, stranding an automatic wake on a human. `Claimed` is also what
+/// makes the repair restartable — `claim_child_commands_in` reassigns
+/// `persisted`/`claimed` rows, so a crash mid-turn hands this same command to the
+/// next generation, which lands right back here and re-selects the ci-fix flow.
 async fn arm_ci_fix_wake(
     store: &SharedStore,
     session: &TaskSession,
     lease: &ChildWriteLease,
-) -> Result<bool> {
-    let Some(mut pr) = store.active_task_pr(&session.id).await? else {
-        return Ok(false);
-    };
-    if !pr
-        .fresh_ci()
-        .is_some_and(crate::task::CiObservation::wake_warranted)
+    claimed: Vec<ChildCommand>,
+) -> Result<(Option<CiFixWake>, Vec<ChildCommand>)> {
+    if !claimed
+        .iter()
+        .any(|command| matches!(command.kind, ChildCommandKind::CiFix { .. }))
     {
-        return Ok(false);
+        return Ok((None, claimed));
     }
-    if let Some(observation) = pr.ci_observation.as_mut() {
-        observation.mark_woken();
+    // The failure to repair is whatever the PR reads as *now*, minted through the
+    // same path the enqueue used. `None` means the head went green, moved on, or
+    // the PR is gone — every claimed wake is then stale.
+    let current = store
+        .active_task_pr(&session.id)
+        .await?
+        .as_ref()
+        .and_then(crate::ops::task::current_ci_incident)
+        .map(|incident| incident.identity);
+
+    let mut matched = None;
+    let mut remaining = Vec::with_capacity(claimed.len());
+    for command in claimed {
+        let ChildCommandKind::CiFix {
+            incident_identity, ..
+        } = &command.kind
+        else {
+            remaining.push(command);
+            continue;
+        };
+        if current.as_deref() == Some(incident_identity.as_str()) {
+            // At most one command can carry a given identity — `ensure_` is what
+            // guarantees it — so this matches once.
+            matched = Some(command);
+            continue;
+        }
+        ChildTarget::Task(&session.id, lease)
+            .supersede_command(
+                store,
+                command.id,
+                "the PR's current failure no longer matches this wake; the head or failing set moved on",
+            )
+            .await?;
     }
-    pr.updated_at = time::OffsetDateTime::now_utc();
+
+    let Some(command) = matched else {
+        return Ok((None, remaining));
+    };
+    let ChildCommandKind::CiFix {
+        incident_identity,
+        pr_number,
+        head_sha,
+        failing_checks,
+    } = command.kind.clone()
+    else {
+        unreachable!("matched a CiFix command");
+    };
+
+    // Absorb never sees this command, and absorb is what normally records a
+    // claim. Without this the wake would leave no trace in the event stream.
     store
-        .arm_task_pr_ci_fix_for_lease(&pr, lease, pr.updated_at)
+        .append_task_event_for_lease(
+            &session.id,
+            lease,
+            &TaskEventKind::CommandChanged {
+                command_id: command.id.clone(),
+                state: ChildCommandState::Claimed,
+                effect: None,
+                error: None,
+            },
+        )
         .await?;
-    Ok(true)
+    // A body now exists for this failure. Body birth is the response milestone.
+    store
+        .mark_ci_incident_responded(&incident_identity, time::OffsetDateTime::now_utc())
+        .await?;
+
+    Ok((
+        Some(CiFixWake {
+            command_id: command.id,
+            pr_number,
+            head_sha,
+            failing_checks,
+        }),
+        remaining,
+    ))
 }
 
 /// The seed for a `ci-fix` turn: the PR the skill must repair plus the failing
 /// required checks (names + log URLs) so it resolves the exact failure on the
 /// current head without re-deriving it.
-fn ci_fix_seed(session: &TaskSession, pr: &crate::task::TaskPr, wave_name: &str) -> String {
-    let github = pr.github();
-    let number = github.map(|github| github.number);
-    let url = github.map(|github| github.url.as_str()).unwrap_or("");
-    let head = pr.head_sha().unwrap_or("");
-    let failing = pr
-        .fresh_ci()
-        .map(|observation| {
-            observation
-                .failing_checks
-                .iter()
-                .map(|check| match &check.url {
-                    Some(link) => format!("- {} ({link})", check.name),
-                    None => format!("- {}", check.name),
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
+///
+/// The failure comes from the wake command, not from `pr.fresh_ci()`. The
+/// observation row is mutable and moves on; the command is the immutable record
+/// of the failure this body was born for. Re-reading the observation here let a
+/// body repair a different failure than the one that woke it — the seed and the
+/// dedup key now describe the same thing.
+fn ci_fix_seed(
+    session: &TaskSession,
+    pr: &crate::task::TaskPr,
+    wake: &CiFixWake,
+    wave_name: &str,
+) -> String {
+    let url = pr.github().map(|github| github.url.as_str()).unwrap_or("");
+    let number = wake.pr_number;
+    let head = wake.head_sha.as_str();
+    let failing = wake
+        .failing_checks
+        .iter()
+        .map(|check| match &check.url {
+            Some(link) => format!("- {} ({link})", check.name),
+            None => format!("- {}", check.name),
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         "Fix the failing required CI checks on Linear task {identifier}'s open pull request.\n\n\
          Run the ci-fix skill: reproduce the latest failure on the current head, make the smallest correct fix, run targeted then proportional checks, and push the same branch. Report an infrastructure or credential blocker rather than weakening tests.\n\n\
@@ -2005,7 +2142,7 @@ fn ci_fix_seed(session: &TaskSession, pr: &crate::task::TaskPr, wave_name: &str)
          Wave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\n\n\
          Push fixes to the same branch; do not open a new PR or rotate the serial branch. When the push lands, the Task returns to waiting on the new head.",
         identifier = session.launch.issue.identifier,
-        number = number.map(|n| n.to_string()).unwrap_or_default(),
+        number = number,
         url = url,
         branch = pr.branch,
         head = head,
@@ -2362,9 +2499,10 @@ mod tests {
             .await
             .unwrap();
         let flow = resume_task_phase(&session).unwrap();
-        let prepared = prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow)
-            .await
-            .unwrap();
+        let prepared =
+            prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow, None)
+                .await
+                .unwrap();
         (repo, store, session, lease, flow, prepared)
     }
 
@@ -2466,9 +2604,10 @@ mod tests {
         let (_repo, store, mut session, lease, mut flow, prepared) =
             prepared_gate_review(TaskLifecyclePlan::standard("task")).await;
         let review = prepared.review.clone().expect("demo requires human review");
-        let replayed = prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow)
-            .await
-            .unwrap();
+        let replayed =
+            prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow, None)
+                .await
+                .unwrap();
         assert_eq!(
             replayed.review.as_ref().map(|review| &review.id),
             Some(&review.id)
@@ -2571,15 +2710,16 @@ mod tests {
             }),
             merge_commit: None,
             abandoned_at: None,
+            // The observation has already moved on to a different head and a
+            // different failure — exactly the drift that used to reach the seed.
             ci_observation: Some(crate::task::CiObservation {
-                head_sha: "headsha".to_string(),
+                head_sha: "movedhead".to_string(),
                 state: crate::task::CiState::Failing,
                 failing_checks: vec![crate::task::CiCheck {
-                    name: "rust-test".to_string(),
-                    url: Some("https://ci/rust".to_string()),
+                    name: "some-other-check".to_string(),
+                    url: Some("https://ci/other".to_string()),
                 }],
                 observed_at: now,
-                woken_failure_set: None,
             }),
             github_observation: None,
             linear_attachment_id: None,
@@ -2593,7 +2733,16 @@ mod tests {
             crate::engine::builtins::get_builtin_flow("ci-fix").is_some(),
             "the ci-fix builtin flow must resolve"
         );
-        let seed = ci_fix_seed(&session, &pr, "product");
+        let wake = super::CiFixWake {
+            command_id: crate::child_session::ChildCommandId::new(),
+            pr_number: 916,
+            head_sha: "headsha".to_string(),
+            failing_checks: vec![crate::task::CiCheck {
+                name: "rust-test".to_string(),
+                url: Some("https://ci/rust".to_string()),
+            }],
+        };
+        let seed = ci_fix_seed(&session, &pr, &wake, "product");
         // The skill resolves the exact failure from the injected metadata.
         assert!(seed.contains("#916"), "seed names the PR");
         assert!(seed.contains("jack/ship"), "seed names the branch");
@@ -2606,6 +2755,19 @@ mod tests {
         assert!(
             seed.contains("ci-fix skill"),
             "seed points at the ci-fix skill"
+        );
+
+        // The seed follows the wake command, not the observation row. The command
+        // is the immutable record of the failure this body was born for; the row
+        // is mutable and moves on. When they disagree the command wins, or a body
+        // repairs a failure other than the one that woke it.
+        assert!(
+            !seed.contains("movedhead"),
+            "seed must not carry the observation's newer head"
+        );
+        assert!(
+            !seed.contains("some-other-check"),
+            "seed must not carry the observation's newer failure"
         );
     }
 

@@ -1294,13 +1294,18 @@ mod tests {
         );
         command.created_at = observed_at + Duration::seconds(15);
         store.create_child_command(&command).await.unwrap();
+        // The trigger link and the response are both keyed on the identity the
+        // wake carries, so evidence names the command that woke the body.
         assert!(store
-            .mark_ci_incident_responded(
-                &pr.id,
-                "bad-head",
-                &["test".to_string()],
-                observed_at + Duration::seconds(10),
+            .mark_ci_incident_triggered(
+                &incident.identity,
+                &command.id,
+                observed_at + Duration::seconds(8),
             )
+            .await
+            .unwrap());
+        assert!(store
+            .mark_ci_incident_responded(&incident.identity, observed_at + Duration::seconds(10))
             .await
             .unwrap());
         store
@@ -3420,7 +3425,6 @@ mod tests {
                 url: Some("https://ci/build".to_string()),
             }],
             observed_at: OffsetDateTime::now_utc(),
-            woken_failure_set: None,
         });
         pr.github_observation = Some(crate::task::GithubObservation {
             checked_at: OffsetDateTime::now_utc(),

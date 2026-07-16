@@ -134,6 +134,29 @@ impl<'a> ChildTarget<'a> {
             .await
     }
 
+    /// Displace a claimed command that circumstances made moot. `reason` rides
+    /// the event, not the command's `error` column — a superseded command did not
+    /// fail, so no surface should report it as a fault.
+    pub(crate) async fn supersede_command(
+        self,
+        store: &SharedStore,
+        command_id: ChildCommandId,
+        reason: &str,
+    ) -> Result<()> {
+        let target = self.as_ref();
+        store
+            .supersede_child_command_for_lease(&target, self.lease(), &command_id)
+            .await?;
+        self.record_command_changed(
+            store,
+            command_id,
+            ChildCommandState::Superseded,
+            None,
+            Some(crate::security::sanitize_operator_message(reason)),
+        )
+        .await
+    }
+
     async fn fail_command(
         self,
         store: &SharedStore,
@@ -381,6 +404,23 @@ pub(crate) async fn absorb_commands(
                 } else {
                     target.accept_command(store, command.id, None).await?;
                 }
+            }
+            // Every wake claimable at birth is consumed by `arm_ci_fix_wake` —
+            // matched and withheld from this loop, or superseded there as stale.
+            // So reaching here means a wake was claimed *during* the body's life:
+            // the observer saw an inactive Session and raced a body that was
+            // starting. That body is already working this PR, so the wake is moot.
+            // Superseding is the honest outcome, and the reason is specific to
+            // this race rather than to staleness. Not a settlement: the identity
+            // is spent, and a still-failing head re-arms under a new one.
+            ChildCommandKind::CiFix { .. } => {
+                target
+                    .supersede_command(
+                        store,
+                        command.id,
+                        "a live body already owns this PR; the ci-fix wake arrived too late to seed it",
+                    )
+                    .await?;
             }
             ChildCommandKind::Decide {
                 decision_id,

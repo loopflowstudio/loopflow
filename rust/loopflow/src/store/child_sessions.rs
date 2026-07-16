@@ -282,20 +282,6 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn arm_task_pr_ci_fix_for_lease(
-        &self,
-        pr: &TaskPr,
-        lease: &ChildWriteLease,
-        responded_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        let pr = pr.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.arm_task_pr_ci_fix_for_lease(&pr, &lease, responded_at)
-        })
-        .await
-    }
-
     pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.heal_task_pr_base(&pr)).await
@@ -733,6 +719,23 @@ impl Store {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.fail_child_command(&command_id, effect, &error)
+        })
+        .await
+    }
+
+    /// Mark one claimed command superseded because circumstances made it moot.
+    /// Unlike failing it, this records no error — nothing went wrong.
+    pub(crate) async fn supersede_child_command_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        command_id: &ChildCommandId,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        let lease = lease.clone();
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.supersede_child_command_for_lease(&target, &lease, &command_id)
         })
         .await
     }

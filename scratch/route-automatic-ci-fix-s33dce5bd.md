@@ -242,14 +242,40 @@ consumes what this generation claimed. **It does not settle the command.**
 async fn arm_ci_fix_wake(..., claimed: Vec<ChildCommand>)
     -> Result<(Option<CiFixWake>, Vec<ChildCommand>)>
 {
-    // take the claimed CiFix out of the list, if any and if the bar is legal
-    // build the seed from the command payload
+    // derive the CURRENT identity from the active PR, via the same mint point
+    //   the enqueue used (ops::task::current_ci_incident)
+    // select the claimed CiFix whose incident_identity == that, not the first one
+    // supersede every other claimed CiFix as stale (head/failing set moved on)
+    // build the seed from the matched command's payload
     // stamp CiIncident.responded_at by incident_identity
     // emit CommandChanged{claimed} — absorb never sees this command, so this
     //   emit is the only trace the claim leaves
     // leave the command CLAIMED — ENG-19 settlement owns the terminal transition
 }
 ```
+
+**Selection is by identity, never by position.** More than one wake can be
+claimable: a head that failed, was pushed to, and failed again mints a fresh
+identity each time, and any of those commands may still be unsettled. Taking the
+first claimed CiFix would seed an obsolete head and failing set — and then the
+*current* wake would fall through to `absorb_commands` and be superseded as a
+stray, spending its identity. `ensure_child_ci_fix_command` would then find that
+spent command and never relaunch, so **the live failure would never be
+repaired**. Legality (`wake_legal`) is not sufficient on its own; it says the PR
+is failing *now*, not that this command names *that* failure.
+
+So arm derives the current identity through `ops::task::current_ci_incident` —
+the one mint point, shared with the enqueue, because two derivations that drift
+would match nothing — and keeps only the command carrying it. `ensure_`
+guarantees at most one command per identity, so the match is unique. Non-matching
+wakes are superseded *here*, where the reason is known to be staleness; the
+`absorb` arm keeps the live-body-race reason, which is now the only way a CiFix
+reaches it (claimed mid-life, after arm already consumed the birth batch). Two
+distinct causes, two accurate reasons.
+
+A `None` current identity — head green, head moved past the reading, PR gone —
+makes every claimed wake stale. All are superseded and the body resumes its
+lifecycle phase, which is what happens on main today.
 
 **`Claimed` for the whole bounded repair turn is the design, not an omission.**
 `claim_child_commands_in` (`sqlite/child_sessions.rs:4462`) reassigns on
@@ -299,11 +325,23 @@ Existing state, existing event, no new concept.
 
 **No new event kind.** The evidence is what already exists, wired up:
 
-- `queue_ci_fix_command` stamps `CiIncident.trigger_command_id` after
-  `ensure_` reports `created: true`. New store method
+- **The durable order is `incident exists → command ensure → trigger link →
+  launch/claim/respond`.** `queue_command` stamps
+  `CiIncident.trigger_command_id` the moment `ensure_child_ci_fix_command`
+  returns the surviving command, *before* either the duplicate relaunch or the
+  created-command launch. New store method
   `mark_ci_incident_triggered(identity, command_id)` beside the existing
-  `mark_ci_incident_responded`. No FK on the column (`0.11.024:18`), so no
-  ordering constraint — but we write it after creation regardless.
+  `mark_ci_incident_responded`.
+
+  Linking after the launch — the obvious placement, in `ops::task` around the
+  `queue_command` call — is a real bug, not a style point. Launching leads to a
+  body, and a body stamps `responded_at` as soon as it arms; `wait_for_resolution
+  = false` widens the gap by returning without waiting. A crash in that window
+  leaves an incident reading **responded, trigger unknown** — precisely the state
+  the Measure query counts as a bypass, manufactured by the code meant to prevent
+  it. The link is upstream of the launch, so the wake is attributable before
+  anything can service it. The column has no FK (`0.11.024:18`), so nothing but
+  this ordering enforces it.
 - `arm_ci_fix_wake` stamps `responded_at` — unchanged milestone, now reached from
   the command path.
 - `arm_ci_fix_wake` emits `CommandChanged { command_id, state: Claimed }`. This
@@ -515,6 +553,13 @@ didn't move):
 
 - `duplicate_observation_enqueues_one_ci_fix_command` — reconcile ×3 on one
   failed head ⇒ exactly one command row, one incident, one `trigger_command_id`.
+- **`a_ci_fix_wake_is_attributable_before_anything_can_service_it`** — the
+  ordering invariant, asserted at the launch seam rather than eventually. Enqueue
+  against a Session that cannot produce a body, so nothing downstream of the
+  launch runs; `trigger_command_id` is *already* set and names the surviving
+  command. A post-launch stamp fails this. Pairs with the standing invariant no
+  test can express directly: no incident may ever hold `responded_at` without
+  `trigger_command_id`.
 - `a_restart_before_the_body_boots_delivers_the_same_command` — enqueue, drop
   the process, reconcile again, boot ⇒ the *same* `command_id` is claimed; no
   second row, no second body.
@@ -525,6 +570,14 @@ didn't move):
   selected is `ci-fix` again, no second command is minted, and the command never
   reaches `Uncertain`. This test fails against an accept-at-arm implementation —
   it is the executable form of §6's argument.
+- **`a_moved_failure_arms_the_current_wake_and_supersedes_the_stale_one`** — the
+  selector's proof. Command A persists for identity A (head `h1`, checks `{X}`);
+  before any body boots the failure moves to identity B (`h2`, or `{X,Y}` on
+  `h1`); command B persists; the body boots and claims **both**. Assert: the body
+  services **B** — the flow is ci-fix and the seed names B's head and checks — B
+  is `Claimed`, A is `Superseded` with the stale reason (not the live-body-race
+  reason), and B is not lost. Against a first-match selector this seeds A and
+  spends B.
 - `a_ci_fix_command_never_enters_delivering` — asserts the state sequence a
   ci-fix wake can occupy, so a future edit cannot quietly reintroduce the
   `Uncertain`/`NeedsInput` strand.

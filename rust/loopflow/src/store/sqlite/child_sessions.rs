@@ -775,36 +775,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn arm_task_pr_ci_fix_for_lease(
-        &self,
-        pr: &TaskPr,
-        lease: &ChildWriteLease,
-        responded_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        validate_task_pr(pr)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(
-            &transaction,
-            &ChildRef::Task(pr.task_session_id.clone()),
-            lease,
-        )?;
-        if update_task_pr(&transaction, pr)? == 0 {
-            return Err(StoreError::NotFound);
-        }
-        if let Some(observation) = pr.fresh_ci() {
-            super::ci_incidents::mark_ci_incident_responded_on(
-                &transaction,
-                &pr.id,
-                &observation.head_sha,
-                &observation.failure_set(),
-                responded_at,
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if heal_task_pr_base(&conn, pr)? == 0 {
@@ -1850,6 +1820,40 @@ impl SqliteStore {
             params![
                 effect.map(ChildCommandEffect::as_str),
                 error,
+                command_id.as_str(),
+                target.target_kind(),
+                target.target_id()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "child command {command_id} is already resolved or belongs to another Session"
+            )));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Displace one claimed command that circumstances made moot.
+    ///
+    /// Distinct from `fail_child_command_for_lease`: nothing went wrong, so the
+    /// `error` column stays null and `lf task status` does not report a fault.
+    /// The reason rides the event instead.
+    pub(crate) fn supersede_child_command_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        command_id: &ChildCommandId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_child_write_lease(&transaction, target, lease)?;
+        let changed = transaction.execute(
+            "UPDATE child_commands
+             SET state='superseded'
+             WHERE id=?1 AND target_kind=?2 AND session_id=?3
+               AND state IN ('persisted', 'claimed', 'delivering')",
+            params![
                 command_id.as_str(),
                 target.target_kind(),
                 target.target_id()

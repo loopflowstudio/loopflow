@@ -173,13 +173,41 @@ def _refresh_default_branch(repo: Path = ROOT) -> None:
 # --- Builds ---
 
 
+def _migration_authority(repo: Path = ROOT) -> str:
+    """Only a canonical main or tagged checkout may advance the release store."""
+    head = _git_stdout(["rev-parse", "HEAD"], repo=repo, check=False)
+    if not head:
+        return "published"
+    default_ref = _git_stdout(
+        ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+        repo=repo,
+        check=False,
+    )
+    canonical = (
+        _git_stdout(["rev-parse", default_ref], repo=repo, check=False) if default_ref else ""
+    )
+    tagged = bool(_git_stdout(["tag", "--points-at", "HEAD"], repo=repo, check=False))
+    dirty = bool(_git_stdout(["status", "--porcelain"], repo=repo, check=False))
+    return "published" if not dirty and (head == canonical or tagged) else "validation_only"
+
+
+def _release_build_env() -> dict[str, str]:
+    return {
+        **os.environ,
+        "LOOPFLOW_BUILD_PROVENANCE": "release",
+        "LOOPFLOW_MIGRATION_AUTHORITY": os.environ.get(
+            "LOOPFLOW_MIGRATION_AUTHORITY", _migration_authority()
+        ),
+    }
+
+
 def _build_binaries() -> None:
     typer.echo("Building lf (cargo release)...")
     _run_or_raise(
         ["cargo", "build", "-p", "loopflow", "--release"],
         "cargo",
         cwd=ROOT,
-        env={**os.environ, "LOOPFLOW_BUILD_PROVENANCE": "release"},
+        env=_release_build_env(),
     )
 
 
@@ -189,7 +217,7 @@ def _build_cli_binaries() -> None:
         ["cargo", "build", "--release", "-p", "loopflow", "--bin", "lf"],
         "cargo",
         cwd=ROOT,
-        env={**os.environ, "LOOPFLOW_BUILD_PROVENANCE": "release"},
+        env=_release_build_env(),
     )
 
 

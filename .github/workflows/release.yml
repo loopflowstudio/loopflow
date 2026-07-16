@@ -12,6 +12,7 @@ on:
 
 env:
   LOOPFLOW_BUILD_PROVENANCE: release
+  LOOPFLOW_MIGRATION_AUTHORITY: published
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:

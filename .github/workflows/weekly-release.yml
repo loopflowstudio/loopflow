@@ -10,6 +10,7 @@ on:
 
 env:
   LOOPFLOW_BUILD_PROVENANCE: release
+  LOOPFLOW_MIGRATION_AUTHORITY: published
 
 jobs:
   tag-check:
@@ -79,6 +80,8 @@ jobs:
       # a shipped migration that was edited would silently rewrite the history of
       # every database in the wild.
       - name: Verify migration namespaces
+        env:
+          LOOPFLOW_REQUIRE_ORIGIN_MAIN: "1"
         run: uv run python scripts/check_migrations.py
       - name: Install lf
         run: |

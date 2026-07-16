@@ -9,6 +9,12 @@ pub enum BuildProvenance {
     Release,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrationAuthority {
+    Published,
+    ValidationOnly,
+}
+
 impl BuildProvenance {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -44,6 +50,18 @@ pub fn source_identity() -> String {
         .unwrap_or_else(|| "release".to_string())
 }
 
+pub fn source_revision() -> &'static str {
+    env!("LOOPFLOW_BUILD_SOURCE_REVISION")
+}
+
+pub fn migration_authority() -> MigrationAuthority {
+    match env!("LOOPFLOW_MIGRATION_AUTHORITY") {
+        "published" => MigrationAuthority::Published,
+        "validation_only" => MigrationAuthority::ValidationOnly,
+        _ => unreachable!("build script validates migration authority"),
+    }
+}
+
 fn parse_provenance(value: &str) -> Option<BuildProvenance> {
     match value {
         "development" => Some(BuildProvenance::Development),
@@ -74,7 +92,10 @@ fn source_identity_for(root: &Path) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::{parse_provenance, provenance, source_identity_for, source_root, BuildProvenance};
+    use super::{
+        migration_authority, parse_provenance, provenance, source_identity_for, source_revision,
+        source_root, BuildProvenance, MigrationAuthority,
+    };
 
     #[test]
     fn source_identity_is_stable_and_distinguishes_worktrees() {
@@ -109,5 +130,10 @@ mod tests {
         );
         assert_eq!(parse_provenance("release"), Some(BuildProvenance::Release));
         assert_eq!(parse_provenance("other"), None);
+        assert!(matches!(
+            migration_authority(),
+            MigrationAuthority::Published | MigrationAuthority::ValidationOnly
+        ));
+        assert!(!source_revision().is_empty());
     }
 }

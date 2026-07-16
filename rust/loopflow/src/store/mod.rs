@@ -221,6 +221,17 @@ fn guard_development_database(
     ))
 }
 
+fn may_apply_migrations(
+    path: &Path,
+    authority: crate::build_info::MigrationAuthority,
+    home: &Path,
+) -> Result<bool, std::io::Error> {
+    if authority == crate::build_info::MigrationAuthority::Published {
+        return Ok(true);
+    }
+    Ok(!same_database_file(path, &home.join(".lf/loopflow.db"))?)
+}
+
 fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
     if canonicalize_with_missing_tail(left)? == canonicalize_with_missing_tail(right)? {
         return Ok(true);
@@ -856,11 +867,11 @@ pub type SharedStore = Arc<Store>;
 mod tests {
     use super::sqlite::SqliteStore;
     use super::{
-        default_lf_home_dir_for, guard_development_database, open_store, select_store_env_value,
-        CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId, RoutingState,
-        RunEventRow, StorageConfig,
+        default_lf_home_dir_for, guard_development_database, may_apply_migrations, open_store,
+        select_store_env_value, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
+        RoutingState, RunEventRow, StorageConfig,
     };
-    use crate::build_info::BuildProvenance;
+    use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child_session::{
         BoundaryResult, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandKind,
         ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState,
@@ -949,6 +960,24 @@ mod tests {
             .unwrap();
         guard_development_database(&production, BuildProvenance::Release, None::<&str>, home)
             .unwrap();
+    }
+
+    #[test]
+    fn only_published_builds_migrate_the_release_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let production = home.join(".lf/loopflow.db");
+
+        assert!(
+            !may_apply_migrations(&production, MigrationAuthority::ValidationOnly, home,).unwrap()
+        );
+        assert!(may_apply_migrations(&production, MigrationAuthority::Published, home,).unwrap());
+        assert!(may_apply_migrations(
+            &home.join(".lf-dev/branch/loopflow.db"),
+            MigrationAuthority::ValidationOnly,
+            home,
+        )
+        .unwrap());
     }
 
     #[cfg(unix)]

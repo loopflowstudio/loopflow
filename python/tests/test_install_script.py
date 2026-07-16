@@ -198,6 +198,32 @@ def test_sync_skills_warns_without_failing_when_lf_cannot_run(
     assert "binaries installed, skills unchanged" in captured.err
 
 
+def test_only_canonical_or_tagged_installs_receive_migration_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = {
+        ("rev-parse", "HEAD"): "branch-head",
+        ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main",
+        ("rev-parse", "refs/remotes/origin/main"): "main-head",
+        ("tag", "--points-at", "HEAD"): "",
+        ("status", "--porcelain"): "",
+    }
+    monkeypatch.setattr(
+        install,
+        "_git_stdout",
+        lambda args, repo=install.ROOT, check=True: values[tuple(args)],
+    )
+
+    assert install._migration_authority() == "validation_only"
+    values[("rev-parse", "HEAD")] = "main-head"
+    assert install._migration_authority() == "published"
+    values[("rev-parse", "HEAD")] = "tagged-head"
+    values[("tag", "--points-at", "HEAD")] = "v0.11.2"
+    assert install._migration_authority() == "published"
+    values[("status", "--porcelain")] = " M rust/loopflow/src/store/migrations.rs"
+    assert install._migration_authority() == "validation_only"
+
+
 def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) -> None:
     local_bin = tmp_path / "local-bin"
     local_bin.mkdir()

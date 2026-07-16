@@ -5,6 +5,7 @@ use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
@@ -109,9 +110,59 @@ fn emit_build_provenance(manifest_dir: &Path) {
             .display()
             .to_string()
     };
+    let migration_authority =
+        env::var("LOOPFLOW_MIGRATION_AUTHORITY").unwrap_or_else(|_| "validation_only".to_string());
+    if !matches!(
+        migration_authority.as_str(),
+        "published" | "validation_only"
+    ) {
+        panic!(
+            "LOOPFLOW_MIGRATION_AUTHORITY must be `published` or `validation_only`, got `{migration_authority}`"
+        );
+    }
+    let mut source_revision = git_root
+        .and_then(|root| {
+            Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(root)
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+        })
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|revision| revision.trim().to_string())
+        .filter(|revision| !revision.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let dirty = git_root.is_some_and(|root| {
+        Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(root)
+            .output()
+            .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
+    });
+    if dirty {
+        source_revision.push_str("-dirty");
+    }
     println!("cargo:rustc-env=LOOPFLOW_BUILD_PROVENANCE={provenance}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
+    println!("cargo:rustc-env=LOOPFLOW_MIGRATION_AUTHORITY={migration_authority}");
+    println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
+    println!("cargo:rerun-if-env-changed=LOOPFLOW_MIGRATION_AUTHORITY");
+    if let Some(root) = git_root {
+        for git_path in ["HEAD", "refs/heads"] {
+            if let Ok(output) = Command::new("git")
+                .args(["rev-parse", "--git-path", git_path])
+                .current_dir(root)
+                .output()
+            {
+                if output.status.success() {
+                    let path = String::from_utf8_lossy(&output.stdout);
+                    println!("cargo:rerun-if-changed={}", path.trim());
+                }
+            }
+        }
+    }
 }
 
 fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {

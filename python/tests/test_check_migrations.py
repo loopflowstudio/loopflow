@@ -191,3 +191,19 @@ def test_manifests_disagreeing_on_the_version_fails(repo: Path):
     result = check(repo)
     assert result.returncode == 1
     assert "disagree" in result.stderr
+
+
+def test_a_branch_cannot_reuse_an_ordinal_owned_by_current_main(repo: Path):
+    (repo / MIGRATIONS / "0.10.002_main_change.sql").write_text("SELECT 'main';\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "main_change"))
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "main migration")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-qb", "feature", "HEAD~1")
+
+    (repo / MIGRATIONS / "0.10.002_branch_change.sql").write_text("SELECT 'branch';\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "branch_change"))
+
+    result = check(repo)
+    assert result.returncode == 1
+    assert "collides with 0.10.002_main_change.sql on origin/main" in result.stderr

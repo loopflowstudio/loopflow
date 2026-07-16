@@ -144,11 +144,11 @@ struct PmInitOutput {
     team_key: Option<String>,
 }
 
-fn role_team_identity(
+fn role_team_key(
     role: crate::ops::pm::StandardWaveRole,
     wave: &str,
     team_key: Option<&str>,
-) -> Result<(String, String)> {
+) -> Result<String> {
     if wave == role.wave() {
         if let Some(team_key) = team_key {
             let team_key = crate::ops::pm::new_wave_team_key(Some(team_key))?;
@@ -161,12 +161,9 @@ fn role_team_identity(
                 ));
             }
         }
-        Ok((role.team_key().to_string(), role.title().to_string()))
+        Ok(role.team_key().to_string())
     } else {
-        Ok((
-            crate::ops::pm::new_wave_team_key(team_key)?,
-            crate::ops::pm::wave_title(wave),
-        ))
+        Ok(crate::ops::pm::new_wave_team_key(team_key)?)
     }
 }
 
@@ -566,10 +563,10 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             } else if let Some(role) = role {
                 let selected = crate::ops::resolve_wave_name(explicit.or(Some(role.wave())))
                     .ok_or_else(|| anyhow!("invalid wave name"))?;
-                let (key, name) = role_team_identity(*role, &selected, team_key.as_deref())?;
+                let key = role_team_key(*role, &selected, team_key.as_deref())?;
                 let objective = role.objective(&selected);
                 crate::ops::pm::author_wave_scaffold(&repo_root, &selected, &objective)?;
-                (vec![selected], Some(key), Some(name))
+                (vec![selected], Some(key), team_name.clone())
             } else if *create {
                 let selected = explicit.ok_or_else(|| {
                     anyhow!("--create needs a Wave name: `lf pm init <name> --create`")
@@ -579,10 +576,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 let key = crate::ops::pm::new_wave_team_key(team_key.as_deref())?;
                 let objective = crate::ops::pm::provisional_wave_objective(&selected);
                 crate::ops::pm::author_wave_scaffold(&repo_root, &selected, &objective)?;
-                let name = team_name
-                    .clone()
-                    .unwrap_or_else(|| crate::ops::pm::wave_title(&selected));
-                (vec![selected], Some(key), Some(name))
+                (vec![selected], Some(key), team_name.clone())
             } else {
                 // pm init is a creation flow: an explicit --wave may name a
                 // wave not yet registered (it links a wave directory to
@@ -1093,7 +1087,7 @@ fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
 
 #[cfg(test)]
 mod pm_output_tests {
-    use super::{format_pm_task_table, role_team_identity, PmInitOutput};
+    use super::{format_pm_task_table, role_team_key, PmInitOutput};
     use crate::ops::pm::StandardWaveRole;
     use crate::pm::PmItem;
 
@@ -1111,18 +1105,16 @@ mod pm_output_tests {
     }
 
     #[test]
-    fn role_team_identity_defaults_only_the_canonical_wave() {
+    fn role_team_key_defaults_only_the_canonical_wave() {
         assert_eq!(
-            role_team_identity(StandardWaveRole::Product, "product", None)
-                .expect("canonical identity"),
-            ("PRD".to_string(), "Product".to_string())
+            role_team_key(StandardWaveRole::Product, "product", None).expect("canonical key"),
+            "PRD"
         );
-        assert!(role_team_identity(StandardWaveRole::Product, "product", Some("GAM")).is_err());
-        assert!(role_team_identity(StandardWaveRole::Product, "game", None).is_err());
+        assert!(role_team_key(StandardWaveRole::Product, "product", Some("GAM")).is_err());
+        assert!(role_team_key(StandardWaveRole::Product, "game", None).is_err());
         assert_eq!(
-            role_team_identity(StandardWaveRole::Product, "game", Some("gam"))
-                .expect("domain identity"),
-            ("GAM".to_string(), "Game".to_string())
+            role_team_key(StandardWaveRole::Product, "game", Some("gam")).expect("domain key"),
+            "GAM"
         );
     }
 

@@ -35,6 +35,14 @@ const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: 
   }
 }"#;
 
+const UPDATE_TEAM_NAME_MUTATION: &str = r#"mutation UpdateTeamName($id: String!, $name: String!) {
+  teamUpdate(id: $id, input: { name: $name }) {
+    team {
+      id
+    }
+  }
+}"#;
+
 const CREATE_INITIATIVE_MUTATION: &str = r#"mutation CreateInitiative($name: String!, $description: String!) {
   initiativeCreate(input: { name: $name, description: $description }) {
     initiative {
@@ -324,9 +332,9 @@ impl LinearClient {
     }
 
     /// Adopt or create the team a wave should own, keyed by `key`. Returns the
-    /// stable team id. Diagnoses conflicts instead of guessing:
-    /// - the requested key already belongs to a team with the same name → adopt;
-    /// - the requested key belongs to a *different*-named team → refuse;
+    /// stable team id. The key is durable identity; the display name follows the
+    /// repository and Wave and may be renamed:
+    /// - the requested key already belongs to a team → adopt and rename it;
     /// - the name exists under a different key → refuse (name the existing key);
     /// - neither exists → create.
     pub async fn ensure_team(&self, name: &str, key: &str) -> PmResult<TeamBinding> {
@@ -344,18 +352,28 @@ impl LinearClient {
             .iter()
             .find(|team| team.key.eq_ignore_ascii_case(&requested_key))
         {
-            if team.name.eq_ignore_ascii_case(name) {
-                return Ok(TeamBinding {
-                    id: team.id.clone(),
-                    key: team.key.clone(),
-                    created: false,
-                });
+            if !team.name.eq_ignore_ascii_case(name) {
+                if let Some(other) = teams
+                    .iter()
+                    .find(|other| other.id != team.id && other.name.eq_ignore_ascii_case(name))
+                {
+                    return Err(PmError::Message(format!(
+                        "cannot rename Linear team {:?} (key {}) to {name:?}; that name belongs to team {} (key {})",
+                        team.name, team.key, other.id, other.key
+                    )));
+                }
+                let _: Value = self
+                    .graphql(
+                        UPDATE_TEAM_NAME_MUTATION,
+                        json!({ "id": team.id, "name": name }),
+                    )
+                    .await?;
             }
-            return Err(PmError::Message(format!(
-                "Linear team key {requested_key:?} already belongs to team {:?} (id {}). \
-                 Pass a different --team-key or rename that team.",
-                team.name, team.id
-            )));
+            return Ok(TeamBinding {
+                id: team.id.clone(),
+                key: team.key.clone(),
+                created: false,
+            });
         }
 
         if let Some(team) = teams
@@ -2118,23 +2136,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_team_refuses_key_owned_by_another_team() {
-        let (base_url, _requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "teams": { "nodes": [
-                { "id": "team-x", "name": "Platform", "key": "PRD" },
-            ] } } }),
-        )])
+    async fn ensure_team_renames_the_team_owned_by_the_key() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teams": { "nodes": [
+                    { "id": "team-x", "name": "Product", "key": "PRD" },
+                ] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teamUpdate": { "team": { "id": "team-x" } } } }),
+            ),
+        ])
         .await;
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
-        let err = client
-            .ensure_team("Product", "PRD")
+        let binding = client
+            .ensure_team("loopflow Product", "PRD")
             .await
-            .expect_err("conflicting key is refused");
-        let message = err.to_string();
-        assert!(message.contains("PRD"), "{message}");
-        assert!(message.contains("Platform"), "{message}");
+            .expect("key owner is renamed");
+
+        assert_eq!(binding.id, "team-x");
+        let requests = requests.lock().await;
+        let rename: Value = serde_json::from_str(&requests[1].body).expect("rename json");
+        assert!(rename["query"]
+            .as_str()
+            .expect("query")
+            .contains("teamUpdate"));
+        assert_eq!(rename["variables"]["name"], "loopflow Product");
     }
 
     #[tokio::test]

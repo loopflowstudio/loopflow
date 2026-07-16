@@ -25,6 +25,7 @@ use crate::pm::{
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
+use crate::repository::RepoId;
 use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
 use crate::task::{TaskSession, TaskSessionStatus};
 
@@ -35,7 +36,7 @@ pub struct PmInitOptions {
     pub wave: Option<String>,
     /// Durable three-letter Task prefix (e.g. `PRD`). Required when unbound.
     pub team_key: Option<String>,
-    /// Team display name. Defaults to the title-cased wave name.
+    /// Team display name. Defaults to `<repo> <Wave>`.
     pub team_name: Option<String>,
 }
 
@@ -1070,8 +1071,10 @@ pub(crate) fn provisional_wave_objective(wave: &str) -> String {
     )
 }
 
-pub(crate) fn wave_title(wave: &str) -> String {
-    title_case(wave)
+pub(crate) fn wave_team_name(repo: &Path, wave: &str) -> OpsResult<String> {
+    let repo_id = RepoId::discover(repo)
+        .map_err(|error| OpsError::Message(format!("cannot identify repository: {error}")))?;
+    Ok(format!("{} {}", repo_id.name(), title_case(wave)))
 }
 
 pub(crate) fn new_wave_team_key(team_key: Option<&str>) -> OpsResult<String> {
@@ -1195,7 +1198,10 @@ async fn pm_init_async(
     // binding. Missing bindings were rejected before any provider call.
     let resolve_requested_team = explicit_team || existing_team.is_none();
     let (team_id, team_key, team_created) = if resolve_requested_team {
-        let name = options.team_name.clone().unwrap_or_else(|| title.clone());
+        let name = match &options.team_name {
+            Some(name) => name.clone(),
+            None => wave_team_name(repo, &wave)?,
+        };
         let key = requested_team_key
             .clone()
             .expect("resolving a requested team requires an explicit key");

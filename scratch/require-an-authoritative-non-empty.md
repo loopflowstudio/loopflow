@@ -125,16 +125,12 @@ stacked child measures from its durable fork point, not main.
 
 ## Implementation status
 
-Implementation is in the working tree (uncommitted) and compiles clean. Existing
-tests pass. Remaining: the Done-when test matrix needs two scenarios that no
-test exercises yet:
-
-- **Empty range refusal** — an existing PR (with a GitHub number) reset/rebased
-  empty must refuse before any `gh` call. This is the core hole this task closes.
-- **Stacked child** — live parent (child measures from parent tip, parent-only
-  changes can't satisfy) and collapsed parent (child measures from origin/main
-  after collapse). The `stacked_rotation_task` helper exists but no test calls
-  it.
+Complete. Compiles clean; `cargo fmt` and `cargo clippy -- -D warnings` pass.
+16 tests cover the full matrix: 8 integration tests
+(`task_pr_range_tests.rs`) drive the real `submit`/`land`/`publish` paths, and
+8 unit tests (`ops::task::tests`) exercise the verifier directly for the
+stacked-child and empty-range edge cases that are impractical to reach
+end-to-end without a full stack-rotation runtime.
 
 ## Done when
 

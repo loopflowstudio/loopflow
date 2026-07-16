@@ -151,6 +151,10 @@ private struct WavePlanView: View {
 
     @Environment(\.palette) private var palette
     @State private var reading = WaveDetailReading()
+    // True until the first live read resolves. It gates the loading affordance,
+    // so an empty projects area during the pre-snapshot window reads as
+    // "loading" rather than "no projects".
+    @State private var isAwaitingDetail = true
 
     private var identity: String { "\(repoPath)|\(wave.id)" }
     private var refreshIdentity: String { "\(identity)|\(refreshSignal)" }
@@ -266,9 +270,19 @@ private struct WavePlanView: View {
                     }
                 }
             } else if plan.projects.isEmpty {
-                Text("No projects yet.")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
+                if isAwaitingDetail {
+                    HStack(spacing: Spacing.sm) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading live detail…")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                    .accessibilityIdentifier("wave-detail-loading")
+                } else {
+                    Text("No projects yet.")
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                }
             } else {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
                     ForEach(plan.projects) { project in
@@ -304,16 +318,12 @@ private struct WavePlanView: View {
 
     private func refreshDetail() async {
         if AppTestMode.current() == .mockWaves {
-            if wave.name == MockWaveFixture.detailWaveName,
-               let snapshot = MockWaveFixture.selectedWaveDetail() {
-                reading.update(snapshot)
-            } else {
-                reading.clear()
-            }
+            applyMockDetail()
             return
         }
         guard wave.isRegistered else {
             reading.clear()
+            isAwaitingDetail = false
             return
         }
         do {
@@ -327,6 +337,18 @@ private struct WavePlanView: View {
             guard !Task.isCancelled else { return }
             reading.recordFailure(error)
         }
+        isAwaitingDetail = false
+    }
+
+    /// The `mock-waves` detail rendering: the fixture owns the state→reading
+    /// decision (see `MockWaveFixture.detailReading`); the view just applies it.
+    private func applyMockDetail() {
+        let outcome = MockWaveFixture.detailReading(
+            waveName: wave.name,
+            state: MockWaveFixture.detailState
+        )
+        reading = outcome.reading
+        isAwaitingDetail = outcome.awaitingFirstRead
     }
 }
 

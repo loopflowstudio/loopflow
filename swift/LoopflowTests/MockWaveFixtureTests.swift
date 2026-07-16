@@ -44,4 +44,52 @@ struct MockWaveFixtureTests {
         #expect(WaveLens.forTask(try #require(byId["INF-123"]).attention).color == .red)
         #expect(WaveLens.forTask(try #require(byId["INF-124"]).attention).color == .black)
     }
+
+    // The Proof requires the screenshot fixture to cover empty, loading, error,
+    // selected, and future-child indentation. Empty is the `empty-workspaces`
+    // mode; selected and indentation are proven above. These cover the detail
+    // states the mock surface drives with `LOOPFLOW_UI_TEST_DETAIL_STATE`.
+
+    @Test("the selected detail state renders the populated hierarchy, no longer awaiting")
+    func selectedDetailState() {
+        let outcome = MockWaveFixture.detailReading(
+            waveName: MockWaveFixture.detailWaveName,
+            state: .selected
+        )
+        #expect(outcome.reading.snapshot != nil)
+        #expect(outcome.reading.errorMessage == nil)
+        #expect(outcome.awaitingFirstRead == false)
+    }
+
+    @Test("the loading detail state withholds the snapshot and keeps the loading affordance")
+    func loadingDetailState() {
+        let outcome = MockWaveFixture.detailReading(
+            waveName: MockWaveFixture.detailWaveName,
+            state: .loading
+        )
+        #expect(outcome.reading.snapshot == nil)
+        #expect(outcome.reading.errorMessage == nil)
+        #expect(outcome.awaitingFirstRead)  // loading affordance stays on screen
+    }
+
+    @Test("the error detail state preserves the last-good detail under a framed footer")
+    func errorDetailState() {
+        let outcome = MockWaveFixture.detailReading(
+            waveName: MockWaveFixture.detailWaveName,
+            state: .error
+        )
+        // The cached detail survives the failed refresh (PR #932 behavior)...
+        #expect(outcome.reading.snapshot?.wave.name == "infrastructure")
+        // ...framed as a quiet footer reason, never a raw error dominating the pane.
+        #expect(outcome.reading.errorMessage == "Wave status unavailable: the local registry is unreachable")
+        #expect(outcome.awaitingFirstRead == false)
+    }
+
+    @Test("detailState reads LOOPFLOW_UI_TEST_DETAIL_STATE, defaulting to selected")
+    func detailStateParsing() {
+        #expect(MockWaveFixture.DetailState(rawValue: "loading") == .loading)
+        #expect(MockWaveFixture.DetailState(rawValue: "error") == .error)
+        #expect(MockWaveFixture.DetailState(rawValue: "selected") == .selected)
+        #expect(MockWaveFixture.DetailState(rawValue: "nonsense") == nil)
+    }
 }

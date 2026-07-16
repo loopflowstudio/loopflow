@@ -56,20 +56,43 @@ screenshots:
     select_tab: runs
     directions: [conductor, listener]
 
-  # UI test captures (flow-focused, slower)
-  - name: loopflow-main-uitest
+  # Stable Wave surface (W2-178) — the Proof's five states, driven offline
+  # through the mock-waves fixture (no registry). Each captures one state the
+  # Task must prove; together they are the screenshot fixture the Proof names.
+
+  # selected — the populated detail hierarchy: objective, Projects, KRs, Task
+  # lenses, and (in the list) the child Wave indented under its parent.
+  - name: wave-surface-selected
     type: uitest
     ui_test_mode: mock-waves
     ui_test_delay: 2
 
-  - name: loopflow-wave-running-uitest
+  # future-child indentation — select a leaf so the list, with cadenza indented
+  # under infrastructure, is the subject rather than the detail hierarchy.
+  - name: wave-surface-child-indentation
     type: uitest
     ui_test_mode: mock-waves
-    ui_test_select_branch: wave-auth-feature
+    ui_test_select_branch: cadenza
     ui_test_delay: 2
 
-  - name: loopflow-wave-waiting-uitest
+  # loading — the pre-snapshot state: objective from the cached plan, with the
+  # "Loading live detail…" affordance where Projects will resolve.
+  - name: wave-surface-loading
     type: uitest
     ui_test_mode: mock-waves
-    ui_test_select_branch: wave-api-refactor
+    ui_test_detail_state: loading
+    ui_test_delay: 2
+
+  # error — a failed refresh preserves the last-good detail under one quiet
+  # "showing cached plan · live status unavailable" footer, not a raw error.
+  - name: wave-surface-error
+    type: uitest
+    ui_test_mode: mock-waves
+    ui_test_detail_state: error
+    ui_test_delay: 2
+
+  # empty — no Waves: the calm empty surface, not a giant error.
+  - name: wave-surface-empty
+    type: uitest
+    ui_test_mode: empty-workspaces
     ui_test_delay: 2

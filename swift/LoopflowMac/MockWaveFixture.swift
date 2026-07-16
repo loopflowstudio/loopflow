@@ -28,6 +28,28 @@ enum MockWaveFixture {
         return (env?.isEmpty == false ? env : nil) ?? detailWaveName
     }
 
+    /// Which detail-pane state the selected Wave renders. `selected` is the
+    /// populated hierarchy; `loading` holds the pre-snapshot state so the plan
+    /// pane shows its loading affordance; `error` preserves the cached detail
+    /// under the "showing cached plan · live status unavailable" footer (the
+    /// PR #932 preservation behavior). A screenshot run picks one with
+    /// `LOOPFLOW_UI_TEST_DETAIL_STATE`, so the fixture covers every state the
+    /// Proof names without a live registry.
+    enum DetailState: String {
+        case selected
+        case loading
+        case error
+    }
+
+    static var detailState: DetailState {
+        let raw = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_DETAIL_STATE"]
+        return raw.flatMap(DetailState.init(rawValue:)) ?? .selected
+    }
+
+    /// The failure a mock `error` state reports — a plausible offline reason,
+    /// never a raw stack. `WaveDetailReading` frames it as the disclosed footer.
+    static let refreshError = RegistryQueryError("the local registry is unreachable")
+
     /// The stable list, one Wave per lens state: green (a live body), red
     /// (stopped with active work), black (off and clean), plus a child Wave
     /// (parent set) to exercise future-ancestry row indentation.
@@ -70,6 +92,30 @@ enum MockWaveFixture {
     /// `lf status --json` emits (the round-tripped `wave_detail.json` fixture).
     static func selectedWaveDetail() -> WaveDetailSnapshot? {
         try? JSONDecoder().decode(WaveDetailSnapshot.self, from: Data(detailJSON.utf8))
+    }
+
+    /// The detail reading a `mock-waves` capture renders for `waveName` in the
+    /// given state, plus whether the pane still awaits its first live read (the
+    /// loading affordance stays on screen only while awaiting). Pure so the
+    /// screenshot states are covered without launching the app.
+    static func detailReading(
+        waveName: String,
+        state: DetailState
+    ) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
+        let snapshot = waveName == detailWaveName ? selectedWaveDetail() : nil
+        var reading = WaveDetailReading()
+        switch state {
+        case .loading:
+            reading.clear()
+            return (reading, true)
+        case .error:
+            if let snapshot { reading.update(snapshot) }
+            reading.recordFailure(refreshError)
+            return (reading, false)
+        case .selected:
+            if let snapshot { reading.update(snapshot) } else { reading.clear() }
+            return (reading, false)
+        }
     }
 
     static let detailJSON = #"""

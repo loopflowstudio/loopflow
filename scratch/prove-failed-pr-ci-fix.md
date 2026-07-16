@@ -107,9 +107,13 @@ in-crate unit tests. Per CLAUDE.md, explicit imports — no `use super::*`.
 The lifecycle is driven by two real functions plus one fake-`gh` state change.
 Nothing is mocked; the store is real SQLite in a `TempDir`.
 
+**The read cache is the thing this design missed, and it would have made the whole suite a tautology.** `reconcile_task_pr_with_authority` calls `cached_github_observation` *before* it spawns `gh`, and reuses the last reading for `PR_OBSERVATION_TTL` — **60 seconds** (`ops/task.rs`, `Fresh`; 5 minutes on `Degraded`). Every phase here lands milliseconds after the last, so a plain reconcile loop serves the first reading back forever: the checks never "go red", and — the dangerous one — the gh-outage test passes *without gh ever being consulted*. It did exactly that on first run: green, proving only that the cache works.
+
+So each phase ages `github_observation.checked_at` past the TTL before reconciling, which is how the suite models a minute passing. (`ops/task.rs`'s own tests use the same trick from the other side, pinning that 59s is still fresh.) Found by the assertions having teeth: the failing-set assertion reported `left: Pending, right: Failing` rather than quietly agreeing.
+
 | Phase | Test does | Production code under test |
 |---|---|---|
-| observe | write the fake's state files, call `reconcile_task_pr_for_lease` | `observe_pr_by_number` → `merge_gate_state` → `read_check_set` → `observe_required_checks` |
+| observe | write the fake's state files, **expire the read cache**, call `reconcile_task_pr_for_lease` | `cached_github_observation` → `observe_pr_by_number` → `merge_gate_state` → `read_check_set` → `observe_required_checks` |
 | arm | call `arm_ci_fix_wake` | `fresh_ci` → `wake_warranted` → `mark_woken` → `update_task_pr_for_lease` |
 | push | flip `head.sha` in the fake's PR state, reconcile | `fresh_ci` staleness rule |
 | restart | re-call `reconcile_task_pr_for_lease` at each checkpoint | `observe_required_checks` dedup carry-forward |
@@ -418,6 +422,9 @@ aggregate-dropping behaviour this design had promoted to its headline test
 | Which fixtures break when the field lands? | **None break** — a fixture omitting `ci_observation` silently decodes as `None` in both languages. That is the drift, not a safety net. Populated `PrSnapshot`s: `task_attention_states.json` (1) and `roadmap_snapshot.json` (1). `wave_detail.json`'s `active_pr` is a PR **id string** — a different DTO, unaffected. | Both get explicit `"ci_observation": null`, enforced by the layer-2 presence guard rather than by the decoder; fixture count assertion 8 → 9. |
 | Is the branch behind main? | No. Base is **`7c4d4e965`**, `0` behind, on PR 2's branch. Main moved four times during this Task (`42cd883cd` → `9613efbb2` → `895c5cd1d` → `7c4d4e965`), which is what stranded the doc's citations twice. | Prerequisite discharged — but re-check citations against the base at implementation time, not at design time. See `questions.md` for the `lf rebase`/`lf pr publish` trap that forced the branch rotation. |
 | Are the three prerequisites landed? | No — W2-230, W2-231, W2-232 all confirmed open in Linear, ranked *below* W2-229. | Prove today's behavior; gate W2-231's assertion. Do not block on siblings. |
+| Does a reconcile actually re-read GitHub? | **Not within 60s.** `cached_github_observation` short-circuits before `gh` spawns (`PR_OBSERVATION_TTL`, 5min on `Degraded`). The design never mentioned it; the first run was green *because* of it. | Each phase ages `checked_at` past the TTL. Without this the suite is a tautology — see the Approach section. |
+| How does the harness get a `ChildWriteLease`? | Only from the real reservation path. `reserve_task_process` CASes on `COALESCE(process_generation,0) = generation-1` **and** `status = expected_status`, then `activate_task_process` promotes the lease from `reserved` to writable. A hand-built token is refused: "generation 1 no longer holds its write lease". | The harness runs the production launch — Waiting → reserve generation 1 → activate — which is exactly the state a body is in when `runner.rs:122` arms its own wake. No fabricated state. |
+| Can the harness create a published PR directly? | No. The store refuses: "Task Session requires its sequence-1 Working PR". | Create the Working PR, then publish it by update — the real order, and the same shape `ops/child.rs`'s wake test uses. |
 
 ## Alternatives considered
 
@@ -477,7 +484,9 @@ aggregate-dropping behaviour this design had promoted to its headline test
      ];
      ```
 
-   - **redirect the store home** — `LF_HOME`, `LF_DB_PATH`, `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH` — at a temp dir, so `open_registry_for_authority()` can never reach the developer's live control DB. This is a *separate* concern from the identity list, and `EnvGuard` treats it separately too (it clears the four and points `LF_HOME` at a `TempDir`); mirror that structure rather than merging the two lists.
+   - ~~**redirect the store home** at a temp dir so `open_registry_for_authority()` cannot reach the live control DB~~ — **wrong, and harmful. Cut during implementation.** The premise was that this proof drives `resolve_task_authority`. It does not: `reconcile_task_pr_with_authority` takes `Some(lease)` and reads only the store it is handed, and the suite opens its own SQLite store in a `TempDir`, so nothing resolves a home. Worse, the redirect *broke a passing test* — `trace.rs:1358` reads `LF_HOME`, and the lib test binary runs its ~1400 tests in threads, so pointing that var at a temp dir failed `trace::tests::capture_persists_private_artifacts_and_queryable_rows` from another thread. Verified by bisect: clean tree 1407 pass, with the redirect 1 fail, without it 1410 pass.
+
+     The lesson generalizes past this row. **The guard's mutex serializes it against itself, never against the rest of the binary** — that asymmetry does not exist for `tests/support/`'s `EnvGuard`, whose every sibling in that binary takes the same lock. In the lib binary, any env var this guard touches is touched underneath 1400 unrelated tests. So: mutate the minimum that is *measurably* required, and treat every var as a shared global with unknown readers.
    - hold a process-wide `Mutex` (the lib test binary runs tests in threads, and env is process-global);
    - restore every previous value on `Drop`.
 

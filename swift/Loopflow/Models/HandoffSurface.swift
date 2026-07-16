@@ -66,48 +66,64 @@ public struct HandoffSurfaceOption: Codable, Sendable, Hashable, Identifiable {
 /// What the current machine and handoff permit. The resolver reads only these
 /// facts; it never touches the filesystem or `NSWorkspace` itself, which keeps
 /// the decision pure and testable.
+///
+/// Only a surface that runs the *exact shared attach command* may claim
+/// `.attach`: Ghostty embeds it, and Warp runs it through a command-bearing
+/// launch configuration. An IDE opened at a folder does not resume the specific
+/// provider Session, so an IDE is never more than `.worktreeOnly` — it opens the
+/// worktree without ever claiming to attach.
+///
+/// The descriptor's Home matters: on a **remote** Home the worktree lives on
+/// another host, so a local editor or a plain local window cannot reach it.
+/// Ghostty and a command-bearing Warp still attach — the launcher transports the
+/// shared argv to the descriptor's host — but local worktree-only actions become
+/// unavailable rather than opening a path that is not there.
 public struct HandoffSurfaceCapability: Sendable, Hashable {
     /// External apps installed on the current Home. Ghostty is embedded, so it is
     /// never listed here and is always available.
     public let installedApps: Set<HandoffSurface>
-    /// The handoff's provider is Claude — IDE attach names Claude.
-    public let providerIsClaude: Bool
-    /// A provider session id is known, so an IDE can claim to attach.
-    public let providerSessionKnown: Bool
-    /// The worktree is a proven workspace an IDE can open.
+    /// The worktree is a proven workspace an IDE can open (only meaningful for a
+    /// local Home; a remote worktree is never locally proven).
     public let workspaceProven: Bool
-    /// Warp can be handed a command-bearing launch configuration.
+    /// Warp can be handed a command-bearing launch configuration that runs the
+    /// exact shared attach command.
     public let warpCommandBearing: Bool
+    /// The handoff's Home is on another host (`descriptor.host`), so the worktree
+    /// is not on this machine.
+    public let isRemoteHome: Bool
 
     public init(
         installedApps: Set<HandoffSurface>,
-        providerIsClaude: Bool,
-        providerSessionKnown: Bool,
         workspaceProven: Bool,
-        warpCommandBearing: Bool
+        warpCommandBearing: Bool,
+        isRemoteHome: Bool
     ) {
         self.installedApps = installedApps
-        self.providerIsClaude = providerIsClaude
-        self.providerSessionKnown = providerSessionKnown
         self.workspaceProven = workspaceProven
         self.warpCommandBearing = warpCommandBearing
+        self.isRemoteHome = isRemoteHome
     }
 
     /// How honestly `surface` can present this handoff right now.
     public func reach(_ surface: HandoffSurface) -> HandoffSurfaceReach {
         switch surface {
         case .ghostty:
-            // Embedded and required: always the honest attach fallback.
+            // Embedded and required: the launcher runs the shared argv locally or
+            // transports it to the descriptor host, so it attaches on either Home.
             return .attach
         case .warp:
             guard installedApps.contains(.warp) else { return .unavailable }
-            return warpCommandBearing ? .attach : .worktreeOnly
+            // A command-bearing config runs the shared argv, so it attaches on any
+            // Home. A plain worktree window only reaches a *local* path, so on a
+            // remote Home it is unavailable rather than worktree-only.
+            if warpCommandBearing { return .attach }
+            return isRemoteHome ? .unavailable : .worktreeOnly
         case .vscode, .cursor:
-            guard installedApps.contains(surface) else { return .unavailable }
-            // Claude-in-IDE attach needs a session id and a proven workspace;
-            // anything short of that opens the worktree without claiming to attach.
-            if providerIsClaude && providerSessionKnown && workspaceProven {
-                return .attach
+            // A local editor cannot open a remote worktree, and no IDE launch
+            // resumes the specific provider Session — so an IDE is worktree-only
+            // on a local Home and unavailable on a remote one.
+            guard !isRemoteHome, installedApps.contains(surface), workspaceProven else {
+                return .unavailable
             }
             return .worktreeOnly
         }
@@ -154,6 +170,37 @@ public struct HandoffSurfaceMemory: Codable, Sendable, Hashable {
         byProviderHome[Self.key(provider: provider, home: home)] = surface
         overall = surface
     }
+
+    /// Record a launch only when it earned the right to become Open's default.
+    /// Folder-only IDE opens, automatic resolution, and failed launches leave the
+    /// last attach-capable preference untouched.
+    @discardableResult
+    public mutating func recordLaunch(
+        _ surface: HandoffSurface,
+        provider: String,
+        home: String,
+        reach: HandoffSurfaceReach,
+        userInitiated: Bool,
+        launchSucceeded: Bool
+    ) -> Bool {
+        guard userInitiated, launchSucceeded, reach == .attach else { return false }
+        record(surface, provider: provider, home: home)
+        return true
+    }
+}
+
+/// The outcome of resolving Open's default surface: the chosen surface plus, when
+/// a remembered surface could not be honored, a human-readable reason naming it
+/// and why it was skipped. The view surfaces that reason so a fallback is never
+/// silent.
+public struct HandoffSurfaceResolution: Sendable, Hashable {
+    public let surface: HandoffSurface
+    public let fallbackReason: String?
+
+    public init(surface: HandoffSurface, fallbackReason: String?) {
+        self.surface = surface
+        self.fallbackReason = fallbackReason
+    }
 }
 
 /// Decides which surface Open uses by default. The decision is pure: the
@@ -161,21 +208,38 @@ public struct HandoffSurfaceMemory: Codable, Sendable, Hashable {
 /// overall surface, then the embedded Ghostty fallback. A remembered surface is
 /// honored only while it can still `.attach`, so an uninstalled app or a lost
 /// capability falls back visibly to the next candidate rather than opening a
-/// surface that would lie about reaching the Session.
+/// surface that would lie about reaching the Session — and the resolution
+/// reports *why* it fell back so the reason can be shown.
 public enum HandoffSurfaceResolver {
     public static func resolve(
         provider: String,
         home: String,
         memory: HandoffSurfaceMemory,
         capability: HandoffSurfaceCapability
-    ) -> HandoffSurface {
-        let remembered = [
-            memory.preferred(provider: provider, home: home),
-            memory.overallPreferred,
-        ]
-        for case let surface? in remembered where capability.reach(surface) == .attach {
-            return surface
+    ) -> HandoffSurfaceResolution {
+        guard let remembered = memory.preferred(provider: provider, home: home)
+            ?? memory.overallPreferred
+        else {
+            // Nothing remembered yet: Ghostty is the plain default, not a fallback.
+            return HandoffSurfaceResolution(surface: .ghostty, fallbackReason: nil)
         }
-        return .ghostty
+        if capability.reach(remembered) == .attach {
+            return HandoffSurfaceResolution(surface: remembered, fallbackReason: nil)
+        }
+        // The remembered surface can no longer attach — name it and why, then use
+        // the embedded terminal that always can.
+        let why: String
+        switch capability.reach(remembered) {
+        case .unavailable:
+            why = "\(remembered.appName) is unavailable"
+        case .worktreeOnly:
+            why = "\(remembered.appName) can no longer attach"
+        case .attach:
+            why = ""  // unreachable: handled above
+        }
+        return HandoffSurfaceResolution(
+            surface: .ghostty,
+            fallbackReason: "\(why) — using the embedded terminal."
+        )
     }
 }

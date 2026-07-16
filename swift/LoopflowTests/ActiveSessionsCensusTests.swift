@@ -58,6 +58,20 @@ struct ActiveSessionsCensusTests {
         #expect(project.tint == .red)
     }
 
+    @Test("an attached-but-unresolved handoff stays red through its parent chain")
+    func attachedHandoffStaysRed() throws {
+        let product = try group("wave-product")
+        // A human is attached but has not completed or cancelled, so the handoff
+        // is still unresolved: its row stays red and keeps naming the human, and
+        // it reddens its parent project directly (not only via a sibling task).
+        let attached = try #require(product.rows.first { $0.handoffSessionId == "ih_attached_project" })
+        #expect(attached.tint == .red)
+        #expect(attached.nextOwner == .human)
+        #expect(attached.isOpenable)
+        #expect(try row(product, "ps_prod").tint == .red)
+        #expect(product.tint == .red)
+    }
+
     @Test("evidence stays distinguishable: observed, stale, stopped, unavailable, unreachable")
     func evidenceStatesAreDistinct() throws {
         let product = try group("wave-product")

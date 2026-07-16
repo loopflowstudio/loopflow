@@ -212,17 +212,16 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         staleThresholdSecs: Int
     ) -> ActiveSessionWaveGroup {
         let remoteUnreachable = isRemote(wave.home) && !wave.live
-        // A handoff waiting on the human blocks its declared parent; index those
-        // parent ids so the parent chain can be tinted red.
-        let waitingParentIds = Set(
-            handoffs.filter { $0.status == .waiting }.map(\.parentId)
-        )
-        let waveLevelWaiting = handoffs.contains {
-            $0.status == .waiting && $0.parentKind == "wave"
-        }
+        // Every handoff here is active — waiting *or* attached — and so still
+        // unresolved: the human has not completed or cancelled it, and the parent
+        // stays blocked. Index those parent ids so the parent chain tints red
+        // until the handoff reaches a terminal outcome, not merely until a human
+        // first attaches.
+        let blockingParentIds = Set(handoffs.map(\.parentId))
+        let waveLevelBlocking = handoffs.contains { $0.parentKind == "wave" }
 
         var rows: [ActiveSessionRow] = []
-        var anyRed = waveLevelWaiting
+        var anyRed = waveLevelBlocking
         var handledHandoffIds: Set<String> = []
 
         if case let .available(projectItems, _) = projects {
@@ -231,7 +230,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                     !isTerminal(runtime.status)
                 else { continue }
                 let projectRowId = runtime.sessionId
-                var projectRed = waitingParentIds.contains(runtime.sessionId)
+                var projectRed = blockingParentIds.contains(runtime.sessionId)
                 var childRows: [ActiveSessionRow] = []
 
                 for task in project.tasks {
@@ -239,9 +238,9 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                         !isTerminal(taskRuntime.status)
                     else { continue }
                     let taskRowId = taskRuntime.sessionId
-                    let waitingHandoff = waitingParentIds.contains(taskRuntime.sessionId)
+                    let blockingHandoff = blockingParentIds.contains(taskRuntime.sessionId)
                     var tint = tint(for: task.attention.level)
-                    if waitingHandoff { tint = .red }
+                    if blockingHandoff { tint = .red }
                     if tint == .red { projectRed = true }
                     childRows.append(
                         ActiveSessionRow(
@@ -375,7 +374,10 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         parentRowId: String?,
         staleThresholdSecs: Int
     ) -> ActiveSessionRow {
-        let waiting = handoff.status == .waiting
+        // Only active handoffs are censused, and an active handoff — waiting or
+        // already attached — is still owed a human resolution, so it stays red
+        // and keeps naming the human as the next owner until it completes, hands
+        // back, or fails.
         return ActiveSessionRow(
             id: "handoff:\(handoff.sessionId)",
             kind: .handoff,
@@ -389,8 +391,8 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             step: nil,
             ageSecs: handoff.ageSecs,
             reason: handoff.reason,
-            nextOwner: waiting ? .human : nil,
-            tint: waiting ? .red : .green,
+            nextOwner: .human,
+            tint: .red,
             evidence: isStale(handoff.ageSecs, staleThresholdSecs) ? .stale : .observed,
             actions: [.open],
             handoffSessionId: handoff.sessionId

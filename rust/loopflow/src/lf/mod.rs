@@ -892,6 +892,9 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
+        /// Route every interactive lifecycle step to the parent Project
+        #[arg(long)]
+        headless: bool,
         #[arg(long)]
         json: bool,
     },
@@ -910,6 +913,9 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
+        /// Route every interactive lifecycle step to the parent Project
+        #[arg(long)]
+        headless: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1917,6 +1923,31 @@ mod tests {
             panic!("expected task run command");
         };
         assert_eq!(flow.as_deref(), Some("iterate"));
+    }
+
+    #[test]
+    fn task_run_and_start_accept_headless_lifecycle_policy() {
+        for argv in [
+            vec!["lf", "task", "run", "INF-123", "--headless"],
+            vec![
+                "lf",
+                "task",
+                "start",
+                "Ship auth",
+                "--project",
+                "project-1",
+                "--headless",
+            ],
+        ] {
+            let cli = Cli::try_parse_from(argv).expect("parse headless Task launch");
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Task {
+                    cmd: TaskCommand::Run { headless: true, .. }
+                        | TaskCommand::Start { headless: true, .. }
+                })
+            ));
+        }
     }
 
     #[test]

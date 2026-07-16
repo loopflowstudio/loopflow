@@ -936,6 +936,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             flow,
             stack_on,
             directive,
+            headless,
             json,
         } => {
             let session = loopflow::ops::task::task_run(
@@ -946,6 +947,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     flow: flow.clone(),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
+                    headless: *headless,
                 },
             )?;
             print_task_session(&session, *json)
@@ -957,6 +959,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             flow,
             stack_on,
             directive,
+            headless,
             json,
         } => {
             let session = loopflow::ops::task::task_start(
@@ -968,6 +971,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     flow: flow.clone(),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
+                    headless: *headless,
                 },
             )?;
             print_task_session(&session, *json)

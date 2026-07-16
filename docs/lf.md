@@ -150,6 +150,7 @@ lf stop designer                                   # stop its listener and resid
 lf project run <linear-project-id>                  # durable Project Session
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
+lf task run DES-125 --headless                       # Project reviews every interactive step
 lf task run DES-124 --stack-on DES-123
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123 --message "take the smaller approach"

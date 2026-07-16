@@ -4,6 +4,19 @@ produces: .lf/config.yaml
 ---
 Guide the user through setting up loopflow in this repository.
 
+## Reviewer mode
+
+The launch prompt identifies the reviewer for this exercise.
+
+- **Human reviewer:** ask the setup questions below one at a time.
+- **Parent reviewer:** run the same detection, preserve a valid existing
+  default, and otherwise choose the sole detected agent or the first detected
+  supported harness. Send the exact repo-config change to the Task through the
+  review protocol and verify its reply; do not edit the Task's repository
+  yourself. Never create or modify personal user config without a human—report
+  those choices as deferred. If no agent is installed, return the install
+  instructions and request changes.
+
 ## Phase 1: Environment check
 
 Run these checks:
@@ -34,7 +47,9 @@ User config: ~/.lf/config.yaml (exists)
 
 ## Phase 2: Agent guidance
 
-**Multiple agents found:** Report all, ask which to default to.
+**Multiple agents found:** Report all. Ask the human reviewer which to default
+to; with a parent reviewer, preserve the valid existing default or choose the
+first detected supported harness.
 
 **One agent found:** Default to it, report the choice.
 
@@ -55,7 +70,10 @@ Repo config (`.lf/config.yaml`) is for team conventions. Only write repo
 properties — never personal preferences like yolo, ide, chrome, or autoprune.
 
 **No `.lf/config.yaml`:**
-- Ask: "Initialize loopflow in this repo? This creates .lf/config.yaml"
+- Ask the human reviewer: "Initialize loopflow in this repo? This creates
+  .lf/config.yaml"
+- With a parent reviewer, direct the Task to create it with the deterministic
+  default selected above
 - Create the config with detected agent as default
 
 **Existing `.lf/config.yaml`:**
@@ -88,13 +106,16 @@ in the user file.
 
 **User config exists:** Mention it and move on. Don't modify it.
 
-**No user config:** Offer to create `~/.lf/config.yaml` with a couple of common
-preferences:
+**No user config:** With a human reviewer, offer to create `~/.lf/config.yaml`
+with a couple of common preferences:
 - Skip permission prompts (yolo)? [y/N]
 - Preferred IDE setup? [skip]
 
 Keep it brief — two questions, not an interrogation. Generate only what the user
 chose. If they skip everything, don't create the file.
+
+With a parent reviewer, do not ask these questions and do not create the user
+file. Report the personal choices as deferred.
 
 ## Phase 5: Optional extras
 

@@ -5,6 +5,18 @@ interactive: true
 ---
 Review what the chord already played.
 
+## Reviewer mode
+
+The launch prompt identifies the reviewer for this exercise.
+
+- **Human reviewer:** conduct the retrospective checkpoint below and record
+  the human's reaction.
+- **Parent reviewer:** independently audit the played mutations against their
+  evidence and wave objectives. Record each keep/amend/revert verdict as
+  `parent reviewer judgment`, never as human reaction. Send concrete amendment
+  or revert work to the Task through the review protocol and verify its reply;
+  do not implement the Task's changes yourself.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:
@@ -63,7 +75,7 @@ Write `scratch/wave-review.md`:
 # Chord Review — <date>
 
 ## Summary
-<overall human reaction>
+<overall human reaction or explicitly labeled parent reviewer judgment>
 
 ## Decisions
 ### <mutation title>

@@ -5,6 +5,20 @@ produces: scratch/open-work.md, possibly dispatched ship runs and branch prunes
 ---
 Clear outstanding branches, PRs, worktrees, and waves until the repo has an obvious next move.
 
+## Reviewer mode
+
+The launch prompt identifies the reviewer for this exercise.
+
+- **Human reviewer:** discuss each row and obtain the confirmations required
+  below.
+- **Parent reviewer:** perform the full scan and make evidence-backed triage
+  decisions without waiting for a human. Send concrete actions to the Task as
+  FIFO review messages and verify its replies; do not mutate the Task's
+  branches or worktrees yourself. Ship/ship-partial decisions are within this
+  exercise. Abandon, prune, or archive only when the launch directive already
+  grants that destructive authority; otherwise leave the exact action in the
+  punch list and mark the missing authority in the review outcome.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:
@@ -76,9 +90,12 @@ Recommendations:
 
 Judge waves by progress toward README Goals/Vision, not activity counts. Commit counts and PR counts are signals; delivered value is the answer. Call out **busy without progress** and **lack of action** explicitly.
 
-### 3. Discuss Pass 1 row by row
+### 3. Resolve Pass 1 row by row
 
-Walk each row with the user.
+Walk each row with the human reviewer. With a parent reviewer, send each action
+to the Task through the review protocol and verify the returned evidence.
+The execution bullets below are direct human-session actions; a parent reviewer
+assigns them to the Task instead.
 
 - **ship**: dispatch `lf ship` in that worktree as a background job. Do not wait. Log to `scratch/ship-logs/<branch>.log` in the main repo.
 - **ship-partial**: dispatch `lf ship` the same way; the ship flow defaults toward landing and deferring leftovers into Linear tasks.
@@ -94,7 +111,7 @@ mkdir -p scratch/ship-logs
 
 Fire and forget. Multiple ships can run in parallel across sibling worktrees. Move to the next row immediately.
 
-### 4. Discuss Pass 2 wave by wave
+### 4. Resolve Pass 2 wave by wave
 
 After Pass 1 actions are dispatched or the user says to move on, audit each wave:
 

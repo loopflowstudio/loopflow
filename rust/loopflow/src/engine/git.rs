@@ -331,10 +331,25 @@ pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
 /// It includes committed, staged, tracked working-tree, and untracked-file
 /// changes without reading ignored files.
 pub fn worktree_state(repo: &Path) -> Result<String, GitError> {
+    worktree_state_for_pathspec(repo, &[])
+}
+
+/// Repository state that ignores gate-only artifacts under `scratch/`.
+pub fn material_worktree_state(repo: &Path) -> Result<String, GitError> {
+    worktree_state_for_pathspec(repo, &[".", ":(exclude)scratch", ":(exclude)scratch/**"])
+}
+
+fn worktree_state_for_pathspec(repo: &Path, pathspec: &[&str]) -> Result<String, GitError> {
     let head = git_stdout(repo, &["rev-parse", "HEAD"])?;
-    let status = git_stdout(repo, &["status", "--porcelain"])?;
-    let diff = git_stdout(repo, &["diff", "--binary", "HEAD"])?;
-    let untracked = git_stdout(repo, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut status_args = vec!["status", "--porcelain"];
+    status_args.extend_from_slice(pathspec);
+    let status = git_stdout(repo, &status_args)?;
+    let mut diff_args = vec!["diff", "--binary", "HEAD"];
+    diff_args.extend_from_slice(pathspec);
+    let diff = git_stdout(repo, &diff_args)?;
+    let mut untracked_args = vec!["ls-files", "--others", "--exclude-standard", "-z"];
+    untracked_args.extend_from_slice(pathspec);
+    let untracked = git_stdout(repo, &untracked_args)?;
     let mut untracked_state = String::new();
     for relative in untracked.split('\0').filter(|path| !path.is_empty()) {
         let path = repo.join(relative);
@@ -1298,6 +1313,27 @@ mod tests {
         let updated = worktree_state(repo.path()).expect("updated untracked state");
 
         assert_ne!(initial, updated);
+    }
+
+    #[test]
+    fn material_worktree_state_ignores_gate_scratch_artifacts() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "tracked");
+        let initial = material_worktree_state(repo.path()).expect("initial state");
+
+        fs::create_dir(repo.path().join("scratch")).expect("create scratch");
+        fs::write(repo.path().join("scratch/review.md"), "gate evidence")
+            .expect("write gate artifact");
+        assert_eq!(
+            material_worktree_state(repo.path()).expect("scratch-only state"),
+            initial
+        );
+
+        fs::write(repo.path().join("src.txt"), "material repair").expect("write repair");
+        assert_ne!(
+            material_worktree_state(repo.path()).expect("material state"),
+            initial
+        );
     }
 
     #[test]

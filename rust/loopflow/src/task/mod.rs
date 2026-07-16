@@ -55,6 +55,127 @@ pub enum TaskSessionStatus {
     Abandoned,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskLifecyclePhase {
+    Kickoff,
+    Iterate,
+    Gate,
+}
+
+impl TaskLifecyclePhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Kickoff => "kickoff",
+            Self::Iterate => "iterate",
+            Self::Gate => "gate",
+        }
+    }
+}
+
+impl FromStr for TaskLifecyclePhase {
+    type Err = TaskDataError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "kickoff" => Ok(Self::Kickoff),
+            "iterate" => Ok(Self::Iterate),
+            "gate" => Ok(Self::Gate),
+            _ => Err(TaskDataError::InvalidInvariant(format!(
+                "invalid Task lifecycle phase: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskPhasePlan {
+    pub flow: String,
+    pub interaction_policy: InteractionPolicy,
+}
+
+impl TaskPhasePlan {
+    fn validate(&self, phase: TaskLifecyclePhase) -> Result<(), TaskDataError> {
+        if self.flow.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(format!(
+                "{} flow cannot be empty",
+                phase.as_str()
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLifecyclePlan {
+    pub kickoff: TaskPhasePlan,
+    pub iterate: TaskPhasePlan,
+    pub gate: TaskPhasePlan,
+}
+
+impl TaskLifecyclePlan {
+    pub fn standard(iterate_flow: impl Into<String>) -> Self {
+        Self {
+            kickoff: TaskPhasePlan {
+                flow: "task-kickoff".to_string(),
+                interaction_policy: InteractionPolicy::Require,
+            },
+            iterate: TaskPhasePlan {
+                flow: iterate_flow.into(),
+                interaction_policy: InteractionPolicy::Defer,
+            },
+            gate: TaskPhasePlan {
+                flow: "task-gate".to_string(),
+                interaction_policy: InteractionPolicy::Require,
+            },
+        }
+    }
+
+    pub fn headless(iterate_flow: impl Into<String>) -> Self {
+        let mut plan = Self::standard(iterate_flow);
+        plan.kickoff.interaction_policy = InteractionPolicy::Defer;
+        plan.gate.interaction_policy = InteractionPolicy::Defer;
+        plan
+    }
+
+    pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
+        match phase {
+            TaskLifecyclePhase::Kickoff => &self.kickoff,
+            TaskLifecyclePhase::Iterate => &self.iterate,
+            TaskLifecyclePhase::Gate => &self.gate,
+        }
+    }
+
+    fn validate(&self) -> Result<(), TaskDataError> {
+        self.kickoff.validate(TaskLifecyclePhase::Kickoff)?;
+        self.iterate.validate(TaskLifecyclePhase::Iterate)?;
+        self.gate.validate(TaskLifecyclePhase::Gate)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskGateProposal {
+    pub status: TaskSessionStatus,
+    pub reason: String,
+}
+
+impl TaskGateProposal {
+    fn validate(&self) -> Result<(), TaskDataError> {
+        if self.status.is_process_active() || self.status == TaskSessionStatus::Created {
+            return Err(TaskDataError::InvalidInvariant(format!(
+                "{} is not a gate-settle outcome",
+                self.status.as_str()
+            )));
+        }
+        if self.reason.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(
+                "gate proposal reason cannot be empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl TaskSessionStatus {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -391,16 +512,18 @@ pub struct TaskSession {
     pub status_at: OffsetDateTime,
     pub worktree: PathBuf,
     pub workspace_slug: String,
-    /// Flow selected when the Task Session was created. Relaunches resume this
-    /// flow rather than consulting the caller's current default.
-    pub resolved_flow: String,
-    /// Human-review behavior resolved at launch. Inheritance belongs to the
-    /// authored Project/Task layer; the running Session carries one decision.
-    pub interaction_policy: InteractionPolicy,
-    /// Position of the next flow step. Persisted after each completed or
-    /// deferred step so a new process generation does not replay old work.
-    pub flow_cursor: u32,
-    pub flow_iteration: u32,
+    /// Three pinned phase flows and their reviewer-routing policies.
+    pub lifecycle: TaskLifecyclePlan,
+    /// Current phase entry. `phase_epoch` advances on every transition,
+    /// including Gate → Iterate, so stale bodies cannot rewind the Session.
+    pub lifecycle_phase: TaskLifecyclePhase,
+    pub phase_epoch: u32,
+    pub phase_cursor: u32,
+    pub phase_iteration: u32,
+    /// Number of Gate entries attempted by this Task.
+    pub gate_cycle: u32,
+    /// Outcome proposed by Iterate and awaiting Gate approval.
+    pub gate_proposal: Option<TaskGateProposal>,
     /// Provider/model selection for the next body generation. This is mutable
     /// lease state, not Task Session identity.
     pub agent: String,
@@ -493,17 +616,32 @@ impl TaskSession {
                 self.id
             )));
         }
-        if self.resolved_flow.trim().is_empty() {
-            return Err(TaskDataError::InvalidInvariant(format!(
-                "Task Session {} requires a resolved flow",
-                self.id
-            )));
+        self.lifecycle.validate()?;
+        if self.phase_epoch == 0 {
+            return Err(TaskDataError::InvalidInvariant(
+                "Task lifecycle phase epoch must be positive".to_string(),
+            ));
+        }
+        if self.lifecycle_phase == TaskLifecyclePhase::Gate && self.gate_proposal.is_none() {
+            return Err(TaskDataError::InvalidInvariant(
+                "Task gate phase requires a proposed outcome".to_string(),
+            ));
+        }
+        if self.lifecycle_phase != TaskLifecyclePhase::Gate && self.gate_proposal.is_some() {
+            return Err(TaskDataError::InvalidInvariant(
+                "Task gate proposal is valid only during gate phase".to_string(),
+            ));
+        }
+        if let Some(proposal) = &self.gate_proposal {
+            proposal.validate()?;
         }
         if matches!(self.pm_writeback, PmWritebackState::Pending { .. })
             && self.status != TaskSessionStatus::Completed
+            && self.gate_cycle == 0
         {
             return Err(TaskDataError::InvalidInvariant(
-                "pending PM completion is valid only for a completed Task".to_string(),
+                "pending PM completion requires a completed Task or an active gate cycle"
+                    .to_string(),
             ));
         }
         if self.incorporated_directive_version > self.current_directive_version {
@@ -542,6 +680,63 @@ impl TaskSession {
         });
         self.set_status(TaskSessionStatus::Starting, "task process is starting");
         generation
+    }
+
+    pub fn phase_plan(&self) -> &TaskPhasePlan {
+        self.lifecycle.phase(self.lifecycle_phase)
+    }
+
+    pub fn lifecycle_cycle(&self) -> u32 {
+        match self.lifecycle_phase {
+            TaskLifecyclePhase::Kickoff => 0,
+            TaskLifecyclePhase::Iterate => self.gate_cycle + 1,
+            TaskLifecyclePhase::Gate => self.gate_cycle,
+        }
+    }
+
+    pub fn enter_iterate(&mut self) -> Result<(), TaskDataError> {
+        if self.lifecycle_phase != TaskLifecyclePhase::Kickoff
+            && self.lifecycle_phase != TaskLifecyclePhase::Gate
+        {
+            return Err(TaskDataError::InvalidInvariant(
+                "only kickoff or gate may enter iterate".to_string(),
+            ));
+        }
+        self.lifecycle_phase = TaskLifecyclePhase::Iterate;
+        self.phase_epoch += 1;
+        self.phase_cursor = 0;
+        self.phase_iteration = 0;
+        self.gate_proposal = None;
+        self.updated_at = OffsetDateTime::now_utc();
+        Ok(())
+    }
+
+    pub fn enter_gate(&mut self, proposal: TaskGateProposal) -> Result<(), TaskDataError> {
+        if self.lifecycle_phase != TaskLifecyclePhase::Iterate {
+            return Err(TaskDataError::InvalidInvariant(
+                "only iterate may enter gate".to_string(),
+            ));
+        }
+        proposal.validate()?;
+        self.lifecycle_phase = TaskLifecyclePhase::Gate;
+        self.phase_epoch += 1;
+        self.phase_cursor = 0;
+        self.phase_iteration = 0;
+        self.gate_cycle += 1;
+        self.gate_proposal = Some(proposal);
+        self.updated_at = OffsetDateTime::now_utc();
+        Ok(())
+    }
+
+    pub fn approved_gate_proposal(&self) -> Result<TaskGateProposal, TaskDataError> {
+        if self.lifecycle_phase != TaskLifecyclePhase::Gate {
+            return Err(TaskDataError::InvalidInvariant(
+                "only gate may approve a proposed outcome".to_string(),
+            ));
+        }
+        self.gate_proposal.clone().ok_or_else(|| {
+            TaskDataError::InvalidInvariant("Task gate has no proposed outcome".to_string())
+        })
     }
 }
 
@@ -682,8 +877,9 @@ impl TaskObservation {
 mod tests {
     use super::{
         AfterMerge, ChildCommandId, ChildCommandState, GithubPr, PmWritebackOperation,
-        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskObservation, TaskPr, TaskPrId,
-        TaskSession, TaskSessionId, TaskSessionStatus,
+        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskGateProposal,
+        TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr, TaskPrId, TaskSession,
+        TaskSessionId, TaskSessionStatus,
     };
     use crate::child_session::ChildDecisionId;
     use crate::session_context::{
@@ -720,10 +916,13 @@ mod tests {
             status_at: now,
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
-            resolved_flow: "task".to_string(),
-            interaction_policy: crate::engine::InteractionPolicy::Require,
-            flow_cursor: 0,
-            flow_iteration: 0,
+            lifecycle: TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
@@ -975,7 +1174,38 @@ mod tests {
         session.status = TaskSessionStatus::Completed;
         assert!(session.validate().is_ok());
 
-        session.resolved_flow.clear();
+        session.lifecycle.iterate.flow.clear();
         assert!(session.validate().is_err());
+    }
+
+    #[test]
+    fn task_lifecycle_repeats_iterate_and_gate_until_approval() {
+        let mut session = task_session();
+        session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
+
+        assert_eq!(session.lifecycle_cycle(), 0);
+        session.enter_iterate().unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Iterate);
+        assert_eq!(session.lifecycle_cycle(), 1);
+        assert_eq!(session.phase_epoch, 2);
+
+        let proposal = TaskGateProposal {
+            status: TaskSessionStatus::Waiting,
+            reason: "pull request is ready for review".to_string(),
+        };
+        session.phase_cursor = 2;
+        session.phase_iteration = 3;
+        session.enter_gate(proposal.clone()).unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Gate);
+        assert_eq!(session.lifecycle_cycle(), 1);
+        assert_eq!(session.gate_cycle, 1);
+        assert_eq!(session.approved_gate_proposal().unwrap(), proposal);
+        assert_eq!((session.phase_cursor, session.phase_iteration), (0, 0));
+
+        session.enter_iterate().unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Iterate);
+        assert_eq!(session.lifecycle_cycle(), 2);
+        assert_eq!(session.gate_proposal, None);
+        assert_eq!(session.phase_epoch, 4);
     }
 }

@@ -19,6 +19,8 @@ Each Task Session owns one stable sibling worktree. Provider processes and
 transcript handles are replaceable body generations; a model handoff preserves
 the Session, directive, worktree, and PR chain.
 Ordered PRs own its serial branches; a merge settles one PR, while only
-`lf pr land -c` or `lf task complete` completes the Task.
+`lf pr land -c` or `lf task complete` requests Task completion. The resident
+Task runs kickoff once, repeats its selected inner flow, and settles only after
+its gate approves; gate repairs return it to another iteration.
 A Project Session owns the bounded KR-pursuit process that creates and
 supervises Tasks, but no worktree, branch, or PR.

@@ -1032,10 +1032,13 @@ mod tests {
             status_at: now,
             worktree: PathBuf::from("/repo.inf-123"),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
-            resolved_flow: "task".to_string(),
-            interaction_policy: crate::engine::InteractionPolicy::Require,
-            flow_cursor: 0,
-            flow_iteration: 0,
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
@@ -1111,7 +1114,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_review_state_round_trips_and_updates() {
+    async fn task_lifecycle_plan_and_position_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
             .await
@@ -1121,32 +1124,121 @@ mod tests {
         let project = make_project_session(&wave);
         store.create_project_session(&project).await.unwrap();
         let mut task = make_task_session(&wave, &project);
-        task.resolved_flow = "code".to_string();
-        task.interaction_policy = crate::engine::InteractionPolicy::Defer;
-        task.flow_cursor = 2;
-        task.flow_iteration = 4;
+        task.lifecycle = crate::task::TaskLifecyclePlan::standard("code");
+        task.phase_cursor = 2;
+        task.phase_iteration = 4;
         store
             .create_task_session(&task, &make_task_pr(&task))
             .await
             .unwrap();
 
         let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.resolved_flow, "code");
+        assert_eq!(persisted.lifecycle.iterate.flow, "code");
         assert_eq!(
-            persisted.interaction_policy,
+            persisted.lifecycle.iterate.interaction_policy,
             crate::engine::InteractionPolicy::Defer
         );
-        assert_eq!(persisted.flow_cursor, 2);
-        assert_eq!(persisted.flow_iteration, 4);
+        assert_eq!(persisted.lifecycle.kickoff.flow, "task-kickoff");
+        assert_eq!(persisted.lifecycle.gate.flow, "task-gate");
+        assert_eq!(persisted.phase_cursor, 2);
+        assert_eq!(persisted.phase_iteration, 4);
 
-        task.flow_cursor = 3;
-        task.flow_iteration = 5;
-        store.update_task_session(&task).await.unwrap();
-        task.flow_cursor = 2;
-        task.flow_iteration = 4;
+        task.phase_cursor = 3;
+        task.phase_iteration = 5;
         store.update_task_session(&task).await.unwrap();
         let resumed = store.get_task_session(&task.id).await.unwrap().unwrap();
-        assert_eq!((resumed.flow_cursor, resumed.flow_iteration), (3, 5));
+        assert_eq!((resumed.phase_cursor, resumed.phase_iteration), (2, 4));
+    }
+
+    #[tokio::test]
+    async fn task_phase_epoch_allows_resets_and_rejects_stale_positions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        task.lifecycle_phase = crate::task::TaskLifecyclePhase::Kickoff;
+        task.phase_cursor = 1;
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("task-lifecycle".to_string());
+        let lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut task.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        task.set_status(TaskSessionStatus::Running, "active");
+        store.activate_task_process(&task, &lease).await.unwrap();
+        let mut stale = task.clone();
+
+        task.enter_iterate().unwrap();
+        store
+            .update_task_session_for_lease(&task, &lease)
+            .await
+            .unwrap();
+        let iterating = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!(
+            (
+                iterating.lifecycle_phase,
+                iterating.phase_epoch,
+                iterating.phase_cursor
+            ),
+            (crate::task::TaskLifecyclePhase::Iterate, 2, 0)
+        );
+
+        stale.phase_cursor = 9;
+        stale.phase_iteration = 9;
+        store
+            .update_task_session_for_lease(&stale, &lease)
+            .await
+            .unwrap();
+        let after_stale = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!(
+            (
+                after_stale.lifecycle_phase,
+                after_stale.phase_epoch,
+                after_stale.phase_cursor,
+                after_stale.phase_iteration
+            ),
+            (crate::task::TaskLifecyclePhase::Iterate, 2, 0, 0)
+        );
+
+        let mut completed = task.clone();
+        completed.set_status(TaskSessionStatus::Completed, "implementation complete");
+        store.update_task_session(&completed).await.unwrap();
+        task.status = TaskSessionStatus::Completed;
+        task.status_reason = completed.status_reason;
+        task.enter_gate(crate::task::TaskGateProposal {
+            status: TaskSessionStatus::Completed,
+            reason: "implementation complete".to_string(),
+        })
+        .unwrap();
+        task.set_status(TaskSessionStatus::Running, "gate active");
+        store
+            .update_task_session_for_lease(&task, &lease)
+            .await
+            .unwrap();
+        let gating = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!(
+            gating.lifecycle_phase,
+            crate::task::TaskLifecyclePhase::Gate
+        );
+        assert_eq!(gating.phase_epoch, 3);
+        assert_eq!(gating.gate_cycle, 1);
+        assert_eq!(
+            gating.gate_proposal.unwrap().reason,
+            "implementation complete"
+        );
     }
 
     #[tokio::test]

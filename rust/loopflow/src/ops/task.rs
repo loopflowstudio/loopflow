@@ -19,7 +19,7 @@ use crate::engine::process::{start_lf_session_with_env, tmux_session_exists, tmu
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
-use crate::engine::{expand_flow, load_flow, ConcreteStep, InteractionPolicy};
+use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use crate::id::WaveId;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
@@ -117,10 +117,13 @@ pub struct TaskSessionSnapshot {
     pub status_at: time::OffsetDateTime,
     pub worktree: String,
     pub workspace_slug: String,
-    pub resolved_flow: String,
-    pub interaction_policy: InteractionPolicy,
-    pub flow_cursor: u32,
-    pub flow_iteration: u32,
+    pub lifecycle: crate::task::TaskLifecyclePlan,
+    pub lifecycle_phase: crate::task::TaskLifecyclePhase,
+    pub phase_epoch: u32,
+    pub phase_cursor: u32,
+    pub phase_iteration: u32,
+    pub gate_cycle: u32,
+    pub gate_proposal: Option<crate::task::TaskGateProposal>,
     pub prs: Vec<TaskPr>,
     pub active_pr: Option<TaskPrId>,
     pub agent: String,
@@ -412,10 +415,10 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             }
             if let Some(requested) = flow.as_deref() {
                 let requested = resolve_task_flow(&session.worktree, Some(requested))?;
-                if requested != session.resolved_flow {
+                if requested != session.lifecycle.iterate.flow {
                     return Err(task_error(format!(
                         "Task {} already uses flow {:?}",
-                        session.launch.issue.identifier, session.resolved_flow
+                        session.launch.issue.identifier, session.lifecycle.iterate.flow
                     )));
                 }
             }
@@ -475,7 +478,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
     let resolved_flow = resolve_task_flow(&main_repo, flow.as_deref())?;
-    let interaction_policy = InteractionPolicy::Require;
     let resolved =
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
     let segment = match name.as_deref() {
@@ -604,10 +606,13 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             status_at: now,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
-            resolved_flow,
-            interaction_policy,
-            flow_cursor: 0,
-            flow_iteration: 0,
+            lifecycle: crate::task::TaskLifecyclePlan::standard(resolved_flow),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Kickoff,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
             agent,
             provider,
             provider_session_id: None,
@@ -2236,10 +2241,13 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             status_at: session.status_at,
             worktree: session.worktree.display().to_string(),
             workspace_slug: session.workspace_slug,
-            resolved_flow: session.resolved_flow,
-            interaction_policy: session.interaction_policy,
-            flow_cursor: session.flow_cursor,
-            flow_iteration: session.flow_iteration,
+            lifecycle: session.lifecycle,
+            lifecycle_phase: session.lifecycle_phase,
+            phase_epoch: session.phase_epoch,
+            phase_cursor: session.phase_cursor,
+            phase_iteration: session.phase_iteration,
+            gate_cycle: session.gate_cycle,
+            gate_proposal: session.gate_proposal,
             prs,
             active_pr,
             agent: session.agent,
@@ -3015,10 +3023,13 @@ mod tests {
             status_at: now,
             worktree: repo.path().to_path_buf(),
             workspace_slug: "task-pr-proof".to_string(),
-            resolved_flow: "task".to_string(),
-            interaction_policy: crate::engine::InteractionPolicy::Require,
-            flow_cursor: 0,
-            flow_iteration: 0,
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,

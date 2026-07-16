@@ -20,7 +20,10 @@ use crate::child_session::{
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{PrPhase, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
+use crate::task::{
+    PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskSession, TaskSessionId,
+    TaskSessionStatus,
+};
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
@@ -94,11 +97,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         .await?;
     reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id, lease)).await?;
 
-    let (mut flow, _) = Playhead::resume_root(
-        QueuedInvocation::load(&session.worktree, &session.resolved_flow)?,
-        session.flow_cursor,
-        session.flow_iteration,
-    )?;
+    let mut flow = resume_task_phase(&session)?;
     let prepared = prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -122,6 +121,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         return Err(error.into());
     }
     let mut state_fingerprint = task_state_fingerprint(&session)?;
+    let mut gate_fingerprint = if session.lifecycle_phase == TaskLifecyclePhase::Gate {
+        Some(task_gate_fingerprint(&session)?)
+    } else {
+        None
+    };
 
     let mut pending = VecDeque::new();
     let mut seen_commands = HashSet::new();
@@ -250,17 +254,50 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                         }
                         let resume_interrupted_flow =
                             flow_turn_active && status == Lifecycle::Interrupted;
-                        let flow_iteration_completed = if flow_turn_active {
+                        let mut flow_iteration_completed = if flow_turn_active {
                             finish_task_flow_turn(&mut flow, status)?
                         } else {
                             false
                         };
                         if flow_turn_active {
+                            let latest = store
+                                .get_task_session(&session.id)
+                                .await?
+                                .ok_or_else(|| {
+                                    anyhow!("Task Session {} disappeared", session.id)
+                                })?;
+                            sync_terminal_task_state(&mut session, &latest);
                             record_task_flow_position(&mut session, &flow)?;
                             store.update_task_session_for_lease(&session, lease).await?;
                         }
+                        if session.status == TaskSessionStatus::Abandoned {
+                            let _ = harness.stop().await;
+                            if let Some(process) = &mut session.latest_process {
+                                process.state = ChildLeaseState::Finished;
+                                process.outcome = Some(ChildBodyOutcome::Interrupted {
+                                    reason: session.status_reason.clone(),
+                                });
+                            }
+                            store.finish_task_process(&session, lease).await?;
+                            return Ok(());
+                        }
                         flow_turn_active = false;
                         loop {
+                            if flow_iteration_completed
+                                && session.lifecycle_phase == TaskLifecyclePhase::Kickoff
+                            {
+                                session.enter_iterate()?;
+                                session.set_status(
+                                    TaskSessionStatus::Running,
+                                    "Task kickoff approved; autonomous iteration is starting",
+                                );
+                                store.update_task_session_for_lease(&session, lease).await?;
+                                flow = resume_task_phase(&session)?;
+                                flow_iteration_completed = false;
+                                state_fingerprint = task_state_fingerprint(&session)?;
+                                gate_fingerprint = None;
+                                last_text.clear();
+                            }
                             while let Some(input) = pending.pop_front() {
                                 if !pending_input_is_current(&store, &session, lease, &input).await? {
                                     continue;
@@ -281,6 +318,36 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                 ).await?;
                                 continue 'runner;
                             }
+                            let approved_gate = if flow_iteration_completed
+                                && session.lifecycle_phase == TaskLifecyclePhase::Gate
+                            {
+                                let next_gate_fingerprint = task_gate_fingerprint(&session)?;
+                                if gate_fingerprint.as_ref() != Some(&next_gate_fingerprint) {
+                                    state_fingerprint = task_state_fingerprint(&session)?;
+                                    gate_fingerprint = None;
+                                    session.enter_iterate()?;
+                                    session.set_status(
+                                        TaskSessionStatus::Running,
+                                        "Task gate requested changes; returning to iteration",
+                                    );
+                                    store.update_task_session_for_lease(&session, lease).await?;
+                                    start_resumed_task_phase(
+                                        &store,
+                                        &mut session,
+                                        lease,
+                                        harness.as_mut(),
+                                        &mut flow,
+                                        wave.name(),
+                                    )
+                                    .await?;
+                                    flow_turn_active = true;
+                                    last_text.clear();
+                                    continue 'runner;
+                                }
+                                Some(session.approved_gate_proposal()?)
+                            } else {
+                                None
+                            };
                             if !flow_iteration_completed && status != Lifecycle::Interrupted {
                                 let prepared = prepare_task_flow_step(
                                     &store,
@@ -307,27 +374,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                 .get_task_session(&session.id)
                                 .await?
                                 .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
-                            if latest.status.is_terminal() {
-                                let _ = harness.stop().await;
-                                session = latest;
-                                if !summary.is_empty() {
-                                    store
-                                        .append_task_event_for_lease(
-                                            &session.id,
-                                            lease,
-                                            &TaskEventKind::Progress {
-                                                summary: summary.clone(),
-                                            },
-                                        )
-                                        .await?;
-                                }
-                                if let Some(process) = &mut session.latest_process {
-                                    process.state = ChildLeaseState::Finished;
-                                    process.outcome = Some(ChildBodyOutcome::Completed);
-                                }
-                                store.finish_task_process(&session, lease).await?;
-                                return Ok(());
-                            }
+                            sync_terminal_task_state(&mut session, &latest);
                             session.current_directive_version = latest.current_directive_version;
                             session.incorporated_directive_version =
                                 latest.incorporated_directive_version;
@@ -342,26 +389,6 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                             )
                             .await
                             .map_err(|error| anyhow!(error.to_string()))?;
-                            if session.status == TaskSessionStatus::Completed {
-                                let _ = harness.stop().await;
-                                if !summary.is_empty() {
-                                    store
-                                        .append_task_event_for_lease(
-                                            &session.id,
-                                            lease,
-                                            &TaskEventKind::Progress {
-                                                summary: summary.clone(),
-                                            },
-                                        )
-                                        .await?;
-                                }
-                                if let Some(process) = &mut session.latest_process {
-                                    process.state = ChildLeaseState::Finished;
-                                    process.outcome = Some(ChildBodyOutcome::Completed);
-                                }
-                                store.finish_task_process(&session, lease).await?;
-                                return Ok(());
-                            }
                             let needs_rotation = if observed_pr
                                 .as_ref()
                                 .is_some_and(|pr| pr.is_settled())
@@ -372,7 +399,14 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                             } else {
                                 false
                             };
-                            let (stopped_status, stopped_reason) = if let Some(version) = pending_directive {
+                            let (stopped_status, stopped_reason) = if let Some(proposal) = approved_gate {
+                                (proposal.status, proposal.reason)
+                            } else if session.status == TaskSessionStatus::Completed {
+                                (
+                                    TaskSessionStatus::Completed,
+                                    session.status_reason.clone(),
+                                )
+                            } else if let Some(version) = pending_directive {
                                 (
                                     TaskSessionStatus::Blocked,
                                     format!(
@@ -461,6 +495,35 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     "Task flow completed without a PR or any worktree change; another automatic iteration would spin".to_string(),
                                 )
                             };
+                            if session.lifecycle_phase == TaskLifecyclePhase::Iterate
+                                && status != Lifecycle::Interrupted
+                            {
+                                session.enter_gate(TaskGateProposal {
+                                    status: stopped_status,
+                                    reason: stopped_reason,
+                                })?;
+                                session.set_status(
+                                    TaskSessionStatus::Running,
+                                    format!(
+                                        "Task outcome is awaiting gate cycle {}",
+                                        session.gate_cycle
+                                    ),
+                                );
+                                gate_fingerprint = Some(task_gate_fingerprint(&session)?);
+                                store.update_task_session_for_lease(&session, lease).await?;
+                                start_resumed_task_phase(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    harness.as_mut(),
+                                    &mut flow,
+                                    wave.name(),
+                                )
+                                .await?;
+                                flow_turn_active = true;
+                                last_text.clear();
+                                continue 'runner;
+                            }
                             // Persist non-status fields while the generation is still active.
                             // The following transaction alone chooses commands or inactivity.
                             store.update_task_session_for_lease(&session, lease).await?;
@@ -624,7 +687,9 @@ async fn prepare_task_flow_step(
         );
     }
     session.status_reason = format!(
-        "Task flow iteration {}, step {}/{}: {}",
+        "Task {} cycle {}, iteration {}, step {}/{}: {}",
+        session.lifecycle_phase.as_str(),
+        session.lifecycle_cycle(),
         step.iteration + 1,
         step.index + 1,
         step.total,
@@ -673,6 +738,19 @@ async fn start_task_flow_turn(
     Ok(())
 }
 
+async fn start_resumed_task_phase(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    harness: &mut dyn Harness,
+    flow: &mut Playhead,
+    wave_name: &str,
+) -> Result<()> {
+    *flow = resume_task_phase(session)?;
+    let prepared = prepare_task_flow_step(store, session, lease, wave_name, flow).await?;
+    start_task_flow_turn(store, session, lease, harness, flow, prepared).await
+}
+
 fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
     let body_id = flow
         .active
@@ -695,22 +773,46 @@ fn record_task_flow_position(session: &mut TaskSession, flow: &Playhead) -> Resu
         .stack
         .first()
         .ok_or_else(|| anyhow!("Task flow has no root invocation"))?;
-    if root.flow != session.resolved_flow {
+    if root.flow != session.phase_plan().flow {
         anyhow::bail!(
-            "Task Session {} resolved flow {:?}, but its playhead is {:?}",
+            "Task Session {} {} flow is {:?}, but its playhead is {:?}",
             session.id,
-            session.resolved_flow,
+            session.lifecycle_phase.as_str(),
+            session.phase_plan().flow,
             root.flow
         );
     }
-    session.flow_cursor = root.cursor;
-    session.flow_iteration = root.iteration;
+    session.phase_cursor = root.cursor;
+    session.phase_iteration = root.iteration;
     session.updated_at = time::OffsetDateTime::now_utc();
     Ok(())
 }
 
+fn resume_task_phase(session: &TaskSession) -> Result<Playhead> {
+    let (flow, _) = Playhead::resume_root(
+        QueuedInvocation::load(&session.worktree, &session.phase_plan().flow)?,
+        session.phase_cursor,
+        session.phase_iteration,
+    )?;
+    Ok(flow)
+}
+
+fn sync_terminal_task_state(session: &mut TaskSession, latest: &TaskSession) {
+    if latest.status.is_terminal() {
+        session.status = latest.status;
+        session.status_reason = latest.status_reason.clone();
+        session.status_at = latest.status_at;
+        session.pm_writeback = latest.pm_writeback.clone();
+    }
+}
+
 fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
     let state = crate::engine::git::worktree_state(Path::new(&session.worktree))?;
+    Ok(hex::encode(Sha256::digest(state.as_bytes())))
+}
+
+fn task_gate_fingerprint(session: &TaskSession) -> Result<String> {
+    let state = crate::engine::git::material_worktree_state(Path::new(&session.worktree))?;
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
 }
 
@@ -1094,8 +1196,19 @@ fn task_seed(
         .as_ref()
         .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
         .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
+    let gate_proposal = session
+        .gate_proposal
+        .as_ref()
+        .map(|proposal| {
+            format!(
+                "Gate proposal: {} — {}",
+                proposal.status.as_str(),
+                proposal.reason
+            )
+        })
+        .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` completes the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` completes clean work that needs no PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying your uncommitted edits forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` proposes completing the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. Gate approves settlement or returns the same Task to iteration. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying your uncommitted edits forward. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,
@@ -1108,6 +1221,11 @@ fn task_seed(
         snapshot_synced_at = session.launch.pm_snapshot_synced_at,
         wave = wave_name,
         session_id = session.id,
+        lifecycle_phase = session.lifecycle_phase.as_str(),
+        phase_epoch = session.phase_epoch,
+        gate_cycle = session.gate_cycle,
+        interaction_policy = session.phase_plan().interaction_policy.as_str(),
+        gate_proposal = gate_proposal,
         worktree = session.worktree.display(),
         pr_sequence = pr.sequence,
         pr_branch = pr.branch,
@@ -1282,10 +1400,13 @@ mod tests {
             status_at: now,
             worktree: PathBuf::from(format!("/repo.{provider}")),
             workspace_slug: format!("test-{provider}"),
-            resolved_flow: "task".to_string(),
-            interaction_policy: crate::engine::InteractionPolicy::Require,
-            flow_cursor: 0,
-            flow_iteration: 0,
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),

@@ -151,7 +151,10 @@ lf pr land -c
 ```
 
 `--flow` selects the Task's inner loop. The Task Session retains that resolved
-flow and its next step across process generations.
+flow and its next step across process generations. Every Task runs one kickoff,
+then repeats its inner loop and gate until the gate approves the pending
+outcome. Material gate repairs return the same Task Session to another inner
+loop cycle.
 
 Start dependent work without sharing the parent's worktree:
 

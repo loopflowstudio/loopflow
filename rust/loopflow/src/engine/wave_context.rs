@@ -102,12 +102,62 @@ pub fn placed_channel_name(wave_name: &str, run_id: &RunId) -> String {
     )
 }
 
-/// The Wave a managed run is attributed to, through the shared resolver: a
-/// durable `LF_WAVE_ID` UUID maps to its registry name, a hand-set name is used
-/// directly. Attribution is non-fatal, so a `NoContext`/`StaleIdentity`/registry
-/// error is `None` (the caller falls back to the worktree name).
+/// The run-attribution decision for the current process: the wave name to
+/// attribute a run to (if any), plus a classified failure to record when a
+/// supplied managed identity failed validation.
+///
+/// - valid UUID or hand-set name → `wave: Some(name)`, `failure: None`
+/// - no managed identity (`NoContext`) → `wave: None`, `failure: None`
+///   (worktree inference stays a legitimate fallback for this case alone)
+/// - stale UUID / registry read failure → `wave: None`, `failure: Some(...)`
+///   naming the stale source and the safe explicit recovery (`--wave <name>`)
+///
+/// Attribution is non-fatal: a stale identity is never silently re-attributed to
+/// a wave inferred from the worktree. The run records `None` and the failure so
+/// the stale source stays visible and actionable; see W2-239.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunAttribution {
+    pub wave: Option<String>,
+    pub failure: Option<String>,
+}
+
+/// The run-attribution decision for the current process environment. One
+/// classification shared by every trace/run attribution site
+/// ([`crate::journal::ensure_run_context`] and the `lf` run wrapper).
+pub fn run_attribution() -> RunAttribution {
+    match resolve_managed_wave_name_sync(None) {
+        Ok(name) => RunAttribution {
+            wave: Some(name),
+            failure: None,
+        },
+        Err(WaveResolveError::NoContext) => RunAttribution {
+            wave: None,
+            failure: None,
+        },
+        Err(error) => RunAttribution {
+            wave: None,
+            failure: Some(attribution_failure_text(&error)),
+        },
+    }
+}
+
+/// The text recorded for a supplied identity that failed validation. The
+/// `StaleIdentity` and `UnknownExplicit` `Display` already name the source and
+/// the `--wave <name>` recovery; `Registry` does not, so the recovery hint is
+/// appended.
+fn attribution_failure_text(error: &WaveResolveError) -> String {
+    match error {
+        WaveResolveError::Registry(_) => format!("{error}; pass --wave <name> to recover"),
+        _ => error.to_string(),
+    }
+}
+
+/// The Wave a managed run is attributed to, or `None` when there is no valid
+/// managed identity. Thin wrapper over [`run_attribution`] for non-attribution
+/// callers (`lf home`); trace/run attribution uses [`run_attribution`] directly
+/// so a stale identity is propagated, not swallowed.
 pub fn resolve_run_wave_name() -> Option<String> {
-    resolve_managed_wave_name_sync(None).ok()
+    run_attribution().wave
 }
 
 /// Resolve a top-level `--wave` to the durable Wave row used by prompt,
@@ -643,6 +693,38 @@ mod tests {
 
         std::env::remove_var(WAVE_ID_ENV);
         assert_eq!(resolve_run_wave_name(), None);
+
+        match previous {
+            Some(value) => std::env::set_var(WAVE_ID_ENV, value),
+            None => std::env::remove_var(WAVE_ID_ENV),
+        }
+    }
+
+    /// `run_attribution` keeps the classified failure instead of swallowing it.
+    /// Absent context is `(None, None)` — worktree inference stays a legitimate
+    /// fallback for it alone. A hand-set name, even one no registry row backs, is
+    /// durable and never stale: it attributes to itself with no failure (a
+    /// "stale name" is not a state the resolver produces — only UUIDs go stale).
+    /// The name arm touches no store.
+    #[test]
+    fn run_attribution_classifies_absent_context_and_hand_set_names() {
+        let _lock = crate::journal::test_env_lock();
+        let previous = std::env::var(WAVE_ID_ENV).ok();
+
+        std::env::remove_var(WAVE_ID_ENV);
+        let absent = run_attribution();
+        assert_eq!(absent.wave, None);
+        assert_eq!(absent.failure, None);
+
+        std::env::set_var(WAVE_ID_ENV, "product");
+        let named = run_attribution();
+        assert_eq!(named.wave.as_deref(), Some("product"));
+        assert_eq!(named.failure, None);
+
+        std::env::set_var(WAVE_ID_ENV, "ghost");
+        let unregistered = run_attribution();
+        assert_eq!(unregistered.wave.as_deref(), Some("ghost"));
+        assert_eq!(unregistered.failure, None);
 
         match previous {
             Some(value) => std::env::set_var(WAVE_ID_ENV, value),

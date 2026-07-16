@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use clap::{CommandFactory, Parser};
-use tracing::debug;
+use tracing::{debug, warn};
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
@@ -381,12 +381,21 @@ fn with_runtime<T>(
     command: &[String],
     run: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
+    let attribution = loopflow::engine::wave_context::run_attribution();
+    if let Some(failure) = attribution.failure.as_deref() {
+        warn!(
+            error = failure,
+            "ambient wave identity failed validation; run attributed to no wave \
+             — pass --wave <name> to recover"
+        );
+    }
     journal::emit(
         repo_root,
         LfNode::Run,
         LfEventType::Started,
         LfEventFields {
-            wave_name: loopflow::engine::wave_context::resolve_run_wave_name(),
+            wave_name: attribution.wave,
+            error: attribution.failure,
             worktree: Some(repo_root.display().to_string()),
             command: Some(command.to_vec()),
             ..LfEventFields::default()

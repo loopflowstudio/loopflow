@@ -287,6 +287,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_session_successors",
         sql: include_str!("migrations/0.11.022_task_session_successors.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 23,
+        },
+        name: "capture_pruned_state",
+        sql: include_str!("migrations/0.11.023_capture_pruned_state.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

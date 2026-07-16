@@ -1355,12 +1355,11 @@ fn validate_input_op(value: &str) -> StoreResult<()> {
 }
 
 pub fn trace_root() -> PathBuf {
-    if let Ok(home) = std::env::var("LF_HOME") {
-        return PathBuf::from(home).join("traces");
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lf/traces")
+    // Resolve through the same home logic as the store so capture-time and
+    // doctor-time roots never diverge. lf_home_dir() honors LF_HOME, plus
+    // LF_CONTROL_HOME and the dev/release provenance split; anchoring traces on
+    // it keeps a reference resolvable wherever the store that names it lives.
+    crate::store::lf_home_dir().join("traces")
 }
 
 fn artifact_relative(root: &Path, path: &Path) -> StoreResult<String> {

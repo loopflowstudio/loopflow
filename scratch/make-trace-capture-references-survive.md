@@ -87,9 +87,13 @@ Three changes deliver this:
 
 ### 1. Add the `pruned` terminal state (migration + write path)
 
-New forward migration (allocate via `scripts/new_migration.py`, e.g.
-`0.11.018_capture_pruned_state.sql`). SQLite bakes CHECK constraints into the
-table, so widen the enum with the documented rebuild (mirror
+New forward migration, allocated as the **next free ordinal after rebasing onto
+main** (`.018` is owned by PR #986 `session_body_provenance` and `.020` by #1010
+`task_pr_linear_linkage`; main also carries `.019_task_pr_github_observation`, so
+the next mechanical ordinal is **`.021`** → `0.11.021_capture_pruned_state.sql`).
+Allocate via `scripts/new_migration.py` post-rebase so the ordinal reflects
+main's actual high-water mark, never a hardcoded guess. SQLite bakes CHECK
+constraints into the table, so widen the enum with the documented rebuild (mirror
 `0.11.002_project_session_successors.sql`): create `agent_launches_next` with
 `capture_status … CHECK (capture_status IN ('capturing','complete','partial','prompt_only','pruned'))`,
 `INSERT … SELECT` all rows, drop, rename, recreate the three indexes
@@ -145,7 +149,8 @@ capture-time and doctor-time roots resolve identically under every build and env
 (release default is unchanged: `~/.lf/traces`). This closes the latent
 divergence and is a prerequisite for reconciliation to be *safe* — it must not
 tombstone a file that a correct resolver would have found. `lf_home_dir()` is
-`pub(crate)`, reachable from `trace.rs`.
+`pub(crate)`, reachable from `trace.rs`. **Already applied in the working patch**
+(`trace.rs` uncommitted edit); survives the rebase as authored work.
 
 ## De-risking
 
@@ -193,11 +198,16 @@ tombstone a file that a correct resolver would have found. `lf_home_dir()` is
 
 ## Scope
 
-- **In scope:** `0.11.018` migration adding `pruned`; `finish()`/write-path
-  unaffected but reason plumbing for tombstones; `lf runs reconcile [--apply]
-  [--all] [--json]`; `check_capture` `pruned` arm + pruned count in detail;
-  `trace_root()` unification with `lf_home_dir()`; behavior tests; a
-  production-shaped doctor+reconcile proof against a **copied** store.
+- **In scope:** `.020` migration adding `pruned` (next free ordinal post-rebase;
+  `.018`/`.019` claimed on main by #986 and `task_pr_github_observation`);
+  `finish()`/write-path unaffected but reason plumbing for tombstones; `lf runs
+  reconcile [--apply] [--all] [--json]`; `check_capture` `pruned` arm + pruned
+  count in detail; `trace_root()` unification with `lf_home_dir()` (already
+  applied in the working patch); behavior tests; a production-shaped
+  doctor+reconcile proof against a **copied** store.
+- **Sequencing (directive v3):** #986 merged 2026-07-16, so rebase onto main
+  first, allocate `.020` mechanically, then finish reconcile/tombstone impl +
+  tests. Keep canonical main clean.
 - **Out of scope:** building trace retention/GC (only the state + ordering
   contract it will use); rewriting or deleting the production DB by hand; changes
   to `agent_turns`/context schema; W2-236's shared classification helpers; the

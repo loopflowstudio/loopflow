@@ -12,7 +12,7 @@ mod support;
 use std::fs;
 use std::process::{Command, Stdio};
 
-use loopflow::ops::{land, submit, LandOptions, NullProgress};
+use loopflow::ops::{create_or_update_pr, land, submit, LandOptions, NullProgress, PrOptions};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 
@@ -227,5 +227,75 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
     assert!(
         files.contains("task.txt") && !files.contains("upstream.txt"),
         "the aligned range must show this Task's file and never the upstream file, got:\n{files}"
+    );
+}
+
+/// `lf pr publish` / `lf pr open` rebases behind-base branches onto origin, which
+/// advances the fork point. Without healing, the recorded `base_commit` goes
+/// stale and `lf task changes` (base..HEAD) balloons to include every commit the
+/// rebase pulled in — while GitHub's range stays clean. This regression proves
+/// the publish path heals the base so the two views stay aligned.
+#[test]
+fn publish_heals_the_recorded_base_after_rebasing_onto_origin() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new(); // origin/main = P
+    let stale_base = repo.head_sha();
+
+    let log_path = home.path().join("gh.log");
+    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+
+    // The Task branch, cut from the base and pushed.
+    let branch = "jack/publish-heal-proof";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    repo.push_new_branch(branch);
+
+    // origin/main advances past the recorded base, so publish must rebase.
+    repo.checkout("main");
+    repo.create_file("upstream.txt", "landed upstream\n");
+    repo.stage_all();
+    repo.commit("upstream advance");
+    repo.push();
+    let advanced = repo.head_sha();
+    repo.checkout(branch);
+
+    let task = register_task(home.path(), repo.path(), branch, &stale_base);
+
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("publish heal".to_string()),
+            body: Some("proof body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("publish rebases and heals");
+
+    // The rebase advanced the fork point; the recorded base healed to match, so
+    // lf task changes (base..HEAD) equals GitHub's range and excludes the pulled
+    // upstream commit.
+    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.session.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert_eq!(
+        pr.base_commit, advanced,
+        "publish must heal the stale base to the rebased fork point"
+    );
+    let files = git_out(
+        &repo,
+        &["diff", "--name-only", &format!("{}..HEAD", pr.base_commit)],
+    );
+    assert!(
+        files.contains("task.txt") && !files.contains("upstream.txt"),
+        "the healed range must show only this Task's work, got:\n{files}"
     );
 }

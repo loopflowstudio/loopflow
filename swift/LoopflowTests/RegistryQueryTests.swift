@@ -236,12 +236,13 @@ struct RegistryQueryTests {
     @Test("lf runs decodes the ledger window")
     func runsDecode() async throws {
         let json = """
-        [{"id":"launch-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","flow":"build","skill":"gate","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]
+        [{"id":"launch-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":"auditability","task":"W2-122","flow":"build","skill":"gate","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"},
+         {"id":"launch-2","trace_id":"def","exec_id":"span-2","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":null,"task":null,"flow":null,"skill":"debug","status":"running","started":120,"ended":null,"turns":0,"system_tokens":0,"task_tokens":0,"supplied_context_tokens":0,"input_tokens":null,"output_tokens":null,"reasoning_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null,"cost_usd":null,"duration_secs":null,"provider":"claude","model":null,"surface":"headless","capture_status":"pending"}]
         """
         let query = RegistryQuery { _, _ in json }
 
         let runs = try await query.recentRuns()
-        #expect(runs.count == 1)
+        #expect(runs.count == 2)
         #expect(runs[0].id == "launch-1")
         #expect(runs[0].traceId == "abc")
         #expect(runs[0].wave == "goals")
@@ -250,6 +251,12 @@ struct RegistryQueryTests {
         #expect(runs[0].cacheReadTokens == 800)
         #expect(runs[0].suppliedContextTokens == 150)
         #expect(runs[0].model == "opus")
+        // The drill foreign key: a run declares the roadmap Project/Task it owns,
+        // or nil when it was launched outside a Task Session.
+        #expect(runs[0].project == "auditability")
+        #expect(runs[0].task == "W2-122")
+        #expect(runs[1].project == nil)
+        #expect(runs[1].task == nil)
     }
 
     @Test("lf usage --json preserves lineage and unspent spans")

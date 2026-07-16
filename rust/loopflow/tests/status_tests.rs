@@ -71,6 +71,23 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     flow_end.event = "completed".to_string();
     store.insert_run_event(&flow_end).expect("seed flow end");
 
+    // The run boundary the resident launch below rides on. A real agent launch
+    // always sits inside a run, so its trace is reachable by process or run id.
+    let mut resident_start = event(0, now - 30, "started");
+    resident_start.run_id = "run-resident".to_string();
+    resident_start.process_id = "proc-resident".to_string();
+    resident_start.command = Some(r#"["lf","__resident"]"#.to_string());
+    store
+        .insert_run_event(&resident_start)
+        .expect("seed resident start");
+    let mut resident_end = resident_start.clone();
+    resident_end.seq = 1;
+    resident_end.ts = now - 20;
+    resident_end.event = "completed".to_string();
+    store
+        .insert_run_event(&resident_end)
+        .expect("seed resident end");
+
     let launch = AgentLaunchRow {
         id: "launch-wave-mutate".to_string(),
         run_id: "run-resident".to_string(),
@@ -82,8 +99,8 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         wave: Some(wave_name.to_string()),
         flow: Some("wave".to_string()),
         skill: Some("wave_mutate".to_string()),
-        project: None,
-        task: None,
+        project: Some("auditability".to_string()),
+        task: Some("W2-122".to_string()),
         provider: "codex".to_string(),
         model: Some("gpt-5".to_string()),
         surface: "headless".to_string(),
@@ -207,6 +224,23 @@ fn runs_json(home: &Path) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).expect("lf runs emits JSON")
 }
 
+fn runs_json_filtered(home: &Path, filter: &[&str]) -> serde_json::Value {
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .arg("runs")
+        .args(filter)
+        .arg("--json")
+        .env("LF_HOME", home)
+        .env_remove("LF_DB_PATH")
+        .output()
+        .expect("lf runs runs");
+    assert!(
+        output.status.success(),
+        "lf runs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("lf runs emits JSON")
+}
+
 fn trace_json(home: &Path, exec_id: &str) -> serde_json::Value {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["trace", exec_id, "--json"])
@@ -289,6 +323,56 @@ fn runs_are_skill_launches_with_context_and_token_evidence() {
     assert_eq!(run["supplied_context_tokens"], 10);
     assert_eq!(run["input_tokens"], 10);
     assert_eq!(run["output_tokens"], 5);
+    // A run declares the roadmap Project/Task that owns it — the foreign key a
+    // roadmap row drills through to reach its runs.
+    assert_eq!(run["project"], "auditability");
+    assert_eq!(run["task"], "W2-122");
+}
+
+/// The drill: `lf runs --task <id>` joins a roadmap Task to exactly the runs it
+/// produced, by the Linear issue identifier. A non-matching identifier finds
+/// nothing rather than guessing.
+#[test]
+fn runs_drill_to_one_task_by_issue_identifier() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed(home.path(), "audit-drill");
+
+    let matched = runs_json_filtered(home.path(), &["--task", "W2-122"]);
+    let matched = matched.as_array().expect("run array");
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0]["task"], "W2-122");
+    assert_eq!(matched[0]["trace_id"], "run-resident");
+
+    let missed = runs_json_filtered(home.path(), &["--task", "W2-999"]);
+    assert_eq!(missed.as_array().expect("run array").len(), 0);
+}
+
+/// The wave drill mirrors the internal scoping `lf status` uses.
+#[test]
+fn runs_drill_to_one_wave_by_name() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed(home.path(), "audit-wave-drill");
+
+    let matched = runs_json_filtered(home.path(), &["--wave", "audit-wave-drill"]);
+    assert_eq!(matched.as_array().expect("run array").len(), 1);
+
+    let missed = runs_json_filtered(home.path(), &["--wave", "no-such-wave"]);
+    assert_eq!(missed.as_array().expect("run array").len(), 0);
+}
+
+/// The drill loop closes: `lf trace` accepts the launch id `lf runs` prints,
+/// resolving it to the complete trace.
+#[test]
+fn trace_opens_from_the_launch_id_lf_runs_prints() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed(home.path(), "audit-trace-launch");
+
+    let trace = trace_json(home.path(), "launch-wave-mutate");
+    assert_eq!(trace["trace_id"], "run-resident");
+    let spans = trace["spans"].as_array().expect("span array");
+    assert!(spans
+        .iter()
+        .any(|span| span["process_id"] == "proc-resident"));
 }
 
 /// The reproduced break: inside a resident wave, `LF_WAVE_ID` is a wave id, and

@@ -407,6 +407,12 @@ pub enum Commands {
     },
     /// Show recent agent-backed skill runs with context and token evidence
     Runs {
+        /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
+        #[arg(long)]
+        task: Option<String>,
+        /// Scope to one Wave by name
+        #[arg(long)]
+        wave: Option<String>,
         /// Emit the run history as JSON
         #[arg(long)]
         json: bool,

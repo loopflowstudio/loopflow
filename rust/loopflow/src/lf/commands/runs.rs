@@ -13,14 +13,36 @@ use anyhow::{anyhow, Result};
 
 use crate::journal::open_ledger;
 use crate::lf::output::{format_cost, truncate, Colors};
+use crate::store::sqlite::SqliteStore;
 use crate::store::RunEventRow;
 use crate::wave::journal::short_id;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
-/// `lf runs`: recent agent-backed skill launches across this machine.
-pub fn list(json: bool) -> Result<()> {
+/// A drill filter over the run ledger. Both constituents scope the same launch
+/// set: `wave` narrows to one Wave, `task` to one roadmap Task by its Linear
+/// issue identifier — the key that joins a roadmap row to its runs.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RunFilter<'a> {
+    pub wave: Option<&'a str>,
+    pub task: Option<&'a str>,
+}
+
+impl RunFilter<'_> {
+    fn matches(&self, launch: &crate::trace::AgentLaunchRow) -> bool {
+        self.wave
+            .is_none_or(|wave| launch.wave.as_deref() == Some(wave))
+            && self
+                .task
+                .is_none_or(|task| launch.task.as_deref() == Some(task))
+    }
+}
+
+/// The skill runs matching a filter, newest first, capped. One reader behind
+/// `lf runs`, its `--wave`/`--task` drills, and `lf status`'s Runs evidence, so
+/// the surfaces can never disagree on what a run is.
+pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, bool)> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
     let events = store
@@ -31,6 +53,7 @@ pub fn list(json: bool) -> Result<()> {
         .map_err(|err| anyhow!("failed to read skill launches: {err}"))?
         .into_iter()
         .filter(|launch| launch.skill.is_some())
+        .filter(|launch| filter.matches(launch))
         .collect::<Vec<_>>();
     let launch_ids = launches
         .iter()
@@ -42,7 +65,14 @@ pub fn list(json: bool) -> Result<()> {
 
     let mut runs = summarize_runs(&events, &launches, &turns);
     sort_runs(&mut runs);
-    cap_runs(&mut runs);
+    let truncated = cap_runs(&mut runs);
+    Ok((runs, truncated))
+}
+
+/// `lf runs [--wave <name>] [--task <id>]`: recent agent-backed skill launches,
+/// optionally drilled to one Wave or one roadmap Task.
+pub fn list(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
+    let (runs, _truncated) = collect_runs(RunFilter { wave, task })?;
 
     if json {
         println!("{}", serde_json::to_string(&runs)?);
@@ -50,7 +80,15 @@ pub fn list(json: bool) -> Result<()> {
     }
 
     if runs.is_empty() {
-        println!("No skill runs recorded in the last {WINDOW_DAYS} days.");
+        match (wave, task) {
+            (_, Some(task)) => {
+                println!("No skill runs recorded for {task} in the last {WINDOW_DAYS} days.")
+            }
+            (Some(wave), None) => {
+                println!("No skill runs recorded for wave/{wave} in the last {WINDOW_DAYS} days.")
+            }
+            (None, None) => println!("No skill runs recorded in the last {WINDOW_DAYS} days."),
+        }
         return Ok(());
     }
 
@@ -429,9 +467,19 @@ pub fn trace(
     let matches = store
         .run_events_matching_exec(exec_id)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
-    let trace_matches = store
+    let mut trace_matches = store
         .run_events_matching(exec_id)
         .map_err(|err| anyhow!("failed to read trace: {err}"))?;
+    // `lf runs` prints the launch id, which is neither a process id nor a run
+    // id. Resolve it to its trace so any id a user reads there opens its
+    // complete trace — one continuous drill from run to record.
+    if matches.is_empty() && trace_matches.is_empty() {
+        if let Some(run_id) = resolve_launch_trace_id(&store, exec_id)? {
+            trace_matches = store
+                .run_events_matching(&run_id)
+                .map_err(|err| anyhow!("failed to read trace: {err}"))?;
+        }
+    }
     let trace_id = trace_id_for_address(exec_id, &matches, &trace_matches)?;
     let events = if matches.is_empty() {
         trace_matches
@@ -607,6 +655,33 @@ fn trace_id_for_address(
             trace_ids
                 .into_iter()
                 .map(short_id)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// Resolve a launch id (or prefix) — the id `lf runs` prints — to its trace id.
+/// `None` when no launch matches (the caller keeps its original error path); an
+/// error when the prefix spans distinct traces so the drill never opens the
+/// wrong one.
+fn resolve_launch_trace_id(store: &SqliteStore, prefix: &str) -> Result<Option<String>> {
+    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
+    let run_ids = store
+        .agent_launches_since(since)
+        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?
+        .into_iter()
+        .filter(|launch| launch.id.starts_with(prefix))
+        .map(|launch| launch.run_id)
+        .collect::<BTreeSet<_>>();
+    match run_ids.len() {
+        0 => Ok(None),
+        1 => Ok(run_ids.into_iter().next()),
+        _ => Err(anyhow!(
+            "launch '{prefix}' is ambiguous — matches traces: {}",
+            run_ids
+                .into_iter()
+                .map(|id| short_id(&id))
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
@@ -822,6 +897,14 @@ pub struct SkillRunEntry {
     pub repo: String,
     pub worktree: String,
     pub wave: Option<String>,
+    /// Roadmap Project slug that owns this run, when it launched inside a
+    /// Project/Task Session. `None` for runs with no plan attribution — the join
+    /// is never inferred.
+    pub project: Option<String>,
+    /// Roadmap Task's Linear issue identifier (e.g. `W2-122`) that owns this run,
+    /// when it launched inside a Task Session. `None` when unattributed. This is
+    /// the key that drills a roadmap row to its runs and complete trace.
+    pub task: Option<String>,
     pub flow: Option<String>,
     pub skill: String,
     pub status: String,
@@ -880,29 +963,10 @@ pub struct ExecLedgerEntry {
 
 /// The skill runs one Wave produced, newest first.
 pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<SkillRunEntry>, bool)> {
-    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
-    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    let events = store
-        .list_run_events_since(since)
-        .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
-    let launches = store
-        .agent_launches_since(since)
-        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?
-        .into_iter()
-        .filter(|launch| launch.wave.as_deref() == Some(wave) && launch.skill.is_some())
-        .collect::<Vec<_>>();
-    let launch_ids = launches
-        .iter()
-        .map(|launch| launch.id.clone())
-        .collect::<Vec<_>>();
-    let turns = store
-        .agent_turns_for_launches(&launch_ids)
-        .map_err(|err| anyhow!("failed to read run turns: {err}"))?;
-
-    let mut runs = summarize_runs(&events, &launches, &turns);
-    sort_runs(&mut runs);
-    let truncated = cap_runs(&mut runs);
-    Ok((runs, truncated))
+    collect_runs(RunFilter {
+        wave: Some(wave),
+        task: None,
+    })
 }
 
 fn sort_runs(runs: &mut [SkillRunEntry]) {
@@ -970,6 +1034,8 @@ fn summarize_runs(
                 repo: launch.repo.clone(),
                 worktree: launch.worktree.clone(),
                 wave: launch.wave.clone(),
+                project: launch.project.clone(),
+                task: launch.task.clone(),
                 flow: launch.flow.clone(),
                 skill,
                 status: launch_status_label(&launch.outcome).to_string(),

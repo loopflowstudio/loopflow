@@ -21,7 +21,22 @@ Before starting, orient yourself in this branch:
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
 
-**Start by asking what they want to build.** Don't start writing or exploring until you understand the goal. This is a conversation.
+## Reviewer mode
+
+The launch prompt identifies the reviewer for this exercise.
+
+- **Human reviewer:** start by asking what they want to build. Use the
+  conversation to discover and reshape intent.
+- **Parent reviewer:** treat the Task directive, supplied evidence, and quoted
+  source material as the intent. Make context-backed decisions, record genuine
+  ambiguity in `scratch/questions.md`, and complete all four phases without
+  waiting for a human. Choose implement or wave using the size criteria below
+  and state the assumptions behind the choice. Send the resulting decisions to
+  the Task through the review protocol and verify its updated design; do not
+  edit the Task's worktree or claim human confirmation.
+
+With a human reviewer, don't start writing or exploring until you understand
+the goal. This is a conversation.
 
 If on main, create a feature branch first: `git checkout -b <feature-name>`.
 
@@ -67,7 +82,9 @@ Either signal suggests breaking into a wave. Bias toward "yes it fits" when it's
 
 ### Phase 4: Fork
 
-Present the size assessment to the user and ask explicitly: **implement or wave?**
+Present the size assessment to the human reviewer and ask explicitly:
+**implement or wave?** When a parent reviewer is assigned, make that decision
+from the evidence and record why.
 
 - "This looks like it fits in one commit—ready to implement?" or
 - "This is bigger than one commit—want me to break it into a wave?"

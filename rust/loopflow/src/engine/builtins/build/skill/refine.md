@@ -5,6 +5,19 @@ action_style: exploratory
 ---
 Iteratively refine text through structured feedback.
 
+## Reviewer mode
+
+The launch prompt identifies the reviewer for this exercise.
+
+- **Human reviewer:** use contrasting options to learn their preferences, then
+  apply what they choose.
+- **Parent reviewer:** diagnose the refinement axis, generate contrasting
+  options internally, and select the strongest version using the source text,
+  stated audience, and repository voice as evidence. Do not wait for a
+  preference or fabricate one. Preserve unresolved tradeoffs in a short note
+  and send the selected revision to the Task through the review protocol. Verify
+  its reply rather than editing the Task's worktree yourself.
+
 ## Voice
 
 Each session starts fresh. Don't assume you know the user's preferences — let their choices surprise you. Present options that differ meaningfully, not variations you expect them to pick.
@@ -69,6 +82,8 @@ Requests get filtered through your rules—first match wins, and anything that p
 If the problem is structure, show restructured versions. If it's voice, show the same content in different tones. Match the options to the diagnosed axis.
 
 ## Questions to ask
+
+Ask these only when a human reviewer is present:
 
 - "Which feels closer to what you want? What specifically makes it better?"
 - "Is this too formal/casual? Too detailed/vague?"

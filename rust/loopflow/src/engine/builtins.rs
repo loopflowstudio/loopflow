@@ -235,6 +235,53 @@ mod tests {
     }
 
     #[test]
+    fn interactive_skills_support_human_and_parent_reviewers() {
+        for name in [
+            "code-review",
+            "demo",
+            "design",
+            "explore",
+            "refine",
+            "review-design",
+            "review-open-work",
+            "review",
+            "init",
+        ] {
+            let skill = get_builtin_skill(name).expect("interactive builtin skill");
+            assert!(
+                skill.contains("## Reviewer mode"),
+                "{name} does not define reviewer modes"
+            );
+            assert!(
+                skill.contains("**Human reviewer:**"),
+                "{name} does not define attended behavior"
+            );
+            assert!(
+                skill.contains("**Parent reviewer:**"),
+                "{name} does not define headless parent behavior"
+            );
+            assert!(
+                skill.contains("review protocol"),
+                "{name} does not route parent dialogue through the review protocol"
+            );
+        }
+
+        let demo = get_builtin_skill("demo").expect("demo skill");
+        for evidence in [
+            "every Done When",
+            "product",
+            "code",
+            "admin state",
+            "logs",
+            "stats",
+            "metrics",
+            "real sign-in/login path",
+        ] {
+            assert!(demo.contains(evidence), "demo omits {evidence:?} evidence");
+        }
+    }
+
+    #[test]
     fn execution_context_grants_delegation_by_tier() {
         assert!(LOOPFLOW_DOC.contains("Execute Here First"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));

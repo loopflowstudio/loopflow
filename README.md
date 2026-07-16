@@ -166,7 +166,9 @@ The default policy requires a human for kickoff and gate while deferring
 interactive inner-loop steps to the owning Project. `--headless` defers every
 interactive step to that Project instead. It runs the same kickoff, inner-loop,
 and gate skills; it does not skip them. Re-run an idle Task with `--headless` to
-mark its remaining lifecycle headless.
+mark its remaining lifecycle headless. Interactive skills define both attended
+and parent-reviewer behavior; parent questions and Task answers stay in the
+same durable review conversation.
 
 Start dependent work without sharing the parent's worktree:
 

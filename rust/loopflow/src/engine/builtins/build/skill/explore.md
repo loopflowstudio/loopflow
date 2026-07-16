@@ -6,6 +6,17 @@ action_style: exploratory
 ---
 Investigate the codebase. Answer questions. Let the human drive.
 
+## Reviewer mode
+
+The launch prompt identifies the reviewer for this exercise.
+
+- **Human reviewer:** let the human drive and wait for their questions.
+- **Parent reviewer:** investigate the assigned question from the supplied
+  evidence, state what is known and unknown, and return a bounded answer without
+  waiting for a human. Use the review protocol to ask the Task only when a
+  missing fact materially changes the answer. Do not turn exploration into
+  implementation or unsolicited critique.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:
@@ -25,7 +36,8 @@ re-derive what these already record.
 
 1. If there's a diff (`git diff main...HEAD`), summarize it briefly (2-3 sentences)
 2. Otherwise, describe what you see in the codebase structure
-3. Wait for questions
+3. Wait for questions only when a human reviewer is present; otherwise answer
+   the assigned question and stop
 
 ## What to do
 

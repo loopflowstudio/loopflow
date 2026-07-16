@@ -7,6 +7,18 @@ action_style: procedural
 ---
 Walk the human through experiencing what changed, then decide together what's next.
 
+## Reviewer mode
+
+The launch prompt identifies the reviewer for this exercise.
+
+- **Human reviewer:** guide the human through the experience, pause for their
+  reaction, and decide together what happens next.
+- **Parent reviewer:** run the same demo independently from the supplied
+  evidence. Use the review protocol to ask the Task only for missing evidence;
+  never invent a human reaction or wait for one. Approve only when the demo and
+  every applicable Done When claim are proven. Otherwise request changes with
+  the failed or missing proof. Do not implement the Task's fixes yourself.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:
@@ -38,6 +50,30 @@ Before any code discussion, ground the human in the experience:
 
 If the design doc in `scratch/` has a "Done when" section with a verification command, start there.
 
+## Prove every Done When
+
+Before presenting a verdict, enumerate every Done When claim in the design doc
+and build a compact evidence matrix:
+
+| Done When | Proof surface | Action | Observed result |
+|---|---|---|---|
+| <claim> | product \| code \| admin state \| log \| stat/metric | <what ran or was inspected> | pass \| gap, with evidence |
+
+Choose the surface that most directly proves each claim:
+
+- **Product:** experience the behavior through the real user path.
+- **Code/tests:** use source, tests, and command output for structural or
+  programmatic claims.
+- **Operations:** inspect admin state, logs, counters, stats, or metrics when
+  the result is observable there rather than in the product.
+
+A diff proves construction, not behavior. Use code alone only when the Done
+When is itself structural. For authentication, account, or permissions work,
+exercise a real sign-in/login path with a real configured profile. Do not
+bypass login with seeded state, a mocked user, or an admin shortcut. If the
+required credential or environment is unavailable, mark that claim unproven
+rather than narrating the expected result.
+
 ## Demo
 
 Run things. Show output. Let the human react.
@@ -50,7 +86,9 @@ For CLI/library changes: run the commands, show the output. Before/after when it
 
 For API changes: show example calls and responses.
 
-Pause after the demo. Ask what they noticed. Their reaction shapes the rest of the session.
+With a human reviewer, pause after the demo and ask what they noticed. Their
+reaction shapes the rest of the session. With a parent reviewer, use the
+evidence matrix and observed behavior to choose the review disposition.
 
 ## After the demo
 

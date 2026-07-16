@@ -108,11 +108,8 @@ const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: String!, $n
   }
 }"#;
 
-// Sets the Project's teams to exactly `[$teamId]` — a replacement, not an add —
-// so a Project stranded on the shared team lands on the wave's team. Projects
-// keep their id/slug across a team move (only issues renumber).
-const MOVE_PROJECT_TO_TEAM_MUTATION: &str = r#"mutation MoveProjectToTeam($id: String!, $teamId: String!) {
-  projectUpdate(id: $id, input: { teamIds: [$teamId] }) {
+const SET_PROJECT_TEAMS_MUTATION: &str = r#"mutation SetProjectTeams($id: String!, $teamIds: [String!]!) {
+  projectUpdate(id: $id, input: { teamIds: $teamIds }) {
     project {
       id
     }
@@ -749,17 +746,13 @@ impl LinearClient {
         Ok(response.issue_update.issue.identifier)
     }
 
-    /// Reassign a Project to exactly one team. `teamIds` is a set replacement, so
-    /// this pulls the Project off whatever team(s) it was on (e.g. the shared
-    /// team) and onto the wave's team. Unlike issues, a Project keeps its id and
-    /// slug across the move.
-    pub async fn move_project_to_team(&self, project_id: &str, team_id: &str) -> PmResult<()> {
+    pub async fn set_project_teams(&self, project_id: &str, team_ids: &[String]) -> PmResult<()> {
         let _: Value = self
             .graphql(
-                MOVE_PROJECT_TO_TEAM_MUTATION,
+                SET_PROJECT_TEAMS_MUTATION,
                 json!({
                     "id": project_id,
-                    "teamId": team_id,
+                    "teamIds": team_ids,
                 }),
             )
             .await?;
@@ -1797,7 +1790,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn move_project_to_team_sets_the_team_ids() {
+    async fn set_project_teams_replaces_the_team_ids() {
         let (base_url, requests) = test_server::spawn(vec![json_response(
             StatusCode::OK,
             json!({ "data": { "projectUpdate": { "project": { "id": "project-1" } } } }),
@@ -1810,19 +1803,23 @@ mod tests {
         );
 
         client
-            .move_project_to_team("project-1", "team-cadenza")
+            .set_project_teams(
+                "project-1",
+                &["team-shared".to_string(), "team-cadenza".to_string()],
+            )
             .await
-            .expect("move project succeeds");
+            .expect("set project teams succeeds");
 
         let requests = requests.lock().await;
         let body: Value = serde_json::from_str(&requests[0].body).expect("move json");
         let query = body["query"].as_str().expect("query");
         assert!(query.contains("projectUpdate"));
-        // teamIds is a set replacement: exactly the wave's team, pulling the
-        // Project off the shared team.
-        assert!(query.contains("teamIds: [$teamId]"));
+        assert!(query.contains("teamIds: $teamIds"));
         assert_eq!(body["variables"]["id"], "project-1");
-        assert_eq!(body["variables"]["teamId"], "team-cadenza");
+        assert_eq!(
+            body["variables"]["teamIds"],
+            json!(["team-shared", "team-cadenza"])
+        );
     }
 
     #[tokio::test]

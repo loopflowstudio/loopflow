@@ -216,9 +216,8 @@ pub struct PmReteamDeferral {
     pub reason: String,
 }
 
-/// One Project pulled onto the wave's team. Projects keep their id and slug on a
-/// team move (Linear only renumbers issues), so there is no new identifier to
-/// carry — `from_teams` records where it came from for the plan output.
+/// One Project joined to the wave's team. Projects keep their id and slug, so
+/// there is no new identifier to carry; `from_teams` records the prior set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamProjectMove {
     pub id: String,
@@ -523,9 +522,9 @@ impl PmClient {
         }
     }
 
-    async fn move_project_to_team(&self, project_id: &str, team_id: &str) -> PmResult<()> {
+    async fn set_project_teams(&self, project_id: &str, team_ids: &[String]) -> PmResult<()> {
         match self {
-            Self::Linear(client) => client.move_project_to_team(project_id, team_id).await,
+            Self::Linear(client) => client.set_project_teams(project_id, team_ids).await,
         }
     }
 
@@ -1866,14 +1865,13 @@ fn identifier_has_team_prefix(identifier: &str, team_key: &str) -> bool {
     identifier.trim().to_ascii_uppercase().starts_with(&prefix)
 }
 
-/// Whether a Project's resolved ownership differs from exactly the wave's team.
-/// `None` means the read did not resolve teams (an older snapshot) — unknown,
-/// not a mismatch, so no false positive. Empty, foreign, and multi-team sets all
-/// need repair because one Project belongs to one Wave-owned team.
+/// Whether a Project is missing the wave's team. Legacy teams remain attached
+/// while the Project still contains their completed issues; Linear will not
+/// remove a team that owns issue history in the Project.
 fn project_needs_reteam(bound_team: &str, project_team_ids: Option<&[String]>) -> bool {
     match project_team_ids {
         None => false,
-        Some(team_ids) => team_ids.len() != 1 || team_ids[0] != bound_team,
+        Some(team_ids) => !team_ids.iter().any(|team_id| team_id == bound_team),
     }
 }
 
@@ -1951,10 +1949,9 @@ async fn pm_reteam_async(
     let mut historical = 0usize;
 
     for project in &projects {
-        // A Project without exactly the wave's team is moved onto it. A
-        // multi-team Project is repaired too: ownership is singular, not merely
-        // membership. An unresolved team set (`None`, older snapshot) is skipped,
-        // never guessed.
+        // A Project missing the wave's team is joined to it. Legacy teams remain
+        // while completed issues still belong to them. An unresolved team set
+        // (`None`, older snapshot) is skipped, never guessed.
         if project_needs_reteam(&team_id, project.team_ids.as_deref()) {
             project_moves.push(PmReteamProjectMove {
                 id: project.id.clone(),
@@ -2014,18 +2011,9 @@ async fn pm_reteam_async(
 
     if options.apply {
         ensure_reteam_apply_safe(&deferrals)?;
-        // Projects first: a Project must own the team before its issues land there
-        // cleanly. `teamIds` is a set, so this pulls it off the shared team.
-        for pm in &project_moves {
-            progress.status(&format!(
-                "moving Project `{}` onto team {team_key}",
-                pm.name
-            ));
-            client
-                .move_project_to_team(&pm.id, &team_id)
-                .await
-                .map_err(pm_to_ops)?;
-        }
+        // Issues first: Linear refuses to remove a team from a Project while
+        // that team's issues still belong to it. Issue moves preserve their
+        // stable UUIDs, so a partial retry remains idempotent.
         for mv in &mut moves {
             progress.status(&format!(
                 "moving {} into team {team_key}",
@@ -2064,6 +2052,20 @@ async fn pm_reteam_async(
                     })?,
             );
             mv.new_identifier = Some(new_identifier);
+        }
+        for pm in &project_moves {
+            progress.status(&format!(
+                "moving Project `{}` onto team {team_key}",
+                pm.name
+            ));
+            let mut team_ids = pm.from_teams.clone();
+            if !team_ids.contains(&team_id) {
+                team_ids.push(team_id.clone());
+            }
+            client
+                .set_project_teams(&pm.id, &team_ids)
+                .await
+                .map_err(pm_to_ops)?;
         }
         if !project_moves.is_empty() || !moves.is_empty() {
             // Refresh the snapshot so cached identifiers and Project teams reflect
@@ -2206,14 +2208,14 @@ async fn pm_sync_async(
                     project.name, project.id
                 ));
             }
-            // A Project stranded on a foreign team (or simultaneously attached
-            // to the bound and a legacy team) violates singular Wave ownership.
+            // A Project must include the Wave's team. Linear requires legacy
+            // teams to remain while their completed issue history stays here.
             if let Some(team_id) = &bound_team {
                 if project_needs_reteam(team_id, project.team_ids.as_deref()) {
                     let teams = project.team_ids.as_deref().unwrap_or_default().join(", ");
                     diagnostics.push(format!(
                         "Linear Project `{}` ({}) in wave/{wave} belongs to team(s) [{teams}], \
-                         not the wave's team {team_id}; run `lf pm reteam --wave {wave}` to move it",
+                         missing the wave's team {team_id}; run `lf pm reteam --wave {wave}` to add it",
                         project.name, project.id
                     ));
                 }
@@ -3080,16 +3082,16 @@ mod tests {
     }
 
     #[test]
-    fn project_needs_reteam_requires_exactly_one_bound_team() {
+    fn project_needs_reteam_requires_the_bound_team() {
         // Unknown teams (older snapshot) → never a mismatch.
         assert!(!project_needs_reteam("team-prd", None));
-        // Exactly the bound team → owned.
+        // The bound team is present → owned.
         assert!(!project_needs_reteam(
             "team-prd",
             Some(&["team-prd".to_string()])
         ));
-        // The bound team plus a legacy team still violates one-team ownership.
-        assert!(project_needs_reteam(
+        // A legacy team may remain for completed issue history.
+        assert!(!project_needs_reteam(
             "team-prd",
             Some(&["team-prd".to_string(), "team-shared".to_string()])
         ));

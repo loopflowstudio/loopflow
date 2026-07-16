@@ -7,6 +7,7 @@ mod error;
 mod flow;
 pub mod home;
 mod land;
+pub mod linear_observe;
 pub mod pm;
 mod pr;
 mod present;

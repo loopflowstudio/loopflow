@@ -31,9 +31,10 @@ use crate::session_context::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    AfterMerge, CiObservation, GithubPr, PrPhase, PrPublication, TaskEvent, TaskEventKind,
-    TaskLifecyclePhase, TaskLifecyclePlan, TaskPhasePlan, TaskPr, TaskPrId, TaskSession,
-    TaskSessionId, TaskSessionStatus,
+    AfterMerge, CiObservation, GithubPr, LinearObservationApply, LinearObservationOutcome, PrPhase,
+    PrPublication, TaskEvent, TaskEventKind, TaskLifecyclePhase, TaskLifecyclePlan,
+    TaskLinearObservation, TaskPhasePlan, TaskPr, TaskPrId, TaskSession, TaskSessionId,
+    TaskSessionStatus,
 };
 
 use super::SqliteStore;
@@ -949,6 +950,220 @@ impl SqliteStore {
         )
         .optional()
         .map_err(StoreError::from)
+    }
+
+    pub fn task_linear_observation(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<TaskLinearObservation>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT session_id, last_revision, last_title, last_description,
+                    last_success_at, degraded_reason, updated_at
+             FROM task_linear_observations WHERE session_id=?1",
+            params![session_id.as_str()],
+            map_task_linear_observation_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    /// Persist one Linear observation as Task direction, atomically. Exactly-once
+    /// lives here: a first observation seeds the baseline and emits nothing; a
+    /// stale (older-revision) response is dropped; a title/description edit
+    /// becomes a directive only if the stored content still differs; and a
+    /// comment becomes a follow-up only on its first entry into the ledger.
+    pub fn apply_linear_observation(
+        &self,
+        apply: &LinearObservationApply,
+    ) -> StoreResult<LinearObservationOutcome> {
+        if let Some((_, directive)) = &apply.directive {
+            ensure_directive_target(directive, "task", apply.session_id.as_str())?;
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let existing = transaction
+            .query_row(
+                "SELECT last_revision, last_title, last_description
+                 FROM task_linear_observations WHERE session_id=?1",
+                params![apply.session_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let observed_at = apply.observed_at.unix_timestamp();
+
+        let Some((last_revision, last_title, last_description)) = existing else {
+            // Baseline: seed the cursor and mark every observed comment seen, so
+            // pre-existing direction is never replayed as a surprise.
+            transaction.execute(
+                "INSERT INTO task_linear_observations (
+                    session_id, last_revision, last_title, last_description,
+                    last_success_at, degraded_reason, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?5)",
+                params![
+                    apply.session_id.as_str(),
+                    apply.revision,
+                    apply.title,
+                    apply.description,
+                    observed_at,
+                ],
+            )?;
+            for follow_up in &apply.follow_ups {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO task_linear_ingested_comments
+                        (session_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
+                    params![apply.session_id.as_str(), follow_up.comment_id, observed_at],
+                )?;
+            }
+            transaction.commit()?;
+            return Ok(LinearObservationOutcome {
+                baselined: true,
+                directive_applied: false,
+                superseded: Vec::new(),
+                follow_ups_created: Vec::new(),
+            });
+        };
+
+        // Monotonic guard: an out-of-order response older than what we have
+        // carries stale content, so drop it rather than let it revert direction.
+        if apply.revision.as_str() < last_revision.as_str() {
+            transaction.commit()?;
+            return Ok(LinearObservationOutcome {
+                baselined: false,
+                directive_applied: false,
+                superseded: Vec::new(),
+                follow_ups_created: Vec::new(),
+            });
+        }
+
+        // Title/description edit → replacement directive, but only if the stored
+        // content still differs (a racing observer may have applied it already).
+        let mut directive_applied = false;
+        let mut superseded = Vec::new();
+        if let Some((command, directive)) = &apply.directive {
+            if last_title != apply.title || last_description != apply.description {
+                // The version is stamped here, inside the transaction, from the
+                // authoritative `current_directive_version` — not from the
+                // caller's earlier session read. A concurrent webhook or a racing
+                // `lf task steer` that bumped the version in the gap would
+                // otherwise collide on UNIQUE(target, version) and fail the whole
+                // apply.
+                let current: i64 = transaction.query_row(
+                    "SELECT current_directive_version FROM task_sessions WHERE id=?1",
+                    params![apply.session_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                let next = current + 1;
+                let mut directive = directive.clone();
+                directive.version = next as u32;
+                superseded =
+                    supersede_child_commands(&transaction, "task", apply.session_id.as_str())?;
+                insert_child_command(&transaction, command)?;
+                insert_child_directive(&transaction, &directive)?;
+                transaction.execute(
+                    "UPDATE task_sessions SET current_directive_version=?2, updated_at=?3 WHERE id=?1",
+                    params![apply.session_id.as_str(), next, observed_at],
+                )?;
+                directive_applied = true;
+            }
+        }
+
+        // Each new human comment → one FIFO follow-up, guarded by the ledger.
+        let mut follow_ups_created = Vec::new();
+        for follow_up in &apply.follow_ups {
+            if let Some(id) = ingest_linear_comment(
+                &transaction,
+                apply.session_id.as_str(),
+                &follow_up.comment_id,
+                &follow_up.command,
+                observed_at,
+            )? {
+                follow_ups_created.push(id);
+            }
+        }
+
+        transaction.execute(
+            "UPDATE task_linear_observations
+             SET last_revision=?2, last_title=?3, last_description=?4,
+                 last_success_at=?5, degraded_reason=NULL, updated_at=?5
+             WHERE session_id=?1",
+            params![
+                apply.session_id.as_str(),
+                apply.revision,
+                apply.title,
+                apply.description,
+                observed_at,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(LinearObservationOutcome {
+            baselined: false,
+            directive_applied,
+            superseded,
+            follow_ups_created,
+        })
+    }
+
+    /// Persist one human Linear comment as a FIFO Task follow-up, exactly once.
+    /// Webhook comments arrive one at a time (unlike the snapshot edit path), and
+    /// Linear delivers at-least-once — so the `task_linear_ingested_comments`
+    /// ledger is the guard: the follow-up command is created only on the comment
+    /// id's first insertion. Returns the created command id, or `None` for a
+    /// duplicate delivery.
+    pub fn apply_linear_comment(
+        &self,
+        session_id: &TaskSessionId,
+        comment_id: &str,
+        command: &ChildCommand,
+        observed_at: OffsetDateTime,
+    ) -> StoreResult<Option<ChildCommandId>> {
+        let observed_at = observed_at.unix_timestamp();
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let created = ingest_linear_comment(
+            &transaction,
+            session_id.as_str(),
+            comment_id,
+            command,
+            observed_at,
+        )?;
+        if created.is_some() {
+            // Best-effort freshness for status; a Session missing its seed row
+            // (legacy) simply has nothing to update.
+            transaction.execute(
+                "UPDATE task_linear_observations
+                 SET last_success_at=?2, degraded_reason=NULL, updated_at=?2
+                 WHERE session_id=?1",
+                params![session_id.as_str(), observed_at],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(created)
+    }
+
+    /// Record that the latest observation failed, without moving the cursor. A
+    /// Session with no baseline yet has no row to mark, which is fine — status
+    /// then simply shows no observation.
+    pub fn mark_task_linear_degraded(
+        &self,
+        session_id: &TaskSessionId,
+        reason: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE task_linear_observations SET degraded_reason=?2, updated_at=?3
+             WHERE session_id=?1",
+            params![session_id.as_str(), reason, now_unix()],
+        )?;
+        Ok(())
     }
 
     pub fn child_commands(&self, target: &ChildRef) -> StoreResult<Vec<ChildCommand>> {
@@ -2436,7 +2651,30 @@ fn insert_initial_task(conn: &Connection, session: &TaskSession, pr: &TaskPr) ->
         TASK_SESSION_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
-    insert_task_pr(conn, pr)
+    insert_task_pr(conn, pr)?;
+    seed_task_linear_observation(conn, session)
+}
+
+/// Seed the Linear observation cursor from the launch snapshot, in the Session's
+/// creation transaction. Webhooks only fire for changes *after* subscription, so
+/// there is no cursor to build lazily on a first poll — seeding here means the
+/// first issue-edit webhook diffs against the launch title/description instead of
+/// baselining (and swallowing) it. The revision seeds empty so any real Linear
+/// `updatedAt` wins the monotonic guard.
+fn seed_task_linear_observation(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO task_linear_observations (
+            session_id, last_revision, last_title, last_description,
+            last_success_at, degraded_reason, updated_at
+         ) VALUES (?1, '', ?2, ?3, ?4, NULL, ?4)",
+        params![
+            session.id.as_str(),
+            session.launch.issue.title,
+            session.launch.issue.description,
+            now_unix(),
+        ],
+    )?;
+    Ok(())
 }
 
 fn validate_task_project_session(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
@@ -2744,6 +2982,31 @@ fn map_child_directive_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildDir
         incorporated_at,
         incorporated_summary: row.get(11)?,
     })
+}
+
+/// Persist one Linear comment as a follow-up command, exactly once. The insert
+/// into `task_linear_ingested_comments` is the guard — the command is written
+/// only when the comment id is new to the ledger, so a redelivered webhook or an
+/// overlapping catch-up read cannot double-deliver. Shared by the snapshot apply
+/// loop and the single-comment webhook path.
+fn ingest_linear_comment(
+    conn: &Connection,
+    session_id: &str,
+    comment_id: &str,
+    command: &ChildCommand,
+    observed_at: i64,
+) -> StoreResult<Option<ChildCommandId>> {
+    let inserted = conn.execute(
+        "INSERT OR IGNORE INTO task_linear_ingested_comments
+            (session_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
+        params![session_id, comment_id, observed_at],
+    )?;
+    if inserted == 1 {
+        insert_child_command(conn, command)?;
+        Ok(Some(command.id.clone()))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(super) fn insert_child_command(conn: &Connection, command: &ChildCommand) -> StoreResult<()> {
@@ -3415,6 +3678,24 @@ fn map_child_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildComma
             .map(|value| task_command_datetime(7, value))
             .transpose()?,
         error: row.get(10)?,
+    })
+}
+
+fn map_task_linear_observation_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<TaskLinearObservation> {
+    let last_success_at = OffsetDateTime::from_unix_timestamp(row.get::<_, i64>(4)?)
+        .map_err(|error| invalid_column(4, error))?;
+    let updated_at = OffsetDateTime::from_unix_timestamp(row.get::<_, i64>(6)?)
+        .map_err(|error| invalid_column(6, error))?;
+    Ok(TaskLinearObservation {
+        session_id: TaskSessionId::from_raw(row.get::<_, String>(0)?),
+        last_revision: row.get(1)?,
+        last_title: row.get(2)?,
+        last_description: row.get(3)?,
+        last_success_at,
+        degraded_reason: row.get(5)?,
+        updated_at,
     })
 }
 

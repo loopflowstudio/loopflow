@@ -12,7 +12,8 @@ use crate::project_session::{
     ProjectSessionStatus,
 };
 use crate::task::{
-    TaskEvent, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+    LinearObservationApply, LinearObservationOutcome, TaskEvent, TaskEventKind,
+    TaskLinearObservation, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 use time::OffsetDateTime;
 
@@ -343,6 +344,53 @@ impl Store {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.insert_child_command(&command)
+        })
+        .await
+    }
+
+    pub async fn task_linear_observation(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<TaskLinearObservation>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_linear_observation(&session_id)
+        })
+        .await
+    }
+
+    pub async fn apply_linear_observation(
+        &self,
+        apply: LinearObservationApply,
+    ) -> StoreResult<LinearObservationOutcome> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.apply_linear_observation(&apply)
+        })
+        .await
+    }
+
+    pub async fn apply_linear_comment(
+        &self,
+        session_id: &TaskSessionId,
+        comment_id: String,
+        command: ChildCommand,
+        observed_at: OffsetDateTime,
+    ) -> StoreResult<Option<ChildCommandId>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.apply_linear_comment(&session_id, &comment_id, &command, observed_at)
+        })
+        .await
+    }
+
+    pub async fn mark_task_linear_degraded(
+        &self,
+        session_id: &TaskSessionId,
+        reason: String,
+    ) -> StoreResult<()> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_task_linear_degraded(&session_id, &reason)
         })
         .await
     }

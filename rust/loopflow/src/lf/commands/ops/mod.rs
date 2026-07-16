@@ -784,8 +784,61 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             )?;
             print_pm_reteam_result(&result);
         }
+        PmCommand::Webhook { cmd } => run_pm_webhook(&repo_root, cmd, &ambient_wave)?,
     }
     Ok(())
+}
+
+/// The Linear webhook receiver and its one-time registration. The signing secret
+/// is read from the environment (sourced from Doppler), never a flag or the
+/// store, so a raw value never lands in shell history or a process listing.
+fn run_pm_webhook(
+    repo_root: &std::path::Path,
+    cmd: &crate::lf::PmWebhookCommand,
+    ambient_wave: &impl Fn(Option<&str>) -> Result<Option<String>>,
+) -> Result<()> {
+    use crate::lf::PmWebhookCommand;
+
+    let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").unwrap_or_default();
+    if secret.is_empty() {
+        return Err(anyhow!(
+            "set LF_LINEAR_WEBHOOK_SECRET to a non-empty value (source it from Doppler: `doppler run -- lf pm webhook ...`)"
+        ));
+    }
+    let wave_arg = match cmd {
+        PmWebhookCommand::Serve { wave, .. } | PmWebhookCommand::Register { wave, .. } => {
+            wave.as_deref()
+        }
+    };
+    let wave = ambient_wave(wave_arg)?
+        .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?;
+
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let client = crate::ops::pm::linear_client(repo_root, &wave).await?;
+        match cmd {
+            PmWebhookCommand::Register { url, .. } => {
+                let id = client.create_webhook(url, &secret).await?;
+                println!("registered Linear webhook {id} → {url}");
+                Ok(())
+            }
+            PmWebhookCommand::Serve { addr, .. } => {
+                let viewer = client.viewer_id().await?;
+                let store = std::sync::Arc::new(
+                    crate::store::open_existing_store()
+                        .await
+                        .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
+                );
+                let socket: std::net::SocketAddr = addr
+                    .parse()
+                    .map_err(|error| anyhow!("invalid --addr {addr:?}: {error}"))?;
+                println!(
+                    "lf pm webhook · serving Linear deliveries on http://{socket}/linear/webhook"
+                );
+                crate::webhook::serve(store, secret.into_bytes(), viewer, socket).await
+            }
+        }
+    })
 }
 
 fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {

@@ -424,6 +424,11 @@ pub enum ChildCommandSource {
     Human,
     Attachment,
     System,
+    /// A human edit or comment observed on the linked Linear issue, ingested as
+    /// Task direction. Distinct from `Human` so receipts and status can show the
+    /// direction came from Linear, and so it never carries the operator-resume
+    /// affordance that `Human` does.
+    Linear,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -825,6 +830,15 @@ mod tests {
             step: Some("task_pursue".to_string()),
             reason: "running".to_string(),
         }
+    }
+
+    #[test]
+    fn linear_command_source_round_trips_on_the_wire() {
+        use super::ChildCommandSource;
+        let json = serde_json::to_string(&ChildCommandSource::Linear).expect("serialize");
+        assert_eq!(json, r#"{"kind":"linear"}"#);
+        let parsed: ChildCommandSource = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, ChildCommandSource::Linear);
     }
 
     #[test]

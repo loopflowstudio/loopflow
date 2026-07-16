@@ -42,6 +42,7 @@ public enum ChildControlSource: Codable, Sendable, Hashable {
     case human
     case attachment
     case system
+    case linear
 
     public var label: String {
         switch self {
@@ -50,11 +51,12 @@ public enum ChildControlSource: Codable, Sendable, Hashable {
         case .human: "Human"
         case .attachment: "Terminal"
         case .system: "System"
+        case .linear: "Linear"
         }
     }
 
     private enum CodingKeys: String, CodingKey { case kind, id }
-    private enum Kind: String, Codable { case wave, project, human, attachment, system }
+    private enum Kind: String, Codable { case wave, project, human, attachment, system, linear }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -64,6 +66,7 @@ public enum ChildControlSource: Codable, Sendable, Hashable {
         case .human: self = .human
         case .attachment: self = .attachment
         case .system: self = .system
+        case .linear: self = .linear
         }
     }
 
@@ -79,6 +82,7 @@ public enum ChildControlSource: Codable, Sendable, Hashable {
         case .human: try container.encode(Kind.human, forKey: .kind)
         case .attachment: try container.encode(Kind.attachment, forKey: .kind)
         case .system: try container.encode(Kind.system, forKey: .kind)
+        case .linear: try container.encode(Kind.linear, forKey: .kind)
         }
     }
 }

@@ -1297,6 +1297,35 @@ pub enum PmCommand {
         #[command(subcommand)]
         cmd: PmProjectCommand,
     },
+    /// Linear webhook receiver: stream human edits into Task Sessions
+    Webhook {
+        #[command(subcommand)]
+        cmd: PmWebhookCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PmWebhookCommand {
+    /// Run the receiver that turns Linear edits into Task direction. Reads the
+    /// signing secret from LF_LINEAR_WEBHOOK_SECRET (source it from Doppler).
+    Serve {
+        /// Address to bind (a reverse proxy gives Linear the public HTTPS URL)
+        #[arg(long, default_value = "127.0.0.1:8899")]
+        addr: String,
+        /// Wave whose Linear token identifies Loopflow's own actor
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+    },
+    /// Register the Issue/Comment webhook with Linear (one-time). Reads the
+    /// signing secret from LF_LINEAR_WEBHOOK_SECRET.
+    Register {
+        /// Public HTTPS URL Linear will POST deliveries to
+        #[arg(long)]
+        url: String,
+        /// Wave whose Linear token authorizes the registration
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

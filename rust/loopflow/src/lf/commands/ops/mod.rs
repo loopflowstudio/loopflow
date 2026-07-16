@@ -799,9 +799,12 @@ fn run_pm_webhook(
 ) -> Result<()> {
     use crate::lf::PmWebhookCommand;
 
-    let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").map_err(|_| {
-        anyhow!("set LF_LINEAR_WEBHOOK_SECRET (source it from Doppler: `doppler run -- lf pm webhook ...`)")
-    })?;
+    let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").unwrap_or_default();
+    if secret.is_empty() {
+        return Err(anyhow!(
+            "set LF_LINEAR_WEBHOOK_SECRET to a non-empty value (source it from Doppler: `doppler run -- lf pm webhook ...`)"
+        ));
+    }
     let wave_arg = match cmd {
         PmWebhookCommand::Serve { wave, .. } | PmWebhookCommand::Register { wave, .. } => {
             wave.as_deref()

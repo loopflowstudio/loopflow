@@ -1050,17 +1050,27 @@ impl SqliteStore {
         let mut superseded = Vec::new();
         if let Some((command, directive)) = &apply.directive {
             if last_title != apply.title || last_description != apply.description {
+                // The version is stamped here, inside the transaction, from the
+                // authoritative `current_directive_version` — not from the
+                // caller's earlier session read. A concurrent webhook or a racing
+                // `lf task steer` that bumped the version in the gap would
+                // otherwise collide on UNIQUE(target, version) and fail the whole
+                // apply.
+                let current: i64 = transaction.query_row(
+                    "SELECT current_directive_version FROM task_sessions WHERE id=?1",
+                    params![apply.session_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                let next = current + 1;
+                let mut directive = directive.clone();
+                directive.version = next as u32;
                 superseded =
                     supersede_child_commands(&transaction, "task", apply.session_id.as_str())?;
                 insert_child_command(&transaction, command)?;
-                insert_child_directive(&transaction, directive)?;
+                insert_child_directive(&transaction, &directive)?;
                 transaction.execute(
                     "UPDATE task_sessions SET current_directive_version=?2, updated_at=?3 WHERE id=?1",
-                    params![
-                        apply.session_id.as_str(),
-                        i64::from(directive.version),
-                        observed_at,
-                    ],
+                    params![apply.session_id.as_str(), next, observed_at],
                 )?;
                 directive_applied = true;
             }

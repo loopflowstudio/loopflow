@@ -63,6 +63,18 @@ pub async fn poll_account(
 async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError> {
     let credentials_path = home.join(".credentials.json");
     let access_token = fresh_claude_token(&credentials_path).await?;
+    // The plan rides in the credential file Claude Code maintains
+    // (`subscriptionType`) — observed at login, never hand-entered.
+    let plan = tokio::fs::read_to_string(&credentials_path)
+        .await
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|credentials| {
+            credentials
+                .pointer("/claudeAiOauth/subscriptionType")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
     let response = reqwest::Client::new()
         .get(CLAUDE_USAGE_URL)
         .bearer_auth(&access_token)
@@ -87,13 +99,13 @@ async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError
         .await
         .map_err(|error| SubscriptionError::Unavailable(error.to_string()))?;
     Ok(SubscriptionUsage {
-        windows: claude_windows(&body),
+        windows: claude_windows(&body, plan.as_deref()),
     })
 }
 
 /// Parse the OAuth usage payload's `limits` array: one entry per rate-limit
-/// window, each with a percent, a reset time, and an optional model scope.
-fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
+/// window, each with a percent used, a reset time, and an optional model scope.
+fn claude_windows(body: &Value, plan: Option<&str>) -> Vec<AccountLimitWindow> {
     let Some(limits) = body.get("limits").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -119,7 +131,7 @@ fn claude_windows(body: &Value) -> Vec<AccountLimitWindow> {
                     .and_then(Value::as_str)
                     .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
                     .map(|value| value.unix_timestamp()),
-                plan: None,
+                plan: plan.map(str::to_string),
             })
         })
         .collect()
@@ -344,11 +356,12 @@ mod tests {
                  "scope": {"model": {"id": null, "display_name": "Fable"}}}
             ]
         });
-        let windows = claude_windows(&body);
+        let windows = claude_windows(&body, Some("max"));
         assert_eq!(windows.len(), 3);
         assert_eq!(windows[0].window, "session");
         assert_eq!(windows[0].used_percent, 22);
         assert!(windows[0].resets_at.is_some());
+        assert_eq!(windows[0].plan.as_deref(), Some("max"));
         assert_eq!(windows[1].window, "weekly");
         assert_eq!(windows[2].window, "weekly:fable");
         assert_eq!(windows[2].used_percent, 11);

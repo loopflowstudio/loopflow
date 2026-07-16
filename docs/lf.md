@@ -353,13 +353,15 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
-`lf usage` leads with each managed account's subscription state — plan, session
-window, weekly window, reset times — from stored observations (harness streams
-report them mid-run) topped up by a live poll when older than 15 minutes.
-`--refresh` polls everything now; `--cached` skips polling. A revoked
-credential shows the fix (`lf auth connect <provider>`), not a blank. The
-spend table below it sums per-boundary delta rows; TOTAL is input+output with
-cache reads their own column, and SHARE is each row's slice of total tokens.
+`lf usage` leads with each managed account's subscription state — provider-
+reported plan, session and weekly windows as percent *used*, reset times —
+from stored observations (harness streams report them mid-run) topped up by a
+live poll when older than 15 minutes. `--refresh` polls everything now;
+`--cached` skips polling. A revoked credential shows the fix
+(`lf auth connect <provider>`), not a blank. The spend table below it sums
+per-boundary delta rows; TOTAL is input+output with cache reads their own
+column, and `% TOKENS` is each row's slice of all tokens in the window — a
+distribution across repos, not a subscription measure.
 
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a

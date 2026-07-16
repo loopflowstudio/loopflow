@@ -27,13 +27,25 @@
   phase-plan refactor; the rendezvous wiring composes cleanly with the phase model
   and all tests/fmt/clippy pass on the rebased tree.
 - **PR creation itself did not complete**: `lf pr open`'s store step errored with
-  `ambient Task Session ts_44e5843…  is not registered` (same local-store gap as
-  the acknowledge blocker), and GitHub's GraphQL quota was momentarily exhausted.
-  Retrying `lf pr open` won't help until the Task Session is registered in the
-  store this machine reads. A raw `gh pr create` was deliberately **not** run — it
-  would bypass loopflow's PR reconciliation and risk a duplicate when the
-  orchestrator (which does track this Task) reconciles the pushed branch. The
-  pushed branch is the handoff point; loopflow's PR machinery opens the PR.
+  `ambient Task Session ts_44e5843…  is not registered`, and GitHub's GraphQL quota
+  was momentarily exhausted.
+- **Root cause (mutate invocation, confirmed):** the session row *is* present in
+  `~/.lf/loopflow.db` (`strings` match), and the orchestrator's own
+  `/tmp/loopflow-compat-46c8134c-*` binary resolves `W2-175` → the session fine.
+  But the two `lf` binaries available to me here do **not**: the installed
+  `lf 0.11.1` fails the db's migration gate, and the worktree-built
+  `target/debug/lf` (current rebased HEAD) reports `no Task Session exists for
+  "W2-175"` / `ambient Task Session … is not registered`. This is a post-#936
+  ("connect managed accounts through profiles") store-resolution divergence — the
+  compat binary reads the store where the session is registered; the binaries I
+  can run resolve a different (profile-scoped) path. Fixing that is store/auth
+  resolution, which the operating rules direct me not to repair as a prerequisite.
+- **Handoff:** the change is complete, reviewed, tested, and pushed (origin
+  `409644d4b`, rebased onto main). The Task runner, driving the orchestrator's
+  correctly-resolved binary, opens the PR via the same `lf pr open` that already
+  rebased+pushed this branch. A raw `gh pr create` was deliberately **not** run —
+  it would bypass loopflow's PR reconciliation and risk a duplicate. The pushed
+  branch is the handoff point.
 
 ## Design decisions resolved inline (executive calls)
 

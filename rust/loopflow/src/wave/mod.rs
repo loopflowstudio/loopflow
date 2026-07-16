@@ -72,7 +72,7 @@ use anyhow::{anyhow, Result};
 
 use crate::engine::repo::find_repo_root;
 use crate::engine::worktrees::main_repo_root;
-use crate::ops::util::resolve_wave_name;
+use crate::ops::util::normalize_wave_name;
 use crate::store::{open_existing_store, SharedStore};
 use crate::wave::runtime::WaveRuntime;
 
@@ -92,8 +92,7 @@ pub(crate) const WAVE_SERVER_ENDPOINT_ENV: &str = "LF_WAVE_SERVER_ENDPOINT";
 pub fn run(name: &str, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave =
-        resolve_wave_name(Some(name)).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let registry_config = resolve_registry(&main_repo, &wave).await;
@@ -114,8 +113,7 @@ pub fn run(name: &str, force: bool) -> Result<()> {
 pub fn stop(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave =
-        resolve_wave_name(Some(name)).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
     let rt = tokio::runtime::Runtime::new()?;
     let requested = rt.block_on(request_stop(&main_repo, &wave))?;
     if requested {

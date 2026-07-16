@@ -34,7 +34,7 @@ use tokio::sync::mpsc;
 use crate::engine::repo::find_repo_root;
 use crate::engine::worktrees::main_repo_root;
 use crate::flowloop::wave::{path_for_children, run_loop, LoopConfig};
-use crate::ops::util::resolve_wave_name;
+use crate::ops::util::normalize_wave_name;
 use crate::wave::journal::{MessageId, PendingMessage};
 use crate::wave::runtime::InboxItem;
 use crate::wave::server;
@@ -63,8 +63,7 @@ pub fn run(name: &str) -> Result<()> {
 
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave =
-        resolve_wave_name(Some(name)).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let wave = normalize_wave_name(name).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
 
     let (endpoint, token) = resolve_attachment(
         std::env::var(WAVE_SERVER_ENDPOINT_ENV).ok(),

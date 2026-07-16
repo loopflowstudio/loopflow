@@ -385,8 +385,14 @@ pub fn project_start(
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let main = ensure_clean_main(repo, "Project start")?;
-    let wave = crate::ops::resolve_wave_name(wave)
-        .ok_or_else(|| project_error("cannot determine wave; pass --wave <name>"))?;
+    let wave = crate::engine::wave_context::resolve_managed_wave_name_sync(wave).map_err(
+        |err| match err {
+            crate::engine::wave_context::WaveResolveError::NoContext => {
+                project_error("cannot determine wave; pass --wave <name>")
+            }
+            other => project_error(other.to_string()),
+        },
+    )?;
     require_registered_wave(&wave)?;
     let project = crate::ops::pm::pm_create_project(&main, Some(&wave), title)?;
     if let Err(error) =

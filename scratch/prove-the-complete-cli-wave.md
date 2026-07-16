@@ -5,9 +5,10 @@
 W2-151 shipped one shared ambient-Wave resolver (`resolve_managed_wave_name`) and
 proved it across `lf status`, `lf pm show`, and `lf memory show` — three read
 consumers. But the task closed without the required full read-plus-mutation
-parser matrix. Today, five commands silently bypass the shared resolver, each
-inventing its own rule for Wave context. Adding or changing an `lf` command can
-silently invent a different rule, and nothing in CI catches it.
+parser matrix. Five commands silently bypassed the shared resolver; they were
+fixed on main before this test shipped. The matrix is the proof they stay fixed:
+any command that silently drops a stale UUID or invents its own resolution rule
+fails a cell.
 
 ## The demo
 

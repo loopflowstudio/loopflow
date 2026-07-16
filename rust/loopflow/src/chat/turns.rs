@@ -374,6 +374,25 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
+        TaskEventKind::InteractionReviewRequested { review } => activity(
+            ChildActivityKind::DecisionRequired,
+            &format!("{} review requested", review.step),
+            &review.reason,
+        ),
+        TaskEventKind::InteractionReviewMessage { author, text, .. } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Review message from {}", author.as_str()),
+            text,
+        ),
+        TaskEventKind::InteractionReviewCompleted {
+            disposition,
+            outcome,
+            ..
+        } => activity(
+            ChildActivityKind::DecisionResolved,
+            &format!("Review {}", disposition.as_str()),
+            outcome,
+        ),
         TaskEventKind::PrStarted {
             sequence, branch, ..
         } => activity(

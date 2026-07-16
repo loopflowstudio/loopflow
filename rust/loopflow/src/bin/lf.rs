@@ -7,7 +7,9 @@ use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{Cli, Commands, ProjectCommand, TaskCommand};
+use loopflow::lf::{
+    Cli, Commands, ProjectCommand, ProjectReviewCommand, TaskCommand, TaskReviewCommand,
+};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -845,6 +847,40 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             }
             Ok(())
         }
+        ProjectCommand::Review { command } => match command {
+            ProjectReviewCommand::Message {
+                review_id,
+                message,
+                json,
+            } => {
+                let command =
+                    loopflow::ops::project::project_review_message(review_id, message.clone())?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&command)?);
+                } else {
+                    println!("{} → {}", review_id, command.id);
+                }
+                Ok(())
+            }
+            ProjectReviewCommand::Complete {
+                review_id,
+                disposition,
+                outcome,
+                json,
+            } => {
+                let review = loopflow::ops::project::project_review_complete(
+                    review_id,
+                    disposition,
+                    outcome.clone(),
+                )?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&review)?);
+                } else {
+                    println!("{} → {}", review.id, review.status.as_str());
+                }
+                Ok(())
+            }
+        },
         ProjectCommand::Wait {
             project_id,
             until,
@@ -1095,6 +1131,21 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        TaskCommand::Review { command } => match command {
+            TaskReviewCommand::Reply {
+                review_id,
+                message,
+                json,
+            } => {
+                let review = loopflow::ops::task::task_review_reply(review_id, message.clone())?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&review)?);
+                } else {
+                    println!("{} → reply recorded", review.id);
+                }
+                Ok(())
+            }
+        },
         TaskCommand::Wait {
             issue,
             until,

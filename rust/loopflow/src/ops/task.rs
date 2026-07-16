@@ -21,6 +21,7 @@ use crate::engine::worktrees::{
 };
 use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use crate::id::WaveId;
+use crate::interaction_review::{InteractionReview, InteractionReviewId};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
@@ -2740,6 +2741,39 @@ pub fn task_request_decision(
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    })
+}
+
+pub fn task_review_reply(review_id: &str, text: String) -> OpsResult<InteractionReview> {
+    let review_id = InteractionReviewId::parse(review_id)
+        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
+    block_on_task(async move {
+        let store = task_store().await?;
+        let review = store
+            .get_interaction_review(&review_id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error(format!("interaction review {review_id} not found")))?;
+        let ambient = std::env::var("LF_TASK_SESSION_ID").map_err(|_| {
+            task_error("interaction review replies must run inside the reviewed Task Session")
+        })?;
+        if ambient != review.task_session_id.as_str() {
+            return Err(task_error(format!(
+                "Task Session {ambient} cannot reply to review {review_id} for {}",
+                review.task_session_id
+            )));
+        }
+        let lease = task_write_lease_from_env()
+            .map_err(|error| task_error(format!("Task body has no write authority: {error}")))?;
+        store
+            .reply_to_interaction_review(&review_id, &review.task_session_id, &lease, &text)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        store
+            .get_interaction_review(&review_id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error(format!("interaction review {review_id} disappeared")))
     })
 }
 

@@ -214,6 +214,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_lifecycle",
         sql: include_str!("migrations/0.11.014_task_lifecycle.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 15,
+        },
+        name: "interaction_reviews",
+        sql: include_str!("migrations/0.11.015_interaction_reviews.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -888,7 +897,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.014_task_lifecycle"
+            "0.11.015_interaction_reviews"
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -914,7 +923,8 @@ mod tests {
                 "0.11.011_profiles".to_string(),
                 "0.11.012_provider_account_lifecycle".to_string(),
                 "0.11.013_task_review_state".to_string(),
-                "0.11.014_task_lifecycle".to_string()
+                "0.11.014_task_lifecycle".to_string(),
+                "0.11.015_interaction_reviews".to_string()
             ]
         );
     }
@@ -936,7 +946,7 @@ mod tests {
             assert_eq!(
                 latest_version_sqlite(&conn)
                     .unwrap_or_else(|error| panic!("divergent prefix {count}: {error}")),
-                "0.11.014_task_lifecycle"
+                "0.11.015_interaction_reviews"
             );
             assert_eq!(
                 conn.query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
@@ -1439,7 +1449,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.014_task_lifecycle"
+            "0.11.015_interaction_reviews"
         );
     }
 
@@ -1462,7 +1472,7 @@ mod tests {
         );
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.014_task_lifecycle"
+            "0.11.015_interaction_reviews"
         );
     }
 

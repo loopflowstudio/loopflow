@@ -2478,7 +2478,7 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     kickoff_flow, kickoff_interaction_policy, gate_flow, gate_interaction_policy,
     lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json
     FROM task_sessions";
-const TASK_SESSION_SELECT: &str = "SELECT
+pub(super) const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_prompt_context, wave_id,
     status, status_reason, status_at, worktree, workspace_slug,
@@ -2719,7 +2719,7 @@ fn map_child_directive_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildDir
     })
 }
 
-fn insert_child_command(conn: &Connection, command: &ChildCommand) -> StoreResult<()> {
+pub(super) fn insert_child_command(conn: &Connection, command: &ChildCommand) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO child_commands (
             id, target_kind, session_id, source_json, kind_json, created_at,
@@ -2934,7 +2934,7 @@ fn lease_revoked(kind: &str, id: &str, lease: &ChildWriteLease) -> StoreError {
     }
 }
 
-fn require_child_write_lease(
+pub(super) fn require_child_write_lease(
     conn: &Connection,
     target: &ChildRef,
     lease: &ChildWriteLease,
@@ -3146,7 +3146,7 @@ fn task_command_datetime(index: usize, value: i64) -> rusqlite::Result<time::Off
         .map_err(|error| invalid_column(index, error))
 }
 
-fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
+pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
     let status_text: String = row.get(10)?;
     let status = status_text
         .parse()
@@ -3775,7 +3775,7 @@ fn child_columns(source: &ChildRef) -> (&'static str, String) {
     }
 }
 
-fn insert_task_event_in(
+pub(super) fn insert_task_event_in(
     conn: &Connection,
     session: &TaskSession,
     kind: &TaskEventKind,

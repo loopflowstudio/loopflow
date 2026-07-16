@@ -13,6 +13,7 @@ use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::wave::Wave;
 mod child_sessions;
+mod interaction_reviews;
 mod interactive_handoffs;
 pub mod migrations;
 pub mod rows;
@@ -866,6 +867,10 @@ mod tests {
         ChildProcessGeneration, ChildRef, ObservationRecipient,
     };
     use crate::id::WaveId;
+    use crate::interaction_review::{
+        InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
+        InteractionReviewId, InteractionReviewStatus, InteractionReviewer,
+    };
     use crate::profile::{
         ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
         ProviderProfileCandidate, RepoProfileRoute,
@@ -880,8 +885,9 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::task::{
-        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
-        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind,
+        TaskGateProposal, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession, TaskSessionId,
+        TaskSessionStatus,
     };
     use crate::wave::Wave;
     use std::env;
@@ -1239,6 +1245,295 @@ mod tests {
             gating.gate_proposal.unwrap().reason,
             "implementation complete"
         );
+    }
+
+    #[tokio::test]
+    async fn interaction_review_is_idempotent_and_supports_fifo_parent_dialogue() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.status_reason = "reserved".to_string();
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        project.begin_generation("project-reviewer".to_string());
+        let project_lease = store
+            .reserve_project_process(&project, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut project.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        project.set_status(ProjectSessionStatus::Running, "reviewer active");
+        store
+            .activate_project_process(&project, &project_lease)
+            .await
+            .unwrap();
+
+        let mut task = make_task_session(&wave, &project);
+        task.lifecycle = crate::task::TaskLifecyclePlan::headless("task");
+        task.lifecycle_phase = TaskLifecyclePhase::Gate;
+        task.phase_epoch = 3;
+        task.gate_cycle = 1;
+        task.gate_proposal = Some(TaskGateProposal {
+            status: TaskSessionStatus::Waiting,
+            reason: "PR ready".to_string(),
+        });
+        task.set_status(TaskSessionStatus::Waiting, "ready for gate review");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("task-review".to_string());
+        let task_lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut task.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        task.set_status(TaskSessionStatus::Running, "review requested");
+        store
+            .activate_task_process(&task, &task_lease)
+            .await
+            .unwrap();
+
+        let review = InteractionReview {
+            id: InteractionReviewId::new(),
+            wave_id: wave.id().clone(),
+            project_session_id: project.id.clone(),
+            task_session_id: task.id.clone(),
+            phase: task.lifecycle_phase,
+            phase_epoch: task.phase_epoch,
+            flow: task.phase_plan().flow.clone(),
+            step: "demo".to_string(),
+            step_index: 0,
+            phase_iteration: task.phase_iteration,
+            policy: task.phase_plan().interaction_policy,
+            reviewer: InteractionReviewer::Project(project.id.clone()),
+            status: InteractionReviewStatus::Requested,
+            reason: "prove the task outcome".to_string(),
+            prompt: "Demonstrate each Done When criterion.".to_string(),
+            evidence: InteractionReviewEvidence {
+                worktree: task.worktree.clone(),
+                branch: "jack/reviewed-task".to_string(),
+                base_commit: "base".to_string(),
+                head_commit: "head".to_string(),
+                worktree_fingerprint: "fingerprint".to_string(),
+                pr: None,
+            },
+            requested_by_generation: task_lease.generation,
+            reviewer_generation: None,
+            disposition: None,
+            outcome: None,
+            requested_at: OffsetDateTime::now_utc(),
+            completed_at: None,
+        };
+        let (opened, created) = store
+            .open_interaction_review(&task, &review, &task_lease)
+            .await
+            .unwrap();
+        assert!(created);
+        let mut replay = review.clone();
+        replay.id = InteractionReviewId::new();
+        let (same, created) = store
+            .open_interaction_review(&task, &replay, &task_lease)
+            .await
+            .unwrap();
+        assert!(!created);
+        assert_eq!(same.id, opened.id);
+        let mut future_step = review.clone();
+        future_step.id = InteractionReviewId::new();
+        future_step.step = "code-review".to_string();
+        future_step.step_index = 1;
+        assert!(store
+            .open_interaction_review(&task, &future_step, &task_lease)
+            .await
+            .is_err());
+
+        let command = store
+            .send_project_interaction_review_message(
+                &opened.id,
+                &project.id,
+                &project_lease,
+                "Show the stored state after the product action.",
+            )
+            .await
+            .unwrap();
+        assert!(matches!(command.kind, ChildCommandKind::FollowUp { .. }));
+        assert_eq!(
+            command.source,
+            ChildCommandSource::Project(project.id.clone())
+        );
+        let second_command = store
+            .send_project_interaction_review_message(
+                &opened.id,
+                &project.id,
+                &project_lease,
+                "Then connect that row to the implementation.",
+            )
+            .await
+            .unwrap();
+        let claimed = store
+            .claim_child_commands(&ChildRef::Task(task.id.clone()), task_lease.generation)
+            .await
+            .unwrap();
+        assert_eq!(
+            claimed
+                .iter()
+                .map(|command| command.id.clone())
+                .collect::<Vec<_>>(),
+            vec![command.id, second_command.id]
+        );
+        store
+            .reply_to_interaction_review(
+                &opened.id,
+                &task.id,
+                &task_lease,
+                "The action writes row 42; the admin view reads that row.",
+            )
+            .await
+            .unwrap();
+
+        let (completed, changed) = store
+            .complete_project_interaction_review(
+                &opened.id,
+                &project.id,
+                &project_lease,
+                InteractionReviewDisposition::Approved,
+                "Product action and stored row agree.",
+            )
+            .await
+            .unwrap();
+        assert!(changed);
+        assert_eq!(completed.status, InteractionReviewStatus::Completed);
+        assert_eq!(
+            completed.reviewer_generation,
+            Some(project_lease.generation)
+        );
+        let (_, changed) = store
+            .complete_project_interaction_review(
+                &opened.id,
+                &project.id,
+                &project_lease,
+                InteractionReviewDisposition::Approved,
+                "Product action and stored row agree.",
+            )
+            .await
+            .unwrap();
+        assert!(!changed);
+        let commands = store
+            .list_child_commands(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(commands.len(), 3);
+        assert!(matches!(
+            &commands[2].kind,
+            ChildCommandKind::FollowUp { text }
+                if text.contains("interaction_review_completed")
+                    && text.contains("disposition=\"approved\"")
+        ));
+
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        let messages = events
+            .iter()
+            .filter(|event| matches!(event.kind, TaskEventKind::InteractionReviewMessage { .. }))
+            .count();
+        assert_eq!(messages, 3);
+        let project_observations = store
+            .pending_observations(&ObservationRecipient::Project {
+                session_id: project.id.clone(),
+            })
+            .await
+            .unwrap();
+        let review_observations = project_observations
+            .iter()
+            .filter(|observation| {
+                matches!(
+                    &observation.payload,
+                    ChildEventPayload::Task {
+                        event: TaskEventKind::InteractionReviewRequested { .. }
+                            | TaskEventKind::InteractionReviewMessage { .. }
+                            | TaskEventKind::InteractionReviewCompleted { .. }
+                    }
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(review_observations.len(), 2);
+        assert!(matches!(
+            &review_observations[0].payload,
+            ChildEventPayload::Task {
+                event: TaskEventKind::InteractionReviewRequested { .. }
+            }
+        ));
+        assert!(matches!(
+            &review_observations[1].payload,
+            ChildEventPayload::Task {
+                event: TaskEventKind::InteractionReviewMessage {
+                    author: crate::interaction_review::InteractionReviewMessageAuthor::Task,
+                    ..
+                }
+            }
+        ));
+        let wave_observations = store
+            .pending_observations(&ObservationRecipient::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|observation| {
+                matches!(
+                    observation.payload,
+                    ChildEventPayload::Task {
+                        event: TaskEventKind::InteractionReviewRequested { .. }
+                            | TaskEventKind::InteractionReviewMessage { .. }
+                            | TaskEventKind::InteractionReviewCompleted { .. }
+                    }
+                )
+            })
+            .count();
+        assert_eq!(wave_observations, 0);
+
+        task.enter_iterate().unwrap();
+        task.enter_gate(TaskGateProposal {
+            status: TaskSessionStatus::Waiting,
+            reason: "PR ready after review changes".to_string(),
+        })
+        .unwrap();
+        store
+            .update_task_session_for_lease(&task, &task_lease)
+            .await
+            .unwrap();
+        let mut next_gate_review = review.clone();
+        next_gate_review.id = InteractionReviewId::new();
+        next_gate_review.phase_epoch = task.phase_epoch;
+        next_gate_review.evidence.head_commit = "head-after-review".to_string();
+        next_gate_review.evidence.worktree_fingerprint = "fingerprint-after-review".to_string();
+        next_gate_review.requested_at = OffsetDateTime::now_utc();
+        let (next_gate_review, created) = store
+            .open_interaction_review(&task, &next_gate_review, &task_lease)
+            .await
+            .unwrap();
+        assert!(created);
+        assert_ne!(next_gate_review.id, completed.id);
+
+        let reviews = store
+            .list_interaction_reviews(Some(wave.id()))
+            .await
+            .unwrap();
+        assert_eq!(reviews.len(), 2);
+        assert!(reviews.contains(&completed));
+        assert!(reviews.iter().any(|review| {
+            review.id == next_gate_review.id && review.phase_epoch == next_gate_review.phase_epoch
+        }));
     }
 
     #[tokio::test]

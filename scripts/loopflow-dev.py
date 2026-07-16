@@ -55,9 +55,14 @@ def _app_environment(repo: Path) -> dict[str, str]:
     return env
 
 
-def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
+def run(
+    cmd: list[str],
+    cwd: Path | None = None,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     """Run a command, optionally checking return code."""
-    return subprocess.run(cmd, cwd=cwd, check=check)
+    return subprocess.run(cmd, cwd=cwd, check=check, env=env)
 
 
 def run_capture(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -469,7 +474,15 @@ def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
         cargo_cmd = ["cargo", "build", "--locked", "--bin", "lf"]
         bin_dir = REPO_ROOT / "target" / "debug"
 
-    result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
+    # The Dev app must exercise the same machine state as the installed app.
+    # Build the current checkout as a release-store reader, but never let an
+    # unshipped checkout migrate the shared database.
+    build_env = {
+        **os.environ,
+        "LOOPFLOW_BUILD_PROVENANCE": "release",
+        "LOOPFLOW_MIGRATION_AUTHORITY": "validation_only",
+    }
+    result = run(cargo_cmd, cwd=REPO_ROOT, check=False, env=build_env)
     if result.returncode != 0:
         raise RuntimeError("Failed to build bundled lf binary")
 

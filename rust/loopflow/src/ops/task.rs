@@ -1518,16 +1518,13 @@ pub(crate) async fn relaunch_inactive_process(
 }
 
 async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
-    // Resolve the pinned context before reserving anything: a Session that cannot
-    // name its own binary must not burn a generation discovering that.
-    let execution = session.execution.clone().ok_or_else(|| {
-        task_error(format!(
-            "Task {} predates pinned execution context and cannot be relaunched safely; \
-             abandon it and run the Linear task again to create a Session that records \
-             its own `lf` and database",
-            session.launch.issue.identifier
-        ))
-    })?;
+    // Resolve the current Home lf before reserving anything: the Session's
+    // persisted lf_bin is only an audit record; we always launch through the
+    // current binary. A missing or incompatible lf fails without burning a
+    // generation reservation.
+    let execution = crate::engine::process::pinned_execution_context()
+        .map_err(|error| task_error(format!("cannot resolve current lf binary: {error}")))?;
+    let provenance = crate::child_session::BinaryProvenance::current();
     let tmux_name = format!(
         "lf-task-{}-{}",
         tmux_session_slug(&session.launch.issue.identifier),
@@ -1536,6 +1533,11 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     let from = session.status;
     let mut launch = session.clone();
     let generation = launch.begin_generation(tmux_name.clone());
+    // Set the provenance on the generation after it's created: begin_generation
+    // keeps session logic separate from launch provenance.
+    if let Some(process) = launch.latest_process.as_mut() {
+        process.provenance = Some(provenance);
+    }
     let Some(lease) = store
         .reserve_task_process(&launch, from)
         .await
@@ -3225,6 +3227,91 @@ mod tests {
             .contains("durable Task flows currently require skills"));
     }
 
+    /// The no-pinning contract: `launch_task_process` resolves the current Home
+    /// `lf` from the running process's environment, never the Session's pinned
+    /// `execution`. A Session whose `execution.lf_bin` names a real binary still
+    /// fails to launch when the current `LF_BIN` is gone — proving the pinned
+    /// context is no longer read for launch.
+    #[tokio::test]
+    async fn launch_task_process_resolves_current_binary_not_session_execution() {
+        let home = tempfile::tempdir().unwrap();
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let now = OffsetDateTime::now_utc();
+        let mut session = TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new("issue-no-pin").unwrap(),
+                    identifier: "INF-NO-PIN".to_string(),
+                    title: "Resolve through current lf".to_string(),
+                    description: "Never read the pinned binary".to_string(),
+                },
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-no-pin").unwrap(),
+                    slug: "no-pin".to_string(),
+                    name: "No pin".to_string(),
+                    prompt_context: String::new(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: WaveId::new(),
+            project_session_id: ProjectSessionId::new(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Waiting,
+            status_reason: "ready".to_string(),
+            status_at: now,
+            worktree: home.path().join("worktree"),
+            workspace_slug: "task-no-pin".to_string(),
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            // The pinned context names a real, existing binary. If the launch
+            // path still read this, it would not fail at binary resolution.
+            execution: Some(ChildExecutionContext {
+                lf_bin: std::path::PathBuf::from("/bin/sh"),
+                db_path: home.path().join("loopflow.db"),
+                lf_home: home.path().to_path_buf(),
+            }),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Point the current Home lf at a path that does not exist. The launch
+        // must fail here without burning a generation or spawning tmux.
+        let previous_lf_bin = std::env::var_os("LF_BIN");
+        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
+        let result = super::launch_task_process(&store, &mut session).await;
+        match previous_lf_bin {
+            Some(value) => std::env::set_var("LF_BIN", value),
+            None => std::env::remove_var("LF_BIN"),
+        }
+
+        let error = result.expect_err("launch must fail when the current lf is missing");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot resolve current lf binary"),
+            "error should name the current lf, not the session's pinned binary: {error}"
+        );
+        // No generation was reserved: the session never started a process.
+        assert!(session.latest_process.is_none());
+    }
+
     fn changed_workspace() -> (tempfile::TempDir, String, TaskSessionId) {
         let repo = tempfile::tempdir().expect("create temp repo");
         git(repo.path(), &["init", "-b", "main"]);
@@ -3308,6 +3395,7 @@ mod tests {
                 started_at: now,
                 state: crate::child_session::ChildLeaseState::Active,
                 outcome: None,
+                provenance: None,
             }),
             execution: Some(execution.clone()),
             abandon_intent: None,

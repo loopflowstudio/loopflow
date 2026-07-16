@@ -274,6 +274,7 @@ pub fn register_task(
             started_at: now,
             state: loopflow::child_session::ChildLeaseState::Legacy,
             outcome: None,
+            provenance: None,
         }),
         execution: Some(execution.clone()),
         abandon_intent: None,

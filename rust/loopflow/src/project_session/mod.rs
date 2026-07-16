@@ -201,6 +201,7 @@ impl ProjectSession {
             started_at: now,
             state: ChildLeaseState::Reserved,
             outcome: None,
+            provenance: None,
         });
         self.set_status(
             ProjectSessionStatus::Starting,

@@ -119,6 +119,7 @@ mod tests {
             started_at: OffsetDateTime::now_utc(),
             state: ChildLeaseState::Active,
             outcome: None,
+            provenance: None,
         }
     }
 

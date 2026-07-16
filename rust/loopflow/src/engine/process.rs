@@ -578,6 +578,7 @@ mod tests {
             outcome: Some(crate::child_session::ChildBodyOutcome::Superseded {
                 reason: "test".to_string(),
             }),
+            provenance: None,
         };
 
         reap_child_process(&process, std::time::Duration::from_secs(2))

@@ -817,6 +817,7 @@ mod tests {
             started_at: OffsetDateTime::now_utc(),
             state: crate::child_session::ChildLeaseState::Reserved,
             outcome: None,
+            provenance: None,
         };
         assert!(child_body_reservation_is_fresh(&process));
         process.started_at -= time::Duration::seconds(11);
@@ -943,6 +944,7 @@ mod tests {
                 started_at: now,
                 state: crate::child_session::ChildLeaseState::Active,
                 outcome: None,
+                provenance: None,
             }),
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
@@ -1002,6 +1004,7 @@ mod tests {
                 started_at: now,
                 state: crate::child_session::ChildLeaseState::Active,
                 outcome: None,
+                provenance: None,
             }),
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
@@ -1124,41 +1127,6 @@ mod tests {
         assert_eq!(persisted.latest_process, None);
     }
 
-    /// A Session created before the execution context was pinned cannot say which
-    /// `lf` or which database it belongs to. Relaunching it means letting the
-    /// calling process supply both — which is the original W2-127 failure. It
-    /// refuses, and says what to do instead.
-    #[tokio::test]
-    async fn a_session_with_no_pinned_context_refuses_to_launch() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-                .await
-                .unwrap(),
-        );
-        let wave = make_wave(dir.path().to_str().unwrap());
-        store.create_wave(&wave).await.unwrap();
-        let mut project = make_project(&wave, ProjectSessionStatus::Waiting);
-        project.execution = None;
-        store.create_project_session(&project).await.unwrap();
-
-        let error = queue_command(
-            &store,
-            ChildSession::Project(Box::new(project)),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume { message: None },
-        )
-        .await
-        .expect_err("an unpinned Session must not be relaunched by whoever holds it");
-
-        assert!(
-            error
-                .to_string()
-                .contains("predates pinned execution context"),
-            "got: {error}"
-        );
-    }
-
     /// The 2026-07-14 W2-129 sequence, preserved as a regression.
     ///
     /// Task Session `ts_c33d8dc7…` emitted `pull_request_opened` for #878 and went
@@ -1277,6 +1245,7 @@ mod tests {
             outcome: Some(crate::child_session::ChildBodyOutcome::LegacyStopped {
                 reason: "test body stopped".to_string(),
             }),
+            provenance: None,
         });
         project.agent = "claude:sonnet".to_string();
         project.provider = "claude".to_string();

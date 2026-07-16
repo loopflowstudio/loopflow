@@ -237,6 +237,34 @@ pub enum ObservationRecipient {
     Project { session_id: ProjectSessionId },
 }
 
+/// Immutable audit record for the lf binary that launched a process generation.
+/// Provenance says what ran; it never selects what runs next.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinaryProvenance {
+    pub version: String,
+    pub provenance: String,
+    pub source_identity: String,
+}
+
+impl BinaryProvenance {
+    pub fn current() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            provenance: crate::build_info::provenance().to_string(),
+            source_identity: crate::build_info::source_identity(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_tests() -> Self {
+        Self {
+            version: "0.0.0-test".to_string(),
+            provenance: "development".to_string(),
+            source_identity: "test".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 /// Durable receipt for one child-process write lease. `generation` is the
 /// monotonically increasing fencing token: only the current generation may
@@ -255,6 +283,9 @@ pub struct ChildProcessGeneration {
     pub started_at: OffsetDateTime,
     pub state: ChildLeaseState,
     pub outcome: Option<ChildBodyOutcome>,
+    /// Immutable binary provenance: which lf launched this generation.
+    /// `None` for generations recorded before this field was added.
+    pub provenance: Option<BinaryProvenance>,
 }
 
 impl ChildProcessGeneration {
@@ -292,15 +323,12 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The executable and store a Session runs against, pinned once when the
-/// Session is created.
+/// The executable and store that created a Session, pinned once at creation.
 ///
-/// Re-deriving these per process is how a Session gets relaunched by a
-/// worktree's `target/debug/lf` against the live registry: the launching
-/// process's own binary and environment decided the child's, so whoever
-/// happened to type the command chose the child's execution context. Pinning
-/// makes the Session the authority, and every relaunch reproduces the context
-/// the Session was born with.
+/// DEPRECATED for launch: the current Home lf is resolved at the launch
+/// boundary, not read from the Session. Retained for audit: each Session
+/// records which lf created it. Historical columns may remain until an
+/// earned table rebuild.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
@@ -981,6 +1009,7 @@ mod tests {
             started_at: time::OffsetDateTime::UNIX_EPOCH,
             state: ChildLeaseState::Reserved,
             outcome: None,
+            provenance: None,
         };
         assert!(!serde_json::to_string(&evidence).unwrap().contains(&raw));
     }

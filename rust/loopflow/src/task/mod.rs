@@ -716,6 +716,7 @@ impl TaskSession {
             started_at: now,
             state: ChildLeaseState::Reserved,
             outcome: None,
+            provenance: None,
         });
         self.set_status(TaskSessionStatus::Starting, "task process is starting");
         generation

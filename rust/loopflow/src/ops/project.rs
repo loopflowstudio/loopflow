@@ -407,17 +407,13 @@ pub(crate) async fn launch_project_process(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> OpsResult<()> {
-    // Resolve the pinned context first: a Session that cannot name its own binary
-    // is not launchable at all, so say that before probing git or reserving a
-    // generation it will never use.
-    let execution = session.execution.clone().ok_or_else(|| {
-        project_error(format!(
-            "Project {} predates pinned execution context and cannot be relaunched safely; \
-             abandon it and pursue the Linear project again to create a Session that records \
-             its own `lf` and database",
-            session.launch.project.slug
-        ))
-    })?;
+    // Resolve the current Home lf before reserving anything: the Session's
+    // persisted lf_bin is only an audit record; we always launch through the
+    // current binary. A missing or incompatible lf fails without burning a
+    // generation reservation.
+    let execution = crate::engine::process::pinned_execution_context()
+        .map_err(|error| project_error(format!("cannot resolve current lf binary: {error}")))?;
+    let provenance = crate::child_session::BinaryProvenance::current();
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, session).await?;
@@ -430,6 +426,11 @@ pub(crate) async fn launch_project_process(
     let from = session.status;
     let mut launch = session.clone();
     let generation = launch.begin_generation(tmux_name.clone());
+    // Set the provenance on the generation after it's created: begin_generation
+    // keeps session logic separate from launch provenance.
+    if let Some(process) = launch.latest_process.as_mut() {
+        process.provenance = Some(provenance);
+    }
     let Some(lease) = store
         .reserve_project_process(&launch, from)
         .await
@@ -1403,6 +1404,71 @@ mod tests {
             ),
             "what promotion spawns must parse as the Wave entrypoint"
         );
+    }
+
+    /// The no-pinning contract for Project Sessions: `launch_project_process`
+    /// resolves the current Home `lf`, never the Session's pinned `execution`.
+    /// A Session whose `execution.lf_bin` names a real binary still fails when
+    /// the current `LF_BIN` is gone.
+    #[tokio::test]
+    async fn launch_project_process_resolves_current_binary_not_session_execution() {
+        let home = tempfile::tempdir().unwrap();
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let mut session = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-no-pin").unwrap(),
+                    slug: "no-pin".to_string(),
+                    name: "No pin".to_string(),
+                    prompt_context: String::new(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: WaveId::new(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Created,
+            status_reason: "ready".to_string(),
+            status_at: now,
+            iteration: 1,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "claude".to_string(),
+            provider: "claude".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            execution: Some(crate::child_session::ChildExecutionContext {
+                lf_bin: std::path::PathBuf::from("/bin/sh"),
+                db_path: home.path().join("loopflow.db"),
+                lf_home: home.path().to_path_buf(),
+            }),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let previous_lf_bin = std::env::var_os("LF_BIN");
+        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
+        let result = super::launch_project_process(&store, &mut session).await;
+        match previous_lf_bin {
+            Some(value) => std::env::set_var("LF_BIN", value),
+            None => std::env::remove_var("LF_BIN"),
+        }
+
+        let error = result.expect_err("launch must fail when the current lf is missing");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot resolve current lf binary"),
+            "error should name the current lf, not the session's pinned binary: {error}"
+        );
+        assert!(session.latest_process.is_none());
     }
 
     #[tokio::test]

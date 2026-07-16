@@ -866,9 +866,9 @@ mod tests {
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child_session::{
-        BoundaryResult, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState,
-        ChildProcessGeneration, ChildRef, ObservationRecipient,
+        BinaryProvenance, BoundaryResult, ChildBodyOutcome, ChildCommand, ChildCommandEffect,
+        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective,
+        ChildLeaseState, ChildProcessGeneration, ChildRef, ObservationRecipient,
     };
     use crate::id::WaveId;
     use crate::interaction_review::{
@@ -1111,6 +1111,7 @@ mod tests {
                 started_at: now,
                 state: crate::child_session::ChildLeaseState::Active,
                 outcome: None,
+                provenance: None,
             }),
             execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
@@ -1154,6 +1155,253 @@ mod tests {
         store.update_task_session(&task).await.unwrap();
         let resumed = store.get_task_session(&task.id).await.unwrap().unwrap();
         assert_eq!((resumed.phase_cursor, resumed.phase_iteration), (2, 4));
+    }
+
+    #[tokio::test]
+    async fn task_session_provenance_round_trips_through_insert() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        let mut task = make_task_session(&wave, &project);
+        task.latest_process = Some(ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "lf-task-prov".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            started_at: OffsetDateTime::UNIX_EPOCH,
+            state: ChildLeaseState::Reserved,
+            outcome: None,
+            provenance: Some(BinaryProvenance {
+                version: "0.12.0".to_string(),
+                provenance: "release".to_string(),
+                source_identity: "release".to_string(),
+            }),
+        });
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
+        let provenance = persisted
+            .latest_process
+            .as_ref()
+            .and_then(|process| process.provenance.as_ref())
+            .expect("provenance survived insert");
+        assert_eq!(provenance.version, "0.12.0");
+        assert_eq!(provenance.provenance, "release");
+        assert_eq!(provenance.source_identity, "release");
+    }
+
+    #[tokio::test]
+    async fn task_session_provenance_survives_reserve_and_activate() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        // Create without a generation, then begin one and record provenance the
+        // way the launcher does. The reserve write must persist provenance.
+        let mut task = make_task_session(&wave, &project);
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("lf-task-prov".to_string());
+        if let Some(process) = task.latest_process.as_mut() {
+            process.provenance = Some(BinaryProvenance {
+                version: "0.12.1".to_string(),
+                provenance: "development".to_string(),
+                source_identity: "loopflow-deadbeef".to_string(),
+            });
+        }
+        let lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        let reserved = store.get_task_session(&task.id).await.unwrap().unwrap();
+        let provenance = reserved
+            .latest_process
+            .as_ref()
+            .and_then(|process| process.provenance.as_ref())
+            .expect("provenance survived reserve");
+        assert_eq!(provenance.version, "0.12.1");
+        assert_eq!(provenance.source_identity, "loopflow-deadbeef");
+
+        // Activation re-writes the generation through the lease update; the
+        // immutable provenance must survive unchanged.
+        if let Some(process) = &mut task.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        task.set_status(TaskSessionStatus::Running, "active");
+        store.activate_task_process(&task, &lease).await.unwrap();
+        let active = store.get_task_session(&task.id).await.unwrap().unwrap();
+        let provenance = active
+            .latest_process
+            .as_ref()
+            .and_then(|process| process.provenance.as_ref())
+            .expect("provenance survived activate");
+        assert_eq!(provenance.version, "0.12.1");
+        assert_eq!(provenance.provenance, "development");
+        assert_eq!(provenance.source_identity, "loopflow-deadbeef");
+    }
+
+    #[tokio::test]
+    async fn project_session_provenance_round_trips_through_insert() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let mut project = make_project_session(&wave);
+        project.latest_process = Some(ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "lf-project-prov".to_string(),
+            agent: "claude".to_string(),
+            provider: "claude".to_string(),
+            provider_session_id: None,
+            started_at: OffsetDateTime::UNIX_EPOCH,
+            state: ChildLeaseState::Reserved,
+            outcome: None,
+            provenance: Some(BinaryProvenance {
+                version: "0.12.0".to_string(),
+                provenance: "release".to_string(),
+                source_identity: "release".to_string(),
+            }),
+        });
+        store.create_project_session(&project).await.unwrap();
+        let persisted = store
+            .get_project_session(&project.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let provenance = persisted
+            .latest_process
+            .as_ref()
+            .and_then(|process| process.provenance.as_ref())
+            .expect("provenance survived insert");
+        assert_eq!(provenance.version, "0.12.0");
+        assert_eq!(provenance.provenance, "release");
+    }
+
+    #[tokio::test]
+    async fn project_session_provenance_survives_reserve_and_activate() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.status_reason = "ready".to_string();
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        project.begin_generation("lf-project-prov".to_string());
+        if let Some(process) = project.latest_process.as_mut() {
+            process.provenance = Some(BinaryProvenance {
+                version: "0.12.1".to_string(),
+                provenance: "development".to_string(),
+                source_identity: "loopflow-cafe".to_string(),
+            });
+        }
+        let lease = store
+            .reserve_project_process(&project, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        let reserved = store
+            .get_project_session(&project.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let provenance = reserved
+            .latest_process
+            .as_ref()
+            .and_then(|process| process.provenance.as_ref())
+            .expect("provenance survived reserve");
+        assert_eq!(provenance.version, "0.12.1");
+        assert_eq!(provenance.source_identity, "loopflow-cafe");
+
+        if let Some(process) = &mut project.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        project.set_status(ProjectSessionStatus::Running, "active");
+        store
+            .activate_project_process(&project, &lease)
+            .await
+            .unwrap();
+        let active = store
+            .get_project_session(&project.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let provenance = active
+            .latest_process
+            .as_ref()
+            .and_then(|process| process.provenance.as_ref())
+            .expect("provenance survived activate");
+        assert_eq!(provenance.version, "0.12.1");
+        assert_eq!(provenance.source_identity, "loopflow-cafe");
+    }
+
+    #[tokio::test]
+    async fn session_generation_without_provenance_round_trips_as_none() {
+        // A generation recorded before this field existed deserializes with
+        // provenance `None`, so old sessions remain readable without a backfill.
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        task.latest_process = Some(ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "lf-task-legacy".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            started_at: OffsetDateTime::UNIX_EPOCH,
+            state: ChildLeaseState::Reserved,
+            outcome: None,
+            provenance: None,
+        });
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
+        let process = persisted
+            .latest_process
+            .as_ref()
+            .expect("generation survived");
+        assert_eq!(process.generation, 1);
+        assert_eq!(process.tmux_name, "lf-task-legacy");
+        assert!(process.provenance.is_none());
     }
 
     #[tokio::test]

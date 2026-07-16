@@ -116,6 +116,20 @@ struct DTOFixtureTests {
         #expect(decoded == fact)
     }
 
+    @Test("claim citation fixture preserves Project/KR identity")
+    func claimCitationFixturePreservesReceipts() throws {
+        let data = try loadFixtureData("claim_citation.json")
+        let citation = try JSONDecoder().decode(ClaimCitation.self, from: data)
+
+        #expect(citation.claimId == "95159066-9098-4d0b-8903-01459dc7ec14#0")
+        #expect(citation.receipts.map(\.kind) == [.pm, .pr])
+        let decoded = try JSONDecoder().decode(
+            ClaimCitation.self,
+            from: JSONEncoder().encode(citation)
+        )
+        #expect(decoded == citation)
+    }
+
     @Test("child control activity preserves typed command evidence")
     func childControlActivityPreservesTypedCommandEvidence() throws {
         let data = try loadFixtureData("child_control_activity.json")

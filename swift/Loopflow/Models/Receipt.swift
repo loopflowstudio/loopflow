@@ -42,3 +42,19 @@ public struct MemoryFact: Codable, Sendable, Hashable {
         self.receipts = receipts
     }
 }
+
+/// One Project/KR claim binding from the replayable wave journal.
+public struct ClaimCitation: Codable, Sendable, Hashable {
+    public let claimId: String
+    public let receipts: [Receipt]
+
+    enum CodingKeys: String, CodingKey {
+        case claimId = "claim_id"
+        case receipts
+    }
+
+    public init(claimId: String, receipts: [Receipt]) {
+        self.claimId = claimId
+        self.receipts = receipts
+    }
+}

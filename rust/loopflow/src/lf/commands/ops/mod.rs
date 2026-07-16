@@ -572,6 +572,53 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 print_pm_show_result(&result);
             }
         }
+        PmCommand::Cite {
+            claim_id,
+            wave,
+            receipts,
+        } => {
+            let wave = ambient_wave(wave.as_deref())?
+                .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?;
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                let context = crate::lf::commands::chat::CliContext::detect().await;
+                let target = crate::lf::WaveTargetArgs {
+                    wave: Some(wave.clone()),
+                    parent: false,
+                };
+                let resolved = crate::lf::commands::chat::resolve_target(
+                    &target,
+                    context.store.as_ref(),
+                    context.repo.as_deref(),
+                    context.env_wave_id.as_deref(),
+                    context.env_channel.as_deref(),
+                )
+                .await?
+                .ok_or_else(|| anyhow!("wave '{wave}' cannot be resolved"))?;
+                let parsed = receipts
+                    .iter()
+                    .map(|token| crate::receipt::Receipt::parse(token, &resolved.name))
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|err| anyhow!("{err}"))?;
+                let endpoint = resolved.require_endpoint()?;
+                crate::lf::commands::chat::post_json(
+                    &endpoint,
+                    "/claim-cite",
+                    &serde_json::json!({
+                        "claim_id": claim_id,
+                        "receipts": parsed,
+                    }),
+                )
+                .await?;
+                Ok::<_, anyhow::Error>(())
+            })?;
+            println!(
+                "{}: cited claim {} with {} receipt(s)",
+                wave,
+                claim_id,
+                receipts.len()
+            );
+        }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
                 &repo_root,

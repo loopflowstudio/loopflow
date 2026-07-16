@@ -742,6 +742,27 @@ impl WaveRuntime {
         Ok(())
     }
 
+    /// Journal one `ClaimCited` event binding a Project/KR claim to its
+    /// evidence. The wave journal is the source of truth; the PM receipt
+    /// overlay is a rebuildable projection written alongside this by `lf pm
+    /// cite`. No live broadcast yet — claim citations have no streaming
+    /// consumer (report provenance is a later slice); the journal + overlay are
+    /// the durable record.
+    ///
+    /// # Errors
+    /// Journal I/O only.
+    pub fn append_claim_cited(
+        &self,
+        claim_id: &str,
+        receipts: Vec<Receipt>,
+    ) -> std::io::Result<()> {
+        self.inner().journal.append(|_| EventKind::ClaimCited {
+            claim_id: claim_id.to_string(),
+            receipts,
+        });
+        Ok(())
+    }
+
     /// Facts added since the last externalization, oldest to newest.
     pub fn memory_adds(&self) -> Vec<String> {
         self.inner().memory_adds.clone()

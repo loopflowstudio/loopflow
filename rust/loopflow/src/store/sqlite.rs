@@ -13,8 +13,9 @@ use crate::repository::RepoId;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    BusMessage, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderProfileSelection, RoutingState, RunEventRow, StoreError, StoreResult,
+    BusMessage, ClaimReceiptRow, CredentialState, PmSnapshotRow, ProviderAccount,
+    ProviderAccountId, ProviderProfileSelection, RoutingState, RunEventRow, StoreError,
+    StoreResult,
 };
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
@@ -375,6 +376,61 @@ impl SqliteStore {
         )
         .optional()
         .map_err(StoreError::from)
+    }
+
+    /// Upsert one claim's receipts into the `claim_receipts` overlay.
+    pub fn put_claim_receipts(
+        &self,
+        repo: &str,
+        wave: &str,
+        claim_id: &str,
+        receipts: &[crate::receipt::Receipt],
+    ) -> StoreResult<()> {
+        let payload = serde_json::to_string(receipts)?;
+        let at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO claim_receipts (repo, wave, claim_id, receipts, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(repo, wave, claim_id) DO UPDATE SET
+               receipts = excluded.receipts,
+               updated_at = excluded.updated_at",
+            params![repo, wave, claim_id, payload, at],
+        )?;
+        Ok(())
+    }
+
+    /// Every claim's receipts for one wave, ordered by claim id for stable merge.
+    pub fn claim_receipts(&self, repo: &str, wave: &str) -> StoreResult<Vec<ClaimReceiptRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT repo, wave, claim_id, receipts, updated_at
+             FROM claim_receipts WHERE repo = ?1 AND wave = ?2
+             ORDER BY claim_id",
+        )?;
+        let rows = stmt.query_map(params![repo, wave], |row| {
+            let payload: String = row.get(3)?;
+            let receipts: Vec<crate::receipt::Receipt> =
+                serde_json::from_str(&payload).map_err(|err| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        Box::new(err),
+                    )
+                })?;
+            Ok(ClaimReceiptRow {
+                repo: row.get(0)?,
+                wave: row.get(1)?,
+                claim_id: row.get(2)?,
+                receipts,
+                updated_at: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

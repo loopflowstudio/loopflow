@@ -251,6 +251,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "session_body_provenance",
         sql: include_str!("migrations/0.11.018_session_body_provenance.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 19,
+        },
+        name: "claim_receipts",
+        sql: include_str!("migrations/0.11.019_claim_receipts.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

@@ -356,7 +356,7 @@ struct RegistryQueryTests {
     func planDecodesProjects() async throws {
         let json = """
         {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[
-          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"]}
+          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","krs":[{"text":"Survives restart","holds":true,"receipts":[{"kind":"pr","reference":"loopflowstudio/loopflow#984@113452f","wave":"goals"}]}],"receipts":[],"initiative_ids":["init-1"]}
         ],"items":[]}
         """
         let query = RegistryQuery { args, cwd in
@@ -368,8 +368,11 @@ struct RegistryQueryTests {
         let plan = try await query.plan(wave: "goals", objective: "Ship it.", cwd: "/tmp/repo")
         #expect(plan.objective == "Ship it.")
         #expect(plan.projects[0].id == "runtime")
+        #expect(plan.projects[0].claimId == "project-1")
         #expect(plan.projects[0].definition == "Run reliably.")
         #expect(plan.projects[0].krs[0].proof == .holds)
+        #expect(plan.projects[0].krs[0].claimId == "project-1#0")
+        #expect(plan.projects[0].krs[0].receipts[0].kind == .pr)
     }
 
     @Test("Task handoff refreshes the Wave plan before launch")

@@ -80,6 +80,19 @@ pub struct PmSnapshotRow {
     pub payload: String,
 }
 
+/// One Project/KR claim's evidence receipts, the local overlay projection of
+/// `ClaimCited` journal events. Linear owns the claim text (in `pm_snapshots`);
+/// this side-table owns only the citation, keyed by `(repo, wave, claim_id)`.
+/// `receipts` is the parsed `Vec<Receipt>`. Rebuildable from the wave journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimReceiptRow {
+    pub repo: String,
+    pub wave: String,
+    pub claim_id: String,
+    pub receipts: Vec<crate::receipt::Receipt>,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("sqlite error: {0}")]
@@ -335,6 +348,33 @@ impl Store {
         wave: String,
     ) -> StoreResult<Option<PmSnapshotRow>> {
         run_sqlite(&self.sqlite, move |store| store.pm_snapshot(&repo, &wave)).await
+    }
+
+    /// Upsert one claim's receipts into the PM receipt overlay.
+    pub async fn put_claim_receipts(
+        &self,
+        repo: String,
+        wave: String,
+        claim_id: String,
+        receipts: Vec<crate::receipt::Receipt>,
+    ) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.put_claim_receipts(&repo, &wave, &claim_id, &receipts)
+        })
+        .await
+    }
+
+    /// Every claim's receipts for one wave — the overlay `lf pm show` merges
+    /// over the Linear-owned snapshot and `lf doctor` sweeps.
+    pub async fn claim_receipts(
+        &self,
+        repo: String,
+        wave: String,
+    ) -> StoreResult<Vec<ClaimReceiptRow>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_receipts(&repo, &wave)
+        })
+        .await
     }
 
     // The agent bus: publish is an INSERT, subscribe is a forward poll from an
@@ -3655,6 +3695,51 @@ mod tests {
                 .expect("read snapshot"),
             Some(snapshot)
         );
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn claim_receipt_overlay_survives_pm_snapshot_replacement() {
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
+        let store = open_store(&StorageConfig::sqlite(db_path.clone()))
+            .await
+            .expect("store should open");
+        let receipt = crate::receipt::Receipt::new(
+            crate::receipt::EvidenceKind::Pr,
+            "loopflowstudio/loopflow#984@113452f",
+            "product",
+        );
+        store
+            .put_claim_receipts(
+                "/repo".to_string(),
+                "product".to_string(),
+                "project-1#0".to_string(),
+                vec![receipt.clone()],
+            )
+            .await
+            .expect("write claim receipt");
+
+        for payload in ["{\"version\":1}", "{\"version\":2}"] {
+            store
+                .put_pm_snapshot(PmSnapshotRow {
+                    repo: "/repo".to_string(),
+                    wave: "product".to_string(),
+                    provider: "linear".to_string(),
+                    initiative: "initiative-1".to_string(),
+                    synced_at: 1,
+                    payload: payload.to_string(),
+                })
+                .await
+                .expect("replace snapshot");
+        }
+
+        let rows = store
+            .claim_receipts("/repo".to_string(), "product".to_string())
+            .await
+            .expect("read claim receipts");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].claim_id, "project-1#0");
+        assert_eq!(rows[0].receipts, vec![receipt]);
         let _ = std::fs::remove_file(db_path);
     }
 

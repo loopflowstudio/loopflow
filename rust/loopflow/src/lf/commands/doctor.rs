@@ -10,7 +10,7 @@
 //!
 //! Checks are pure functions of the rows, so they are tested without a store.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -645,6 +645,9 @@ pub struct ReceiptKnownIds {
     pub run_ids: HashSet<String>,
     pub trace_turn_ids: HashSet<String>,
     pub pm_ids: HashSet<String>,
+    /// Project ids plus `<project-id>#<ordinal>` KR claim ids in current PM
+    /// snapshots. A cited id absent here outlived its provider-owned claim.
+    pub pm_claim_ids: HashSet<String>,
     pub prs: Vec<PrIdentity>,
     pub unavailable: HashSet<EvidenceKind>,
     pub errors: Vec<String>,
@@ -660,10 +663,12 @@ impl ReceiptKnownIds {
     }
 }
 
-/// One memory fact paired with its claim wave, for the receipt sweep.
+/// One curated claim paired with its wave. `claim_id` is present for
+/// Project/KR claims and absent for free-form memory facts.
 #[derive(Debug, Clone)]
 pub struct ReceiptFact {
     pub wave: String,
+    pub claim_id: Option<String>,
     pub receipts: Vec<Receipt>,
 }
 
@@ -699,6 +704,13 @@ fn check_receipts(facts: &[ReceiptFact], known: &ReceiptKnownIds) -> Check {
     let mut total_receipts = 0;
 
     for fact in facts {
+        if let Some(claim_id) = &fact.claim_id {
+            if known.unavailable.contains(&EvidenceKind::Pm) {
+                inaccessible += 1;
+            } else if !known.pm_claim_ids.contains(claim_id) {
+                orphaned += 1;
+            }
+        }
         if fact.receipts.is_empty() {
             missing += 1;
             continue;
@@ -801,13 +813,29 @@ fn gather_receipt_audit(
     for wave in &waves {
         let repo_root = Path::new(wave.repo());
         let journal = journal_path(repo_root, wave.name());
+        let mut claim_receipts = BTreeMap::new();
+        match store.claim_receipts(wave.repo(), wave.name()) {
+            Ok(rows) => {
+                for row in rows {
+                    claim_receipts.insert(row.claim_id, row.receipts);
+                }
+            }
+            Err(err) => known.errors.push(format!(
+                "claim receipt overlay for wave '{}': {err}",
+                wave.name()
+            )),
+        }
         if journal.exists() {
             let journal_events = read_events(&journal);
             for fact in memory_facts(&journal_events) {
                 facts.push(ReceiptFact {
                     wave: wave.name().to_string(),
+                    claim_id: None,
                     receipts: fact.receipts,
                 });
+            }
+            for citation in crate::wave::journal::claim_citations(&journal_events) {
+                claim_receipts.insert(citation.claim_id, citation.receipts);
             }
             let fold = fold_thread(&journal_events);
             known
@@ -817,6 +845,15 @@ fn gather_receipt_audit(
                 .chat_turn_ids
                 .extend(fold.open.iter().map(|t| t.id.clone()));
         }
+        facts.extend(
+            claim_receipts
+                .into_iter()
+                .map(|(claim_id, receipts)| ReceiptFact {
+                    wave: wave.name().to_string(),
+                    claim_id: Some(claim_id),
+                    receipts,
+                }),
+        );
 
         match store.pm_snapshot(wave.repo(), wave.name()) {
             Ok(Some(snapshot)) => {
@@ -827,6 +864,18 @@ fn gather_receipt_audit(
                                 for entry in arr {
                                     if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
                                         known.pm_ids.insert(id.to_string());
+                                        if key == "projects" {
+                                            known.pm_claim_ids.insert(id.to_string());
+                                            if let Some(krs) =
+                                                entry.get("krs").and_then(|value| value.as_array())
+                                            {
+                                                for ordinal in 0..krs.len() {
+                                                    known
+                                                        .pm_claim_ids
+                                                        .insert(format!("{id}#{ordinal}"));
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1182,6 +1231,7 @@ mod tests {
     fn facts_with_resolving_receipts_are_ok() {
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![
                 receipt(EvidenceKind::ChatTurn, "turn-3", "ship"),
                 receipt(EvidenceKind::WorkerReport, "run-9", "ship"),
@@ -1197,6 +1247,7 @@ mod tests {
     fn facts_with_zero_receipts_warn_during_grace() {
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![],
         }];
         let check = check_receipts(&facts, &ReceiptKnownIds::default());
@@ -1208,6 +1259,7 @@ mod tests {
     fn orphaned_receipts_warn() {
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![receipt(EvidenceKind::ChatTurn, "turn-99", "ship")],
         }];
         let known = known(&["turn-3"], &[]);
@@ -1217,9 +1269,27 @@ mod tests {
     }
 
     #[test]
+    fn citation_whose_kr_no_longer_exists_is_orphaned() {
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            claim_id: Some("project-1#2".to_string()),
+            receipts: vec![receipt(EvidenceKind::ChatTurn, "turn-3", "ship")],
+        }];
+        let mut known = known(&["turn-3"], &[]);
+        known.pm_claim_ids.insert("project-1".to_string());
+        known.pm_claim_ids.insert("project-1#0".to_string());
+
+        let check = check_receipts(&facts, &known);
+
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
+    }
+
+    #[test]
     fn cross_wave_receipts_warn() {
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![receipt(EvidenceKind::ChatTurn, "turn-3", "product")],
         }];
         let known = known(&["turn-3"], &[]);
@@ -1243,6 +1313,7 @@ mod tests {
     fn pr_receipt_resolves_by_repo_and_number() {
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![receipt(
                 EvidenceKind::Pr,
                 "loopflow/loopflow#912@abc123",
@@ -1259,6 +1330,7 @@ mod tests {
         // A bare number scan would resolve this; matching repo + number rejects it.
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![receipt(EvidenceKind::Pr, "other/repo#912", "ship")],
         }];
         let known = known_pr("loopflow/loopflow", 912, &[]);
@@ -1271,6 +1343,7 @@ mod tests {
     fn pr_receipt_with_unknown_number_is_orphaned() {
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![receipt(EvidenceKind::Pr, "loopflow/loopflow#999", "ship")],
         }];
         let known = known_pr("loopflow/loopflow", 912, &[]);
@@ -1285,6 +1358,7 @@ mod tests {
         // reported and explained, never silently counted orphaned.
         let facts = vec![ReceiptFact {
             wave: "ship".to_string(),
+            claim_id: None,
             receipts: vec![receipt(EvidenceKind::Pr, "loopflow/loopflow#912", "ship")],
         }];
         let mut known = ReceiptKnownIds::default();

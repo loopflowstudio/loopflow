@@ -15,6 +15,11 @@ fact plus its evidence `receipts`, covering every `EvidenceKind`. Pinned in Rust
 (`memory_fact_fixture_round_trips_every_evidence_kind`) and Swift
 (`memoryFactFixturePreservesReceipts`).
 
+`claim_citation.json` is one journaled Project/KR claim binding. It pins the
+stable `<project-id>#<ordinal>` KR identity and its required receipt list in
+Rust (`claim_citation_fixture_round_trips_project_kr_identity`) and Swift
+(`claimCitationFixturePreservesReceipts`).
+
 `interactive_handoff_attach.json` is the store-direct `lf handoff attach --json`
 shape. It carries durable identity and structured presentation instructions;
 terminal bytes are deliberately absent. Rust and Swift both round-trip it.

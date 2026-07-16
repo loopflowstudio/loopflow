@@ -3510,12 +3510,15 @@ mod tests {
                 PmKr {
                     text: "Review resumes the same session".to_string(),
                     holds: true,
+                    receipts: None,
                 },
                 PmKr {
                     text: "Merge wakes the Wave".to_string(),
                     holds: false,
+                    receipts: None,
                 },
             ],
+            receipts: None,
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: None,
         };

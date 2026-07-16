@@ -264,6 +264,16 @@ pub enum EventKind {
         #[serde(default)]
         receipts: Vec<Receipt>,
     },
+    // -- provenance --
+    /// One curated claim (a Project/KR claim) bound to its evidence. The claim
+    /// id is the Linear project UUID, or `<project_id>#<ordinal>` for a KR
+    /// (KRs have no Linear id of their own; the ordinal is stable while KR order
+    /// is). Source of truth for the PM receipt overlay, which rebuilds from
+    /// these events the same way `memory_facts` rebuilds from `MemoryAdded`.
+    ClaimCited {
+        claim_id: String,
+        receipts: Vec<Receipt>,
+    },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
     /// it exists so restarts are visible in the forensic record.
@@ -590,6 +600,10 @@ impl Narrator {
             EventKind::MemoryAdded { fact, .. } => {
                 info(format!("memory added: {}", ellipsize(fact, 70)))
             }
+            EventKind::ClaimCited { claim_id, receipts } => info(format!(
+                "claim {claim_id} cited with {} receipt(s)",
+                receipts.len()
+            )),
             EventKind::ServerStarted { pid, endpoint } => {
                 info(format!("server started · pid {pid} · {endpoint}"))
             }
@@ -856,6 +870,34 @@ pub fn memory_facts(events: &[Event]) -> Vec<MemoryFact> {
     facts
 }
 
+/// One Project/KR claim bound to its evidence receipts. Wire type for the
+/// `claim_citations` projection: both fields required, no serde defaults. The
+/// `claim_id` is a Linear project UUID or `<project_id>#<ordinal>` (a KR).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClaimCitation {
+    pub claim_id: String,
+    pub receipts: Vec<Receipt>,
+}
+
+/// Every `ClaimCited` event in journal order, the projection the PM receipt
+/// overlay rebuilds from. A later event for the same `claim_id` supersedes the
+/// earlier — the overlay keeps only the last binding per claim, but the journal
+/// retains the full history (same discipline as the memory add-stream, except
+/// claims have no checkpoint-clear analog: a citation is durable until retracted
+/// through a future correction API).
+pub fn claim_citations(events: &[Event]) -> Vec<ClaimCitation> {
+    events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::ClaimCited { claim_id, receipts } => Some(ClaimCitation {
+                claim_id: claim_id.clone(),
+                receipts: receipts.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Materialize a historical `ChannelOpened` event during journal replay.
 fn legacy_channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
     let mut turn = ChatTurn::user(
@@ -1087,7 +1129,9 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::MemoryUpdated { .. } => {
                 memory_adds.clear();
             }
-            EventKind::RunObserved { .. } | EventKind::ServerStarted { .. } => {}
+            EventKind::ClaimCited { .. }
+            | EventKind::RunObserved { .. }
+            | EventKind::ServerStarted { .. } => {}
         }
     }
 
@@ -1176,6 +1220,51 @@ mod tests {
         let reencoded = serde_json::to_string(&fact).expect("serialize");
         let decoded: MemoryFact = serde_json::from_str(&reencoded).expect("re-decode");
         assert_eq!(fact, decoded);
+    }
+
+    #[test]
+    fn claim_citation_fixture_round_trips_project_kr_identity() {
+        let fixture = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/claim_citation.json"
+        ));
+        let citation: ClaimCitation =
+            serde_json::from_str(fixture).expect("decode claim citation fixture");
+        assert_eq!(citation.claim_id, "95159066-9098-4d0b-8903-01459dc7ec14#0");
+        assert_eq!(citation.receipts.len(), 2);
+        let encoded = serde_json::to_string(&citation).expect("serialize citation");
+        let decoded: ClaimCitation = serde_json::from_str(&encoded).expect("re-decode citation");
+        assert_eq!(citation, decoded);
+    }
+
+    #[test]
+    fn claim_citations_preserve_authored_history_in_journal_order() {
+        let events = vec![
+            Event {
+                v: FORMAT_VERSION,
+                seq: 1,
+                at: OffsetDateTime::UNIX_EPOCH,
+                kind: EventKind::ClaimCited {
+                    claim_id: "project-1#0".to_string(),
+                    receipts: vec![Receipt::new(EvidenceKind::Pm, "task-1", "product")],
+                },
+            },
+            Event {
+                v: FORMAT_VERSION,
+                seq: 2,
+                at: OffsetDateTime::UNIX_EPOCH,
+                kind: EventKind::ClaimCited {
+                    claim_id: "project-1#0".to_string(),
+                    receipts: vec![Receipt::new(EvidenceKind::Pr, "o/r#2", "product")],
+                },
+            },
+        ];
+
+        let citations = claim_citations(&events);
+
+        assert_eq!(citations.len(), 2);
+        assert_eq!(citations[0].receipts[0].reference, "task-1");
+        assert_eq!(citations[1].receipts[0].reference, "o/r#2");
     }
 
     #[test]

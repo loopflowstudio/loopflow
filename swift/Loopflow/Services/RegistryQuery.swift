@@ -174,11 +174,18 @@ public struct RegistryQuery: Sendable {
             projects: snapshot.projects.map { project in
                 WaveProject(
                     id: project.slug,
+                    claimId: project.id,
                     title: project.name,
                     definition: project.definition.isEmpty ? nil : project.definition,
-                    krs: project.krs.map {
-                        WaveKeyResult(text: $0.text, proof: $0.holds ? .holds : .open)
-                    }
+                    krs: project.krs.enumerated().map { ordinal, kr in
+                        WaveKeyResult(
+                            text: kr.text,
+                            claimId: "\(project.id)#\(ordinal)",
+                            proof: kr.holds ? .holds : .open,
+                            receipts: kr.receipts
+                        )
+                    },
+                    receipts: project.receipts
                 )
             }
         )
@@ -292,6 +299,7 @@ private struct PmProjectSnapshot: Decodable {
     let summary: String
     let definition: String
     let krs: [PmKrSnapshot]
+    let receipts: [Receipt]
     let initiativeIds: [String]
     // Stable ids of the Linear teams the Project belongs to. Optional: a snapshot
     // written before the field existed decodes to nil. Mirrors Rust
@@ -299,7 +307,7 @@ private struct PmProjectSnapshot: Decodable {
     let teamIds: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, summary, definition, krs
+        case id, slug, name, summary, definition, krs, receipts
         case initiativeIds = "initiative_ids"
         case teamIds = "team_ids"
     }
@@ -308,6 +316,7 @@ private struct PmProjectSnapshot: Decodable {
 private struct PmKrSnapshot: Decodable {
     let text: String
     let holds: Bool
+    let receipts: [Receipt]
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)

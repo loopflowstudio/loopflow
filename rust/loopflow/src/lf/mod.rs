@@ -1274,6 +1274,17 @@ pub enum PmCommand {
         #[arg(long = "no-sync")]
         no_sync: bool,
     },
+    /// Bind one Project or KR claim to the evidence that justifies it
+    Cite {
+        /// Linear Project id, or `<project-id>#<ordinal>` for a KR
+        claim_id: String,
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Evidence receipt (`kind:reference`); repeat for multiple records
+        #[arg(long = "receipt", required = true)]
+        receipts: Vec<String>,
+    },
     /// Show local PM status for linked waves
     Status {
         /// Wave name (all PM-enabled waves if omitted)
@@ -2916,6 +2927,38 @@ mod tests {
         assert!(no_sync);
 
         assert!(Cli::try_parse_from(["lf", "pm", "show", "--sync", "--no-sync"]).is_err());
+    }
+
+    #[test]
+    fn pm_cite_requires_evidence_and_preserves_repeated_receipts() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "pm",
+            "cite",
+            "project-1#0",
+            "--wave",
+            "product",
+            "--receipt",
+            "pm:task-1",
+            "--receipt",
+            "pr:loopflowstudio/loopflow#984@113452f",
+        ])
+        .expect("parse cite");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Cite {
+                    claim_id,
+                    wave,
+                    receipts,
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm cite command");
+        };
+        assert_eq!(claim_id, "project-1#0");
+        assert_eq!(wave.as_deref(), Some("product"));
+        assert_eq!(receipts.len(), 2);
+        assert!(Cli::try_parse_from(["lf", "pm", "cite", "project-1#0"]).is_err());
     }
 
     #[test]

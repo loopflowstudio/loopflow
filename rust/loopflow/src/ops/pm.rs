@@ -319,6 +319,7 @@ async fn pm_create_project_async(
             summary: seed.summary,
             definition: seed.definition,
             krs: seed.krs,
+            receipts: None,
             initiative_ids: vec![ctx.initiative],
             // The create result is transient — the next sync resolves the
             // authoritative teams from Linear.
@@ -1093,10 +1094,11 @@ pub(crate) async fn pm_show_async(
     let wave = resolve_wave(options.wave.as_deref())?;
     let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
     let snapshot = decode_snapshot(&wave, &row.payload)?;
-    let projects = match options.project.as_deref() {
+    let mut projects = match options.project.as_deref() {
         Some(slug) => vec![find_project(&snapshot.projects, &wave, slug)?.clone()],
         None => snapshot.projects,
     };
+    merge_claim_receipts(repo, &wave, &mut projects).await?;
     let slugs: BTreeSet<_> = projects
         .iter()
         .map(|project| project.slug.as_str())
@@ -1119,6 +1121,120 @@ pub(crate) async fn pm_show_async(
         projects,
         items,
     })
+}
+
+/// Whether a claim id resolves in the current cached PM snapshot. Project ids
+/// address Projects directly; `<project_id>#<ordinal>` addresses one KR.
+/// This is deliberately cache-only: citing evidence never performs a Linear
+/// request or mutates provider-owned claim text.
+pub(crate) async fn pm_claim_exists(repo: &Path, wave: &str, claim_id: &str) -> OpsResult<bool> {
+    let row = read_pm_snapshot(repo, wave).await?;
+    let snapshot = decode_snapshot(wave, &row.payload)?;
+    Ok(claim_exists(&snapshot.projects, claim_id))
+}
+
+/// Project the journaled citation into the local PM receipt overlay. The
+/// journal write happens first at the wave server; if this projection fails,
+/// a later `pm show` rebuilds it from the journal.
+pub(crate) async fn put_claim_receipts(
+    repo: &Path,
+    wave: &str,
+    claim_id: &str,
+    receipts: Vec<crate::receipt::Receipt>,
+) -> OpsResult<()> {
+    pm_store()
+        .await?
+        .put_claim_receipts(
+            pm_repo_key(repo),
+            wave.to_string(),
+            claim_id.to_string(),
+            receipts,
+        )
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to store claim receipts: {err}")))
+}
+
+fn claim_exists(projects: &[PmProject], claim_id: &str) -> bool {
+    if projects.iter().any(|project| project.id == claim_id) {
+        return true;
+    }
+    let Some((project_id, ordinal)) = claim_id.rsplit_once('#') else {
+        return false;
+    };
+    let Ok(ordinal) = ordinal.parse::<usize>() else {
+        return false;
+    };
+    projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .is_some_and(|project| ordinal < project.krs.len())
+}
+
+async fn merge_claim_receipts(
+    repo: &Path,
+    wave: &str,
+    projects: &mut [PmProject],
+) -> OpsResult<()> {
+    let repo_key = pm_repo_key(repo);
+    let store = pm_store().await?;
+    let rows = store
+        .claim_receipts(repo_key.clone(), wave.to_string())
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to read claim receipts: {err}")))?;
+    let mut by_claim: BTreeMap<String, Vec<crate::receipt::Receipt>> = rows
+        .into_iter()
+        .map(|row| (row.claim_id, row.receipts))
+        .collect();
+
+    // Replay is the repair path: deleting the rebuildable overlay, rotating a
+    // Task branch, or restarting the server cannot erase an authored citation.
+    // A stable read performs no write; only a missing or stale projection is
+    // repaired.
+    let journal = crate::wave::journal::journal_path(Path::new(&repo_key), wave);
+    if journal.exists() {
+        let events = crate::wave::journal::read_events(&journal);
+        let mut latest = BTreeMap::new();
+        for citation in crate::wave::journal::claim_citations(&events) {
+            latest.insert(citation.claim_id, citation.receipts);
+        }
+        for (claim_id, receipts) in latest {
+            if by_claim.get(&claim_id) != Some(&receipts) {
+                store
+                    .put_claim_receipts(
+                        repo_key.clone(),
+                        wave.to_string(),
+                        claim_id.clone(),
+                        receipts.clone(),
+                    )
+                    .await
+                    .map_err(|err| {
+                        OpsError::Message(format!("failed to rebuild claim receipt overlay: {err}"))
+                    })?;
+                by_claim.insert(claim_id, receipts);
+            }
+        }
+    }
+
+    apply_claim_receipts(projects, &by_claim);
+    Ok(())
+}
+
+fn apply_claim_receipts(
+    projects: &mut [PmProject],
+    by_claim: &BTreeMap<String, Vec<crate::receipt::Receipt>>,
+) {
+    for project in projects {
+        project.receipts = Some(
+            by_claim
+                .get(project.id.as_str())
+                .cloned()
+                .unwrap_or_default(),
+        );
+        for (ordinal, kr) in project.krs.iter_mut().enumerate() {
+            let claim_id = format!("{}#{ordinal}", project.id);
+            kr.receipts = Some(by_claim.get(claim_id.as_str()).cloned().unwrap_or_default());
+        }
+    }
 }
 
 // ── update ──────────────────────────────────────────────────────────
@@ -1998,6 +2114,7 @@ async fn pm_project_write_async(
             PmKr {
                 text: text.trim().to_string(),
                 holds,
+                receipts: None,
             }
         })
         .filter(|kr| !kr.text.is_empty())
@@ -2758,6 +2875,7 @@ mod tests {
             summary: String::new(),
             definition: String::new(),
             krs: Vec::new(),
+            receipts: None,
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: None,
         };
@@ -2766,6 +2884,84 @@ mod tests {
         let error = ensure_unique_project_slugs(&projects, "product")
             .expect_err("duplicate slug must fail");
         assert!(error.to_string().contains("both derive slug `wave-chat`"));
+    }
+
+    #[test]
+    fn project_and_kr_claim_ids_resolve_without_accepting_dangling_ordinals() {
+        let projects = vec![PmProject {
+            id: "project-1".to_string(),
+            slug: "wave-chat".to_string(),
+            name: "Wave Chat".to_string(),
+            summary: String::new(),
+            definition: String::new(),
+            krs: vec![PmKr {
+                text: "Replies survive restarts".to_string(),
+                holds: false,
+                receipts: None,
+            }],
+            receipts: None,
+            initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: None,
+        }];
+
+        assert!(claim_exists(&projects, "project-1"));
+        assert!(claim_exists(&projects, "project-1#0"));
+        assert!(!claim_exists(&projects, "project-1#1"));
+        assert!(!claim_exists(&projects, "missing-project"));
+        assert!(!claim_exists(&projects, "project-1#not-an-index"));
+    }
+
+    #[test]
+    fn claim_overlay_materializes_explicit_empty_and_cited_receipt_lists() {
+        let mut projects = vec![PmProject {
+            id: "project-1".to_string(),
+            slug: "wave-chat".to_string(),
+            name: "Wave Chat".to_string(),
+            summary: String::new(),
+            definition: String::new(),
+            krs: vec![PmKr {
+                text: "Replies survive restarts".to_string(),
+                holds: false,
+                receipts: None,
+            }],
+            receipts: None,
+            initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: None,
+        }];
+        let receipt = crate::receipt::Receipt::new(
+            crate::receipt::EvidenceKind::Pr,
+            "loopflowstudio/loopflow#984@113452f",
+            "product",
+        );
+        let rows = BTreeMap::from([("project-1#0".to_string(), vec![receipt.clone()])]);
+
+        apply_claim_receipts(&mut projects, &rows);
+
+        assert_eq!(projects[0].receipts, Some(Vec::new()));
+        assert_eq!(projects[0].krs[0].receipts, Some(vec![receipt]));
+    }
+
+    #[test]
+    fn provider_snapshot_without_receipt_fields_remains_readable() {
+        let snapshot = decode_snapshot(
+            "product",
+            r#"{
+                "projects": [{
+                    "id": "project-1",
+                    "slug": "wave-chat",
+                    "name": "Wave Chat",
+                    "summary": "",
+                    "definition": "A measured bet.",
+                    "krs": [{"text": "Replies survive", "holds": false}],
+                    "initiative_ids": ["initiative-1"],
+                    "team_ids": null
+                }],
+                "items": []
+            }"#,
+        )
+        .expect("decode pre-overlay snapshot");
+        assert_eq!(snapshot.projects[0].receipts, None);
+        assert_eq!(snapshot.projects[0].krs[0].receipts, None);
     }
 
     #[test]
@@ -2785,7 +2981,9 @@ mod tests {
                 krs: vec![PmKr {
                     text: "Replies survive restarts.".to_string(),
                     holds: true,
+                    receipts: Some(Vec::new()),
                 }],
+                receipts: Some(Vec::new()),
                 initiative_ids: vec!["initiative-1".to_string()],
                 team_ids: Some(vec!["team-prd".to_string()]),
             }],
@@ -2795,6 +2993,11 @@ mod tests {
         let value = serde_json::to_value(result).expect("serialize PM show result");
         assert_eq!(value["synced_at"], 42);
         assert_eq!(value["projects"][0]["team_ids"][0], "team-prd");
+        assert_eq!(value["projects"][0]["receipts"], serde_json::json!([]));
+        assert_eq!(
+            value["projects"][0]["krs"][0]["receipts"],
+            serde_json::json!([])
+        );
         assert_eq!(
             value["projects"][0]["definition"],
             "Conversation stays in flow."

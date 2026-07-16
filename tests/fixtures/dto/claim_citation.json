@@ -1,0 +1,7 @@
+{
+  "claim_id": "95159066-9098-4d0b-8903-01459dc7ec14#0",
+  "receipts": [
+    { "kind": "pm", "reference": "9c0032b4-585c-4b7c-b31f-4937effa3d6d", "wave": "product" },
+    { "kind": "pr", "reference": "loopflowstudio/loopflow#984@113452f", "wave": "product" }
+  ]
+}

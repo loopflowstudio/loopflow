@@ -1128,6 +1128,7 @@ impl ProjectNode {
             summary: self.description.unwrap_or_default(),
             definition,
             krs,
+            receipts: None,
             initiative_ids: self
                 .initiatives
                 .nodes
@@ -1560,6 +1561,7 @@ mod tests {
                 &[PmKr {
                     text: "Replies stream".to_string(),
                     holds: false,
+                    receipts: None,
                 }],
             )
             .await
@@ -1600,6 +1602,7 @@ mod tests {
                 &[PmKr {
                     text: "Replies survive every restart boundary".to_string(),
                     holds: false,
+                    receipts: None,
                 }],
             )
             .await

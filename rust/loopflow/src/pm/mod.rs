@@ -67,6 +67,9 @@ impl FromStr for PmProviderKind {
 pub struct PmKr {
     pub text: String,
     pub holds: bool,
+    /// Local evidence overlay. `None` in a provider-owned snapshot; PM reads
+    /// materialize it as `Some`, including an empty list for an uncited KR.
+    pub receipts: Option<Vec<crate::receipt::Receipt>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +80,9 @@ pub struct PmProject {
     pub summary: String,
     pub definition: String,
     pub krs: Vec<PmKr>,
+    /// Local evidence overlay. Linear never owns or rewrites this field.
+    /// `None` is a provider snapshot; PM reads materialize it as `Some`.
+    pub receipts: Option<Vec<crate::receipt::Receipt>>,
     pub initiative_ids: Vec<String>,
     /// Stable ids of the Linear teams this Project belongs to. `None` when the
     /// read did not resolve teams (a snapshot written before the field existed);
@@ -252,6 +258,7 @@ pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
                         current_kr = Some(PmKr {
                             text: text.trim().to_string(),
                             holds,
+                            receipts: None,
                         });
                     }
                 } else if !trimmed.is_empty() {
@@ -447,10 +454,12 @@ mod tests {
             PmKr {
                 text: "One proof holds".to_string(),
                 holds: true,
+                receipts: None,
             },
             PmKr {
                 text: "Another remains".to_string(),
                 holds: false,
+                receipts: None,
             },
         ];
         let rendered = render_project_content("A measured bet.", &krs);
@@ -467,6 +476,7 @@ mod tests {
                 vec![PmKr {
                     text: "One proof holds across wrapped lines.".to_string(),
                     holds: false,
+                    receipts: None,
                 }]
             )
         );

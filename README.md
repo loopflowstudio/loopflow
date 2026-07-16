@@ -661,6 +661,7 @@ lf pm show --wave designer                # read; refresh when the snapshot is s
 lf pm show --wave designer --no-sync      # cache-only read for agents and apps
 lf pm show --wave designer --sync         # force a Linear refresh first
 lf pm show --wave designer --project ui   # filter to one Linear Project
+lf pm cite PROJECT_ID#0 --wave designer --receipt pr:owner/repo#42@HEAD_SHA
 lf pm project update --wave designer --project ui --definition "..." --kr "..."
 lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
@@ -692,8 +693,11 @@ Projects view; Loopflow strips that presentation prefix and keeps the concise
 canonical slug (`Product — Loopflow API` remains `project:loopflow-api`). `lf pm show` serves snapshots younger than one hour, tries
 a five-second refresh for older snapshots, and refuses to silently serve one
 older than a week when Linear is unreachable. Use `--no-sync` for deterministic
-cache-only reads. Issue descriptions and comments are Markdown, which Linear
-renders natively.
+cache-only reads. `lf pm cite` binds a Project id, or a KR id written as
+`<project-id>#<ordinal>`, to one or more evidence receipts without writing to
+Linear. The running Wave journals the citation; `lf pm show --json` overlays it
+onto the cached Project/KR and `lf doctor` audits it. Issue descriptions and
+comments are Markdown, which Linear renders natively.
 
 Use the install script or cargo to install `lf`.
 

@@ -96,6 +96,10 @@
 //!   content's first non-empty line. The server is the sole writer of the
 //!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`;
 //!   add-only facts journal `MemoryAdded` and broadcast `memory-add`.
+//! - `POST /claim-cite {claim_id, receipts}` → `{claim_id}`. Journals one
+//!   `ClaimCited` event binding a Project/KR claim to its evidence. The journal
+//!   is the source of truth; `lf pm cite` writes the PM receipt overlay
+//!   alongside. No live broadcast — citations have no streaming consumer yet.
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
@@ -327,6 +331,21 @@ struct PostMemoryResponse {
     summary: String,
 }
 
+/// `POST /claim-cite` request body. `claim_id` is a Linear project UUID or
+/// `<project_id>#<ordinal>` (a KR); `receipts` are the parsed evidence bindings,
+/// always sent as a list (no serde default).
+#[derive(Debug, Deserialize)]
+struct PostClaimCite {
+    claim_id: String,
+    receipts: Vec<Receipt>,
+}
+
+/// `POST /claim-cite` response: the claim id that was journaled.
+#[derive(Debug, Serialize)]
+struct PostClaimCiteResponse {
+    claim_id: String,
+}
+
 /// `POST /messages` response. `turn` is the appended user turn; null for a
 /// bare interrupt, which appends nothing. `state` is the loop-state name at
 /// acceptance time.
@@ -382,6 +401,7 @@ pub fn router(
         .route("/observations", post(observations_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/memory/log", get(memory_log_handler))
+        .route("/claim-cite", post(claim_cite_handler))
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
@@ -606,6 +626,67 @@ async fn memory_write_handler(
         Err(err) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("memory write failed: {err}"),
+        )),
+    }
+}
+
+async fn claim_cite_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<PostClaimCite>,
+) -> Result<Json<PostClaimCiteResponse>, (StatusCode, String)> {
+    let claim_id = body.claim_id.trim();
+    if claim_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "claim_id is required".to_string()));
+    }
+    if body.receipts.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "at least one receipt is required".to_string(),
+        ));
+    }
+    if body
+        .receipts
+        .iter()
+        .any(|receipt| receipt.wave != state.runtime.name())
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("every receipt must name wave '{}'", state.runtime.name()),
+        ));
+    }
+    let exists =
+        crate::ops::pm::pm_claim_exists(state.runtime.repo_root(), state.runtime.name(), claim_id)
+            .await
+            .map_err(|err| (StatusCode::SERVICE_UNAVAILABLE, err.to_string()))?;
+    if !exists {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!(
+                "claim '{claim_id}' is not in wave '{}' PM snapshot",
+                state.runtime.name()
+            ),
+        ));
+    }
+    match state
+        .runtime
+        .append_claim_cited(claim_id, body.receipts.clone())
+    {
+        Ok(()) => {
+            crate::ops::pm::put_claim_receipts(
+                state.runtime.repo_root(),
+                state.runtime.name(),
+                claim_id,
+                body.receipts,
+            )
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+            Ok(Json(PostClaimCiteResponse {
+                claim_id: claim_id.to_string(),
+            }))
+        }
+        Err(err) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("claim cite failed: {err}"),
         )),
     }
 }

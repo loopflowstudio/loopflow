@@ -1,5 +1,5 @@
 - refresh-plan
 - implement
 - gate
-- op: pr open
+- op: pr publish
 - op: pr land

@@ -160,7 +160,7 @@ Start dependent work without sharing the parent's worktree:
 
 ```bash
 lf task run INF-124 --stack-on INF-123
-lf pr open   # targets INF-123's active branch
+lf pr publish   # targets INF-123's active branch
 ```
 
 The parent Task must already have an open PR. After it merges, `lf rebase` or
@@ -303,7 +303,7 @@ Side-channel utilities — wrappers around git, PR, release, and wave state.
 | `init` | Set up loopflow in this repo |
 | `commit` | Commit with generated message |
 | `rebase` | Rebase onto main |
-| `pr` | Generate PR title/body and call `lf pr open --title --body` |
+| `pr` | Generate PR title/body and call `lf pr publish --title --body` |
 | `land` | Land the PR and prune its merged worker worktree |
 | `lint` | Run linter, fix issues |
 | `update-wave` | Create, update, or delete wave state |
@@ -341,7 +341,7 @@ Flows can include mechanical ops items directly:
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
 | `deploy` | gate → op: pr land --create-pr |
-| `ship` | refresh-plan → implement → gate → op: pr open → op: pr land |
+| `ship` | refresh-plan → implement → gate → op: pr publish → op: pr land |
 | `incident` | debug → 5whys → code → deploy |
 
 ### Govern flows (`govern/`)

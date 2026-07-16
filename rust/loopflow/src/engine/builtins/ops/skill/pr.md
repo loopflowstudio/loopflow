@@ -1,6 +1,6 @@
 ---
 requires: code on branch
-produces: opened/updated PR
+produces: published/updated PR
 ---
 Generate a PR title/body, then call the mechanical ops command.
 
@@ -25,7 +25,10 @@ Write reviewer-friendly PR copy with agent judgment. Use ops only for execution.
      - **Key decisions** — non-obvious choices and why.
      - **Not included** — intentional omissions, if any.
 
-3. Open or update the PR with explicit fields.
+3. Publish or refresh the PR with explicit fields. This pushes and creates or
+   updates the PR, then prints its state and URL — it opens no browser.
    ```bash
-   lf pr open --title "<title>" --body "<body>"
+   lf pr publish --title "<title>" --body "<body>"
    ```
+   `lf pr open` does the same publish and then opens the PR for review; use it
+   only when a human explicitly asked to see the PR.

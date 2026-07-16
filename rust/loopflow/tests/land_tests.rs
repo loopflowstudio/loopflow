@@ -7,7 +7,7 @@ use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
 use loopflow::task::{AfterMerge, PrPhase};
 use loopflow_test_support::TestRepo;
-use support::{register_task, EnvGuard};
+use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
@@ -361,6 +361,91 @@ fn land_uses_cached_pr_copy_when_available() {
     let log = fs::read_to_string(log_path).expect("read gh log");
     assert!(log.contains("--title cached title"));
     assert!(log.contains("--body cached body"));
+}
+
+#[test]
+fn submit_and_land_make_no_presentation_attempt() {
+    let marker_dir = tempfile::TempDir::new().expect("marker dir");
+    let marker = marker_dir.path().join("present.log");
+    let open_script = counting_open_script(&marker);
+
+    // submit prepares the PR for a human to merge — and presents nothing.
+    let submit_repo = TestRepo::new();
+    submit_repo.create_branch("feature");
+    submit_repo.create_file("feature.txt", "feature");
+    submit_repo.stage_all();
+    submit_repo.commit("feature work");
+    push_branch(&submit_repo, "feature");
+    let submit_log = submit_repo.path().join("gh.log");
+    let submit_script = gh_land_script(submit_log.to_string_lossy().as_ref());
+    {
+        let _env = EnvGuard::new(&[
+            ("gh", submit_script.as_str()),
+            ("open", open_script.as_str()),
+            ("xdg-open", open_script.as_str()),
+        ]);
+        submit(
+            submit_repo.path(),
+            &LandOptions {
+                strict: true,
+                local: false,
+                create_pr: true,
+                complete: false,
+                next_slug: None,
+                worktree: None,
+                commit_message: None,
+                pr_title: Some("test title".to_string()),
+                pr_body: Some("test body".to_string()),
+                agent: None,
+            },
+            &NullProgress,
+        )
+        .expect("submit");
+    }
+    assert_eq!(
+        presentation_attempts(&marker),
+        0,
+        "submit must open no review surface"
+    );
+
+    // land arms auto-merge and walks away — also presenting nothing.
+    let land_repo = TestRepo::new();
+    land_repo.create_branch("feature");
+    land_repo.create_file("feature.txt", "feature");
+    land_repo.stage_all();
+    land_repo.commit("feature work");
+    push_branch(&land_repo, "feature");
+    let land_log = land_repo.path().join("gh.log");
+    let land_script = gh_land_script(land_log.to_string_lossy().as_ref());
+    {
+        let _env = EnvGuard::new(&[
+            ("gh", land_script.as_str()),
+            ("open", open_script.as_str()),
+            ("xdg-open", open_script.as_str()),
+        ]);
+        land(
+            land_repo.path(),
+            &LandOptions {
+                strict: true,
+                local: false,
+                create_pr: true,
+                complete: false,
+                next_slug: None,
+                worktree: None,
+                commit_message: None,
+                pr_title: Some("test title".to_string()),
+                pr_body: Some("test body".to_string()),
+                agent: None,
+            },
+            &NullProgress,
+        )
+        .expect("land");
+    }
+    assert_eq!(
+        presentation_attempts(&marker),
+        0,
+        "land must open no review surface"
+    );
 }
 
 #[test]

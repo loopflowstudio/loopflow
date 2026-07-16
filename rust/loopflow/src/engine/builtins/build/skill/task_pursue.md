@@ -33,7 +33,9 @@ selection. Follow the repo style guide.
   required Project Session resolves the routine choice or explicitly escalates
   it to the Wave. Do not invent a provider-specific approval path or start
   unrelated work while it is pending.
-- Use `lf pr open` when the branch has a reviewable PR-shaped change.
+- Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
+  pushes and creates or refreshes the PR without opening a browser. Reach for
+  `lf pr open` only when a human explicitly asked to see the PR for review.
 - A merged PR settles that PR. Use `lf pr land -c` only when that merge
   completes the Task; use bare `lf pr land --next <slug>` when another serial
   PR follows. Use `lf task complete <issue> --summary "..."` for clean

@@ -89,6 +89,18 @@ struct LocalWaveAgentLauncherTests {
         ])
     }
 
+    @Test("PR review delegates to lf pr open rather than opening a URL itself")
+    func pullRequestReviewDelegatesToCLI() {
+        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
+        let command = LocalWaveAgentLauncher.pullRequestReviewCommand(lfPath: lf)
+
+        // The one review-presentation action shells `lf pr open` — the single
+        // presentation boundary — and never constructs a github.com URL to open.
+        #expect(command == [lf, "pr", "open"])
+        #expect(!command.contains { $0.contains("github.com") })
+        #expect(!command.contains { $0.hasPrefix("http") })
+    }
+
     @Test("Task start uses the exact CLI receipt as workspace identity")
     func taskStartReceiptDecodes() throws {
         let receipt = try LocalWaveAgentLauncher.taskStartReceipt("""

@@ -3,10 +3,12 @@ mod support;
 use std::process::Command;
 
 use loopflow::ops::task::task_status;
-use loopflow::ops::{create_or_update_pr, current_pr, NullProgress, OpsError, PrOptions};
+use loopflow::ops::{
+    create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
+};
 use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication, TaskSessionStatus};
 use loopflow_test_support::TestRepo;
-use support::{register_task, EnvGuard};
+use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
     let diff = pr_diff.unwrap_or("");
@@ -99,6 +101,69 @@ fn pr_create_calls_gh() {
 
     assert!(result.created);
     assert_eq!(result.url, "https://example.com/pr/1");
+}
+
+#[test]
+fn publish_makes_no_presentation_attempt() {
+    let gh_script = write_gh_script("[]", None);
+    let marker_dir = tempfile::TempDir::new().expect("marker dir");
+    let marker = marker_dir.path().join("present.log");
+    let open_script = counting_open_script(&marker);
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", gh_script.as_str()),
+            ("open", open_script.as_str()),
+            ("xdg-open", open_script.as_str()),
+            ("claude", claude_script()),
+        ],
+        Some(home.path()),
+    );
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    push_branch(&repo, "feature");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("test title".to_string()),
+            body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("pr");
+
+    assert!(result.created);
+    assert_eq!(
+        presentation_attempts(&marker),
+        0,
+        "publication must not open any review surface"
+    );
+}
+
+#[test]
+fn present_pr_review_opens_the_pr_once() {
+    let marker_dir = tempfile::TempDir::new().expect("marker dir");
+    let marker = marker_dir.path().join("present.log");
+    let open_script = counting_open_script(&marker);
+    let _env = EnvGuard::new(&[
+        ("open", open_script.as_str()),
+        ("xdg-open", open_script.as_str()),
+    ]);
+
+    present_pr_review("https://example.com/pr/1").expect("present");
+
+    assert_eq!(
+        presentation_attempts(&marker),
+        1,
+        "pr open must present exactly once once a PR URL exists"
+    );
+    let log = std::fs::read_to_string(&marker).expect("marker");
+    assert!(
+        log.contains("https://example.com/pr/1"),
+        "the presented URL is the published PR URL: {log}"
+    );
 }
 
 #[test]

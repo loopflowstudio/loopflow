@@ -320,6 +320,23 @@ pub fn register_task(
     RegisteredTask { store, session, pr }
 }
 
+/// A fake `open` / `xdg-open` that records each invocation to `marker`, so a
+/// test can count presentation attempts through the recorded boundary. Register
+/// it under both `open` and `xdg-open` so the platform opener records on either
+/// OS.
+#[allow(dead_code)] // Shared helper compiled into multiple test crates.
+pub fn counting_open_script(marker: &Path) -> String {
+    format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", marker.display())
+}
+
+/// Count recorded presentation attempts written by `counting_open_script`.
+#[allow(dead_code)] // Shared helper compiled into multiple test crates.
+pub fn presentation_attempts(marker: &Path) -> usize {
+    std::fs::read_to_string(marker)
+        .map(|log| log.lines().filter(|line| !line.trim().is_empty()).count())
+        .unwrap_or(0)
+}
+
 fn write_executable(dir: &Path, name: &str, content: &str) {
     let path = dir.join(name);
     std::fs::write(&path, content).expect("write script");

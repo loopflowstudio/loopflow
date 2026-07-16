@@ -133,7 +133,6 @@ pub fn create_or_update_pr(
         if pr.is_draft {
             mark_pr_ready(repo, pr.number)?;
         }
-        open_url(&pr.url);
         let info = pr_info(&branch, pr);
         (
             PrResult {
@@ -152,7 +151,6 @@ pub fn create_or_update_pr(
                 mark_pr_ready(repo, pr.number)?;
             }
         }
-        open_url(&url);
         let info = match visible {
             Some(pr) => Some(pr_info(&branch, pr)),
             None => pr_number_from_url(&url).map(|number| PrInfo {
@@ -655,10 +653,6 @@ fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
         }
     }
     Ok(base_branch.to_string())
-}
-
-fn open_url(url: &str) {
-    crate::engine::platform::open_url(url);
 }
 
 #[derive(Debug, Deserialize)]

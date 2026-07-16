@@ -2437,6 +2437,53 @@ pub(crate) async fn reconcile_task_pr(
     reconcile_task_pr_with_authority(store, session, None).await
 }
 
+/// Status for a Task whose PR is open, decided after a body turn completed.
+///
+/// Only the runner may call this: it is the sole caller that knows whether the
+/// turn that just ran pushed anything. A passive reconcile has no such evidence
+/// and leaves an open PR `Waiting`, so the `ci-fix` wake stays armed.
+///
+/// `head_advanced` is true when the PR head moved during the iteration — the
+/// body pushed a fix, so the Task waits for CI to resolve even if the reading is
+/// currently `Failing`. A failing head the body did *not* move is a repair that
+/// did not happen: block rather than report false progress. `github_degraded`
+/// carries `Observation::Degraded`'s reason and dominates — a turn that ran
+/// blind to GitHub cannot be said to have repaired anything.
+pub(crate) fn decide_open_pr_status(
+    pr: &TaskPr,
+    github_degraded: Option<&str>,
+    head_advanced: bool,
+) -> (TaskSessionStatus, String) {
+    let number = pr
+        .github()
+        .expect("open Task PR requires a GitHub receipt")
+        .number;
+    if let Some(reason) = github_degraded {
+        return (
+            TaskSessionStatus::Blocked,
+            format!(
+                "ci-fix blocked by github-observation: {reason}. Resume when GitHub recovers; pull request #{number} stays attached."
+            ),
+        );
+    }
+    let failing = pr
+        .ci_observation
+        .as_ref()
+        .is_some_and(|observation| observation.state == CiState::Failing);
+    if failing && !head_advanced {
+        return (
+            TaskSessionStatus::Blocked,
+            format!(
+                "CI failing on pull request #{number}; the Task body did not repair the head. Needs a new directive or human review; pull request #{number} stays attached."
+            ),
+        );
+    }
+    (
+        TaskSessionStatus::Waiting,
+        format!("pull request #{number} is open for review"),
+    )
+}
+
 /// Wake a Task sleeping on an open PR into a `ci-fix` turn. Thin re-export of the
 /// shared child-launch path so supervisors (the project loop) can trigger the
 /// wake without reaching into `ops::child`. Gated by `ci_fix_restart_bar`; a
@@ -4658,14 +4705,14 @@ mod tests {
 
     use super::{
         _defer_task_interactions, cached_github_observation, changes_snapshot,
-        count_recovery_attempts, derive_workspace_slug, diff_snapshot, ensure_working_pr,
-        ensure_working_pr_with_authority, file_snapshot, next_pr_slug, parse_pr_slug,
-        parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
-        recover_stalled_task_body, recover_stranded_task_body, refuse_dirty_between_prs,
-        refuse_if_canonical_ahead, require_task_pr_range_nonempty_with_authority,
-        resolve_task_flow, resolve_upstream_base, succession_workspace_slug,
-        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        count_recovery_attempts, decide_open_pr_status, derive_workspace_slug, diff_snapshot,
+        ensure_working_pr, ensure_working_pr_with_authority, file_snapshot, next_pr_slug,
+        parse_pr_slug, parse_workspace_slug, project_context, reconcile_process_liveness,
+        reconcile_task_pr, recover_stalled_task_body, recover_stranded_task_body,
+        refuse_dirty_between_prs, refuse_if_canonical_ahead,
+        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
+        succession_workspace_slug, task_recovery_adoption, verify_task_pr_range_with_authority,
+        RotateOptions, TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -4681,9 +4728,9 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
-        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession,
-        TaskSessionId, TaskSessionStatus,
+        AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
+        GithubPr, Observation, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
+        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
     use loopflow_test_support::TestRepo;
@@ -7855,5 +7902,117 @@ mod tests {
                 .any(|review| review.id == review_id),
             "review row must survive repair"
         );
+    }
+
+    /// Build an open Task PR with a GitHub receipt and an optional CI reading
+    /// for `head_sha`, the minimal shape `decide_open_pr_status` reads.
+    fn open_pr_with_ci(number: u32, head_sha: &str, state: Option<CiState>) -> TaskPr {
+        let now = OffsetDateTime::now_utc();
+        TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "w2-231".to_string(),
+            branch: "feature".to_string(),
+            base_commit: "base".to_string(),
+            parent_pr_id: None,
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number,
+                    url: format!("https://github.com/loopflow/loopflow/pull/{number}"),
+                    head_sha: Some(head_sha.to_string()),
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            github_observation: None,
+            ci_observation: state.map(|state| CiObservation {
+                head_sha: head_sha.to_string(),
+                state,
+                failing_checks: if state == CiState::Failing {
+                    vec![CiCheck {
+                        name: "build".to_string(),
+                        url: Some("https://ci/build".to_string()),
+                    }]
+                } else {
+                    Vec::new()
+                },
+                observed_at: now,
+                woken_failure_set: None,
+            }),
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn decide_open_pr_status_blocks_on_degraded_github_observation() {
+        // A turn that ran blind to GitHub cannot be said to have repaired the
+        // head: block on the named capability with the PR still attached.
+        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
+        let (status, reason) =
+            decide_open_pr_status(&pr, Some("GitHub API rate limit exceeded"), false);
+        assert_eq!(status, TaskSessionStatus::Blocked);
+        assert!(reason.contains("github-observation"), "reason: {reason}");
+        assert!(reason.contains("rate limit"), "reason: {reason}");
+        assert!(reason.contains("#42 stays attached"), "reason: {reason}");
+    }
+
+    #[test]
+    fn decide_open_pr_status_blocks_on_no_change_failing_ci() {
+        // The body completed but the head did not advance and CI is still
+        // Failing — a no-change report, not a healthy PR observation.
+        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
+        let (status, reason) = decide_open_pr_status(&pr, None, false);
+        assert_eq!(status, TaskSessionStatus::Blocked);
+        assert!(reason.contains("did not repair"), "reason: {reason}");
+        assert!(reason.contains("#42 stays attached"), "reason: {reason}");
+    }
+
+    #[test]
+    fn decide_open_pr_status_waits_when_head_advanced_even_if_failing() {
+        // The body pushed (head advanced) — that is progress, so the Task waits
+        // for CI to resolve instead of blocking a genuine attempt.
+        let pr = open_pr_with_ci(42, "sha-2", Some(CiState::Failing));
+        let (status, reason) = decide_open_pr_status(&pr, None, true);
+        assert_eq!(status, TaskSessionStatus::Waiting);
+        assert!(reason.contains("open for review"), "reason: {reason}");
+    }
+
+    #[test]
+    fn decide_open_pr_status_waits_on_healthy_ci() {
+        let pending = open_pr_with_ci(42, "sha-1", Some(CiState::Pending));
+        assert_eq!(
+            decide_open_pr_status(&pending, None, false).0,
+            TaskSessionStatus::Waiting
+        );
+        let passing = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
+        assert_eq!(
+            decide_open_pr_status(&passing, None, false).0,
+            TaskSessionStatus::Waiting
+        );
+        // No required checks / gh unavailable reads as unknown-healthy, so an
+        // env without CI configured is never penalized with a block.
+        let unknown = open_pr_with_ci(42, "sha-1", None);
+        assert_eq!(
+            decide_open_pr_status(&unknown, None, false).0,
+            TaskSessionStatus::Waiting
+        );
+    }
+
+    #[test]
+    fn decide_open_pr_status_degraded_dominates_healthy_ci() {
+        // A degraded observation blocks even when the cached CI reading looks
+        // healthy: the reading may simply be stale.
+        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
+        let (status, reason) = decide_open_pr_status(&pr, Some("network unreachable"), true);
+        assert_eq!(status, TaskSessionStatus::Blocked);
+        assert!(reason.contains("github-observation"), "reason: {reason}");
     }
 }

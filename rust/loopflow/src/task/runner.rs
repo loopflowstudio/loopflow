@@ -28,8 +28,8 @@ use crate::interactive_handoff::{InteractiveHandoffOutcome, InteractiveHandoffPa
 use crate::store::{open_existing_store, SharedStore};
 use crate::task::interactive_rendezvous::{self, Rendezvous};
 use crate::task::{
-    PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskSession, TaskSessionId,
-    TaskSessionStatus,
+    Observation, PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskSession,
+    TaskSessionId, TaskSessionStatus,
 };
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
@@ -158,6 +158,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         return Err(error.into());
     }
     let mut state_fingerprint = task_state_fingerprint(&session)?;
+    let mut iteration_start_head = pr_head_for_session(&store, &session).await?;
     let mut gate_fingerprint = if session.lifecycle_phase == TaskLifecyclePhase::Gate {
         Some(task_gate_fingerprint(&session)?)
     } else {
@@ -335,13 +336,31 @@ The durable reviewer outcome is:\n{}",
                     ConversationEvent::TurnCompleted { status, .. } => {
                         provider_turn_active = false;
                         if status == Lifecycle::Failed {
+                            // A provider outage during a PR/ci-fix iteration is
+                            // an infrastructure blocker, not an unhandled
+                            // failure: keep the PR attached and block
+                            // actionably so a resume when the provider recovers
+                            // picks up the same PR. Without a PR, fall back to
+                            // the generic failed path.
+                            if store.active_task_pr(&session.id).await?.is_some() {
+                                return finish_infra_blocked(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    harness.as_mut(),
+                                    "provider",
+                                    "provider turn failed; resume when the provider recovers",
+                                )
+                                .await;
+                            }
                             return finish_failed(
                                 &store,
                                 &mut session,
                                 lease,
                                 harness.as_mut(),
                                 "provider turn failed",
-                            ).await;
+                            )
+                            .await;
                         }
                         if flow_turn_active
                             && status == Lifecycle::Completed
@@ -598,6 +617,22 @@ The durable reviewer outcome is:\n{}",
                             )
                             .await
                             .map_err(|error| anyhow!(error.to_string()))?;
+                            // Reconcile keeps the cached PR row through a GitHub
+                            // outage and names the failure on the session. For a
+                            // turn that just ran, that degraded reading is an
+                            // infrastructure blocker: it could not have verified
+                            // a repair.
+                            let github_degraded = match &session.observation {
+                                Observation::Degraded { reason, .. } => Some(reason.clone()),
+                                _ => None,
+                            };
+                            // The head before this turn is the baseline for the
+                            // no-change check; the head we just observed becomes
+                            // the baseline for the next turn.
+                            let head_before_turn = iteration_start_head;
+                            iteration_start_head = observed_pr
+                                .as_ref()
+                                .and_then(|pr| pr.head_sha().map(str::to_string));
                             let settled_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
                                 pr.is_settled()
                                     && pr
@@ -693,13 +728,18 @@ The durable reviewer outcome is:\n{}",
                                 .as_ref()
                                 .filter(|pr| pr.phase() == PrPhase::Open)
                             {
-                                let number = pr
-                                    .github()
-                                    .expect("open Task PR requires a GitHub receipt")
-                                    .number;
-                                (
-                                    TaskSessionStatus::Waiting,
-                                    format!("pull request #{number} is open for review"),
+                                let head_advanced =
+                                    match (head_before_turn.as_deref(), pr.head_sha()) {
+                                        // No baseline (the PR was opened during
+                                        // this turn): opening it is progress.
+                                        (None, _) => true,
+                                        (Some(start), Some(current)) => start != current,
+                                        (Some(_), None) => false,
+                                    };
+                                crate::ops::task::decide_open_pr_status(
+                                    pr,
+                                    github_degraded.as_deref(),
+                                    head_advanced,
                                 )
                             } else {
                                 let next_fingerprint = task_state_fingerprint(&session)?;
@@ -1421,6 +1461,18 @@ fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
 }
 
+/// The active PR's current head SHA, or `None` when there is no active PR.
+/// Captured at iteration boundaries as a GitHub-side progress baseline so the
+/// runner can tell a no-change ci-fix (head unchanged) from a push (head
+/// advanced) without relying on worktree churn.
+async fn pr_head_for_session(store: &SharedStore, session: &TaskSession) -> Result<Option<String>> {
+    Ok(store
+        .active_task_pr(&session.id)
+        .await?
+        .and_then(|pr| pr.github().map(|g| g.head_sha.clone()))
+        .flatten())
+}
+
 fn task_gate_fingerprint(session: &TaskSession) -> Result<String> {
     let state = crate::engine::git::material_worktree_state(Path::new(&session.worktree))?;
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
@@ -1787,6 +1839,46 @@ async fn finish_failed(
     anyhow::bail!(error.to_string())
 }
 
+/// The Blocked reason for an infrastructure failure, naming the failing
+/// capability and the safe next action. `pr_number` keeps the attached PR
+/// visible so a resume after the capability recovers picks up the same PR.
+fn infra_blocked_reason(capability: &str, detail: &str, pr_number: Option<u32>) -> String {
+    let pr_note = pr_number
+        .map(|n| format!(" Pull request #{n} stays attached."))
+        .unwrap_or_default();
+    format!("ci-fix blocked by {capability}: {detail}.{pr_note}")
+}
+
+/// Stop the body and transition the Task to Blocked for an infrastructure
+/// failure (provider outage, GitHub observation failure), keeping the active PR
+/// attached so a resume after the capability recovers picks up the same PR.
+/// Returns `Ok(())` — a clean stop, not an error — so the runner does not also
+/// record an unhandled failure.
+async fn finish_infra_blocked(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    harness: &mut dyn Harness,
+    capability: &str,
+    detail: &str,
+) -> Result<()> {
+    let _ = harness.stop().await;
+    let pr_number = store
+        .active_task_pr(&session.id)
+        .await?
+        .and_then(|pr| pr.github().map(|g| g.number));
+    let reason = infra_blocked_reason(capability, detail, pr_number);
+    set_and_record_status(store, session, lease, TaskSessionStatus::Blocked, &reason).await?;
+    if let Some(process) = &mut session.latest_process {
+        process.state = ChildLeaseState::Finished;
+        process.outcome = Some(ChildBodyOutcome::Failed {
+            reason: reason.clone(),
+        });
+    }
+    store.finish_task_process(session, lease).await?;
+    Ok(())
+}
+
 async fn finish_abandoned(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -1989,9 +2081,9 @@ mod tests {
 
     use super::{
         absorb_commands, apply_input, apply_next_pending, ci_fix_seed, handle_attachment,
-        human_interaction_review_protocol, interaction_review_prompt, prepare_task_flow_step,
-        progress_summary, resume_task_phase, start_prepared_task_step, task_seed, CommandStop,
-        PreparedTaskStep,
+        human_interaction_review_protocol, infra_blocked_reason, interaction_review_prompt,
+        prepare_task_flow_step, progress_summary, resume_task_phase, start_prepared_task_step,
+        task_seed, CommandStop, PreparedTaskStep,
     };
     use crate::child_session::{
         ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
@@ -2268,6 +2360,34 @@ mod tests {
         let summary = progress_summary(&"x".repeat(2_500));
         assert_eq!(summary.chars().count(), 2_000);
         assert!(summary.ends_with('…'));
+    }
+
+    #[test]
+    fn infra_blocked_reason_names_capability_and_keeps_pr_attached() {
+        // Provider outage: the capability and safe next action are visible,
+        // and the attached PR is named so a resume recovers onto the same PR.
+        let reason = infra_blocked_reason(
+            "provider",
+            "provider turn failed; resume when the provider recovers",
+            Some(900),
+        );
+        assert!(reason.contains("blocked by provider"), "reason: {reason}");
+        assert!(
+            reason.contains("resume when the provider recovers"),
+            "reason: {reason}"
+        );
+        assert!(reason.contains("#900 stays attached"), "reason: {reason}");
+
+        // GitHub observation failure uses the same shape with its capability.
+        let gh = infra_blocked_reason("github-observation", "gh pr checks: HTTP 502", Some(7));
+        assert!(gh.contains("blocked by github-observation"), "reason: {gh}");
+        assert!(gh.contains("#7 stays attached"), "reason: {gh}");
+
+        // No PR attached (e.g. a no-PR task that still hit an infra failure):
+        // the reason names the capability without a PR note.
+        let no_pr = infra_blocked_reason("provider", "turn failed", None);
+        assert!(no_pr.contains("blocked by provider"), "reason: {no_pr}");
+        assert!(!no_pr.contains("stays attached"), "reason: {no_pr}");
     }
 
     #[test]

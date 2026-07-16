@@ -5,6 +5,35 @@ routed `lf status` + every `lf pm` arm through it. This branch finishes the
 contract for **every other** consumer that acts on "the wave I'm inside", so the
 one rule holds everywhere — not another partial pass.
 
+## Computable design contract
+
+- **User-visible outcome.** A human or agent inside a Wave/Project/Task process
+  (`LF_WAVE_ID` set) runs `lf chat`, `lf radio pub/sub`, `lf memory show/log/add`,
+  `lf home`, or `lf cron add` with no `--wave` and acts on the same durable Wave
+  that `lf status` / `lf pm show` already resolve. A hand-set `LF_WAVE_ID=<name>`
+  now resolves instead of dropping; a stale UUID fails loudly instead of looking
+  like "no wave here".
+- **Source of truth.** The shared SQLite registry row (`Wave`: id + name). The
+  environment is only a pointer used to find that row, never identity. Every
+  consumer derives the wave *name* from the row and keys its own view off it
+  (chat/memory endpoint pointer + journal, radio channel, home `GOAL.md`, trace
+  attribution).
+- **End-to-end proof.** `lf memory show` (through `chat::resolve_target`) resolves
+  the same wave as `status`/`pm show` across the seven-cell matrix; unit cells at
+  `chat::resolve_target` and `radio::ambient_wave` for the two previously-silent
+  failures. Commands: `cargo test -p loopflow --test wave_resolution_tests` and
+  `cargo test -p loopflow --lib -- commands::chat:: commands::radio::
+  engine::wave_context::`.
+- **Operational boundary.** Resolution is one local `get_wave` /
+  `get_wave_by_name` — daemon-less, no Linear on any read path. The UUID arm hops
+  a scratch thread (context assembly is sync, sometimes inside a runtime); the
+  hand-set-name arm touches no store.
+- **Exclusions.** `LF_CHANNEL` semantics and sub-channel (`family_head`)
+  derivation are untouched — only the `WaveId` arm is unified. `lf cron
+  sync`/`remove` stay declarative (explicit wave, reconciling `GOAL.md`). No wire
+  DTO fields; no Swift/iOS model change. The launcher still exports the UUID
+  (correct); consumers were the bug.
+
 ## The one rule (unchanged, from PR1)
 
 `--wave` wins → else `LF_WAVE_ID` as a durable **UUID** mapped to its registry

@@ -485,6 +485,12 @@ impl PmClient {
         }
     }
 
+    async fn reopen_item(&self, item_id: &str) -> PmResult<()> {
+        match self {
+            Self::Linear(client) => client.reopen_item(item_id).await,
+        }
+    }
+
     async fn comment(&self, item_id: &str, body: &str) -> PmResult<String> {
         match self {
             Self::Linear(client) => client.comment(item_id, body).await,
@@ -1269,6 +1275,24 @@ pub(crate) async fn pm_update_async(
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
     refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(result)
+}
+
+/// Reopen one PM issue: move it from its completed workflow state back to the
+/// team's default active state, then refresh the local snapshot. The Task
+/// repair path calls this when a Task was prematurely completed while its PR or
+/// required review gates were still open. Idempotent at the Linear layer: a
+/// second reopen of an already-open issue is a no-op state transition.
+pub(crate) async fn pm_reopen_task_async(
+    repo: &Path,
+    wave: &str,
+    item_id: &str,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let ctx = resolve_context(repo, wave).await?;
+    progress.status(&format!("reopening {} task {item_id}", ctx.provider));
+    ctx.client.reopen_item(item_id).await.map_err(pm_to_ops)?;
+    refresh_pm_snapshot(repo, wave, &ctx).await?;
+    Ok(())
 }
 
 async fn apply_update(

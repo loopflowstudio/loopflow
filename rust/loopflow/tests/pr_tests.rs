@@ -2,7 +2,7 @@ mod support;
 
 use std::process::Command;
 
-use loopflow::ops::task::task_status;
+use loopflow::ops::task::{task_complete, task_status};
 use loopflow::ops::{
     create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
 };
@@ -364,6 +364,43 @@ fn observed_merge_waits_for_an_unincorporated_directive_before_completion() {
         .block_on(task.store.task_prs(&task.session.id))
         .expect("read merged PR");
     assert_eq!(prs[0].phase(), PrPhase::Merged);
+}
+
+#[test]
+fn task_complete_refuses_while_a_working_pr_is_unsettled() {
+    // W2-151: a Task must not be completed in the PM while it still owns an
+    // unsettled PR. Previously `lf task complete` would delete an unpublished
+    // working PR and complete; now the completion gate refuses it so the PR
+    // cannot be published later into a Task the PM already calls done.
+    let home = tempfile::TempDir::new().expect("temp home");
+    let gh_script = write_gh_script("[]", None);
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_script.as_str())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    let result = task_complete("INF-123", "done".to_string());
+    let message = result
+        .expect_err("an unpublished working PR must block completion")
+        .to_string();
+    assert!(
+        message.contains("cannot complete") && message.contains("unpublished"),
+        "expected a gate refusal naming the unpublished PR, got: {message}"
+    );
+
+    // The Session and PR are unchanged: no premature completion, no deleted PR.
+    let runtime = tokio::runtime::Runtime::new().expect("read runtime");
+    let stored = runtime
+        .block_on(task.store.get_task_session(&task.session.id))
+        .expect("read session")
+        .expect("session present");
+    assert_ne!(stored.status, TaskSessionStatus::Completed);
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.session.id))
+        .expect("read PRs");
+    assert_eq!(prs.len(), 1, "working PR must survive the refusal");
 }
 
 #[test]

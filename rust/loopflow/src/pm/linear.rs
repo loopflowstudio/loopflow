@@ -183,7 +183,7 @@ const MOVE_ITEM_MUTATION: &str = r#"mutation MoveIssueToProject($id: String!, $p
   }
 }"#;
 
-const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $stateId: String!) {
+const SET_ITEM_STATE_MUTATION: &str = r#"mutation SetIssueState($id: String!, $stateId: String!) {
   issueUpdate(id: $id, input: { stateId: $stateId }) {
     issue {
       id
@@ -783,7 +783,30 @@ impl LinearClient {
         let state_id = self.completed_state_id().await?;
         let _: Value = self
             .graphql(
-                COMPLETE_ITEM_MUTATION,
+                SET_ITEM_STATE_MUTATION,
+                json!({
+                    "id": item_id,
+                    "stateId": state_id,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Reopen a completed issue by moving it back to the team's default active
+    /// (`unstarted`) workflow state. Mirrors [`complete_item`]; the repair path
+    /// uses it when a Task was prematurely completed while its gates were open.
+    /// Errors when the team has no unstarted state to return to.
+    pub async fn reopen_item(&self, item_id: &str) -> PmResult<()> {
+        let team_id = self.resolve_team_id().await?;
+        let Some(state_id) = self.unstarted_state_id(&team_id).await? else {
+            return Err(PmError::Message(format!(
+                "no active Linear workflow state found to reopen issue {item_id}"
+            )));
+        };
+        let _: Value = self
+            .graphql(
+                SET_ITEM_STATE_MUTATION,
                 json!({
                     "id": item_id,
                     "stateId": state_id,
@@ -1387,13 +1410,13 @@ mod tests {
         for query in [
             UPDATE_ITEM_MUTATION,
             MOVE_ITEM_MUTATION,
-            COMPLETE_ITEM_MUTATION,
+            SET_ITEM_STATE_MUTATION,
             CREATE_COMMENT_MUTATION,
         ] {
             assert!(!query.contains(": ID!"));
         }
         assert!(MOVE_ITEM_MUTATION.contains("$projectId: String!"));
-        assert!(COMPLETE_ITEM_MUTATION.contains("$stateId: String!"));
+        assert!(SET_ITEM_STATE_MUTATION.contains("$stateId: String!"));
         assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
     }
 

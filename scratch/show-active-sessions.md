@@ -168,9 +168,11 @@ Open performs exactly one `lf handoff attach` per click; attach is replay-safe.
 
 ## PR plan (serial, one Task worktree)
 
-All three slices land on this one serial branch — no PR has been opened or
-merged yet (the branch binary can't reach the registry to rotate serial PRs;
-the orchestration surface lands it). The commits below are local and green.
+All three slices land on this one serial branch. **No PR has been opened or
+merged** — despite the stale subject of commit `4c6b833c2` ("record PR 1
+landed"), nothing has landed; that wording was wrong and is corrected here. The
+commits below are committed and green; publishing was blocked until the
+registry-compatible `lf` was restored.
 
 - **Slice 1 — committed, green (local).** `lf handoff list [--active] [--parent]
   --json` + `InteractiveHandoffListRow` DTO + `interactive_handoff_list.json`

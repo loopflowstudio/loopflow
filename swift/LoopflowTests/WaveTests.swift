@@ -10,13 +10,14 @@ struct WaveTests {
             id: "wave-123",
             name: "infrastructure",
             repo: "/tmp/repo",
-            status: .running
+            status: .running,
+            live: true
         ))
 
         #expect(wave.id == "wave-123")
         #expect(wave.displayName == "infrastructure")
         #expect(wave.repo == "/tmp/repo")
-        #expect(wave.statusText == "Running")
+        #expect(wave.lens.color == .green)
         #expect(wave.isRegistered)
     }
 
@@ -33,6 +34,10 @@ struct WaveTests {
         )
 
         #expect(!wave.isRegistered)
+        // No runtime reading exists yet, so the lens is unknown-with-reason —
+        // never a silent black and never a local-session guess.
+        #expect(wave.lens.color == .unknown)
+        #expect(!wave.lens.reason.isEmpty)
     }
 
     @Test("objective tagline uses the first authored line")

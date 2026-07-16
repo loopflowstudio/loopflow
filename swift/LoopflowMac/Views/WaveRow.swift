@@ -1,4 +1,6 @@
-// Row view for displaying a wave in the sidebar.
+// Row view for displaying a wave in the sidebar. One stable row: an operational
+// lens, the Wave name, and a one-line objective tagline. No status pill, no
+// state regrouping. `indentLevel` reserves room for future Wave ancestry.
 
 import SwiftUI
 import Loopflow
@@ -7,45 +9,52 @@ struct WaveRow: View {
     let wave: WaveViewModel
     let isSelected: Bool
     let onSelect: () -> Void
+    var indentLevel: Int = 0
     var onDelete: (() -> Void)? = nil
 
     @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(wave.displayName)
-                    .font(Typography.sectionTitle(18))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("wave-name")
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            WaveLensView(lens: wave.lens)
+                .padding(.top, 3)
+                .accessibilityIdentifier("wave-status")
 
-                Spacer()
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: Spacing.sm) {
+                    Text(wave.displayName)
+                        .font(Typography.sectionTitle(18))
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("wave-name")
 
-                Text(wave.statusText)
-                    .font(Typography.caption(10))
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(wave.statusIndicator.color.opacity(0.22))
-                    .foregroundStyle(wave.statusIndicator.color)
-                    .clipShape(Capsule())
-                    .fixedSize()
-                    .accessibilityIdentifier("wave-status")
-            }
-            .lineLimit(1)
-            .accessibilityIdentifier("wave-name-row")
+                    if wave.openTaskCount > 0 {
+                        Text("\(wave.openTaskCount)")
+                            .font(Typography.caption(10))
+                            .fontWeight(.medium)
+                            .foregroundStyle(.white.opacity(0.55))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.white.opacity(0.1))
+                            .clipShape(Capsule())
+                            .accessibilityLabel("\(wave.openTaskCount) open tasks")
+                    }
 
-            if let tagline = wave.objectiveTagline {
-                Text(tagline)
-                    .font(Typography.caption())
-                    .foregroundStyle(.white.opacity(0.5))
-                    .lineLimit(1)
-                    .accessibilityIdentifier("wave-objective")
+                    Spacer(minLength: 0)
+                }
+
+                if let tagline = wave.objectiveTagline {
+                    Text(tagline)
+                        .font(Typography.caption())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .accessibilityIdentifier("wave-objective")
+                }
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, Spacing.md + CGFloat(indentLevel) * Spacing.lg)
+        .padding(.trailing, Spacing.md)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: CornerRadius.md)
@@ -71,7 +80,7 @@ struct WaveRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Wave: \(wave.displayName)")
+        .accessibilityLabel("Wave: \(wave.displayName). \(wave.lens.reason)")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

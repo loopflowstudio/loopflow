@@ -54,19 +54,43 @@ struct WavesView: View {
     }
 
     /// Registered waves plus idle placeholders for authored GOAL.md files that
-    /// have not been served yet. Running Waves sort first, then paused and idle.
+    /// have not been served yet. One stable alphabetical list — the row's lens
+    /// carries state, so rows never reorder as processes start and stop.
     private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
         let live = repoStates[repo.path]?.waves ?? []
         let liveNames = Set(live.map(\.name))
         let placeholders = (authoredWavesByRepo[repo.path] ?? [])
             .filter { !liveNames.contains($0.name) }
             .map { authoredPlaceholder(repoPath: repo.path, snapshot: $0) }
-        return (live + placeholders).sorted { lhs, rhs in
-            let lp = Self.statusPriority(lhs.status)
-            let rp = Self.statusPriority(rhs.status)
-            if lp != rp { return lp < rp }
-            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        return (live + placeholders).sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
+    }
+
+    /// The filtered Waves arranged as an outline: roots alphabetical, each parent
+    /// immediately followed by its children (indented). Today's Waves are flat,
+    /// but a future child Wave — a Project promoted to residency — indents under
+    /// its parent with the same lens and selection behavior.
+    private var outlinedWaves: [(wave: WaveViewModel, indent: Int)] {
+        let waves = filteredWaves
+        let byId = Dictionary(waves.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func isRoot(_ w: WaveViewModel) -> Bool {
+            guard let parent = w.parentWaveId else { return true }
+            return byId[parent] == nil
+        }
+        let childrenByParent = Dictionary(
+            grouping: waves.filter { !isRoot($0) },
+            by: { $0.parentWaveId ?? "" }
+        )
+        var result: [(WaveViewModel, Int)] = []
+        func emit(_ wave: WaveViewModel, _ indent: Int) {
+            result.append((wave, indent))
+            let children = (childrenByParent[wave.id] ?? [])
+                .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+            for child in children { emit(child, indent + 1) }
+        }
+        for root in waves.filter(isRoot) { emit(root, 0) }
+        return result
     }
 
     /// An idle, not-yet-launched row for a wave authored on disk. Its id carries the
@@ -79,14 +103,6 @@ struct WavesView: View {
             status: snapshot.status
         ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)],
         isRegistered: false)
-    }
-
-    private static func statusPriority(_ status: WaveStatus) -> Int {
-        switch status {
-        case .running: 0
-        case .paused: 1
-        case .idle: 2
-        }
     }
 
     private var filteredWaves: [WaveViewModel] {
@@ -119,13 +135,8 @@ struct WavesView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            repoRail
-                .frame(width: 100)
-
-            Divider()
-
             waveListColumn
-                .frame(width: 400)
+                .frame(width: 300)
 
             Divider()
 
@@ -176,73 +187,6 @@ struct WavesView: View {
         }
     }
 
-    // MARK: - Repo rail (burgundy)
-
-    private var repoRail: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Repos")
-                .font(Typography.caption(9))
-                .fontWeight(.medium)
-                .foregroundStyle(.white.opacity(0.25))
-                .tracking(0.5)
-                .padding(.horizontal, Spacing.sm)
-                .padding(.top, Spacing.lg)
-                .padding(.bottom, Spacing.sm)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
-                    repoRow(
-                        title: "All",
-                        icon: "square.stack.3d.up",
-                        filter: .all
-                    )
-
-                    ForEach(repos) { repo in
-                        repoRow(
-                            title: repo.displayName,
-                            icon: "folder",
-                            filter: .repo(repo.path)
-                        )
-                    }
-                }
-                .padding(.horizontal, Spacing.sm)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.loopflowBurgundy)
-        .accessibilityIdentifier("repo-sidebar")
-    }
-
-    private func repoRow(title: String, icon: String, filter: RepoFilter) -> some View {
-        let isSelected = selection == filter
-        return Button {
-            selection = filter
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: icon)
-                    .font(Typography.caption())
-                    .foregroundStyle(.white.opacity(isSelected ? 0.9 : 0.45))
-                    .frame(width: 14)
-                Text(title)
-                    .font(Typography.caption(11))
-                    .foregroundStyle(.white.opacity(isSelected ? 1 : 0.7))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Spacing.xs)
-            .padding(.vertical, Spacing.xs)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(isSelected ? Color.white.opacity(0.14) : .clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Wave list (burgundy)
 
     private var waveListColumn: some View {
@@ -254,11 +198,12 @@ struct WavesView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                        ForEach(filteredWaves) { wave in
+                        ForEach(outlinedWaves, id: \.wave.id) { entry in
                             WaveRow(
-                                wave: wave,
-                                isSelected: selectedWaveId == waveSelectionId(wave),
-                                onSelect: { selectedWaveId = waveSelectionId(wave) }
+                                wave: entry.wave,
+                                isSelected: selectedWaveId == waveSelectionId(entry.wave),
+                                onSelect: { selectedWaveId = waveSelectionId(entry.wave) },
+                                indentLevel: entry.indent
                             )
                         }
                     }
@@ -267,27 +212,20 @@ struct WavesView: View {
                 }
                 .accessibilityIdentifier("repo-wave-list")
             }
+
+            Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.loopflowBurgundy)
     }
 
+    /// Repository scope as a dropdown above the Wave list, plus New. The rail is
+    /// gone: repo selection is a scope control, not a full-height column.
     private var waveListHeader: some View {
-        HStack(alignment: .top, spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(headerTitle)
-                    .font(Typography.caption())
-                    .fontWeight(.medium)
-                    .foregroundStyle(.white.opacity(0.7))
+        HStack(spacing: Spacing.sm) {
+            repoDropdown
 
-                Text(selectionSubtitle)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer()
+            Spacer(minLength: 0)
 
             Circle()
                 .fill(isAnyConnected ? Color.statusSuccess : Color.white.opacity(0.3))
@@ -310,12 +248,42 @@ struct WavesView: View {
         .padding(.vertical, Spacing.md)
     }
 
+    private var repoDropdown: some View {
+        Menu {
+            Button { selection = .all } label: {
+                Label("All Repos", systemImage: "square.stack.3d.up")
+            }
+            if !repos.isEmpty { Divider() }
+            ForEach(repos) { repo in
+                Button { selection = .repo(repo.path) } label: {
+                    Label(repo.displayName, systemImage: "folder")
+                }
+            }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Text(headerTitle)
+                    .font(Typography.sectionTitle(16))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityIdentifier("repo-dropdown")
+        .accessibilityLabel("Repository: \(headerTitle)")
+    }
+
     private var emptyWaveState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Text(repos.isEmpty ? "No repos in ~/src" : "No waves")
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(repos.isEmpty ? "No repositories found." : "No waves yet.")
                 .font(Typography.caption())
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.white.opacity(0.55))
             if !repos.isEmpty {
                 Button {
                     isShowingCreate = true
@@ -327,10 +295,10 @@ struct WavesView: View {
                 .controlSize(.small)
                 .accessibilityIdentifier("wave-empty-create")
             }
-            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
     }
 
     // MARK: - Wave detail (WaveChat)
@@ -385,12 +353,8 @@ struct WavesView: View {
 
     // MARK: - Header helpers
 
-    private var connectionSubtitle: String {
-        "Local registry"
-    }
-
-    /// The surface is named after the repo you're in (its GitHub/dir name),
-    /// e.g. "loopflow" — not a generic "Waves".
+    /// The dropdown label: "All Repos", or the selected repo's name (its
+    /// GitHub/dir name, e.g. "loopflow").
     private var headerTitle: String {
         switch selection {
         case .all:
@@ -399,10 +363,6 @@ struct WavesView: View {
             return repos.first { $0.path.normalizedFilePath == path.normalizedFilePath }?.displayName
                 ?? URL(fileURLWithPath: path).lastPathComponent
         }
-    }
-
-    private var selectionSubtitle: String {
-        connectionSubtitle
     }
 
     private var defaultCreatePath: String? {
@@ -571,6 +531,10 @@ struct WavesView: View {
     }
 
     private func syncRepoStates() async {
+        if AppTestMode.current() == .mockWaves {
+            seedMockWaves()
+            return
+        }
         if AppTestMode.current() != nil { return }
         ensureRepoStates()
 
@@ -584,6 +548,37 @@ struct WavesView: View {
         } catch {
             for state in repoStates.values {
                 state.markRefreshFailed()
+            }
+        }
+    }
+
+    /// Seed the populated Wave surface from `MockWaveFixture`, bypassing the
+    /// registry, so the `mock-waves` UI-test mode renders the stable list lenses
+    /// and auto-selects a Wave into its full detail hierarchy. Idempotent.
+    private func seedMockWaves() {
+        let repo = PortfolioRepo(path: MockWaveFixture.repoPath, lastOpened: Date())
+        if !portfolioService.repos.contains(where: { $0.path == repo.path }) {
+            portfolioService.addRepo(repo.url)
+        }
+        repos = [repo]
+        let state = repoStates[repo.path]
+            ?? PortfolioRepoState(repo: repo, registryQuery: RegistryQueryLocal.shared)
+        state.applyConnectedWaves(MockWaveFixture.waves, plans: MockWaveFixture.plans)
+        repoStates[repo.path] = state
+        if selectedWaveId == nil,
+           let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
+            selectedWaveId = waveSelectionId(selected)
+        }
+        // Drive the sheet-presentation leg of the AttributeGraph zero-cycle
+        // matrix headlessly: once the populated detail hierarchy has settled,
+        // raise the create sheet over it — a genuine mid-session presentation,
+        // not a cold-launch-with-sheet. Gated so the plain mock render stays
+        // sheet-free. See scripts/check_attributegraph_cycles.sh --sheet.
+        if ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] != nil,
+           !isShowingCreate {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                isShowingCreate = true
             }
         }
     }

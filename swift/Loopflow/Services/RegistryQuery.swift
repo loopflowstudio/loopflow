@@ -435,13 +435,18 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
         case parentWaveId = "parent_wave_id"
     }
 
-    /// Map the registry snapshot to the app's deliberately small Wave row.
+    /// Map the registry snapshot to the app's Wave row, carrying the shared
+    /// liveness, active-work, and ancestry facts the surface renders.
     func toWave() -> Wave {
         Wave(
             id: id,
             name: name,
             repo: repo,
-            status: status
+            status: status,
+            live: live,
+            activeTasks: activeTasks,
+            activeProjects: activeProjects,
+            parentWaveId: parentWaveId
         )
     }
 }

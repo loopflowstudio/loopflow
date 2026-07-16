@@ -25,6 +25,7 @@ use crate::wave::Wave;
 mod child_sessions;
 mod interaction_reviews;
 mod interactive_handoffs;
+mod provider_deliveries;
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {

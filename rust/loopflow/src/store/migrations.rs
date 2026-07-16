@@ -269,6 +269,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_pr_linear_linkage",
         sql: include_str!("migrations/0.11.020_task_pr_linear_linkage.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 21,
+        },
+        name: "provider_deliveries",
+        sql: include_str!("migrations/0.11.021_provider_deliveries.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1331,7 +1340,8 @@ mod tests {
                 "0.11.017_migration_provenance".to_string(),
                 "0.11.018_session_body_provenance".to_string(),
                 "0.11.019_task_pr_github_observation".to_string(),
-                "0.11.020_task_pr_linear_linkage".to_string()
+                "0.11.020_task_pr_linear_linkage".to_string(),
+                "0.11.021_provider_deliveries".to_string()
             ]
         );
     }
@@ -1345,11 +1355,11 @@ mod tests {
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.019_task_pr_github_observation")
+            Some("0.11.020_task_pr_linear_linkage")
         );
-        assert!(!columns(&conn, "task_prs")
+        assert!(!columns(&conn, "provider_deliveries")
             .iter()
-            .any(|column| column == "linear_attachment_id"));
+            .any(|column| column == "delivery_id"));
     }
 
     #[test]

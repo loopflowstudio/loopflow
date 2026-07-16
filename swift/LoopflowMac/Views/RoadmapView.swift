@@ -148,14 +148,9 @@ struct RoadmapView: View {
                 Text("Work")
                     .font(Typography.sectionTitle(20))
                     .foregroundStyle(palette.text)
-                HStack(spacing: Spacing.xs) {
-                    Text(repoPath == nil ? "Every registered Wave" : "Registered Waves in this repository")
-                    if let synced = snapshot?.generatedAt {
-                        Text("· as of \(syncedLabel(synced))")
-                    }
-                }
-                .font(Typography.caption(11))
-                .foregroundStyle(palette.textSecondary)
+                Text(repoPath == nil ? "All Waves" : "Waves in this repository")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
             }
             Spacer()
             Picker("Lens", selection: $lens) {
@@ -185,17 +180,6 @@ struct RoadmapView: View {
         .padding(.vertical, Spacing.md)
     }
 
-    /// The roadmap read's clock. RFC3339 in, short local time out; the raw
-    /// string if it will not parse — staleness must always be visible, never
-    /// swallowed by a formatting failure.
-    private func syncedLabel(_ iso: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
-        let out = DateFormatter()
-        out.dateStyle = .none
-        out.timeStyle = .short
-        return out.string(from: date)
-    }
-
     @ViewBuilder
     private var content: some View {
         if snapshot == nil, queryError == nil {
@@ -203,13 +187,13 @@ struct RoadmapView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if snapshot == nil {
             ContentUnavailableView(
-                "Roadmap unavailable",
+                "Work unavailable",
                 systemImage: "exclamationmark.triangle",
-                description: Text("The registry read failed. Refresh to try again.")
+                description: Text("Couldn't read the latest work. Refresh to try again.")
             )
         } else if visibleWaves.isEmpty {
             ContentUnavailableView(
-                repoPath == nil ? "No waves in the registry" : "No registered waves in this repository",
+                repoPath == nil ? "No Waves yet" : "No Waves in this repository",
                 systemImage: "map"
             )
         } else {

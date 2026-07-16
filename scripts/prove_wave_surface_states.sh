@@ -44,8 +44,9 @@ capture() {
   LOOPFLOW_UI_TEST_SNAPSHOT_PATH="$out" \
     "$BIN" -ui-test-mode "$mode" >/dev/null 2>&1 &
   local pid=$!
-  # The app snapshots ~2.5s in, then self-terminates; wait it out with a cap.
-  for _ in $(seq 1 20); do
+  # The app snapshots ~2.5s in, then self-terminates; wait it out with a cap
+  # generous enough for a cold CI runner's first render.
+  for _ in $(seq 1 60); do
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.5
   done

@@ -4705,14 +4705,14 @@ mod tests {
 
     use super::{
         _defer_task_interactions, cached_github_observation, changes_snapshot,
-        count_recovery_attempts, derive_workspace_slug, diff_snapshot, ensure_working_pr,
-        ensure_working_pr_with_authority, file_snapshot, next_pr_slug, parse_pr_slug,
-        parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
-        recover_stalled_task_body, recover_stranded_task_body, refuse_dirty_between_prs,
-        refuse_if_canonical_ahead, require_task_pr_range_nonempty_with_authority,
-        resolve_task_flow, resolve_upstream_base, succession_workspace_slug,
-        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        count_recovery_attempts, decide_open_pr_status, derive_workspace_slug, diff_snapshot,
+        ensure_working_pr, ensure_working_pr_with_authority, file_snapshot, next_pr_slug,
+        parse_pr_slug, parse_workspace_slug, project_context, reconcile_process_liveness,
+        reconcile_task_pr, recover_stalled_task_body, recover_stranded_task_body,
+        refuse_dirty_between_prs, refuse_if_canonical_ahead,
+        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
+        succession_workspace_slug, task_recovery_adoption, verify_task_pr_range_with_authority,
+        RotateOptions, TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -4728,9 +4728,9 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
-        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession,
-        TaskSessionId, TaskSessionStatus,
+        AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
+        GithubPr, Observation, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
+        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
     use loopflow_test_support::TestRepo;

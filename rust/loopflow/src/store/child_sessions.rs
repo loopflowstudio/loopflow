@@ -14,6 +14,7 @@ use crate::project_session::{
 use crate::task::{
     LinearObservationApply, LinearObservationOutcome, TaskEvent, TaskEventKind,
     TaskLinearObservation, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+    TaskSessionSuccession,
 };
 use time::OffsetDateTime;
 
@@ -40,6 +41,25 @@ impl Store {
         let directive = directive.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_task_session_with_directive(&session, &pr, &directive)
+        })
+        .await
+    }
+
+    /// Carry a terminal Task Session's direction onto a successor. See
+    /// [`crate::store::sqlite::SqliteStore::reserve_task_session_successor`].
+    pub async fn reserve_task_session_successor(
+        &self,
+        predecessor: &TaskSession,
+        successor: &TaskSession,
+        pr: &TaskPr,
+        directive: &ChildDirective,
+    ) -> StoreResult<TaskSessionSuccession> {
+        let predecessor = predecessor.clone();
+        let successor = successor.clone();
+        let pr = pr.clone();
+        let directive = directive.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_task_session_successor(&predecessor, &successor, &pr, &directive)
         })
         .await
     }

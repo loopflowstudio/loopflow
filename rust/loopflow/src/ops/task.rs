@@ -39,7 +39,8 @@ use crate::store::{
 use crate::task::{
     AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
     GithubPr, Observation, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
-    TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionStatus,
+    TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+    TaskSessionSuccession,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -443,13 +444,22 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             }
         })
         .transpose()?;
-    if let Some(existing) = block_on_task(async {
+    let (existing, terminal_predecessor_id) = block_on_task(async {
         let store = task_store().await?;
         let mut existing = store
             .get_task_session_by_issue(issue)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
         if let Some(session) = &mut existing {
+            if session.status.is_terminal() {
+                // A terminal Task Session leaves its direction to a successor
+                // created below; do not return its status here. The placement
+                // path re-resolves the issue, derives a distinct worktree slug
+                // from this predecessor's id, and carries the cursor and comment
+                // ledger onto the new Session.
+                let predecessor_id = session.id.clone();
+                return Ok((None, Some(predecessor_id)));
+            }
             if let Some(requested) = name.as_deref() {
                 let requested = parse_workspace_slug(requested)?;
                 if requested.as_str() != session.workspace_slug {
@@ -523,8 +533,9 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     .map_err(|error| task_error(error.to_string()))?;
             }
         }
-        Ok(existing)
-    })? {
+        Ok((existing, None))
+    })?;
+    if let Some(existing) = existing {
         return task_status(existing.launch.issue.id.as_str());
     }
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
@@ -534,7 +545,13 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
     let segment = match name.as_deref() {
         Some(name) => parse_workspace_slug(name)?,
-        None => derive_workspace_slug(&resolved.item.name)?,
+        None => match &terminal_predecessor_id {
+            // A terminal predecessor may still occupy its worktree and branch on
+            // disk (e.g. after `lf task complete`), so the successor places a
+            // fresh worktree under a slug derived from the predecessor's id.
+            Some(predecessor_id) => succession_workspace_slug(&resolved.item.name, predecessor_id)?,
+            None => derive_workspace_slug(&resolved.item.name)?,
+        },
     };
     let workspace_slug = segment.as_str().to_string();
     let mut plan = plan_placement(&main_repo, segment)
@@ -627,13 +644,19 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
 
     block_on_task(async move {
         let store = task_store().await?;
-        if let Some(existing) = store
+        // Re-resolve after worktree planning: a concurrent run may have created
+        // a Session in the gap. A non-terminal Session wins — return it. A
+        // terminal one is the predecessor whose direction the successor carries;
+        // None means this is the first Session for the issue.
+        let predecessor = match store
             .get_task_session_by_issue(&resolved.item.id)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?
         {
-            return Ok(existing);
-        }
+            Some(existing) if !existing.status.is_terminal() => return Ok(existing),
+            Some(terminal) => Some(terminal),
+            None => None,
+        };
         let now = time::OffsetDateTime::now_utc();
         let mut session = TaskSession {
             id: crate::task::TaskSessionId::new(),
@@ -709,26 +732,43 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             directive,
             command_source(&store, &session).await?,
         );
-        match store
-            .reserve_task_session_with_directive(&session, &pr, &initial)
-            .await
-        {
-            Ok(()) => {}
-            Err(StoreError::Sqlite(_)) => {
-                if let Some(existing) = store
-                    .get_task_session_by_issue(&resolved.item.id)
-                    .await
-                    .map_err(|error| {
-                        task_error(format!("failed to recover task reservation: {error}"))
-                    })?
-                {
-                    return Ok(existing);
+        let succession = if let Some(predecessor) = &predecessor {
+            store
+                .reserve_task_session_successor(predecessor, &session, &pr, &initial)
+                .await
+                .map_err(|error| task_error(format!("failed to reserve task successor: {error}")))?
+        } else {
+            match store
+                .reserve_task_session_with_directive(&session, &pr, &initial)
+                .await
+            {
+                Ok(()) => TaskSessionSuccession {
+                    session: session.clone(),
+                    created: true,
+                },
+                Err(StoreError::Sqlite(_)) => {
+                    if let Some(existing) = store
+                        .get_task_session_by_issue(&resolved.item.id)
+                        .await
+                        .map_err(|error| {
+                            task_error(format!("failed to recover task reservation: {error}"))
+                        })?
+                    {
+                        if !existing.status.is_terminal() {
+                            return Ok(existing);
+                        }
+                    }
+                    return Err(task_error(
+                        "task reservation collided with another task placement",
+                    ));
                 }
-                return Err(task_error(
-                    "task reservation collided with another task placement",
-                ));
+                Err(error) => return Err(task_error(format!("failed to reserve task: {error}"))),
             }
-            Err(error) => return Err(task_error(format!("failed to reserve task: {error}"))),
+        };
+        if !succession.created {
+            // A concurrent or retried run already created the non-terminal
+            // successor; its status is the answer.
+            return Ok(succession.session);
         }
 
         store
@@ -874,16 +914,38 @@ fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
 }
 
 fn derive_workspace_slug(title: &str) -> OpsResult<WorktreeSegment> {
+    derive_workspace_slug_with_cap(title, 5)
+}
+
+/// Derive a workspace slug, keeping the kebab-word count at or below `max_words`
+/// so a caller that appends a suffix word still fits the 2-5 word limit.
+fn derive_workspace_slug_with_cap(title: &str, max_words: usize) -> OpsResult<WorktreeSegment> {
     let sanitized = sanitize_for_branch(title);
     let mut words = sanitized
         .split('-')
         .filter(|word| !word.is_empty())
-        .take(5)
+        .take(max_words)
         .collect::<Vec<_>>();
     if words.len() == 1 {
         words.push("task");
     }
     parse_workspace_slug(&words.join("-"))
+}
+
+/// A successor's worktree and branch must differ from its terminal
+/// predecessor's, which may still occupy its checkout and branch on disk (for
+/// example after `lf task complete`). Append a short, per-predecessor suffix
+/// derived from the predecessor's id so the successor places a fresh worktree
+/// without colliding. The base is capped at four words so the suffix word keeps
+/// the segment within the 2-5 word limit.
+fn succession_workspace_slug(
+    title: &str,
+    predecessor_id: &TaskSessionId,
+) -> OpsResult<WorktreeSegment> {
+    let base = derive_workspace_slug_with_cap(title, 4)?;
+    let id = predecessor_id.as_str();
+    let tail = &id[id.len().saturating_sub(8)..];
+    parse_workspace_slug(&format!("{}-s{}", base.as_str(), tail))
 }
 
 fn parse_pr_slug(value: &str) -> OpsResult<String> {
@@ -4278,9 +4340,9 @@ mod tests {
         parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
         recover_stalled_task_body, recover_stranded_task_body, refuse_dirty_between_prs,
         refuse_if_canonical_ahead, require_task_pr_range_nonempty_with_authority,
-        resolve_task_flow, resolve_upstream_base, task_recovery_adoption,
-        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult,
-        TaskRecoveryAdoption, TaskWorkspace,
+        resolve_task_flow, resolve_upstream_base, succession_workspace_slug,
+        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
+        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -5564,6 +5626,42 @@ mod tests {
             "released-upgrade-proof"
         );
         assert!(parse_pr_slug("released/upgrade").is_err());
+    }
+
+    #[test]
+    fn succession_slug_is_distinct_capped_and_per_predecessor() {
+        // A successor's slug must differ from its predecessor's so the successor
+        // can place a fresh worktree when the terminal predecessor's still
+        // occupies disk. The base is capped at four words so the `-s<tail>`
+        // suffix word keeps the segment within the 2-5 word limit.
+        let title = "Release scoped migrations across every target";
+        let base = derive_workspace_slug(title).unwrap();
+        assert_eq!(base.as_str(), "release-scoped-migrations-across-every");
+
+        let pred_a = TaskSessionId::new();
+        let pred_b = TaskSessionId::new();
+        let succ_a = succession_workspace_slug(title, &pred_a).unwrap();
+        let succ_b = succession_workspace_slug(title, &pred_b).unwrap();
+
+        // Distinct from the predecessor slug and from each other.
+        assert_ne!(succ_a.as_str(), base.as_str());
+        assert_ne!(succ_a.as_str(), succ_b.as_str());
+
+        // Valid and within the 2-5 word bound; the base is capped at four words.
+        let words = succ_a.as_str().split('-').count();
+        assert!(
+            (2..=5).contains(&words),
+            "got {words} words in {}",
+            succ_a.as_str()
+        );
+        // The four-word cap holds: the longest title still leaves room for the suffix.
+        let capped =
+            succession_workspace_slug("one two three four five six seven", &pred_a).unwrap();
+        assert_eq!(
+            capped.as_str().split('-').count(),
+            5,
+            "four base words + one suffix word"
+        );
     }
 
     #[tokio::test]

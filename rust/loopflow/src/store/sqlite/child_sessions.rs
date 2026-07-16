@@ -33,7 +33,7 @@ use crate::task::{
     AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
     LinearObservationOutcome, PrPhase, PrPublication, TaskEvent, TaskEventKind, TaskLifecyclePhase,
     TaskLifecyclePlan, TaskLinearObservation, TaskPhasePlan, TaskPr, TaskPrId, TaskSession,
-    TaskSessionId, TaskSessionStatus,
+    TaskSessionId, TaskSessionStatus, TaskSessionSuccession,
 };
 
 use super::SqliteStore;
@@ -63,6 +63,86 @@ impl SqliteStore {
         insert_child_directive(&transaction, directive)?;
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Carry a terminal Task Session's direction onto a successor, in one
+    /// transaction with the successor's own creation.
+    ///
+    /// Inserts the successor Session, its sequence-1 Working PR, and its initial
+    /// directive; then transactionally re-keys the Linear observation cursor and
+    /// the ingested-comment ledger from the predecessor onto the successor. The
+    /// cursor is re-keyed (moved) rather than copied, so the successor resumes
+    /// polling from the predecessor's last revision and a webhook redelivery of
+    /// an already-applied edit cannot re-emit it; if the predecessor had no
+    /// cursor row, the successor is seeded from its launch snapshot instead. The
+    /// ledger re-key makes a comment already turned into a follow-up by the
+    /// predecessor land zero times on the successor. Historical receipts
+    /// (`child_commands`, `child_directives`) stay on the predecessor for
+    /// attribution; the successor is soft-linked to it via
+    /// `predecessor_session_id`.
+    ///
+    /// Idempotent: if a non-terminal Session for the same Linear issue already
+    /// exists (a concurrent or retried run, or a crash after commit), it is
+    /// returned unchanged with `created: false` and no re-key runs again.
+    pub fn reserve_task_session_successor(
+        &self,
+        predecessor: &TaskSession,
+        successor: &TaskSession,
+        pr: &TaskPr,
+        directive: &ChildDirective,
+    ) -> StoreResult<TaskSessionSuccession> {
+        ensure_directive_target(directive, "task", successor.id.as_str())?;
+        validate_task_session(successor)?;
+        validate_initial_task_pr(successor, pr)?;
+        let issue_id = successor.launch.issue.id.as_str().to_string();
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) =
+            non_terminal_successor_for_issue(&transaction, predecessor.id.as_str(), &issue_id)?
+        {
+            transaction.commit()?;
+            return Ok(TaskSessionSuccession {
+                session: existing,
+                created: false,
+            });
+        }
+        validate_task_project_session(&transaction, successor)?;
+        let parameters = task_session_params(successor);
+        transaction.execute(
+            TASK_SESSION_INSERT,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        insert_task_pr(&transaction, pr)?;
+        insert_child_directive(&transaction, directive)?;
+        // Re-key the cursor: move the predecessor's single row onto the
+        // successor. No successor cursor row exists yet (the successor was not
+        // seeded), so the UPDATE cannot collide on the PRIMARY KEY.
+        transaction.execute(
+            "UPDATE task_linear_observations SET session_id=?2 WHERE session_id=?1",
+            params![predecessor.id.as_str(), successor.id.as_str()],
+        )?;
+        // Seed-if-absent: a predecessor without a cursor (e.g. one predating
+        // the cursor migration) leaves the successor with no row to move, so
+        // seed from the launch snapshot. INSERT OR IGNORE is a no-op when the
+        // re-key moved a row.
+        seed_task_linear_observation(&transaction, successor)?;
+        // Re-key the comment ledger so an already-delivered comment cannot
+        // become a second follow-up on the successor.
+        transaction.execute(
+            "UPDATE task_linear_ingested_comments SET session_id=?2 WHERE session_id=?1",
+            params![predecessor.id.as_str(), successor.id.as_str()],
+        )?;
+        // Soft-link the successor to its predecessor. Receipts stay on the
+        // predecessor; this column is the attributable-history link.
+        transaction.execute(
+            "UPDATE task_sessions SET predecessor_session_id=?2 WHERE id=?1",
+            params![successor.id.as_str(), predecessor.id.as_str()],
+        )?;
+        transaction.commit()?;
+        Ok(TaskSessionSuccession {
+            session: successor.clone(),
+            created: true,
+        })
     }
 
     pub fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
@@ -611,21 +691,22 @@ impl SqliteStore {
 
     pub fn task_session_by_issue(&self, issue: &str) -> StoreResult<Option<TaskSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // A terminal Task Session keeps its row for attributable history while a
+        // successor carries its direction forward, so one Linear issue may have a
+        // terminal predecessor plus a single non-terminal successor. Resolve to
+        // the non-terminal Session if any, else the newest terminal one — never
+        // error on a count >1. The partial unique index guarantees at most one
+        // non-terminal Session per issue.
         let query = format!(
-            "{TASK_SESSION_COLUMNS} WHERE issue_id = ?1 OR issue_identifier = ?1 ORDER BY created_at"
+            "{TASK_SESSION_COLUMNS} WHERE issue_id = ?1 OR issue_identifier = ?1 \
+             ORDER BY CASE WHEN status IN ('completed', 'abandoned') THEN 1 ELSE 0 END, \
+             created_at DESC"
         );
         let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params![issue], map_task_session_row)?;
-        let mut sessions = Vec::new();
-        for row in rows {
-            sessions.push(row?);
-        }
-        match sessions.len() {
-            0 => Ok(None),
-            1 => Ok(sessions.pop()),
-            count => Err(StoreError::InvalidData(format!(
-                "issue {issue:?} resolves to {count} task sessions"
-            ))),
+        let mut rows = statement.query_map(params![issue], map_task_session_row)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
         }
     }
 
@@ -2881,6 +2962,28 @@ fn seed_task_linear_observation(conn: &Connection, session: &TaskSession) -> Sto
         ],
     )?;
     Ok(())
+}
+
+/// The single non-terminal Task Session for a Linear issue, other than the
+/// predecessor. The partial unique index `idx_task_sessions_one_current_issue`
+/// guarantees at most one, so this is the idempotency probe for a carry
+/// transaction: a crash or concurrent run that already created the successor
+/// surfaces here instead of re-keying direction a second time.
+fn non_terminal_successor_for_issue(
+    conn: &Connection,
+    predecessor_id: &str,
+    issue_id: &str,
+) -> StoreResult<Option<TaskSession>> {
+    let query = format!(
+        "{TASK_SESSION_COLUMNS} WHERE issue_id=?1 AND id != ?2 \
+         AND status NOT IN ('completed', 'abandoned') ORDER BY created_at"
+    );
+    let mut statement = conn.prepare(&query)?;
+    let mut rows = statement.query_map(params![issue_id, predecessor_id], map_task_session_row)?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
 }
 
 fn validate_task_project_session(conn: &Connection, session: &TaskSession) -> StoreResult<()> {

@@ -1942,6 +1942,12 @@ fn progress_summary(text: &str) -> String {
     summary
 }
 
+/// The failed-PR ci-fix lifecycle driven end to end. In-crate because the
+/// functions it proves — `arm_ci_fix_wake` among them — are private to this
+/// module tree; see the module's own header.
+#[cfg(test)]
+mod ci_fix_lifecycle_tests;
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;

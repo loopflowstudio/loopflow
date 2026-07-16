@@ -12,13 +12,11 @@ use loopflow::session_context::{
 };
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
 
-/// Ambient Task-Session env vars a live `lf __task` process exports. When the
-/// test suite itself runs inside a Task Session, these leak in and steer
-/// `task_for_worktree` at the wrong (real) session's store. Every EnvGuard
-/// Ambient identity variables that `EnvGuard` clears so task-aware tests
-/// resolve by worktree path, restoring them on drop. Includes `LF_WAVE_ID`
-/// and `LF_PROJECT_SESSION_ID` so `command_source` classification is isolated
-/// from the ambient loopflow environment.
+/// Ambient identity vars a live `lf __task` process exports. When the test suite
+/// itself runs inside a Task Session, these leak in and steer `task_for_worktree`
+/// at the wrong (real) session's store, and `command_source` classification at the
+/// ambient Wave. Every `EnvGuard` clears them so task-aware tests resolve by
+/// worktree path, restoring them on drop.
 const AMBIENT_TASK_ENV: [&str; 5] = [
     "LF_TASK_SESSION_ID",
     "LF_TASK_GENERATION",

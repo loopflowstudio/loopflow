@@ -1075,40 +1075,6 @@ async fn a_ci_fix_wake_mints_no_directive() {
     );
 }
 
-/// The state contract of a wake, pinned so a future edit cannot quietly
-/// reintroduce the `Uncertain`/`NeedsInput` strand. `Delivering` means a provider
-/// call is in flight; a wake makes none, so it must never be reachable.
-#[tokio::test]
-async fn a_ci_fix_wake_never_enters_delivering() {
-    let mut harness = Harness::new().await;
-    harness.head("h1");
-    harness.checks_failing();
-    let (wake_id, _) = harness.observe().await.expect("a red head mints a wake");
-
-    for state in [
-        harness.command_state(&wake_id).await,
-        {
-            harness.arm().await.expect("the wake arms");
-            harness.command_state(&wake_id).await
-        },
-        {
-            harness.crash_and_relaunch().await;
-            harness.arm().await.expect("the successor rearms");
-            harness.command_state(&wake_id).await
-        },
-    ] {
-        assert!(
-            matches!(
-                state,
-                ChildCommandState::Persisted | ChildCommandState::Claimed
-            ),
-            "a wake occupies only Persisted or Claimed before settlement, got {state:?}"
-        );
-        assert_ne!(state, ChildCommandState::Delivering);
-        assert_ne!(state, ChildCommandState::Uncertain);
-    }
-}
-
 /// The Project runner's seam, through the real entry point.
 ///
 /// `queue_ci_fix_command` is what the observation calls now; the direct

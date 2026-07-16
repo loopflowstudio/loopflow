@@ -1215,7 +1215,7 @@ mod tests {
 
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.015_interaction_reviews"
+            latest_known_version()
         );
         assert_eq!(
             applied_versions(&conn).unwrap(),

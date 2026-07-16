@@ -283,12 +283,25 @@ pub struct ChildProcessGeneration {
     pub started_at: OffsetDateTime,
     pub state: ChildLeaseState,
     pub outcome: Option<ChildBodyOutcome>,
-    /// Immutable binary provenance: which lf launched this generation.
-    /// `None` for generations recorded before this field was added.
+    /// Immutable binary provenance: which lf actually booted this generation,
+    /// stamped by that process itself at boot. `None` until the generation has
+    /// booted (a reserved-but-never-started generation ran nothing), and for
+    /// generations recorded before this field was added.
     pub provenance: Option<BinaryProvenance>,
 }
 
 impl ChildProcessGeneration {
+    /// Stamp the running process's identity as it boots this generation: its
+    /// pid, process group, and the provenance of the binary that is actually
+    /// executing it. Called from inside the child body, so `current()` reflects
+    /// the booting binary — provenance describes what ran, not what launched it.
+    pub(crate) fn mark_booted(&mut self) {
+        self.pid = Some(std::process::id());
+        self.process_group_id = crate::engine::process::current_process_group_id();
+        self.state = ChildLeaseState::Active;
+        self.provenance = Some(BinaryProvenance::current());
+    }
+
     pub(crate) fn observe_provider(
         &mut self,
         provider: &str,
@@ -323,30 +336,15 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The executable and store that created a Session, pinned once at creation.
-///
-/// DEPRECATED for launch: the current Home lf is resolved at the launch
-/// boundary, not read from the Session. Retained for audit: each Session
-/// records which lf created it. Historical columns may remain until an
-/// earned table rebuild.
+/// The `lf` binary, store, and home a Session launches through, resolved fresh
+/// at the launch boundary from the current Home — never persisted as Session
+/// state. A transient bundle carried from the resolver to the tmux spawn; a
+/// Session no longer pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
     pub db_path: PathBuf,
     pub lf_home: PathBuf,
-}
-
-#[cfg(test)]
-impl ChildExecutionContext {
-    /// A pinned context for tests that do not care which binary or store a
-    /// Session names — only that it names one.
-    pub(crate) fn for_tests() -> Self {
-        Self {
-            lf_bin: PathBuf::from("/usr/local/bin/lf"),
-            db_path: PathBuf::from("/tmp/loopflow-test/loopflow.db"),
-            lf_home: PathBuf::from("/tmp/loopflow-test"),
-        }
-    }
 }
 
 /// A recorded request to end a Session, durable from the moment the Abandon

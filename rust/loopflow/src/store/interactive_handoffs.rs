@@ -89,7 +89,7 @@ mod tests {
 
     use time::OffsetDateTime;
 
-    use crate::child_session::{ChildExecutionContext, ChildLeaseState, ChildProcessGeneration};
+    use crate::child_session::{ChildLeaseState, ChildProcessGeneration};
     use crate::engine::wave_home::WaveHome;
     use crate::id::WaveId;
     use crate::interactive_handoff::{
@@ -156,7 +156,6 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: Some("project-thread".to_string()),
             latest_process: Some(process(1, "project-thread")),
-            execution: Some(ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -197,7 +196,6 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: Some("task-thread".to_string()),
             latest_process: Some(process(4, "task-thread")),
-            execution: Some(ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

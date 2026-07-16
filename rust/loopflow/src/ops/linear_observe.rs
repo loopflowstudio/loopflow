@@ -200,7 +200,6 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
-            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

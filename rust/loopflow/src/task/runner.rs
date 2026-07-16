@@ -93,9 +93,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         );
     }
     if let Some(process) = &mut session.latest_process {
-        process.pid = Some(std::process::id());
-        process.process_group_id = crate::engine::process::current_process_group_id();
-        process.state = ChildLeaseState::Active;
+        process.mark_booted();
     }
     let from = session.status;
     session.set_status(TaskSessionStatus::Running, "provider turn is active");
@@ -1992,7 +1990,6 @@ mod tests {
             provider: provider.to_string(),
             provider_session_id: None,
             latest_process: None,
-            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -2031,7 +2028,6 @@ mod tests {
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
             latest_process: None,
-            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

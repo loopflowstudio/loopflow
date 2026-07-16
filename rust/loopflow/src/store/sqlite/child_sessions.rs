@@ -15,9 +15,8 @@ use time::OffsetDateTime;
 use crate::child_session::{
     AbandonIntent, BoundaryResult, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome,
     ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDirective, ChildDirectiveId, ChildExecutionContext, ChildLeaseState,
-    ChildLeaseToken, ChildProcessGeneration, ChildRef, ChildWriteLease, DirectiveKind,
-    ObservationRecipient,
+    ChildCommandState, ChildDirective, ChildDirectiveId, ChildLeaseState, ChildLeaseToken,
+    ChildProcessGeneration, ChildRef, ChildWriteLease, DirectiveKind, ObservationRecipient,
 };
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
@@ -2883,32 +2882,6 @@ const CHILD_COMMAND_COLUMNS: &str = "SELECT
     claimed_by_generation, accepted_at, state, effect, error
     FROM child_commands";
 
-/// A Session's pinned context, or `None` for a row written before it was pinned.
-/// The three columns are written together, so a partial row is corruption rather
-/// than a legacy Session, and is read as unpinned — refusing to launch is the
-/// safe reading either way.
-fn execution_context(
-    row: &rusqlite::Row<'_>,
-    lf_bin: usize,
-    db_path: usize,
-    lf_home: usize,
-) -> rusqlite::Result<Option<ChildExecutionContext>> {
-    Ok(
-        match (
-            row.get::<_, Option<String>>(lf_bin)?,
-            row.get::<_, Option<String>>(db_path)?,
-            row.get::<_, Option<String>>(lf_home)?,
-        ) {
-            (Some(lf_bin), Some(db_path), Some(lf_home)) => Some(ChildExecutionContext {
-                lf_bin: PathBuf::from(lf_bin),
-                db_path: PathBuf::from(db_path),
-                lf_home: PathBuf::from(lf_home),
-            }),
-            _ => None,
-        },
-    )
-}
-
 fn ensure_directive_target(
     directive: &ChildDirective,
     target_kind: &str,
@@ -3143,24 +3116,13 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.project_session_id.as_str().to_string()),
         Box::new(i64::from(session.current_directive_version)),
         Box::new(i64::from(session.incorporated_directive_version)),
-        Box::new(
-            session
-                .execution
-                .as_ref()
-                .map(|execution| execution.lf_bin.display().to_string()),
-        ),
-        Box::new(
-            session
-                .execution
-                .as_ref()
-                .map(|execution| execution.db_path.display().to_string()),
-        ),
-        Box::new(
-            session
-                .execution
-                .as_ref()
-                .map(|execution| execution.lf_home.display().to_string()),
-        ),
+        // Legacy lf_bin/db_path/lf_home columns: a Session no longer pins a
+        // binary. Launch resolves the current Home lf; BinaryProvenance on the
+        // generation is the audit record. Written NULL, never read; the columns
+        // are dropped by the earned table rebuild, not this change.
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
         Box::new(
             session
                 .abandon_intent
@@ -3554,7 +3516,8 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         }
         _ => None,
     };
-    let execution = execution_context(row, 29, 30, 31)?;
+    // Columns 29/30/31 (lf_bin/db_path/lf_home) are legacy dead schema: a
+    // Session no longer pins a binary, so they are not read into domain state.
     let abandon_intent = match (
         row.get::<_, Option<i64>>(32)?,
         row.get::<_, Option<String>>(33)?,
@@ -3633,7 +3596,6 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         provider: row.get(16)?,
         provider_session_id: row.get(17)?,
         latest_process: process,
-        execution,
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
@@ -3897,24 +3859,13 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.updated_at.unix_timestamp()),
         Box::new(i64::from(session.current_directive_version)),
         Box::new(i64::from(session.incorporated_directive_version)),
-        Box::new(
-            session
-                .execution
-                .as_ref()
-                .map(|execution| execution.lf_bin.display().to_string()),
-        ),
-        Box::new(
-            session
-                .execution
-                .as_ref()
-                .map(|execution| execution.db_path.display().to_string()),
-        ),
-        Box::new(
-            session
-                .execution
-                .as_ref()
-                .map(|execution| execution.lf_home.display().to_string()),
-        ),
+        // Legacy lf_bin/db_path/lf_home columns: a Session no longer pins a
+        // binary. Launch resolves the current Home lf; BinaryProvenance on the
+        // generation is the audit record. Written NULL, never read; the columns
+        // are dropped by the earned table rebuild, not this change.
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
         Box::new(
             session
                 .abandon_intent
@@ -4035,7 +3986,8 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         }
         _ => None,
     };
-    let execution = execution_context(row, 24, 25, 26)?;
+    // Columns 24/25/26 (lf_bin/db_path/lf_home) are legacy dead schema: a
+    // Session no longer pins a binary, so they are not read into domain state.
     let abandon_intent = match (
         row.get::<_, Option<i64>>(27)?,
         row.get::<_, Option<String>>(28)?,
@@ -4070,7 +4022,6 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         provider: row.get(14)?,
         provider_session_id: row.get(15)?,
         latest_process: process,
-        execution,
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(20)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(21)?),

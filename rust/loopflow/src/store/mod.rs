@@ -150,13 +150,43 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
-    let candidate = select_store_env_value(
-        crate::build_info::provenance(),
-        std::env::var_os(CONTROL_DB_PATH_ENV),
-        std::env::var_os("LF_DB_PATH"),
+    resolve_database_path(
+        select_store_env_value(
+            crate::build_info::provenance(),
+            std::env::var_os(CONTROL_DB_PATH_ENV),
+            std::env::var_os("LF_DB_PATH"),
+        ),
+        lf_home_dir(),
     )
-    .map(PathBuf::from)
-    .unwrap_or_else(default_db_path);
+}
+
+/// Resolve the current Home lf's home directory, ignoring `LF_CONTROL_HOME`.
+///
+/// A relaunch must target the current Home, not the historical control home a
+/// legacy body carries in `LF_CONTROL_HOME`. Only `LF_HOME` (or the built-in
+/// default) is honored here — the control-plane selection is deliberately not.
+pub(crate) fn current_home_lf_home_dir() -> PathBuf {
+    std::env::var_os("LF_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_lf_home_dir)
+}
+
+/// Resolve the current Home lf's database path, ignoring `LF_CONTROL_DB_PATH`.
+///
+/// The companion to [`current_home_lf_home_dir`]: a relaunch resolves the
+/// current store, never the launching body's pinned control database.
+pub(crate) fn current_home_database_path() -> Result<PathBuf, std::io::Error> {
+    resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
+}
+
+fn resolve_database_path(
+    candidate_env: Option<OsString>,
+    home_dir: PathBuf,
+) -> Result<PathBuf, std::io::Error> {
+    let candidate = candidate_env
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir.join("loopflow.db"));
     let path = if candidate.is_absolute() {
         candidate
     } else {
@@ -171,7 +201,7 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
                 "LF_DB_PATH must not escape LF_HOME",
             ));
         }
-        lf_home_dir().join(candidate)
+        home_dir.join(candidate)
     };
     guard_development_database(&path, crate::build_info::provenance(), &machine_home_dir())?;
     if let Some(parent) = path.parent() {
@@ -1049,7 +1079,6 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
-            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1113,7 +1142,6 @@ mod tests {
                 outcome: None,
                 provenance: None,
             }),
-            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1258,6 +1286,68 @@ mod tests {
         assert_eq!(provenance.version, "0.12.1");
         assert_eq!(provenance.provenance, "development");
         assert_eq!(provenance.source_identity, "loopflow-deadbeef");
+    }
+
+    /// The cross-version invariant: provenance describes the binary that boots a
+    /// generation (B), never the launcher (A). Launcher A reserves a generation
+    /// carrying A's provenance; the booting binary then stamps its own identity
+    /// via `mark_booted` at activation. The persisted audit row must record B.
+    #[tokio::test]
+    async fn generation_provenance_is_the_booting_binary_not_the_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        // Launcher A reserves a generation stamped with A's (wrong) provenance.
+        let launcher_a = BinaryProvenance {
+            version: "A-0.0.0".to_string(),
+            provenance: "release".to_string(),
+            source_identity: "launcher-A".to_string(),
+        };
+        let mut task = make_task_session(&wave, &project);
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("lf-task-ab".to_string());
+        if let Some(process) = task.latest_process.as_mut() {
+            process.provenance = Some(launcher_a.clone());
+        }
+        let lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Binary B boots the generation and stamps its own identity, exactly as
+        // the child runner does. This overwrites A's provenance with B's.
+        if let Some(process) = task.latest_process.as_mut() {
+            process.mark_booted();
+        }
+        task.set_status(TaskSessionStatus::Running, "active");
+        store.activate_task_process(&task, &lease).await.unwrap();
+
+        let active = store.get_task_session(&task.id).await.unwrap().unwrap();
+        let recorded = active
+            .latest_process
+            .as_ref()
+            .and_then(|process| process.provenance.as_ref())
+            .expect("the booted generation records provenance");
+        let booting_b = BinaryProvenance::current();
+        assert_eq!(
+            recorded, &booting_b,
+            "provenance must describe what ran (B)"
+        );
+        assert_ne!(
+            recorded, &launcher_a,
+            "provenance must not be the launcher's (A)"
+        );
     }
 
     #[tokio::test]

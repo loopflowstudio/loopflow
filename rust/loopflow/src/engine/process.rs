@@ -60,6 +60,16 @@ fn select_binary_override(
     }
 }
 
+/// The launch-boundary counterpart to [`select_binary_override`]: it takes only
+/// the ordinary `LF_BIN` value and has no control input at all. The current
+/// Home is never resolved through `LF_CONTROL_BIN`, in any provenance — that
+/// pin is the historical binary a legacy body must stop relaunching through.
+fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    ordinary
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 /// Resolve the `lf` a Session will be pinned to: an absolute path that exists.
 ///
 /// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
@@ -86,9 +96,14 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     })
 }
 
-/// Capture the execution context to pin on a Session being created: this
-/// process's `lf`, this process's store, this process's `LF_HOME` — all
-/// absolute, all resolved exactly once.
+/// Capture the current process's control context — this process's `lf`, store,
+/// and `LF_HOME` — for propagating down to a vendored subprocess. In a release
+/// build this honors `LF_CONTROL_*`, so a running body hands its own session's
+/// context (not the machine's Home) to the provider CLI it spawns.
+///
+/// This is NOT the launch resolver. Use [`current_home_execution_context`] to
+/// launch or relaunch a Session: launching through the control context would
+/// perpetuate the historical binary a legacy body was created with.
 pub(crate) fn pinned_execution_context() -> Result<crate::child_session::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
         .map_err(|error| anyhow!("cannot resolve the Session's database path: {error}"))?;
@@ -96,6 +111,84 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child_session::ChildEx
         lf_bin: resolve_pinned_lf_binary()?,
         db_path,
         lf_home: crate::store::lf_home_dir(),
+    })
+}
+
+/// Resolve the current Home `lf` binary, never the historical `LF_CONTROL_BIN`.
+///
+/// `resolve_lf_binary` prefers `LF_CONTROL_BIN` in a release build — the pin a
+/// legacy body carries from whichever binary created it. Relaunching through
+/// that is exactly the stranding this resolver exists to prevent, so the
+/// control override is deliberately skipped: `LF_BIN` (the current Home), then
+/// the installed `lf` on `PATH`, then this executable, then the bare name.
+fn resolve_current_home_lf_binary() -> PathBuf {
+    if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
+        return bin;
+    }
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    if let Some(installed) = which_on_path(Path::new("lf")) {
+        return installed;
+    }
+    if let Ok(current) = std::env::current_exe() {
+        if current
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "lf")
+        {
+            return current;
+        }
+        if let Some(parent) = current.parent() {
+            let sibling = parent.join("lf");
+            if sibling.exists() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from("lf")
+}
+
+/// The current Home `lf`, resolved to an absolute path that exists. Mirrors
+/// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
+fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
+    let candidate = resolve_current_home_lf_binary();
+    if candidate.is_absolute() {
+        return if candidate.exists() {
+            Ok(candidate)
+        } else {
+            Err(anyhow!(
+                "lf binary {} does not exist; set LF_BIN to the current Home lf",
+                candidate.display()
+            ))
+        };
+    }
+    which_on_path(&candidate).ok_or_else(|| {
+        anyhow!(
+            "cannot resolve an absolute path for `{}`; set LF_BIN to the current Home lf",
+            candidate.display()
+        )
+    })
+}
+
+/// Resolve the current Home execution context for launching a Session: the
+/// current Home `lf`, store, and `LF_HOME`, ignoring every `LF_CONTROL_*` pin.
+///
+/// This is the launch/relaunch boundary resolver. A Session created under one
+/// binary and resumed under another launches through the current Home — its
+/// worktree, provider history, and directives are unaffected by which binary
+/// first created it.
+pub(crate) fn current_home_execution_context() -> Result<crate::child_session::ChildExecutionContext>
+{
+    let db_path = crate::store::current_home_database_path()
+        .map_err(|error| anyhow!("cannot resolve the current Home database path: {error}"))?;
+    Ok(crate::child_session::ChildExecutionContext {
+        lf_bin: resolve_current_home_lf_binary_checked()?,
+        db_path,
+        lf_home: crate::store::current_home_lf_home_dir(),
     })
 }
 
@@ -441,7 +534,7 @@ mod tests {
 
     use super::{
         extend_session_control_context, lf_session_shell_command, reap_child_process,
-        select_binary_override, tmux_installed,
+        select_binary_override, select_current_home_binary, tmux_installed,
     };
     use crate::build_info::BuildProvenance;
     use crate::child_session::ChildExecutionContext;
@@ -464,6 +557,34 @@ mod tests {
             ),
             Some(PathBuf::from("/production/lf"))
         );
+    }
+
+    /// The launch boundary must resolve the current Home lf (B), never the
+    /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded
+    /// legacy Sessions. Contrast the two selectors under release provenance:
+    /// the old override picks the control pin A, the current-Home selector
+    /// picks B and has no way to reach A at all.
+    #[test]
+    fn current_home_binary_never_resolves_through_the_control_pin() {
+        // Old behavior (the bug): a release build prefers LF_CONTROL_BIN (A),
+        // even when the current Home LF_BIN (B) is present.
+        assert_eq!(
+            select_binary_override(
+                BuildProvenance::Release,
+                Some("/old/A/lf".into()),
+                Some("/current/B/lf".into()),
+            ),
+            Some(PathBuf::from("/old/A/lf")),
+        );
+        // Fixed: the current-Home selector has no control input, so with
+        // LF_BIN=B it resolves B — A is unreachable, in any provenance.
+        assert_eq!(
+            select_current_home_binary(Some("/current/B/lf".into())),
+            Some(PathBuf::from("/current/B/lf")),
+        );
+        // Empty or absent LF_BIN falls through to PATH/installed lf, never to A.
+        assert_eq!(select_current_home_binary(None), None);
+        assert_eq!(select_current_home_binary(Some("".into())), None);
     }
 
     #[test]

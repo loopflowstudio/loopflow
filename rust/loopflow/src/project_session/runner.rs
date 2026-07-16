@@ -77,9 +77,7 @@ async fn run_project_session_inner(
         anyhow::bail!("Project Session {session_id} generation {generation} is not current");
     }
     if let Some(process) = &mut session.latest_process {
-        process.pid = Some(std::process::id());
-        process.process_group_id = crate::engine::process::current_process_group_id();
-        process.state = ChildLeaseState::Active;
+        process.mark_booted();
     }
     let from = session.status;
     session.set_status(
@@ -1244,7 +1242,6 @@ mod tests {
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
             latest_process: None,
-            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

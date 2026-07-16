@@ -12,8 +12,8 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
-    ChildDecisionId, ChildDirectiveId, ChildExecutionContext, ChildLeaseState,
-    ChildProcessGeneration, ChildRef, DirectiveKind, ObservationRecipient,
+    ChildDecisionId, ChildDirectiveId, ChildLeaseState, ChildProcessGeneration, ChildRef,
+    DirectiveKind, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::session_context::ProjectLaunchReceipt;
@@ -128,12 +128,10 @@ pub struct ProjectSession {
     pub provider: String,
     /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
-    /// Latest launch generation, retained after that process exits.
+    /// Latest launch generation, retained after that process exits. Its
+    /// [`crate::child_session::BinaryProvenance`] is the audit record of which
+    /// lf launched it — a Session no longer pins a binary of its own.
     pub latest_process: Option<ChildProcessGeneration>,
-    /// The binary and store every generation of this Session relaunches with.
-    /// `None` only for a Session created before the context was pinned; see
-    /// [`crate::task::TaskSession::execution`].
-    pub execution: Option<ChildExecutionContext>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a process for a Session carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -370,7 +368,6 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
-            execution: Some(crate::child_session::ChildExecutionContext::for_tests()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,

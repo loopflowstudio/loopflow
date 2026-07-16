@@ -248,6 +248,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ProjectCommand,
     },
+    /// Review accumulated parent-reviewed work across one Wave
+    Reviews {
+        #[command(subcommand)]
+        cmd: ReviewsCommand,
+    },
     /// Linear-backed Task Session lifecycle
     Task {
         #[command(subcommand)]
@@ -902,6 +907,18 @@ pub enum TaskReviewCommand {
         outcome: String,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReviewsCommand {
+    /// Run one human catch-up exercise over the Wave's deferred reviews
+    CatchUp {
+        #[arg(long, default_value = "demo", value_parser = ["demo", "code-review"])]
+        skill: String,
+        /// Print the assembled review evidence without launching an agent
+        #[arg(long)]
+        plan: bool,
     },
 }
 
@@ -2160,6 +2177,33 @@ mod tests {
                 && disposition == "approved"
                 && outcome == "The empty state is proven"
         ));
+    }
+
+    #[test]
+    fn wave_review_catch_up_selects_a_bounded_human_exercise() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "--wave",
+            "product",
+            "reviews",
+            "catch-up",
+            "--skill",
+            "code-review",
+            "--plan",
+        ])
+        .expect("parse Wave review catch-up");
+
+        assert_eq!(cli.wave.as_deref(), Some("product"));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Reviews {
+                cmd: ReviewsCommand::CatchUp {
+                    skill,
+                    plan: true,
+                }
+            }) if skill == "code-review"
+        ));
+        assert!(Cli::try_parse_from(["lf", "reviews", "catch-up", "--skill", "design",]).is_err());
     }
 
     #[test]

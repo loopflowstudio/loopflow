@@ -1384,6 +1384,24 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Project { cmd }) => {
                 in_repo_runtime(&args, |repo| run_project_command(repo, cmd))
             }
+            Some(Commands::Reviews { cmd }) => in_repo_runtime(&args, |repo| {
+                let plan = loopflow::lf::commands::reviews::prepare(cmd, cli.wave.as_deref())?;
+                if plan.preview {
+                    println!("{}", plan.prompt);
+                    return Ok(());
+                }
+                eprintln!(
+                    "catching up {} parent reviews with {}",
+                    plan.review_count, plan.skill
+                );
+                run_target_in_repo(
+                    repo,
+                    &plan.skill,
+                    Some(&plan.prompt),
+                    &cli,
+                    &args,
+                )
+            }),
             Some(Commands::Task { cmd }) => {
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }

@@ -13,6 +13,7 @@ pub mod memory;
 pub mod ops;
 pub mod profile;
 pub mod radio;
+pub mod reviews;
 pub mod run;
 pub mod runs;
 pub mod ssh;

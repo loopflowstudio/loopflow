@@ -24,6 +24,7 @@ use crate::interaction_review::{
 use crate::project_session::ProjectSessionId;
 use crate::session_context::TaskLaunchReceipt;
 
+pub mod actions;
 pub(crate) mod interactive_rendezvous;
 pub mod runner;
 

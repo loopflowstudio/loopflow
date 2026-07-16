@@ -267,7 +267,7 @@ struct TaskWorkspaceView: View {
     }
 
     private var canAttachToAgent: Bool {
-        attention.controls.contains(.attach)
+        runtime?.observation.controls.contains(.attach) ?? false
     }
 
     private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {

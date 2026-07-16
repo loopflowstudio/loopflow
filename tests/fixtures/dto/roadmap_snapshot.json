@@ -18,7 +18,9 @@
         "home": {
           "address": "jack@local",
           "owner": "jack",
-          "location": {"kind": "local"}
+          "location": {
+            "kind": "local"
+          }
         }
       },
       "projects": {
@@ -33,7 +35,10 @@
               "summary": "One coherent model everywhere.",
               "definition": "The product contract for goal-authored computation.",
               "krs": [
-                {"text": "A parallel concept anywhere is a failure event", "holds": false}
+                {
+                  "text": "A parallel concept anywhere is a failure event",
+                  "holds": false
+                }
               ]
             },
             "runtime": {
@@ -44,9 +49,25 @@
               "iteration": 2,
               "pending_observations": 0,
               "provider": "codex",
-              "process_alive": true, "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
+              "process_alive": true,
+              "observation": {
+                "category": "needs_input",
+                "reason": "supervised Tasks are active",
+                "owner": "human",
+                "controls": [
+                  "decide",
+                  "resume",
+                  "abandon"
+                ],
+                "progress_age_secs": null,
+                "deadline_in_secs": null,
+                "step": "iteration 2"
+              }
             },
-            "next_move": {"owner": "project", "reason": "supervised Tasks are active"},
+            "next_move": {
+              "owner": "project",
+              "reason": "supervised Tasks are active"
+            },
             "section": "now",
             "tasks": [
               {
@@ -74,20 +95,82 @@
                   "reason": "Task flow iteration 1, step 2/3: task_pursue",
                   "status_at": "2026-07-14T23:44:00Z",
                   "provider": "claude",
-                  "process_alive": true, "observation": {"category": "working", "reason": "Task flow iteration 1, step 2/3: task_pursue", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iterate"}
+                  "process_alive": true,
+                  "observation": {
+                    "category": "working",
+                    "reason": "Task flow iteration 1, step 2/3: task_pursue",
+                    "owner": "session",
+                    "controls": [
+                      "attach",
+                      "steer",
+                      "interrupt",
+                      "stop"
+                    ],
+                    "progress_age_secs": 60,
+                    "deadline_in_secs": 1740,
+                    "step": "iterate"
+                  }
                 },
-                "next_move": {"owner": "task", "reason": "Task flow iteration 1, step 2/3: task_pursue"},
+                "next_move": {
+                  "owner": "task",
+                  "reason": "Task flow iteration 1, step 2/3: task_pursue"
+                },
                 "attention": {
                   "level": "green",
                   "reason": "Task flow iteration 1, step 2/3: task_pursue",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": 960,
                   "next_owner": "task",
-                  "controls": ["attach", "interrupt"],
+                  "actions": {
+                    "recommended": "no_action",
+                    "actions": [
+                      {
+                        "action": "recover",
+                        "available": false,
+                        "reason": "body is alive; use attach/interrupt to interact"
+                      },
+                      {
+                        "action": "resume",
+                        "available": false,
+                        "reason": "body is working; nothing to resume"
+                      },
+                      {
+                        "action": "review",
+                        "available": false,
+                        "reason": "no open PR to review"
+                      },
+                      {
+                        "action": "start_next_pr",
+                        "available": false,
+                        "reason": "no merged PR to advance from"
+                      },
+                      {
+                        "action": "complete",
+                        "available": false,
+                        "reason": "implementation not finished"
+                      },
+                      {
+                        "action": "no_action",
+                        "available": true,
+                        "reason": "Task body is working"
+                      }
+                    ]
+                  },
                   "pm_completed": false,
                   "session_status": "running",
-                  "process": {"state": "observed", "alive": true, "reason": null},
-                  "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null},
+                  "process": {
+                    "state": "observed",
+                    "alive": true,
+                    "reason": null
+                  },
+                  "local_progress": {
+                    "state": "observed",
+                    "unsettled": false,
+                    "dirty": false,
+                    "authored_commits": false,
+                    "recovery_required": false,
+                    "reason": null
+                  },
                   "active_pr_phase": null
                 },
                 "active_pr": null,
@@ -118,20 +201,81 @@
                   "reason": "PR open for review",
                   "status_at": "2026-07-14T22:00:00Z",
                   "provider": "claude",
-                  "process_alive": false, "observation": {"category": "needs_input", "reason": "PR open for review", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
+                  "process_alive": false,
+                  "observation": {
+                    "category": "needs_input",
+                    "reason": "PR open for review",
+                    "owner": "human",
+                    "controls": [
+                      "decide",
+                      "resume",
+                      "abandon"
+                    ],
+                    "progress_age_secs": null,
+                    "deadline_in_secs": null,
+                    "step": "iterate"
+                  }
                 },
-                "next_move": {"owner": "review", "reason": "PR open for review"},
+                "next_move": {
+                  "owner": "review",
+                  "reason": "PR open for review"
+                },
                 "attention": {
                   "level": "red",
                   "reason": "PR open for review",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": 7200,
                   "next_owner": "review",
-                  "controls": ["resume"],
+                  "actions": {
+                    "recommended": "review",
+                    "actions": [
+                      {
+                        "action": "recover",
+                        "available": false,
+                        "reason": "body is not dead; PR is open for review"
+                      },
+                      {
+                        "action": "resume",
+                        "available": false,
+                        "reason": "awaiting review; resume after review to address feedback"
+                      },
+                      {
+                        "action": "review",
+                        "available": true,
+                        "reason": "checks passed; awaiting review"
+                      },
+                      {
+                        "action": "start_next_pr",
+                        "available": false,
+                        "reason": "PR is open, not merged"
+                      },
+                      {
+                        "action": "complete",
+                        "available": false,
+                        "reason": "PR is open, not merged"
+                      },
+                      {
+                        "action": "no_action",
+                        "available": false,
+                        "reason": "action available: review the PR"
+                      }
+                    ]
+                  },
                   "pm_completed": false,
                   "session_status": "waiting",
-                  "process": {"state": "not_expected", "alive": null, "reason": null},
-                  "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null},
+                  "process": {
+                    "state": "not_expected",
+                    "alive": null,
+                    "reason": null
+                  },
+                  "local_progress": {
+                    "state": "observed",
+                    "unsettled": true,
+                    "dirty": false,
+                    "authored_commits": true,
+                    "recovery_required": false,
+                    "reason": null
+                  },
                   "active_pr_phase": "open"
                 },
                 "active_pr": {
@@ -146,7 +290,10 @@
                     "requested_at": "2026-07-14T22:05:00Z",
                     "after_merge": "review",
                     "next_slug": null,
-                    "github": {"number": 899, "url": "https://github.com/loopflow/loopflow/pull/899"}
+                    "github": {
+                      "number": 899,
+                      "url": "https://github.com/loopflow/loopflow/pull/899"
+                    }
                   },
                   "merge_commit": null,
                   "abandoned_at": null
@@ -168,18 +315,66 @@
                   "workspace": null
                 },
                 "runtime": null,
-                "next_move": {"owner": "project", "reason": "Task is ready to start"},
+                "next_move": {
+                  "owner": "project",
+                  "reason": "Task is ready to start"
+                },
                 "attention": {
                   "level": "black",
                   "reason": "Task is ready to start",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": null,
                   "next_owner": "project",
-                  "controls": ["start"],
+                  "actions": {
+                    "recommended": null,
+                    "actions": [
+                      {
+                        "action": "recover",
+                        "available": false,
+                        "reason": "no Task Session; start one with `lf task run`"
+                      },
+                      {
+                        "action": "resume",
+                        "available": false,
+                        "reason": "no Task Session; start one with `lf task run`"
+                      },
+                      {
+                        "action": "review",
+                        "available": false,
+                        "reason": "no Task Session; start one with `lf task run`"
+                      },
+                      {
+                        "action": "start_next_pr",
+                        "available": false,
+                        "reason": "no Task Session; start one with `lf task run`"
+                      },
+                      {
+                        "action": "complete",
+                        "available": false,
+                        "reason": "no Task Session; start one with `lf task run`"
+                      },
+                      {
+                        "action": "no_action",
+                        "available": false,
+                        "reason": "no Task Session; start one with `lf task run`"
+                      }
+                    ]
+                  },
                   "pm_completed": false,
                   "session_status": null,
-                  "process": {"state": "not_applicable", "alive": null, "reason": null},
-                  "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null},
+                  "process": {
+                    "state": "not_applicable",
+                    "alive": null,
+                    "reason": null
+                  },
+                  "local_progress": {
+                    "state": "not_applicable",
+                    "unsettled": false,
+                    "dirty": null,
+                    "authored_commits": null,
+                    "recovery_required": null,
+                    "reason": null
+                  },
                   "active_pr_phase": null
                 },
                 "active_pr": null,
@@ -210,20 +405,77 @@
                   "reason": "Research delivered in merged PR",
                   "status_at": "2026-07-14T21:00:00Z",
                   "provider": "claude",
-                  "process_alive": false, "observation": {"category": "terminal", "reason": "Research delivered in merged PR", "owner": "nobody", "controls": [], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
+                  "process_alive": false,
+                  "observation": {
+                    "category": "terminal",
+                    "reason": "Research delivered in merged PR",
+                    "owner": "nobody",
+                    "controls": [],
+                    "progress_age_secs": null,
+                    "deadline_in_secs": null,
+                    "step": "iterate"
+                  }
                 },
-                "next_move": {"owner": "project", "reason": "Linear Task is complete"},
+                "next_move": {
+                  "owner": "project",
+                  "reason": "Linear Task is complete"
+                },
                 "attention": {
                   "level": "black",
                   "reason": "Linear Task is complete",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": 10800,
                   "next_owner": "project",
-                  "controls": [],
+                  "actions": {
+                    "recommended": "no_action",
+                    "actions": [
+                      {
+                        "action": "recover",
+                        "available": false,
+                        "reason": "Task is terminal"
+                      },
+                      {
+                        "action": "resume",
+                        "available": false,
+                        "reason": "Task is terminal"
+                      },
+                      {
+                        "action": "review",
+                        "available": false,
+                        "reason": "Task is terminal"
+                      },
+                      {
+                        "action": "start_next_pr",
+                        "available": false,
+                        "reason": "Task is terminal"
+                      },
+                      {
+                        "action": "complete",
+                        "available": false,
+                        "reason": "Task is terminal"
+                      },
+                      {
+                        "action": "no_action",
+                        "available": true,
+                        "reason": "Task is completed"
+                      }
+                    ]
+                  },
                   "pm_completed": true,
                   "session_status": "completed",
-                  "process": {"state": "not_expected", "alive": null, "reason": null},
-                  "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null},
+                  "process": {
+                    "state": "not_expected",
+                    "alive": null,
+                    "reason": null
+                  },
+                  "local_progress": {
+                    "state": "observed",
+                    "unsettled": false,
+                    "dirty": false,
+                    "authored_commits": false,
+                    "recovery_required": false,
+                    "reason": null
+                  },
                   "active_pr_phase": null
                 },
                 "active_pr": null,

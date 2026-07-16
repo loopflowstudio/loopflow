@@ -16,6 +16,7 @@ mod child_sessions;
 mod interaction_reviews;
 mod interactive_handoffs;
 pub mod migrations;
+pub mod provider_deliveries;
 pub mod rows;
 pub mod sqlite;
 mod token_crypto;

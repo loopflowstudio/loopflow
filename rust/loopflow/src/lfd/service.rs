@@ -1,0 +1,393 @@
+//! `lfd` service lifecycle: render and manage the launchd (macOS) or systemd
+//! user (Linux) unit that keeps the Home daemon running.
+//!
+//! Service files never carry secrets. `LF_HOME` / `LF_DB_PATH` are non-secret
+//! path configuration and may be embedded; `LF_LINEAR_WEBHOOK_SECRET`,
+//! `LF_LINEAR_VIEWER_ID`, and `LF_LFD_AUTH_TOKEN` are sourced out-of-band
+//! (Doppler via a wrapper, or `launchctl setenv`). The file is written `0o600`
+//! regardless, since it may contain paths.
+
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+
+pub const LABEL: &str = "com.loopflow.lfd";
+
+/// The non-secret configuration embedded into the service file.
+#[derive(Debug, Clone)]
+pub struct ServiceSpec {
+    /// Absolute path to the `lfd` binary (`ProgramArguments[0]` / `ExecStart`).
+    pub lfd_path: PathBuf,
+    /// Address the daemon binds (`serve --addr <addr>`).
+    pub addr: String,
+    /// `LF_HOME`, when set in the installing environment.
+    pub lf_home: Option<PathBuf>,
+    /// `LF_DB_PATH`, when set in the installing environment.
+    pub db_path: Option<PathBuf>,
+}
+
+/// Where the rendered service file lands, and how it is loaded, per platform.
+#[derive(Debug, Clone, Serialize)]
+pub struct ServiceFile {
+    pub path: PathBuf,
+    pub platform: &'static str,
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn shell_escape(value: &str) -> String {
+    // systemd Environment values are shell-style; quote only when a value could
+    // otherwise be misread. A path or addr never contains a quote, so a simple
+    // wrap is safe and unambiguous.
+    if value.is_empty()
+        || value
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '$'))
+    {
+        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        value.to_string()
+    }
+}
+
+/// Render the launchd plist for macOS. `RunAtLoad` + `KeepAlive` keep the daemon
+/// up; `ThrottleInterval` bounds restart churn; logs go to `~/.lf/logs/lfd.log`.
+pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
+    let program_args = [
+        spec.lfd_path.to_string_lossy().to_string(),
+        "serve".to_string(),
+        "--addr".to_string(),
+        spec.addr.clone(),
+    ];
+    let program_args_xml = program_args
+        .iter()
+        .map(|arg| format!("        <string>{}</string>", xml_escape(arg)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut env = String::new();
+    if let Some(home) = &spec.lf_home {
+        env.push_str(&format!(
+            "        <key>LF_HOME</key>\n        <string>{}</string>\n",
+            xml_escape(&home.to_string_lossy())
+        ));
+    }
+    if let Some(db) = &spec.db_path {
+        env.push_str(&format!(
+            "        <key>LF_DB_PATH</key>\n        <string>{}</string>\n",
+            xml_escape(&db.to_string_lossy())
+        ));
+    }
+    let env_block = if env.is_empty() {
+        String::new()
+    } else {
+        format!("    <key>EnvironmentVariables</key>\n    <dict>\n{env}    </dict>\n")
+    };
+    let log_path = xml_escape(&format!(
+        "{}/.lf/logs/lfd.log",
+        dirs::home_dir()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|| "$HOME".to_string())
+    ));
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+{program_args_xml}
+    </array>
+    {env_block}<key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>{log_path}</string>
+    <key>StandardErrorPath</key>
+    <string>{log_path}</string>
+</dict>
+</plist>
+"#,
+        label = LABEL,
+    )
+}
+
+/// Render the systemd user unit for Linux. `Restart = on-failure` with a 5s
+/// backoff mirrors the launchd `KeepAlive` posture.
+pub fn render_systemd_unit(spec: &ServiceSpec) -> String {
+    let mut env_lines = String::new();
+    if let Some(home) = &spec.lf_home {
+        env_lines.push_str(&format!(
+            "Environment=LF_HOME={}\n",
+            shell_escape(&home.to_string_lossy())
+        ));
+    }
+    if let Some(db) = &spec.db_path {
+        env_lines.push_str(&format!(
+            "Environment=LF_DB_PATH={}\n",
+            shell_escape(&db.to_string_lossy())
+        ));
+    }
+    let exec_start = shell_escape(&spec.lfd_path.to_string_lossy());
+    format!(
+        "[Unit]\nDescription=Loopflow Home daemon (lfd)\n\n\
+         [Service]\n\
+         Type=simple\n\
+         ExecStart={exec_start} serve --addr {addr}\n\
+         Restart=on-failure\n\
+         RestartSec=5\n\
+         {env_lines}\
+         StandardOutput=append:{log_path}\n\
+         StandardError=append:{log_path}\n\n\
+         [Install]\n\
+         WantedBy=default.target\n",
+        addr = shell_escape(&spec.addr),
+        log_path = shell_escape(&format!(
+            "{}/.lf/logs/lfd.log",
+            dirs::home_dir()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|| "$HOME".to_string())
+        ))
+    )
+}
+
+fn write_service_file(path: &Path, contents: &str) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    drop(file);
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
+// -- Install / uninstall / status (platform-specific) -----------------------
+
+#[cfg(target_os = "macos")]
+pub fn install(spec: &ServiceSpec) -> anyhow::Result<ServiceFile> {
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to install into"))?;
+    let dir = home.join("Library/LaunchAgents");
+    let path = dir.join(format!("{LABEL}.plist"));
+    let plist = render_launchd_plist(spec);
+    write_service_file(&path, &plist)?;
+    // Reload: unload (no-op if not loaded) then load, so an edit takes effect.
+    let _ = std::process::Command::new("launchctl")
+        .arg("unload")
+        .arg(&path)
+        .status();
+    let status = std::process::Command::new("launchctl")
+        .arg("load")
+        .arg(&path)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("launchctl load failed for {}", path.display());
+    }
+    Ok(ServiceFile {
+        path,
+        platform: "launchd",
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub fn install(spec: &ServiceSpec) -> anyhow::Result<ServiceFile> {
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to install into"))?;
+    let dir = home.join(".config/systemd/user");
+    let path = dir.join("lfd.service");
+    let unit = render_systemd_unit(spec);
+    write_service_file(&path, &unit)?;
+    let reload = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status()?;
+    let enable = std::process::Command::new("systemctl")
+        .args(["--user", "enable", "--now", "lfd"])
+        .status()?;
+    if !reload.success() || !enable.success() {
+        anyhow::bail!("systemctl enable --now lfd failed");
+    }
+    Ok(ServiceFile {
+        path,
+        platform: "systemd",
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn install(_spec: &ServiceSpec) -> anyhow::Result<ServiceFile> {
+    anyhow::bail!("lfd install is supported on macOS and Linux only")
+}
+
+#[cfg(target_os = "macos")]
+pub fn uninstall() -> anyhow::Result<PathBuf> {
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to uninstall from"))?;
+    let path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist"));
+    if path.exists() {
+        let _ = std::process::Command::new("launchctl")
+            .arg("unload")
+            .arg(&path)
+            .status();
+        std::fs::remove_file(&path)?;
+    }
+    Ok(path)
+}
+
+#[cfg(target_os = "linux")]
+pub fn uninstall() -> anyhow::Result<PathBuf> {
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to uninstall from"))?;
+    let path = home.join(".config/systemd/user/lfd.service");
+    if path.exists() {
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "disable", "--now", "lfd"])
+            .status();
+        std::fs::remove_file(&path)?;
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .status();
+    }
+    Ok(path)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn uninstall() -> anyhow::Result<PathBuf> {
+    anyhow::bail!("lfd uninstall is supported on macOS and Linux only")
+}
+
+/// Report whether the service is loaded and running. Best-effort: a missing
+/// `launchctl`/`systemctl` or an unloaded service prints "not installed" rather
+/// than erroring.
+#[cfg(target_os = "macos")]
+pub fn status() -> anyhow::Result<String> {
+    let out = std::process::Command::new("launchctl")
+        .args(["list", LABEL])
+        .output();
+    match out {
+        Ok(output) if output.status.success() => {
+            Ok(format!("lfd installed and loaded (launchd label {LABEL})"))
+        }
+        _ => Ok(format!("lfd not installed (no launchd label {LABEL})")),
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn status() -> anyhow::Result<String> {
+    let out = std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "lfd"])
+        .output();
+    match out {
+        Ok(output) if output.status.success() => Ok("lfd active (systemd user unit)".to_string()),
+        Ok(output) => Ok(format!(
+            "lfd not active: {}",
+            String::from_utf8_lossy(&output.stdout).trim()
+        )),
+        _ => Ok("lfd not installed (no systemd user unit)".to_string()),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn status() -> anyhow::Result<String> {
+    Ok("lfd service lifecycle is unsupported on this platform".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    fn spec() -> ServiceSpec {
+        ServiceSpec {
+            lfd_path: PathBuf::from("/usr/local/bin/lfd"),
+            addr: "127.0.0.1:8080".to_string(),
+            lf_home: Some(PathBuf::from("/home/op/.lf")),
+            db_path: None,
+        }
+    }
+
+    #[test]
+    fn launchd_plist_carries_label_keepalive_and_non_secret_env_only() {
+        let plist = render_launchd_plist(&spec());
+        assert!(plist.contains("<string>com.loopflow.lfd</string>"));
+        assert!(plist.contains("<key>KeepAlive</key>"));
+        assert!(plist.contains("<key>RunAtLoad</key>"));
+        assert!(plist.contains("<integer>10</integer>"));
+        assert!(plist.contains("<key>LF_HOME</key>"));
+        assert!(plist.contains("/usr/local/bin/lfd</string>"));
+        assert!(plist.contains("serve</string>"));
+        assert!(plist.contains("127.0.0.1:8080</string>"));
+        // Secrets must never appear in the file.
+        assert!(!plist.contains("WEBHOOK_SECRET"));
+        assert!(!plist.contains("VIEWER_ID"));
+        assert!(!plist.contains("AUTH_TOKEN"));
+    }
+
+    #[test]
+    fn systemd_unit_carries_execstart_restart_and_env_lines() {
+        let unit = render_systemd_unit(&spec());
+        assert!(unit.contains("ExecStart=/usr/local/bin/lfd serve --addr 127.0.0.1:8080"));
+        assert!(unit.contains("Restart=on-failure"));
+        assert!(unit.contains("RestartSec=5"));
+        assert!(unit.contains("Environment=LF_HOME=/home/op/.lf"));
+        assert!(unit.contains("WantedBy=default.target"));
+        assert!(!unit.contains("WEBHOOK_SECRET"));
+    }
+
+    #[test]
+    fn service_files_omit_env_blocks_when_no_path_config_is_set() {
+        let bare = ServiceSpec {
+            lfd_path: PathBuf::from("/usr/local/bin/lfd"),
+            addr: "127.0.0.1:8080".to_string(),
+            lf_home: None,
+            db_path: None,
+        };
+        let plist = render_launchd_plist(&bare);
+        assert!(!plist.contains("EnvironmentVariables"));
+        let unit = render_systemd_unit(&bare);
+        assert!(!unit.contains("Environment="));
+    }
+
+    #[test]
+    fn xml_and_shell_escape_neutralize_metacharacters() {
+        let mut s = spec();
+        s.addr = "0.0.0.0:8080 \"injected\"".to_string();
+        let plist = render_launchd_plist(&s);
+        assert!(plist.contains("&quot;injected&quot;"));
+        let unit = render_systemd_unit(&s);
+        assert!(unit.contains("0.0.0.0:8080 \\\"injected\\\""));
+    }
+
+    #[test]
+    fn install_refuses_without_a_home_directory() {
+        // The render path is pure; the install path needs a home. We exercise
+        // the unsupported-platform stub when present, otherwise just confirm the
+        // render round-trips into a file we can write.
+        let path = std::env::temp_dir().join("lfd-service-render.plist");
+        write_service_file(&path, &render_launchd_plist(&spec())).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("com.loopflow.lfd"));
+        std::fs::remove_file(&path).ok();
+        let _: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+    }
+}

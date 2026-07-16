@@ -802,11 +802,12 @@ mod tests {
         );
     }
 
-    // The npm-shim / descendant shape: the direct child backgrounds a
-    // grandchild (same process group) and exits. The grandchild touches a flag
-    // file after a short sleep; the group kill `stop()` fires must take it down
-    // before the sleep finishes, so the flag never appears. This is the same
-    // kill the interrupt hook fires on SIGINT/SIGTERM/SIGHUP.
+    // The orphaned-leader shape (the reaper's Dead + group-alive arm at the
+    // harness level): the direct child backgrounds a grandchild (same process
+    // group) and exits. The grandchild touches a flag file after a short sleep;
+    // the group kill `stop()` fires must take it down before the sleep
+    // finishes, so the flag never appears. This is the same kill the interrupt
+    // hook fires on SIGINT/SIGTERM/SIGHUP.
     #[cfg(unix)]
     #[tokio::test]
     async fn kill_process_group_reaches_the_grandchild() {
@@ -827,5 +828,55 @@ mod tests {
         // Past the grandchild's sleep: if it leaked, the flag would exist.
         tokio::time::sleep(Duration::from_millis(1500)).await;
         assert!(!flag.exists(), "grandchild outlived the group kill");
+    }
+
+    // The W2-225 interrupt shape: the leader (`opencode serve`) is still alive
+    // when the signal handler fires the group kill, with a descendant (MCP
+    // server / model proxy / npm-shim grandchild) running in the same group.
+    // Both must come down — the parent leader AND the provider-child — not just
+    // the orphaned grandchild. This is the kill `stop()` and the
+    // interrupt-cleanup hook fire on SIGINT/SIGTERM/SIGHUP.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_process_group_reaps_live_parent_and_provider_child() {
+        let tmp = tempfile::tempdir().unwrap();
+        let parent_flag = tmp.path().join("parent_alive");
+        let child_flag = tmp.path().join("descendant_survived");
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(format!(
+            "touch {parent} && (sleep 2 && touch {child}) & sleep 30",
+            parent = parent_flag.display(),
+            child = child_flag.display(),
+        ));
+        command.process_group(0);
+        let mut child = command.spawn().unwrap();
+        let pid = child.id().unwrap();
+
+        // Wait for the leader to prove it is alive before we kill the group.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if parent_flag.exists() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                panic!("parent leader never started");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        kill_process_group(pid);
+
+        // The parent leader must be dead: the direct child exited (killed).
+        let leader_dead = tokio::time::timeout(Duration::from_secs(2), child.wait())
+            .await
+            .is_ok();
+        assert!(leader_dead, "live parent leader outlived the group kill");
+
+        // Past the descendant's sleep: if it leaked, the flag would exist.
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert!(
+            !child_flag.exists(),
+            "provider-child descendant outlived the group kill"
+        );
     }
 }

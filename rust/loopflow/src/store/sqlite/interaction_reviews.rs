@@ -185,46 +185,69 @@ impl SqliteStore {
             lease,
         )?;
         let review = require_open_project_review(&transaction, review_id, project_session_id)?;
-        let session = transaction.query_row(
-            TASK_SESSION_SELECT,
-            [review.task_session_id.as_str()],
-            map_task_session_row,
-        )?;
-        transaction.execute(
-            "UPDATE interaction_reviews
-             SET status='active', reviewer_generation=COALESCE(reviewer_generation, ?2)
-             WHERE id=?1 AND status IN ('requested', 'active')",
-            params![review_id.as_str(), i64::from(lease.generation)],
-        )?;
-        let command = ChildCommand::new(
-            ChildRef::Task(review.task_session_id.clone()),
+        let command = _send_interaction_review_message(
+            &transaction,
+            &review,
             ChildCommandSource::Project(project_session_id.clone()),
-            ChildCommandKind::FollowUp {
-                text: format!(
-                    "<interaction_review_message review_id=\"{review_id}\" from=\"reviewer\">\n{text}\n\nReply with `lf task review reply {review_id} \"<answer and evidence>\"`.\n</interaction_review_message>"
-                ),
-            },
-        );
-        insert_child_command(&transaction, &command)?;
-        insert_task_event_in(
-            &transaction,
-            &session,
-            &TaskEventKind::CommandChanged {
-                command_id: command.id.clone(),
-                state: crate::child_session::ChildCommandState::Persisted,
-                effect: command.effect,
-                error: None,
-            },
+            Some(lease.generation),
+            &text,
         )?;
-        insert_task_event_in(
-            &transaction,
-            &session,
-            &TaskEventKind::InteractionReviewMessage {
-                review_id: review_id.clone(),
-                author: InteractionReviewMessageAuthor::Reviewer,
-                text,
-            },
+        transaction.commit()?;
+        Ok(command)
+    }
+
+    pub(crate) fn activate_human_interaction_review(
+        &self,
+        session: &TaskSession,
+        review_id: &InteractionReviewId,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<InteractionReview> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_child_write_lease(&transaction, &ChildRef::Task(session.id.clone()), lease)?;
+        let review = require_open_human_review(&transaction, review_id)?;
+        if review.task_session_id != session.id
+            || review.phase_epoch != session.phase_epoch
+            || review.phase_iteration != session.phase_iteration
+            || review.step_index != session.phase_cursor
+        {
+            return Err(StoreError::InvalidData(
+                "human interaction review is stale for this Task lifecycle waitpoint".to_string(),
+            ));
+        }
+        transaction.execute(
+            "UPDATE interaction_reviews SET status='active'
+             WHERE id=?1 AND status IN ('requested', 'active')",
+            [review_id.as_str()],
         )?;
+        let active = transaction.query_row(
+            &format!("{INTERACTION_REVIEW_COLUMNS} WHERE id=?1"),
+            [review_id.as_str()],
+            map_review_row,
+        )?;
+        transaction.commit()?;
+        Ok(active)
+    }
+
+    pub(crate) fn send_human_interaction_review_message(
+        &self,
+        review_id: &InteractionReviewId,
+        source: ChildCommandSource,
+        text: &str,
+    ) -> StoreResult<ChildCommand> {
+        if !matches!(
+            source,
+            ChildCommandSource::Human | ChildCommandSource::Attachment
+        ) {
+            return Err(StoreError::InvalidData(
+                "human review messages require human or attachment authority".to_string(),
+            ));
+        }
+        let text = require_text("review message", text)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let review = require_open_human_review(&transaction, review_id)?;
+        let command = _send_interaction_review_message(&transaction, &review, source, None, &text)?;
         transaction.commit()?;
         Ok(command)
     }
@@ -309,79 +332,192 @@ impl SqliteStore {
                 "only the assigned Project reviewer may complete this review".to_string(),
             ));
         }
-        if review.status == InteractionReviewStatus::Completed {
-            if review.disposition == Some(disposition)
-                && review.outcome.as_deref() == Some(outcome.as_str())
-            {
-                transaction.commit()?;
-                return Ok((review, false));
-            }
-            return Err(StoreError::InvalidData(
-                "interaction review already has a different completion".to_string(),
-            ));
-        }
-        if review.status.is_terminal() {
-            return Err(StoreError::InvalidData(
-                "interaction review is already terminal".to_string(),
-            ));
-        }
-        let completed_at = time::OffsetDateTime::now_utc();
-        transaction.execute(
-            "UPDATE interaction_reviews
-             SET status='completed', reviewer_generation=?2, disposition=?3,
-                 outcome=?4, completed_at=?5
-             WHERE id=?1",
-            params![
-                review_id.as_str(),
-                i64::from(lease.generation),
-                disposition.as_str(),
-                outcome,
-                completed_at.unix_timestamp(),
-            ],
-        )?;
-        let command = ChildCommand::new(
-            ChildRef::Task(review.task_session_id.clone()),
+        let result = _complete_interaction_review(
+            &transaction,
+            review,
             ChildCommandSource::Project(project_session_id.clone()),
-            ChildCommandKind::FollowUp {
-                text: format!(
-                    "<interaction_review_completed review_id=\"{review_id}\" disposition=\"{}\">\n{outcome}\n</interaction_review_completed>",
-                    disposition.as_str()
-                ),
-            },
-        );
-        insert_child_command(&transaction, &command)?;
-        let session = transaction.query_row(
-            TASK_SESSION_SELECT,
-            [review.task_session_id.as_str()],
-            map_task_session_row,
-        )?;
-        insert_task_event_in(
-            &transaction,
-            &session,
-            &TaskEventKind::CommandChanged {
-                command_id: command.id.clone(),
-                state: crate::child_session::ChildCommandState::Persisted,
-                effect: command.effect,
-                error: None,
-            },
-        )?;
-        insert_task_event_in(
-            &transaction,
-            &session,
-            &TaskEventKind::InteractionReviewCompleted {
-                review_id: review_id.clone(),
-                disposition,
-                outcome,
-            },
-        )?;
-        let completed = transaction.query_row(
-            &format!("{INTERACTION_REVIEW_COLUMNS} WHERE id=?1"),
-            [review_id.as_str()],
-            map_review_row,
+            Some(lease.generation),
+            disposition,
+            &outcome,
         )?;
         transaction.commit()?;
-        Ok((completed, true))
+        Ok(result)
     }
+
+    pub(crate) fn complete_human_interaction_review(
+        &self,
+        review_id: &InteractionReviewId,
+        disposition: InteractionReviewDisposition,
+        outcome: &str,
+    ) -> StoreResult<(InteractionReview, bool)> {
+        let outcome = require_text("review outcome", outcome)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let review = transaction
+            .query_row(
+                &format!("{INTERACTION_REVIEW_COLUMNS} WHERE id=?1"),
+                [review_id.as_str()],
+                map_review_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        if review.reviewer != InteractionReviewer::Human {
+            return Err(StoreError::InvalidData(
+                "only a human may complete this interaction review".to_string(),
+            ));
+        }
+        let result = _complete_interaction_review(
+            &transaction,
+            review,
+            ChildCommandSource::Human,
+            None,
+            disposition,
+            &outcome,
+        )?;
+        transaction.commit()?;
+        Ok(result)
+    }
+}
+
+fn _send_interaction_review_message(
+    transaction: &rusqlite::Transaction<'_>,
+    review: &InteractionReview,
+    source: ChildCommandSource,
+    reviewer_generation: Option<u32>,
+    text: &str,
+) -> StoreResult<ChildCommand> {
+    let session = transaction.query_row(
+        TASK_SESSION_SELECT,
+        [review.task_session_id.as_str()],
+        map_task_session_row,
+    )?;
+    match reviewer_generation {
+        Some(generation) => {
+            transaction.execute(
+                "UPDATE interaction_reviews
+                 SET status='active', reviewer_generation=COALESCE(reviewer_generation, ?2)
+                 WHERE id=?1 AND status IN ('requested', 'active')",
+                params![review.id.as_str(), i64::from(generation)],
+            )?;
+        }
+        None => {
+            transaction.execute(
+                "UPDATE interaction_reviews SET status='active'
+                 WHERE id=?1 AND status IN ('requested', 'active')",
+                [review.id.as_str()],
+            )?;
+        }
+    }
+    let command = ChildCommand::new(
+        ChildRef::Task(review.task_session_id.clone()),
+        source,
+        ChildCommandKind::FollowUp {
+            text: format!(
+                "<interaction_review_message review_id=\"{}\" from=\"reviewer\">\n{text}\n\nReply with `lf task review reply {} \"<answer and evidence>\"`.\n</interaction_review_message>",
+                review.id, review.id
+            ),
+        },
+    );
+    insert_child_command(transaction, &command)?;
+    insert_task_event_in(
+        transaction,
+        &session,
+        &TaskEventKind::CommandChanged {
+            command_id: command.id.clone(),
+            state: crate::child_session::ChildCommandState::Persisted,
+            effect: command.effect,
+            error: None,
+        },
+    )?;
+    insert_task_event_in(
+        transaction,
+        &session,
+        &TaskEventKind::InteractionReviewMessage {
+            review_id: review.id.clone(),
+            author: InteractionReviewMessageAuthor::Reviewer,
+            text: text.to_string(),
+        },
+    )?;
+    Ok(command)
+}
+
+fn _complete_interaction_review(
+    transaction: &rusqlite::Transaction<'_>,
+    review: InteractionReview,
+    source: ChildCommandSource,
+    reviewer_generation: Option<u32>,
+    disposition: InteractionReviewDisposition,
+    outcome: &str,
+) -> StoreResult<(InteractionReview, bool)> {
+    if review.status == InteractionReviewStatus::Completed {
+        if review.disposition == Some(disposition) && review.outcome.as_deref() == Some(outcome) {
+            return Ok((review, false));
+        }
+        return Err(StoreError::InvalidData(
+            "interaction review already has a different completion".to_string(),
+        ));
+    }
+    if review.status.is_terminal() {
+        return Err(StoreError::InvalidData(
+            "interaction review is already terminal".to_string(),
+        ));
+    }
+    let completed_at = time::OffsetDateTime::now_utc();
+    transaction.execute(
+        "UPDATE interaction_reviews
+         SET status='completed', reviewer_generation=?2, disposition=?3,
+             outcome=?4, completed_at=?5
+         WHERE id=?1",
+        params![
+            review.id.as_str(),
+            reviewer_generation.map(i64::from),
+            disposition.as_str(),
+            outcome,
+            completed_at.unix_timestamp(),
+        ],
+    )?;
+    let command = ChildCommand::new(
+        ChildRef::Task(review.task_session_id.clone()),
+        source,
+        ChildCommandKind::FollowUp {
+            text: format!(
+                "<interaction_review_completed review_id=\"{}\" disposition=\"{}\">\n{outcome}\n</interaction_review_completed>",
+                review.id,
+                disposition.as_str()
+            ),
+        },
+    );
+    insert_child_command(transaction, &command)?;
+    let session = transaction.query_row(
+        TASK_SESSION_SELECT,
+        [review.task_session_id.as_str()],
+        map_task_session_row,
+    )?;
+    insert_task_event_in(
+        transaction,
+        &session,
+        &TaskEventKind::CommandChanged {
+            command_id: command.id.clone(),
+            state: crate::child_session::ChildCommandState::Persisted,
+            effect: command.effect,
+            error: None,
+        },
+    )?;
+    insert_task_event_in(
+        transaction,
+        &session,
+        &TaskEventKind::InteractionReviewCompleted {
+            review_id: review.id.clone(),
+            disposition,
+            outcome: outcome.to_string(),
+        },
+    )?;
+    let completed = transaction.query_row(
+        &format!("{INTERACTION_REVIEW_COLUMNS} WHERE id=?1"),
+        [review.id.as_str()],
+        map_review_row,
+    )?;
+    Ok((completed, true))
 }
 
 fn insert_review(conn: &rusqlite::Connection, review: &InteractionReview) -> StoreResult<()> {
@@ -490,6 +626,26 @@ fn require_open_project_review(
     {
         return Err(StoreError::InvalidData(
             "interaction review is not open for this Project reviewer".to_string(),
+        ));
+    }
+    Ok(review)
+}
+
+fn require_open_human_review(
+    conn: &rusqlite::Connection,
+    review_id: &InteractionReviewId,
+) -> StoreResult<InteractionReview> {
+    let review = conn
+        .query_row(
+            &format!("{INTERACTION_REVIEW_COLUMNS} WHERE id=?1"),
+            [review_id.as_str()],
+            map_review_row,
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
+    if review.reviewer != InteractionReviewer::Human || review.status.is_terminal() {
+        return Err(StoreError::InvalidData(
+            "interaction review is not open for the human reviewer".to_string(),
         ));
     }
     Ok(review)

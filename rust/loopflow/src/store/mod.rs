@@ -1534,6 +1534,129 @@ mod tests {
         assert!(reviews.iter().any(|review| {
             review.id == next_gate_review.id && review.phase_epoch == next_gate_review.phase_epoch
         }));
+
+        task.enter_iterate().unwrap();
+        task.lifecycle = crate::task::TaskLifecyclePlan::standard("task");
+        task.enter_gate(TaskGateProposal {
+            status: TaskSessionStatus::Waiting,
+            reason: "PR ready for attended review".to_string(),
+        })
+        .unwrap();
+        store
+            .update_task_session_for_lease(&task, &task_lease)
+            .await
+            .unwrap();
+        let mut human_review = review.clone();
+        human_review.id = InteractionReviewId::new();
+        human_review.phase_epoch = task.phase_epoch;
+        human_review.policy = crate::engine::InteractionPolicy::Require;
+        human_review.reviewer = InteractionReviewer::Human;
+        human_review.evidence.head_commit = "head-for-human".to_string();
+        human_review.evidence.worktree_fingerprint = "fingerprint-for-human".to_string();
+        human_review.requested_at = OffsetDateTime::now_utc();
+        let (human_review, created) = store
+            .open_interaction_review(&task, &human_review, &task_lease)
+            .await
+            .unwrap();
+        assert!(created);
+        let active = store
+            .activate_human_interaction_review(&task, &human_review.id, &task_lease)
+            .await
+            .unwrap();
+        assert_eq!(active.status, InteractionReviewStatus::Active);
+        let first_human_message = store
+            .send_human_interaction_review_message(
+                &human_review.id,
+                ChildCommandSource::Human,
+                "Show me the user-visible result.",
+            )
+            .await
+            .unwrap();
+        let attached_message = store
+            .send_human_interaction_review_message(
+                &human_review.id,
+                ChildCommandSource::Attachment,
+                "Now connect it to the stored row.",
+            )
+            .await
+            .unwrap();
+        let claimed = store
+            .claim_child_commands(&ChildRef::Task(task.id.clone()), task_lease.generation)
+            .await
+            .unwrap();
+        let human_dialogue = claimed
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command.source,
+                    ChildCommandSource::Human | ChildCommandSource::Attachment
+                )
+            })
+            .map(|command| command.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            human_dialogue,
+            vec![first_human_message.id, attached_message.id]
+        );
+        store
+            .reply_to_interaction_review(
+                &human_review.id,
+                &task.id,
+                &task_lease,
+                "The product result and stored row agree.",
+            )
+            .await
+            .unwrap();
+        assert!(store
+            .send_project_interaction_review_message(
+                &human_review.id,
+                &project.id,
+                &project_lease,
+                "Project agents cannot impersonate the human.",
+            )
+            .await
+            .is_err());
+        let (completed_human_review, changed) = store
+            .complete_human_interaction_review(
+                &human_review.id,
+                InteractionReviewDisposition::ChangesRequested,
+                "The login proof is still missing.",
+            )
+            .await
+            .unwrap();
+        assert!(changed);
+        assert_eq!(completed_human_review.reviewer_generation, None);
+        assert_eq!(
+            completed_human_review.disposition,
+            Some(InteractionReviewDisposition::ChangesRequested)
+        );
+        let (_, changed) = store
+            .complete_human_interaction_review(
+                &human_review.id,
+                InteractionReviewDisposition::ChangesRequested,
+                "The login proof is still missing.",
+            )
+            .await
+            .unwrap();
+        assert!(!changed);
+        assert!(store
+            .complete_project_interaction_review(
+                &human_review.id,
+                &project.id,
+                &project_lease,
+                InteractionReviewDisposition::Approved,
+                "The Project cannot approve the human checkpoint.",
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            store
+                .list_interaction_reviews(Some(wave.id()))
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     #[tokio::test]

@@ -170,6 +170,24 @@ mark its remaining lifecycle headless. Interactive skills define both attended
 and parent-reviewer behavior; parent questions and Task answers stay in the
 same durable review conversation.
 
+Review an attended kickoff or gate in the Task's existing provider session:
+
+```bash
+lf task status INF-123                 # status reason names the review id
+lf task attach INF-123                 # watch the exercise and type FIFO replies
+lf task review message ir_... "Show the real sign-in path"
+lf task review complete ir_... \
+  --disposition changes-requested \
+  --outcome "The login proof is missing"
+```
+
+Bare input while attached to a human review is a FIFO review message, not a
+steer. Use `/interrupt` explicitly to interrupt the provider. Approval advances
+the lifecycle; requested Gate changes return the same Task to another inner-loop
+cycle. The durable review records the exercise, evidence snapshot, conversation,
+disposition, and outcome. A generic interactive handoff only tells another UI
+how to present or attach to the existing session; it does not decide the review.
+
 Start dependent work without sharing the parent's worktree:
 
 ```bash

@@ -34,6 +34,56 @@ instant and that routine actions feel like single actions — a status dump that
 omits the legal next move, or a button that says Resume when the real move is
 Review, breaks both.
 
+## Implementation status
+
+The Rust core is **already implemented**. A prior session landed the types and
+derivation; what remains is the test/fixture/Swift migration and the matrix
+test.
+
+**Done (Rust):**
+- `task/actions.rs` — `TaskAction` (6), `TaskActionStatus`, `TaskActionModel`,
+  `TaskActionEvidence`, `ReviewGateState`, `derive_task_actions` (full truth
+  table: review gate > PR phase > body liveness > status, predecessor overlay),
+  `ci_failure_reason`, `one_action` helper.
+- `TaskAttentionSnapshot.actions: TaskActionModel` replaces `.controls`;
+  `TaskAttentionControl` enum deleted from type definitions.
+- `TaskSessionSnapshot.actions: TaskActionModel` added.
+- `derive_task_attention` takes `action_evidence: Option<&TaskActionEvidence>`,
+  delegates to `derive_task_actions`.
+- `task_snapshot` builds `TaskActionEvidence` (CI via `pr.fresh_ci()`, review
+  gate from store, predecessor from parent PR) and calls `derive_task_actions`.
+- `print_task_session` prints `action:` / `blocked:` lines.
+- `BodyControl::Attach` added; `observe()` emits it for live bodies
+  (`child_session.rs:792,806`).
+- `review_gate_from` maps `interaction_reviews` → `ReviewGateState`.
+
+**Remaining:**
+1. **Rust tests (9 compile errors):** `projected_attention` test helper has the
+   old signature (passes `Option<PrPhase>` as 4th arg; `derive_task_attention`
+   now expects `Option<&TaskActionEvidence>`).
+   `shared_attention_projection_covers_the_desktop_decision_table` asserts on
+   `.controls` / `TaskAttentionControl::*` which no longer exist.
+2. **4 fixtures:** `attention.controls` → `attention.actions` in
+   `task_attention_states.json` (8 states; flip `dead_authored_commits` to
+   `review`), `wave_detail.json`, `roadmap_snapshot.json`,
+   `active_sessions_census.json`. Note: `observation.controls` (BodyControl)
+   stay unchanged — only `attention.controls` (old TaskAttentionControl) become
+   `attention.actions`.
+3. **Swift mirror:** `WaveWorkMap.swift` — add `TaskAction`/`TaskActionStatus`/
+   `TaskActionModel`, replace `TaskAttentionControl` + `controls` with
+   `actions`, add `attach` to `BodyControl`. `RoadmapView.swift` —
+   `roadmapTaskAction` reads `actions.recommended` (+ `runtime == nil` →
+   `.run`); `roadmapTaskCanInterrupt` reads `observation.controls`.
+4. **Swift tests:** `DTOFixtureTests`, `WorkAttentionTests`, `RoadmapViewTests`,
+   `WaveLensTests` updated for the new types.
+5. **Matrix test:** every `TaskSessionStatus` (8) × `PrPhase` (6 incl. none) ×
+   predecessor (none/parent-open/parent-merged/parent-abandoned) ×
+   `ReviewGateState` (none/requested/approved/changes-requested), asserting
+   coherence + directive-named transitions.
+
+All six open questions in `scratch/questions.md` are **validated by the existing
+code** — the implementation confirms each assumption.
+
 ## The demo
 
 A Task is `waiting`, its PR is `open`, required checks **pass**. Run:

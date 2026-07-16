@@ -666,6 +666,7 @@ pub enum BodyOwner {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum BodyControl {
+    Attach,
     Steer,
     Interrupt,
     Stop,
@@ -1040,6 +1041,7 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
                     "alive but no meaningful progress past the deadline",
                     BodyOwner::Loopflow,
                     vec![
+                        BodyControl::Attach,
                         BodyControl::Extend,
                         BodyControl::Interrupt,
                         BodyControl::Stop,
@@ -1053,6 +1055,7 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
                     &evidence.reason,
                     BodyOwner::Session,
                     vec![
+                        BodyControl::Attach,
                         BodyControl::Steer,
                         BodyControl::Interrupt,
                         BodyControl::Stop,

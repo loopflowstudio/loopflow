@@ -36,6 +36,9 @@ use crate::session_context::{
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, StoreError,
 };
+use crate::task::actions::{
+    derive_task_actions, ReviewGateState, TaskActionEvidence, TaskActionModel,
+};
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
@@ -162,6 +165,7 @@ pub struct TaskSessionSnapshot {
     /// means a bounded remote read failed and the PR fields are cached, not
     /// freshly confirmed.
     pub observation: Observation,
+    pub actions: TaskActionModel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -3987,6 +3991,20 @@ pub(crate) async fn reconcile_task_completion(
     Ok(())
 }
 
+fn review_gate_from(review: &InteractionReview) -> ReviewGateState {
+    match review.status {
+        InteractionReviewStatus::Requested => ReviewGateState::Requested,
+        InteractionReviewStatus::Active => ReviewGateState::Active,
+        InteractionReviewStatus::Completed => match review.disposition {
+            Some(InteractionReviewDisposition::Approved) => ReviewGateState::Approved,
+            Some(InteractionReviewDisposition::ChangesRequested) => {
+                ReviewGateState::ChangesRequested
+            }
+            None => ReviewGateState::Approved,
+        },
+    }
+}
+
 pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     let session = session.clone();
     block_on_task(async move {
@@ -4012,7 +4030,47 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .task_prs(&session.id)
             .await
             .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-        let active_pr = prs.iter().find(|pr| pr.is_active()).map(|pr| pr.id.clone());
+        let active = prs.iter().find(|pr| pr.is_active());
+        let active_pr = active.map(|pr| pr.id.clone());
+        let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
+            Some(parent_id) => store
+                .get_task_pr(parent_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
+                .map(|pr| pr.phase()),
+            None => None,
+        };
+        let review_gate = store
+            .interaction_review_at(
+                &session.id,
+                session.phase_epoch,
+                session.phase_iteration,
+                session.phase_cursor,
+            )
+            .await
+            .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
+            .map(|r| review_gate_from(&r));
+        let action_evidence = TaskActionEvidence {
+            status: session.status,
+            active_pr_phase: active.map(|pr| pr.phase()),
+            active_pr_after_merge: active
+                .and_then(|pr| pr.publication.as_ref())
+                .map(|p| p.after_merge),
+            active_pr_next_slug: active
+                .and_then(|pr| pr.publication.as_ref())
+                .and_then(|p| p.next_slug.as_deref()),
+            ci: active.and_then(|pr| pr.fresh_ci()),
+            process_alive: if session.status.is_process_active() {
+                Some(process_alive)
+            } else {
+                None
+            },
+            predecessor_phase,
+            review_gate,
+            abandon_intent: session.abandon_intent.is_some(),
+            local_progress_unsettled: None,
+        };
+        let actions = derive_task_actions(&action_evidence);
         // Resolve the live routing target for this Task's parent Project. The
         // historical project_session_id stays as provenance; the routing target
         // is its non-terminal successor when the historical session is terminal.
@@ -4061,6 +4119,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             created_at: session.created_at,
             updated_at: session.updated_at,
             observation: session.observation,
+            actions,
         })
     })
 }

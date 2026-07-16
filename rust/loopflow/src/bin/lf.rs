@@ -700,6 +700,24 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             loopflow::task::Observation::NotRequired
             | loopflow::task::Observation::Fresh { .. } => {}
         }
+        let actions = &snapshot.actions;
+        if let Some(recommended) = actions.recommended {
+            let reason = actions
+                .status(recommended)
+                .map(|s| s.reason.as_str())
+                .unwrap_or("");
+            println!("  action: {}  ({})", recommended.as_str(), reason);
+            use loopflow::task::actions::TaskAction;
+            for status in &actions.actions {
+                if !status.available && status.action != TaskAction::NoAction {
+                    println!(
+                        "    blocked: {}  ({})",
+                        status.action.as_str(),
+                        status.reason,
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }

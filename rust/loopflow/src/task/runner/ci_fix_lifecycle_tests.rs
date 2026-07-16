@@ -25,7 +25,10 @@ use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
-use crate::child_session::{ChildLeaseState, ChildProcessGeneration, ChildWriteLease};
+use crate::child_session::{
+    ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
+};
 use crate::id::WaveId;
 use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
 use crate::session_context::{
@@ -511,10 +514,88 @@ impl Harness {
             .expect("expire the read cache");
     }
 
-    async fn arm(&self) -> bool {
-        super::arm_ci_fix_wake(&self.store, &self.task, &self.lease)
+    /// What the Project runner's observation does: enqueue the wake the current
+    /// reading warrants, if any. Mints the payload through the same
+    /// `ci_fix_wake_kind` production uses, so a drift between the identity
+    /// enqueued and the identity `arm` matches would fail these tests.
+    ///
+    /// Stops short of `queue_ci_fix_command` only because its tail launches a real
+    /// process; `ops::child` covers the launch seam. Returns the surviving command
+    /// id and whether this observation minted it.
+    async fn enqueue(&self) -> Option<(ChildCommandId, bool)> {
+        let pr = self
+            .store
+            .active_task_pr(&self.task.id)
             .await
-            .expect("arm the ci-fix wake")
+            .expect("read active pr")?;
+        let kind = crate::ops::task::ci_fix_wake_kind(&pr)?;
+        let ChildCommandKind::CiFix {
+            ref incident_identity,
+            ..
+        } = kind
+        else {
+            unreachable!("ci_fix_wake_kind returns a CiFix");
+        };
+        let identity = incident_identity.clone();
+        let command = ChildCommand::new(
+            ChildRef::Task(self.task.id.clone()),
+            ChildCommandSource::System,
+            kind,
+        );
+        let (command, created) = self
+            .store
+            .ensure_child_ci_fix_command(&command)
+            .await
+            .expect("ensure the ci-fix wake");
+        self.store
+            .mark_ci_incident_triggered(&identity, &command.id, OffsetDateTime::now_utc())
+            .await
+            .expect("link the wake to its incident");
+        Some((command.id, created))
+    }
+
+    /// What a body's boot does: claim, then select the flow from the claimed wake.
+    /// Returns the armed wake, if this generation has one.
+    async fn arm(&self) -> Option<super::CiFixWake> {
+        let claimed = self
+            .store
+            .claim_child_commands_for_lease(&ChildRef::Task(self.task.id.clone()), &self.lease)
+            .await
+            .expect("claim commands");
+        let (wake, _) = super::arm_ci_fix_wake(&self.store, &self.task, &self.lease, claimed)
+            .await
+            .expect("arm the ci-fix wake");
+        wake
+    }
+
+    /// Observe, then enqueue: one supervision pass over a sleeping Task.
+    async fn observe(&mut self) -> Option<(ChildCommandId, bool)> {
+        self.reconcile().await;
+        self.enqueue().await
+    }
+
+    async fn commands(&self) -> Vec<ChildCommand> {
+        self.store
+            .list_child_commands(&ChildRef::Task(self.task.id.clone()))
+            .await
+            .expect("read child commands")
+    }
+
+    async fn ci_fix_commands(&self) -> Vec<ChildCommand> {
+        self.commands()
+            .await
+            .into_iter()
+            .filter(|command| matches!(command.kind, ChildCommandKind::CiFix { .. }))
+            .collect()
+    }
+
+    async fn command_state(&self, id: &ChildCommandId) -> ChildCommandState {
+        self.store
+            .get_child_command(id)
+            .await
+            .expect("read command")
+            .expect("command exists")
+            .state
     }
 
     async fn observation(&self) -> Option<crate::task::CiObservation> {
@@ -583,19 +664,26 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
     // 1. Pending: nothing to repair yet.
     harness.head("h1");
     harness.checks_pending();
-    harness.reconcile().await;
+    assert!(
+        harness.observe().await.is_none(),
+        "a pending head enqueues no wake"
+    );
     let observation = harness
         .observation()
         .await
         .expect("a pending reading lands");
     assert_eq!(observation.state, CiState::Pending);
     assert_eq!(observation.head_sha, "h1");
-    assert!(!harness.arm().await, "a pending head must not wake a body");
+    assert!(
+        harness.arm().await.is_none(),
+        "a pending head must not wake a body"
+    );
 
     // 2. Red: the gate fails and the seed names the broken leaves, not the
     //    `tests-result` aggregate whose link is only the roll-up.
     harness.checks_failing();
-    harness.reconcile().await;
+    let (first, created) = harness.observe().await.expect("a red head enqueues a wake");
+    assert!(created, "the first observation of a failure mints the wake");
     let observation = harness
         .observation()
         .await
@@ -618,38 +706,94 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
         "the first failed head opens an incident"
     );
     assert_eq!(incidents[0].incident.responded_at, None);
+    assert_eq!(
+        incidents[0].incident.trigger_command_id.as_ref(),
+        Some(&first),
+        "the evidence names the command that will wake the body, before one exists"
+    );
 
-    // 3. Exactly one body.
-    assert!(harness.arm().await, "a red head wakes a ci-fix body");
+    // 3. A duplicate observation is not a second wake. This is the whole dedup:
+    //    a durable row keyed on the incident identity, not a marker stamped once
+    //    a body already exists.
+    let (again, created) = harness.observe().await.expect("the failure still stands");
+    assert_eq!(
+        again, first,
+        "a repeat observation lands on the same command"
+    );
+    assert!(!created, "and mints nothing");
+    assert_eq!(harness.ci_fix_commands().await.len(), 1);
+
+    // 4. Exactly one body, and its wake stays Claimed for the whole repair turn.
+    let wake = harness.arm().await.expect("a red head wakes a ci-fix body");
+    assert_eq!(wake.command_id, first);
+    assert_eq!(wake.head_sha, "h1", "the wake names the head that failed");
+    assert_eq!(
+        wake.failing_checks
+            .iter()
+            .map(|check| check.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["cargo-fmt", "clippy"],
+        "the wake carries the failing leaves the body must repair"
+    );
+    assert_eq!(
+        harness.command_state(&first).await,
+        ChildCommandState::Claimed,
+        "the wake is claimed, never accepted: settling it is ENG-19's, and \
+         accepting here would strand a crashed repair"
+    );
     assert!(
         harness.incidents().await[0].incident.responded_at.is_some(),
         "body birth records the response milestone"
     );
-    assert!(
-        !harness.arm().await,
-        "a duplicate delivery must not wake a second body"
-    );
 
-    // 4. Restart: reconciling again on the same head with the same failing set
-    //    carries the dedup marker forward, so it still does not re-arm.
+    // 5. Restart mid-repair: the successor generation reclaims the same command
+    //    and lands on the same wake. No second command, no second failure.
     harness.reconcile().await;
-    assert!(
-        !harness.arm().await,
-        "a restart between observation and settlement must not wake a second body"
+    let resumed = harness
+        .arm()
+        .await
+        .expect("a crashed repair resumes on its own wake");
+    assert_eq!(
+        resumed.command_id, first,
+        "a restart between observation and settlement services the same command"
+    );
+    assert_eq!(
+        harness.ci_fix_commands().await.len(),
+        1,
+        "and mints no second"
+    );
+    assert_eq!(
+        harness.command_state(&first).await,
+        ChildCommandState::Claimed
     );
 
-    // 5. The push: a new head makes the old reading stale, so a fresh reading is
-    //    taken and the still-red head rearms.
+    // 6. The push: a new head makes the old reading stale, so a fresh reading is
+    //    taken and the still-red head rearms under a new identity.
     harness.head("h2");
-    harness.reconcile().await;
+    let (second, created) = harness.observe().await.expect("the new head is red too");
+    assert!(
+        created,
+        "a new failing head is a new failure, not a duplicate"
+    );
+    assert_ne!(second, first);
     let observation = harness
         .observation()
         .await
         .expect("a reading for the new head");
     assert_eq!(observation.head_sha, "h2");
-    assert!(
-        harness.arm().await,
-        "a new failing head rearms rather than staying deduped against the old one"
+    let wake = harness
+        .arm()
+        .await
+        .expect("a new failing head rearms rather than staying deduped against the old one");
+    assert_eq!(
+        wake.command_id, second,
+        "the body services the current failure"
+    );
+    assert_eq!(wake.head_sha, "h2");
+    assert_eq!(
+        harness.command_state(&first).await,
+        ChildCommandState::Superseded,
+        "the wake for the head that was pushed past is stale, not a live race"
     );
     assert_eq!(
         harness.incidents().await.len(),
@@ -657,15 +801,21 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
         "each failed repair head is one measurable attempt"
     );
 
-    // 6. Green: the repair worked and the Task settles back to waiting.
+    // 7. Green: the repair worked and the Task settles back to waiting.
     harness.checks_passing();
-    harness.reconcile().await;
+    assert!(
+        harness.observe().await.is_none(),
+        "a green head enqueues no wake"
+    );
     let observation = harness
         .observation()
         .await
         .expect("a passing reading lands");
     assert_eq!(observation.state, CiState::Passing);
-    assert!(!harness.arm().await, "a green head must not wake a body");
+    assert!(
+        harness.arm().await.is_none(),
+        "a green head must not wake a body"
+    );
     assert!(
         harness
             .incidents()
@@ -674,19 +824,39 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
             .all(|incident| incident.incident.green_at.is_some()),
         "the passing head closes every open attempt on the PR"
     );
+    assert!(
+        harness
+            .incidents()
+            .await
+            .iter()
+            .all(|incident| incident.incident.trigger_command_id.is_some()),
+        "every attempt names the command that woke it"
+    );
 }
 
-/// The carry-forward is conditional on the failing *set*, not just the head: a
-/// check that breaks after a wake already fired is a new failure and earns a
-/// new body.
+/// The identity is conditional on the failing *set*, not just the head: a check
+/// that breaks after a wake already fired is a new failure and earns a new body.
 #[tokio::test]
 async fn a_changed_failing_set_on_the_same_head_rearms() {
     let mut harness = Harness::new().await;
     harness.head("h1");
     harness.checks_failing();
-    harness.reconcile().await;
-    assert!(harness.arm().await, "the first failing set wakes a body");
-    assert!(!harness.arm().await, "and only one");
+    let (first, _) = harness.observe().await.expect("the first failing set");
+    assert_eq!(
+        harness
+            .arm()
+            .await
+            .expect("the first failing set wakes a body")
+            .command_id,
+        first
+    );
+    assert!(
+        harness
+            .observe()
+            .await
+            .is_some_and(|(id, created)| id == first && !created),
+        "and only one"
+    );
 
     // Same head, a different failing set.
     harness.gh.set_checks(
@@ -698,10 +868,112 @@ async fn a_changed_failing_set_on_the_same_head_rearms() {
             ("rust-test", "fail"),
         ],
     );
-    harness.reconcile().await;
+    let (second, created) = harness
+        .observe()
+        .await
+        .expect("a check that broke after the wake fired is a new failure, not a duplicate");
+    assert!(created);
+    assert_ne!(second, first);
+    let wake = harness.arm().await.expect("the new failure wakes a body");
+    assert_eq!(wake.command_id, second);
     assert!(
-        harness.arm().await,
-        "a check that broke after the wake fired is a new failure, not a duplicate"
+        wake.failing_checks
+            .iter()
+            .any(|check| check.name == "rust-test"),
+        "the body repairs the failure that woke it, including the newly broken check"
+    );
+}
+
+/// The Project runner's seam, through the real entry point.
+///
+/// `queue_ci_fix_command` is what the observation calls now; the direct
+/// `wake_task_ci_fix` launch is deleted, so no caller can reach a body except
+/// through the ledger. A healthy head must enqueue nothing — and because a wake
+/// that is never minted is also never launched, this half of the seam is safe to
+/// drive here. The red half launches a real process, so its ledger behaviour is
+/// covered where the launch is barred (`ops::child`).
+#[tokio::test]
+async fn the_observer_enqueues_nothing_for_a_healthy_head() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_passing();
+    harness.reconcile().await;
+
+    let pr = harness
+        .store
+        .active_task_pr(&harness.task.id)
+        .await
+        .expect("read active pr")
+        .expect("an active pr");
+    crate::ops::task::queue_ci_fix_command(&harness.store, &harness.task, &pr)
+        .await
+        .expect("a healthy head is not an error, it is simply nothing to repair");
+
+    assert!(
+        harness.ci_fix_commands().await.is_empty(),
+        "a green head mints no wake, so nothing can launch a body"
+    );
+    assert!(
+        harness.incidents().await.is_empty(),
+        "and opens no incident"
+    );
+}
+
+/// The selector's proof. Two wakes can be claimable at once — a head fails, is
+/// pushed to, and fails again before any body boots. Taking the first claimed
+/// command would seed an obsolete repair *and* spend the current wake's identity
+/// as a stray, leaving the live failure permanently unrepairable.
+#[tokio::test]
+async fn a_moved_failure_arms_the_current_wake_and_supersedes_the_stale_one() {
+    let mut harness = Harness::new().await;
+
+    // Wake A: h1 is red. No body boots.
+    harness.head("h1");
+    harness.checks_failing();
+    let (stale, _) = harness.observe().await.expect("h1 mints a wake");
+
+    // The head moves and fails differently before anything claims A.
+    harness.head("h2");
+    harness.gh.set_checks(
+        &[("tests-result", "fail")],
+        &[("tests-result", "fail"), ("rust-test", "fail")],
+    );
+    let (current, created) = harness.observe().await.expect("h2 mints its own wake");
+    assert!(created);
+    assert_ne!(current, stale);
+    assert_eq!(
+        harness.ci_fix_commands().await.len(),
+        2,
+        "both wakes are unsettled and claimable"
+    );
+
+    // The body boots and claims both. It must service the current failure.
+    let wake = harness
+        .arm()
+        .await
+        .expect("a body arms for the live failure");
+    assert_eq!(
+        wake.command_id, current,
+        "the body services the wake naming the PR's current failure, not the first claimed"
+    );
+    assert_eq!(wake.head_sha, "h2");
+    assert_eq!(
+        wake.failing_checks
+            .iter()
+            .map(|check| check.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["rust-test"],
+        "and is seeded from that wake's payload"
+    );
+    assert_eq!(
+        harness.command_state(&current).await,
+        ChildCommandState::Claimed,
+        "the live wake is held for the repair turn, not lost to the stale one"
+    );
+    assert_eq!(
+        harness.command_state(&stale).await,
+        ChildCommandState::Superseded,
+        "the wake for the head the PR moved past is retired as stale"
     );
 }
 
@@ -714,7 +986,7 @@ async fn a_gh_outage_degrades_the_read_without_inventing_a_reading() {
     let mut harness = Harness::new().await;
     harness.head("h1");
     harness.checks_failing();
-    harness.reconcile().await;
+    let (wake, _) = harness.observe().await.expect("a red head mints a wake");
     let before = harness
         .observation()
         .await
@@ -740,4 +1012,21 @@ async fn a_gh_outage_degrades_the_read_without_inventing_a_reading() {
         "a degraded read must never read as green"
     );
     assert_eq!(after.head_sha, before.head_sha);
+
+    // The outage must not burn the wake. The reading is persisted, not re-read
+    // live, so the identity still matches and the body still arms for it. If a
+    // degraded read could make a wake look stale, its identity would be spent and
+    // the failure would never be repaired.
+    assert_eq!(
+        harness
+            .arm()
+            .await
+            .expect("the wake survives a degraded read")
+            .command_id,
+        wake
+    );
+    assert_eq!(
+        harness.command_state(&wake).await,
+        ChildCommandState::Claimed
+    );
 }

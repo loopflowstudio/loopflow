@@ -2,6 +2,7 @@
 
 use time::OffsetDateTime;
 
+use crate::child_session::ChildCommandId;
 use crate::task::{CiIncident, TaskPrId, TaskSessionStatus};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -27,18 +28,33 @@ impl Store {
         .await
     }
 
+    /// Stamp the moment a body was born to repair this incident. Body birth is
+    /// the response milestone; the wake command carries the identity.
     pub async fn mark_ci_incident_responded(
         &self,
-        pr_id: &TaskPrId,
-        failed_head_sha: &str,
-        failure_set: &[String],
+        identity: &str,
         responded_at: OffsetDateTime,
     ) -> StoreResult<bool> {
-        let pr_id = pr_id.clone();
-        let failed_head_sha = failed_head_sha.to_string();
-        let failure_set = failure_set.to_vec();
+        let identity = identity.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.mark_ci_incident_responded(&pr_id, &failed_head_sha, &failure_set, responded_at)
+            store.mark_ci_incident_responded(&identity, responded_at)
+        })
+        .await
+    }
+
+    /// Record which durable command woke a body for this incident. Written once
+    /// the wake command is created, so the evidence names its trigger even if no
+    /// body ever boots to respond.
+    pub async fn mark_ci_incident_triggered(
+        &self,
+        identity: &str,
+        command_id: &ChildCommandId,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<bool> {
+        let identity = identity.to_string();
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_ci_incident_triggered(&identity, &command_id, updated_at)
         })
         .await
     }

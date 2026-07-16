@@ -775,36 +775,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn arm_task_pr_ci_fix_for_lease(
-        &self,
-        pr: &TaskPr,
-        lease: &ChildWriteLease,
-        responded_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        validate_task_pr(pr)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(
-            &transaction,
-            &ChildRef::Task(pr.task_session_id.clone()),
-            lease,
-        )?;
-        if update_task_pr(&transaction, pr)? == 0 {
-            return Err(StoreError::NotFound);
-        }
-        if let Some(observation) = pr.fresh_ci() {
-            super::ci_incidents::mark_ci_incident_responded_on(
-                &transaction,
-                &pr.id,
-                &observation.head_sha,
-                &observation.failure_set(),
-                responded_at,
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if heal_task_pr_base(&conn, pr)? == 0 {
@@ -1072,6 +1042,66 @@ impl SqliteStore {
                         decision_id: candidate_id,
                         ..
                     } if candidate_id == decision_id
+                ) {
+                    existing = Some(candidate);
+                    break;
+                }
+            }
+            existing
+        };
+        if let Some(existing) = existing {
+            return Ok((existing, false));
+        }
+        insert_child_command(&transaction, command)?;
+        transaction.commit()?;
+        Ok((command.clone(), true))
+    }
+
+    /// Insert a `ci-fix` wake unless one already exists for the same incident
+    /// identity, in which case return the existing row and `false`.
+    ///
+    /// This is the whole dedup: one (repo, PR, failed head, failure set) wakes
+    /// exactly one body, and the fact is a durable row written before any process
+    /// starts rather than a marker stamped once one has. A repeated observation,
+    /// a coalesced multi-check delivery, and a restart between observation and
+    /// arming all land here and all find the same command.
+    ///
+    /// State is *not* consulted, terminal included: an identity that already has
+    /// a wake must never mint a second, however that wake settled. Re-arming is
+    /// the job of a new identity — a moved head or a changed failure set.
+    pub fn ensure_child_ci_fix_command(
+        &self,
+        command: &ChildCommand,
+    ) -> StoreResult<(ChildCommand, bool)> {
+        let ChildCommandKind::CiFix {
+            incident_identity, ..
+        } = &command.kind
+        else {
+            return Err(StoreError::InvalidData(
+                "ci-fix command required".to_string(),
+            ));
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = {
+            let mut statement = transaction.prepare(&format!(
+                "{CHILD_COMMAND_COLUMNS}
+                 WHERE target_kind=?1 AND session_id=?2
+                 ORDER BY created_at, id"
+            ))?;
+            let rows = statement.query_map(
+                params![command.target.target_kind(), command.target.target_id()],
+                map_child_command_row,
+            )?;
+            let mut existing = None;
+            for row in rows {
+                let candidate = row?;
+                if matches!(
+                    &candidate.kind,
+                    ChildCommandKind::CiFix {
+                        incident_identity: candidate_identity,
+                        ..
+                    } if candidate_identity == incident_identity
                 ) {
                     existing = Some(candidate);
                     break;
@@ -1798,6 +1828,49 @@ impl SqliteStore {
         if changed == 0 {
             return Err(StoreError::InvalidData(format!(
                 "child command {command_id} is already resolved or belongs to another Session"
+            )));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Displace one undelivered command that circumstances made moot.
+    ///
+    /// Distinct from `fail_child_command_for_lease`: nothing went wrong, so the
+    /// `error` column stays null and `lf task status` does not report a fault.
+    /// The reason rides the event instead.
+    ///
+    /// `delivering` is deliberately **not** superseded. That state means a
+    /// provider call is in flight and a crash from here is genuinely ambiguous;
+    /// resolving it is `reconcile_stale_deliveries`' job, which moves it to
+    /// `uncertain` so a human inspects the transcript before anything retries.
+    /// Superseding it instead would erase that ambiguity — recording "this never
+    /// mattered" about input the provider may well have received. No caller needs
+    /// it: the only command kind that supersedes from a moot state is `CiFix`,
+    /// which never enters `delivering` at all.
+    pub(crate) fn supersede_child_command_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        command_id: &ChildCommandId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_child_write_lease(&transaction, target, lease)?;
+        let changed = transaction.execute(
+            "UPDATE child_commands
+             SET state='superseded'
+             WHERE id=?1 AND target_kind=?2 AND session_id=?3
+               AND state IN ('persisted', 'claimed')",
+            params![
+                command_id.as_str(),
+                target.target_kind(),
+                target.target_id()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "child command {command_id} is resolved, mid-delivery, or belongs to another Session"
             )));
         }
         transaction.commit()?;

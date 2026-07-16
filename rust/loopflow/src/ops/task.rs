@@ -2499,15 +2499,63 @@ pub(crate) fn decide_open_pr_status(
     )
 }
 
-/// Wake a Task sleeping on an open PR into a `ci-fix` turn. Thin re-export of the
-/// shared child-launch path so supervisors (the project loop) can trigger the
-/// wake without reaching into `ops::child`. Gated by `ci_fix_restart_bar`; a
-/// no-op unless the active PR's current head warrants it.
-pub(crate) async fn wake_task_ci_fix(
+/// The incident this PR's current reading warrants, if any.
+///
+/// The single mint point for a wake's identity. The enqueue and the arm must
+/// derive it the same way or a claimed wake could never be matched to the failure
+/// it names, so both call this rather than composing the parts themselves.
+/// `None` when the current head is not failing a required check — including when
+/// the head has moved past the reading (`fresh_ci`), which makes any wake for the
+/// old head moot.
+pub(crate) fn current_ci_incident(pr: &TaskPr) -> Option<CiIncident> {
+    let observation = pr.fresh_ci().filter(|reading| reading.wake_legal())?;
+    ci_incident(pr, observation)
+}
+
+/// Enqueue one durable `ci-fix` wake for this PR's current failed head.
+///
+/// Replaces the old direct `wake_task_ci_fix` launch. A no-op unless the current
+/// head is failing a required check — that is the legality question, and it is
+/// the only one asked here. Whether this exact failure already woke a body is the
+/// ledger's question, answered by `ensure_child_ci_fix_command` on the incident
+/// identity; a repeat observation lands on the existing command and mints
+/// nothing. `queue_command` owns the trigger link and the launch from there, in
+/// that order — the wake is attributable before anything can service it.
+pub(crate) async fn queue_ci_fix_command(
     store: &SharedStore,
-    session: &mut TaskSession,
-) -> OpsResult<bool> {
-    super::child::wake_task_ci_fix(store, session).await
+    session: &TaskSession,
+    pr: &TaskPr,
+) -> OpsResult<()> {
+    let Some(kind) = ci_fix_wake_kind(pr) else {
+        return Ok(());
+    };
+    super::child::queue_command(
+        store,
+        super::child::ChildSession::Task(Box::new(session.clone())),
+        ChildCommandSource::System,
+        kind,
+    )
+    .await?;
+    Ok(())
+}
+
+/// The wake this PR's current reading warrants, as a command payload.
+///
+/// The one place a `CiFix` payload is built. `arm_ci_fix_wake` matches a claimed
+/// command against `current_ci_incident`, so the identity minted here and the
+/// identity matched there must come from the same derivation — two that drift
+/// would match nothing and every wake would be superseded as stale.
+pub(crate) fn ci_fix_wake_kind(pr: &TaskPr) -> Option<ChildCommandKind> {
+    let incident = current_ci_incident(pr)?;
+    let observation = pr.fresh_ci()?;
+    Some(ChildCommandKind::CiFix {
+        incident_identity: incident.identity,
+        pr_number: incident.pr_number,
+        head_sha: incident.failed_head_sha,
+        // Names come from the incident; the log URLs only exist here, on the
+        // observation the incident was minted from.
+        failing_checks: observation.failing_checks.clone(),
+    })
 }
 
 pub(crate) async fn reconcile_task_pr_for_lease(
@@ -2527,7 +2575,6 @@ fn observe_required_checks(
     worktree: &Path,
     branch: &str,
     head_sha: Option<&str>,
-    prior: Option<&CiObservation>,
     now: time::OffsetDateTime,
 ) -> Option<CiObservation> {
     let head_sha = head_sha?.to_string();
@@ -2539,7 +2586,7 @@ fn observe_required_checks(
     } else {
         CiState::Passing
     };
-    let mut observation = CiObservation {
+    Some(CiObservation {
         head_sha,
         state,
         // Seed with the actionable leaf failures, never the required aggregate:
@@ -2553,20 +2600,7 @@ fn observe_required_checks(
             })
             .collect(),
         observed_at: now,
-        woken_failure_set: None,
-    };
-    // Carry the dedup marker forward across reconciles: a wake already fired for
-    // this exact `(head, failing set)` must not fire again on the next poll. The
-    // marker only survives while both the head and the failing set are unchanged;
-    // a moved head or a changed failing set is a fresh reading that re-arms.
-    if let Some(prior) = prior {
-        if prior.head_sha == observation.head_sha
-            && prior.woken_failure_set.as_deref() == Some(observation.failure_set().as_slice())
-        {
-            observation.woken_failure_set = prior.woken_failure_set.clone();
-        }
-    }
-    Some(observation)
+    })
 }
 
 fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
@@ -2828,7 +2862,6 @@ async fn reconcile_task_pr_with_authority(
                 &session.worktree,
                 &pr.branch,
                 github_pr.head_sha.as_deref(),
-                pr.ci_observation.as_ref(),
                 now,
             ) {
                 if ci_observation.state == CiState::Passing {
@@ -8077,7 +8110,6 @@ mod tests {
                     Vec::new()
                 },
                 observed_at: now,
-                woken_failure_set: None,
             }),
             linear_attachment_id: None,
             linear_comment_id: None,

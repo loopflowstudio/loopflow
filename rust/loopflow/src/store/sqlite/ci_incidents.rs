@@ -24,20 +24,23 @@ fn optional_datetime(index: usize, value: Option<i64>) -> rusqlite::Result<Optio
     value.map(|value| datetime(index, value)).transpose()
 }
 
-pub(super) fn mark_ci_incident_responded_on(
+/// Name the durable command that woke a body for this incident.
+///
+/// `COALESCE` keeps the first trigger: an identity wakes one body, so a second
+/// command claiming the same incident is a bug, not a newer truth. Returns
+/// whether the incident existed.
+pub(super) fn mark_ci_incident_triggered_on(
     conn: &rusqlite::Connection,
-    pr_id: &TaskPrId,
-    failed_head_sha: &str,
-    failure_set: &[String],
-    responded_at: OffsetDateTime,
+    identity: &str,
+    command_id: &ChildCommandId,
+    updated_at: OffsetDateTime,
 ) -> StoreResult<bool> {
-    let failure_set = serde_json::to_string(failure_set)?;
-    let at = timestamp(responded_at);
+    let at = timestamp(updated_at);
     Ok(conn.execute(
         "UPDATE ci_incidents
-         SET responded_at=COALESCE(responded_at, ?4), updated_at=MAX(updated_at, ?4)
-         WHERE pr_id=?1 AND failed_head_sha=?2 AND failure_set_json=?3",
-        params![pr_id.as_str(), failed_head_sha, failure_set, at],
+         SET trigger_command_id=COALESCE(trigger_command_id, ?2), updated_at=MAX(updated_at, ?3)
+         WHERE identity=?1",
+        params![identity, command_id.as_str(), at],
     )? > 0)
 }
 
@@ -139,15 +142,32 @@ impl super::SqliteStore {
         Ok(())
     }
 
+    /// Stamp the moment a body was born to repair this incident. Keyed on the
+    /// identity the wake command carries, so the response lands on exactly the
+    /// incident that woke it.
     pub fn mark_ci_incident_responded(
         &self,
-        pr_id: &TaskPrId,
-        failed_head_sha: &str,
-        failure_set: &[String],
+        identity: &str,
         responded_at: OffsetDateTime,
     ) -> StoreResult<bool> {
+        let at = timestamp(responded_at);
         let conn = self.conn.lock().expect("store mutex poisoned");
-        mark_ci_incident_responded_on(&conn, pr_id, failed_head_sha, failure_set, responded_at)
+        Ok(conn.execute(
+            "UPDATE ci_incidents
+             SET responded_at=COALESCE(responded_at, ?2), updated_at=MAX(updated_at, ?2)
+             WHERE identity=?1",
+            params![identity, at],
+        )? > 0)
+    }
+
+    pub fn mark_ci_incident_triggered(
+        &self,
+        identity: &str,
+        command_id: &ChildCommandId,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        mark_ci_incident_triggered_on(&conn, identity, command_id, updated_at)
     }
 
     pub fn mark_ci_incidents_green(

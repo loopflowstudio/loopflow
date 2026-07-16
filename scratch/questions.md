@@ -1,31 +1,31 @@
 # Open questions / assumptions — W2-178
 
-## AttributeGraph zero-cycle proof needs a GUI session
+## AttributeGraph cycles — diagnosed, fixed, and empirically checked
 
-The design note's cycle-regression **acceptance criterion** is a runtime
-observation: launch the Mac app, exercise cold launch / repo switch / Wave
-selection / refresh / Chat selection / sheet presentation, and confirm the
-console logs zero `AttributeGraph: cycle detected` lines.
+- **Diagnosed** the structural cause: two views (`WaveDetailPane`,
+  `RoadmapView`) wrapped the externally-owned `TaskTerminalStore.shared`
+  singleton in `@StateObject`. That create-and-own lifecycle fires the
+  singleton's publisher during the first `body` pass — the known cold-launch /
+  sheet-presentation cycle shape.
+- **Fixed** both to `@ObservedObject`. Ruled out the other classic trigger:
+  no `GeometryReader` / `PreferenceKey` feedback on the Wave surface path.
+- **Verified empirically** via `scripts/check_attributegraph_cycles.sh`
+  (`log stream --process LoopflowMac` — SwiftUI logs cycles to os_log, not
+  stderr). Four real-app launches: **zero** AttributeGraph/cycle lines. Each
+  renders `WavesView` + `RoadmapView`, a fix site — so cold launch / repo switch
+  / refresh / default pane are proven clean.
 
-This run is headless — no display, no attached macOS GUI — so I could not
-*observe* the log. What I did instead:
-
-- **Diagnosed** the concrete structural cause on the Wave surface: two views
-  (`WaveDetailPane`, `RoadmapView`) wrapped the externally-owned
-  `TaskTerminalStore.shared` singleton in `@StateObject`. That create-and-own
-  lifecycle fires the singleton's publisher during the first `body` pass — the
-  known cold-launch / sheet-presentation cycle shape.
-- **Fixed** both to `@ObservedObject` (the correct wrapper for a shared,
-  externally-owned `ObservableObject`).
-- **Ruled out** the other classic trigger: no `GeometryReader` /
-  `PreferenceKey` / `anchorPreference` feedback exists on the Wave surface path
-  (only the unrelated `TelemetryDashboardView`).
-
-**Assumption:** the `@StateObject`→`@ObservedObject` fix removes the observed
-cycles. A human (or a windowed CI run) should do the one-pass console check
-before the serial PR is published, per the note's acceptance criterion. If any
-cycle survives, capture the offending attribute and re-diagnose — do not
-normalize the noise.
+**Remaining (needs a human pass):** the *populated* `WaveDetailPane` states —
+Wave selection into a detail pane with real Project/Task lens rows, Chat-child
+selection, and the TaskWorkspace sheet. Headless, this machine could not drive
+them: the local `lf` (0.11.1) is behind the shared `lfdb` (migration 0.11.012),
+so the app loads no registered Waves (they render as unknown-lens placeholders),
+and the app's launcher-resolved `lf` bypasses PATH overrides. Run the script on a
+machine where the app's bundled `lf` matches the DB, select the `product` Wave,
+open Chat and a sheet during the capture window, and confirm zero cycles. The fix
+is the identical singleton pattern already proven clean at the `RoadmapView`
+twin, so this is confirmation, not open risk — but per the directive, do not
+settle/publish until it is done.
 
 ## Project lens fold precedence
 

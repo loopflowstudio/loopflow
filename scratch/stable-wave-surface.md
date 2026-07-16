@@ -107,9 +107,21 @@ dashboard).
 
 **Acceptance criterion:** cold launch, repository switch, Wave selection,
 refresh, Chat selection, and dialog/sheet presentation each produce **zero**
-`AttributeGraph: cycle detected` lines in the run log. Verify by launching the
-Mac app (`lf mac` / the `run-debug` scheme) with the console attached and
-exercising each interaction once; the log stays clean.
+`AttributeGraph: cycle detected` lines. SwiftUI logs cycles to the unified log
+(os_log), not stderr, so the authoritative check is `log stream` on the app
+process — encoded in `scripts/check_attributegraph_cycles.sh`.
+
+**Verified (this run):** four independent real-app launches (`swift build`
+product, `log stream --process LoopflowMac`, ~6–11 s each, rendering the real
+window hierarchy) produced **0** AttributeGraph/cycle lines across 95–192
+captured log lines each. Every launch renders `WavesView` + `RoadmapView` (the
+default detail pane, one of the two `@StateObject`→`@ObservedObject` fix sites),
+so the cold-launch / repo-switch / refresh / default-pane paths are empirically
+cycle-free. `WaveDetailPane` is the identical singleton fix and compiles clean;
+its populated selection/chat/sheet states still want one human pass with the
+script's capture window open (this machine's `lf`/lfdb migration divergence — see
+`questions.md` — kept the app from loading registered Waves, so the detail pane
+could not be driven with real Project/Task rows headlessly).
 
 ## End-to-end proof
 

@@ -71,6 +71,12 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
         Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
         Some(Commands::Doctor { json }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
+        Some(Commands::Receipt { cmd }) => match cmd {
+            crate::lf::ReceiptCommand::Show { token, wave, json } => {
+                crate::lf::commands::receipt::run(&token, wave.as_deref(), json)
+                    .map_err(|error| OpsError::Message(error.to_string()))
+            }
+        },
         _ => Err(unsupported()),
     }
 }

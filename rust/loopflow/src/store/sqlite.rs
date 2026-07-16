@@ -1610,6 +1610,23 @@ impl SqliteStore {
         Ok(turns)
     }
 
+    /// One agent turn by its UUID — the trace receipt drill target.
+    pub fn agent_turn(&self, id: &str) -> StoreResult<Option<AgentTurnRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
+                    input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
+                    system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
+                    provider_total_input_tokens, peak_input_tokens, context_window_tokens,
+                    provider_output_tokens, reasoning_tokens, cache_read_tokens,
+                    cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
+                    context_persist_ms, first_event_seq, last_event_seq
+             FROM agent_turns WHERE id=?1",
+        )?;
+        let row = stmt.query_row(params![id], map_agent_turn).optional()?;
+        Ok(row)
+    }
+
     pub fn context_assets_for_turns(
         &self,
         turn_ids: &[String],

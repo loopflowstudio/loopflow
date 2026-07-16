@@ -17,7 +17,9 @@ use anyhow::{anyhow, Result};
 use time::{Duration, OffsetDateTime};
 
 use crate::lf::output::Colors;
+use crate::receipt::{parse_pr_number, EvidenceKind, Receipt};
 use crate::store::RunEventRow;
+use crate::wave::journal::{fold_thread, journal_path, memory_facts, read_events};
 
 /// A node value the current binary understands. `step` is the pre-054 spelling
 /// of `skill`; rows carrying it are history the readers silently drop.
@@ -93,6 +95,8 @@ pub fn run(json: bool) -> Result<()> {
             let events = store.list_run_events_since(0)?;
             let mut checks = audit(&events);
             checks.push(check_capture(&store, &events)?);
+            let (facts, known) = gather_receipt_audit(&store, &events);
+            checks.push(check_receipts(&facts, &known));
             (events, checks)
         }
         Err(error) => {
@@ -625,6 +629,151 @@ fn check_coverage(events: &[RunEventRow]) -> Check {
     }
 }
 
+// ── Receipt sweep ───────────────────────────────────────────────────
+
+/// Known ids for each evidence kind — the resolution surface the receipt
+/// sweep checks against. Gathered from the store and wave journals; the check
+/// itself is pure over these sets.
+#[derive(Debug, Default)]
+pub struct ReceiptKnownIds {
+    pub chat_turn_ids: HashSet<String>,
+    pub run_ids: HashSet<String>,
+    pub trace_turn_ids: HashSet<String>,
+    pub pm_ids: HashSet<String>,
+    pub pr_numbers: HashSet<u32>,
+}
+
+/// One memory fact paired with its claim wave, for the receipt sweep.
+#[derive(Debug, Clone)]
+pub struct ReceiptFact {
+    pub wave: String,
+    pub receipts: Vec<Receipt>,
+}
+
+/// Audit curated memory facts for receipt health: missing (zero receipts),
+/// orphaned (reference resolves to no known record), and cross-wave (receipt
+/// wave ≠ claim wave). Pure over the facts and known-id sets — testable
+/// without a store.
+///
+/// During the post-contract grace window all findings are `warn`, not `fail`,
+/// so pre-contract claims and cross-machine references don't break the gate.
+/// Cross-wave is always `warn` — legitimate for child→parent citation.
+fn check_receipts(facts: &[ReceiptFact], known: &ReceiptKnownIds) -> Check {
+    if facts.is_empty() {
+        return Check::ok("receipts", "no memory facts to audit");
+    }
+
+    let mut missing = 0;
+    let mut orphaned = 0;
+    let mut cross_wave = 0;
+    let mut total_receipts = 0;
+
+    for fact in facts {
+        if fact.receipts.is_empty() {
+            missing += 1;
+            continue;
+        }
+        for receipt in &fact.receipts {
+            total_receipts += 1;
+            if receipt.wave != fact.wave {
+                cross_wave += 1;
+            }
+            if !receipt_resolves(receipt, known) {
+                orphaned += 1;
+            }
+        }
+    }
+
+    let total_facts = facts.len();
+    let detail = format!(
+        "{total_facts} fact(s) with {total_receipts} receipt(s): \
+         {missing} missing, {orphaned} orphaned, {cross_wave} cross-wave"
+    );
+
+    if orphaned > 0 || missing > 0 || cross_wave > 0 {
+        Check::warn("receipts", detail)
+    } else {
+        Check::ok("receipts", detail)
+    }
+}
+
+fn receipt_resolves(receipt: &Receipt, known: &ReceiptKnownIds) -> bool {
+    match receipt.kind {
+        EvidenceKind::ChatTurn => known.chat_turn_ids.contains(&receipt.reference),
+        EvidenceKind::WorkerReport => known.run_ids.contains(&receipt.reference),
+        EvidenceKind::Trace => known.trace_turn_ids.contains(&receipt.reference),
+        EvidenceKind::Pm => known.pm_ids.contains(&receipt.reference),
+        EvidenceKind::Pr => {
+            parse_pr_number(&receipt.reference).is_some_and(|n| known.pr_numbers.contains(&n))
+        }
+    }
+}
+
+/// Gather memory facts (with their claim wave) and the known-id sets for each
+/// evidence kind, from the store and every wave journal on this machine.
+fn gather_receipt_audit(
+    store: &crate::store::sqlite::SqliteStore,
+    events: &[RunEventRow],
+) -> (Vec<ReceiptFact>, ReceiptKnownIds) {
+    let mut known = ReceiptKnownIds::default();
+    let mut facts = Vec::new();
+
+    known.run_ids = events.iter().map(|e| e.run_id.clone()).collect();
+
+    if let Ok(launches) = store.agent_launches_since(0) {
+        let launch_ids: Vec<String> = launches.iter().map(|l| l.id.clone()).collect();
+        if let Ok(turns) = store.agent_turns_for_launches(&launch_ids) {
+            known.trace_turn_ids = turns.iter().map(|t| t.id.clone()).collect();
+        }
+    }
+
+    if let Ok(prs) = store.all_task_prs() {
+        known.pr_numbers = prs
+            .iter()
+            .filter_map(|pr| pr.github().map(|g| g.number))
+            .collect();
+    }
+
+    if let Ok(waves) = store.list_waves(None) {
+        for wave in &waves {
+            let repo_root = Path::new(wave.repo());
+            let journal = journal_path(repo_root, wave.name());
+            if journal.exists() {
+                let journal_events = read_events(&journal);
+                for fact in memory_facts(&journal_events) {
+                    facts.push(ReceiptFact {
+                        wave: wave.name().to_string(),
+                        receipts: fact.receipts,
+                    });
+                }
+                let fold = fold_thread(&journal_events);
+                known
+                    .chat_turn_ids
+                    .extend(fold.turns.iter().map(|t| t.id.clone()));
+                known
+                    .chat_turn_ids
+                    .extend(fold.open.iter().map(|t| t.id.clone()));
+            }
+
+            if let Ok(Some(snapshot)) = store.pm_snapshot(wave.repo(), wave.name()) {
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&snapshot.payload) {
+                    for key in ["items", "projects"] {
+                        if let Some(arr) = payload.get(key).and_then(|v| v.as_array()) {
+                            for entry in arr {
+                                if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
+                                    known.pm_ids.insert(id.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (facts, known)
+}
+
 fn day_of(ts: i64) -> Option<time::Date> {
     OffsetDateTime::from_unix_timestamp(ts)
         .ok()
@@ -929,5 +1078,111 @@ mod tests {
         terminal.provider = Some("claude".to_string());
         terminal.input_tokens = Some(100);
         assert_eq!(status_of(&[terminal], "coverage"), Status::Ok);
+    }
+
+    // ── receipt sweep tests (pure over facts + known-id sets) ─────────
+
+    use super::{check_receipts, ReceiptFact, ReceiptKnownIds};
+    use crate::receipt::{EvidenceKind, Receipt};
+
+    fn receipt(kind: EvidenceKind, reference: &str, wave: &str) -> Receipt {
+        Receipt::new(kind, reference, wave)
+    }
+
+    fn known(turn_ids: &[&str], run_ids: &[&str]) -> ReceiptKnownIds {
+        ReceiptKnownIds {
+            chat_turn_ids: turn_ids.iter().map(|s| s.to_string()).collect(),
+            run_ids: run_ids.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_facts_is_ok() {
+        let check = check_receipts(&[], &ReceiptKnownIds::default());
+        assert_eq!(check.status, Status::Ok);
+    }
+
+    #[test]
+    fn facts_with_resolving_receipts_are_ok() {
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![
+                receipt(EvidenceKind::ChatTurn, "turn-3", "ship"),
+                receipt(EvidenceKind::WorkerReport, "run-9", "ship"),
+            ],
+        }];
+        let known = known(&["turn-3"], &["run-9"]);
+        let check = check_receipts(&facts, &known);
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.detail.contains("1 fact(s)"), "{}", check.detail);
+    }
+
+    #[test]
+    fn facts_with_zero_receipts_warn_during_grace() {
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![],
+        }];
+        let check = check_receipts(&facts, &ReceiptKnownIds::default());
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("1 missing"), "{}", check.detail);
+    }
+
+    #[test]
+    fn orphaned_receipts_warn() {
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![receipt(EvidenceKind::ChatTurn, "turn-99", "ship")],
+        }];
+        let known = known(&["turn-3"], &[]);
+        let check = check_receipts(&facts, &known);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
+    }
+
+    #[test]
+    fn cross_wave_receipts_warn() {
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![receipt(EvidenceKind::ChatTurn, "turn-3", "product")],
+        }];
+        let known = known(&["turn-3"], &[]);
+        let check = check_receipts(&facts, &known);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("1 cross-wave"), "{}", check.detail);
+    }
+
+    #[test]
+    fn pr_receipt_resolves_by_number() {
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![receipt(
+                EvidenceKind::Pr,
+                "loopflow/loopflow#912@abc123",
+                "ship",
+            )],
+        }];
+        let known = ReceiptKnownIds {
+            pr_numbers: [912].into(),
+            ..Default::default()
+        };
+        let check = check_receipts(&facts, &known);
+        assert_eq!(check.status, Status::Ok);
+    }
+
+    #[test]
+    fn pr_receipt_with_unknown_number_is_orphaned() {
+        let facts = vec![ReceiptFact {
+            wave: "ship".to_string(),
+            receipts: vec![receipt(EvidenceKind::Pr, "loopflow/loopflow#999", "ship")],
+        }];
+        let known = ReceiptKnownIds {
+            pr_numbers: [912].into(),
+            ..Default::default()
+        };
+        let check = check_receipts(&facts, &known);
+        assert_eq!(check.status, Status::Warn);
+        assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
     }
 }

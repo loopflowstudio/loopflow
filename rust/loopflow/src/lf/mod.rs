@@ -486,6 +486,11 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Resolve one evidence receipt to its canonical local record
+    Receipt {
+        #[command(subcommand)]
+        cmd: ReceiptCommand,
+    },
     /// Run a command on a remote host carrying your local credentials.
     ///
     /// Resolves the local credential bundle (GitHub, Claude, PM) and forwards it
@@ -721,6 +726,21 @@ pub enum MemoryCommand {
         receipts: Vec<String>,
         #[command(flatten)]
         target: WaveTargetArgs,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReceiptCommand {
+    /// Drill one receipt to its canonical local record
+    Show {
+        /// Receipt token: `kind:reference` (e.g. `chat_turn:turn-3`, `run:run-9`)
+        token: String,
+        /// Wave name (default: the ambient wave)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Emit the resolved record as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -3142,6 +3162,29 @@ mod tests {
         assert_eq!(fact, "one fact");
         assert_eq!(receipts, vec!["chat_turn:turn-3", "run:run-9"]);
         assert!(target.parent);
+    }
+
+    #[test]
+    fn receipt_show_parses_token_wave_and_json() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "receipt",
+            "show",
+            "chat_turn:turn-3",
+            "--wave",
+            "ship",
+            "--json",
+        ])
+        .expect("parse");
+        let Some(Commands::Receipt {
+            cmd: ReceiptCommand::Show { token, wave, json },
+        }) = cli.command
+        else {
+            panic!("expected receipt show");
+        };
+        assert_eq!(token, "chat_turn:turn-3");
+        assert_eq!(wave.as_deref(), Some("ship"));
+        assert!(json);
     }
 
     #[test]

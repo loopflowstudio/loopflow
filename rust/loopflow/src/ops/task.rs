@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -1100,7 +1100,7 @@ async fn task_for_worktree(
         return Ok(Some((session, Some(lease))));
     }
 
-    let mut matches = store
+    let worktree_keys: BTreeSet<String> = store
         .list_task_sessions(None)
         .await
         .map_err(|error| task_error(format!("failed to inspect Task Sessions: {error}")))?
@@ -1111,15 +1111,26 @@ async fn task_for_worktree(
                 .canonicalize()
                 .unwrap_or_else(|_| session.worktree.clone())
                 == checkout
-        });
-    let found = matches.next();
-    if matches.next().is_some() {
+        })
+        .map(|session| session.worktree.display().to_string())
+        .collect();
+    let mut current = Vec::new();
+    for worktree in worktree_keys {
+        if let Some(session) = store
+            .get_task_session_by_worktree(&worktree)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve Task worktree: {error}")))?
+        {
+            current.push(session);
+        }
+    }
+    if current.len() > 1 {
         return Err(task_error(format!(
             "multiple Task Sessions claim worktree {}",
             repo.display()
         )));
     }
-    Ok(found.map(|session| (session, None)))
+    Ok(current.pop().map(|session| (session, None)))
 }
 
 /// Proven authority to run a Task-owned PR operation, or an explicit decision

@@ -9,7 +9,7 @@
 mod support;
 
 use loopflow::child_session::{ChildCommandKind, ChildCommandState, ChildRef};
-use loopflow::ops::task::task_status;
+use loopflow::ops::task::{task_stack, task_status};
 use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
 use loopflow::webhook::{ingest_event, WebhookEvent, WebhookOutcome};
 use loopflow_test_support::TestRepo;
@@ -35,7 +35,11 @@ exit 0
 
 /// Mark the registered Task a completed predecessor, then insert a live successor
 /// that shares its issue id, identifier, and worktree (recovery history).
-fn successor_sharing_the_issue(task: &RegisteredTask, successor_branch: &str) {
+fn successor_sharing_the_issue(
+    task: &RegisteredTask,
+    successor_branch: &str,
+    parent_pr_id: Option<TaskPrId>,
+) {
     let rt = tokio::runtime::Runtime::new().expect("successor runtime");
     rt.block_on(async {
         let mut predecessor = task.session.clone();
@@ -58,7 +62,7 @@ fn successor_sharing_the_issue(task: &RegisteredTask, successor_branch: &str) {
             slug: successor.workspace_slug.clone(),
             branch: successor_branch.to_string(),
             base_commit: task.pr.base_commit.clone(),
-            parent_pr_id: None,
+            parent_pr_id,
             publication: None,
             merge_commit: None,
             abandoned_at: None,
@@ -93,7 +97,7 @@ fn webhook_routes_control_to_the_live_successor() {
     repo.push_new_branch(branch);
 
     let task = register_task(home.path(), repo.path(), branch, &base);
-    successor_sharing_the_issue(&task, "jack/successor");
+    successor_sharing_the_issue(&task, "jack/successor", None);
     let issue_id = task.session.launch.issue.id.as_str().to_string();
     let rt = tokio::runtime::Runtime::new().expect("runtime");
 
@@ -161,7 +165,7 @@ fn task_status_resolves_the_live_successor() {
     repo.push_new_branch(branch);
 
     let task = register_task(home.path(), repo.path(), branch, &base);
-    successor_sharing_the_issue(&task, "jack/status-successor");
+    successor_sharing_the_issue(&task, "jack/status-successor", None);
 
     let resolved = task_status("INF-123").expect("task status");
     assert_ne!(
@@ -173,6 +177,32 @@ fn task_status_resolves_the_live_successor() {
         TaskSessionStatus::Waiting,
         "the live successor is the current attempt"
     );
+}
+
+/// Stacking resolves the shared worktree to the live successor and therefore
+/// returns the successor's child PR, never the terminal predecessor's PR.
+#[test]
+fn task_stack_resolves_the_live_successor_pr_from_shared_worktree() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_empty_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/stack-predecessor";
+    repo.create_branch(branch);
+    repo.create_file("proof.txt", "predecessor\n");
+    repo.stage_all();
+    repo.commit("seed");
+    repo.push_new_branch(branch);
+
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    successor_sharing_the_issue(&task, "jack/stack-successor", Some(task.pr.id.clone()));
+
+    let stacked = task_stack(repo.path())
+        .expect("stack resolution")
+        .expect("the successor PR is stacked");
+    assert_ne!(stacked.child.task_session_id, task.session.id);
+    assert_eq!(stacked.child.branch, "jack/stack-successor");
+    assert_eq!(stacked.parent_branch.as_deref(), Some(branch));
 }
 
 /// A terminal-only history (no live successor) still resolves, so `task status`

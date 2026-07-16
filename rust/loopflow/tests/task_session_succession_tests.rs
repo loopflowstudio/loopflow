@@ -81,6 +81,9 @@ fn successor_session(
         updated_at: now,
         ci_observation: None,
         github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
     };
     (session, pr)
 }

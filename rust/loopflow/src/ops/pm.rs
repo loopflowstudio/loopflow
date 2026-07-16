@@ -485,9 +485,42 @@ impl PmClient {
         }
     }
 
-    async fn comment(&self, item_id: &str, body: &str) -> PmResult<()> {
+    async fn comment(&self, item_id: &str, body: &str) -> PmResult<String> {
         match self {
             Self::Linear(client) => client.comment(item_id, body).await,
+        }
+    }
+
+    async fn update_comment(&self, comment_id: &str, body: &str) -> PmResult<()> {
+        match self {
+            Self::Linear(client) => client.update_comment(comment_id, body).await,
+        }
+    }
+
+    async fn link_attachment(
+        &self,
+        issue_id: &str,
+        url: &str,
+        title: &str,
+        subtitle: &str,
+    ) -> PmResult<String> {
+        match self {
+            Self::Linear(client) => client.link_attachment(issue_id, url, title, subtitle).await,
+        }
+    }
+
+    async fn update_attachment(
+        &self,
+        attachment_id: &str,
+        title: &str,
+        subtitle: &str,
+    ) -> PmResult<()> {
+        match self {
+            Self::Linear(client) => {
+                client
+                    .update_attachment(attachment_id, title, subtitle)
+                    .await
+            }
         }
     }
 }
@@ -1334,6 +1367,122 @@ async fn apply_update(
         completed: mark_done,
         linked_pr,
     })
+}
+
+/// The Linear linkage a published PR carries on its owning issue: a first-class
+/// attachment and a loopflow-managed comment. Ids are `None` until each is created;
+/// their presence switches the writeback from create to idempotent update.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PrLinkageIds {
+    pub attachment_id: Option<String>,
+    pub comment_id: Option<String>,
+}
+
+/// The content a PR linkage writes onto its Linear issue: the issue to link, the
+/// PR URL, the attachment title/subtitle, and the comment body. Assembled by the
+/// caller from the PR model so the writeback layer stays free of PR-domain shape.
+#[derive(Debug, Clone)]
+pub(crate) struct PrLinkRequest {
+    pub issue_id: String,
+    pub url: String,
+    pub title: String,
+    pub subtitle: String,
+    pub body: String,
+}
+
+/// A best-effort linkage attempt: the ids obtained so far (carrying prior ids
+/// forward), plus the failure message when Linear writeback degraded. `error` is
+/// `None` only on full success. This never fails the caller — the GitHub
+/// publication has already happened.
+#[derive(Debug, Clone)]
+pub(crate) struct PrLinkageOutcome {
+    pub ids: PrLinkageIds,
+    pub error: Option<String>,
+}
+
+/// Idempotently link a published PR to its owning Linear issue. Upserts a
+/// first-class attachment (create via `attachmentLinkURL`, later `attachmentUpdate`)
+/// and a managed comment (create via `commentCreate`, later `commentUpdate`), so
+/// repeated `pr open/submit/land` refresh the same linkage instead of duplicating.
+/// Partial progress is preserved: whatever id was obtained rides back in the
+/// outcome even when a later step fails.
+pub(crate) async fn pm_link_pr_async(
+    repo: &Path,
+    wave: &str,
+    request: &PrLinkRequest,
+    prior: &PrLinkageIds,
+) -> PrLinkageOutcome {
+    let ctx = match resolve_context(repo, wave).await {
+        Ok(ctx) => ctx,
+        Err(error) => {
+            return PrLinkageOutcome {
+                ids: prior.clone(),
+                error: Some(error.to_string()),
+            }
+        }
+    };
+    link_pr_with_client(&ctx.client, request, prior).await
+}
+
+async fn link_pr_with_client(
+    client: &PmClient,
+    request: &PrLinkRequest,
+    prior: &PrLinkageIds,
+) -> PrLinkageOutcome {
+    let mut ids = prior.clone();
+
+    match &ids.attachment_id {
+        Some(id) => {
+            if let Err(error) = client
+                .update_attachment(id, &request.title, &request.subtitle)
+                .await
+            {
+                return PrLinkageOutcome {
+                    ids,
+                    error: Some(error.to_string()),
+                };
+            }
+        }
+        None => match client
+            .link_attachment(
+                &request.issue_id,
+                &request.url,
+                &request.title,
+                &request.subtitle,
+            )
+            .await
+        {
+            Ok(id) => ids.attachment_id = Some(id),
+            Err(error) => {
+                return PrLinkageOutcome {
+                    ids,
+                    error: Some(error.to_string()),
+                }
+            }
+        },
+    }
+
+    match &ids.comment_id {
+        Some(id) => {
+            if let Err(error) = client.update_comment(id, &request.body).await {
+                return PrLinkageOutcome {
+                    ids,
+                    error: Some(error.to_string()),
+                };
+            }
+        }
+        None => match client.comment(&request.issue_id, &request.body).await {
+            Ok(id) => ids.comment_id = Some(id),
+            Err(error) => {
+                return PrLinkageOutcome {
+                    ids,
+                    error: Some(error.to_string()),
+                }
+            }
+        },
+    }
+
+    PrLinkageOutcome { ids, error: None }
 }
 
 /// `--status done` closes the task; absence leaves it open; anything else errors.
@@ -3049,6 +3198,166 @@ mod tests {
             .expect("PR link is posted as a comment");
         assert!(comment.body.contains("Shipped:"));
         assert!(comment.body.contains("pull/42"));
+    }
+
+    fn attachment_link_response(id: &str) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "attachmentLinkURL": { "attachment": { "id": id } } } }),
+        )
+    }
+
+    fn attachment_update_response(id: &str) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "attachmentUpdate": { "attachment": { "id": id } } } }),
+        )
+    }
+
+    fn comment_create_response(id: &str) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "commentCreate": { "comment": { "id": id } } } }),
+        )
+    }
+
+    fn comment_update_response(id: &str) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "commentUpdate": { "comment": { "id": id } } } }),
+        )
+    }
+
+    fn link_request(subtitle: &str) -> PrLinkRequest {
+        PrLinkRequest {
+            issue_id: "issue-uuid".to_string(),
+            url: "https://github.com/acme/repo/pull/7".to_string(),
+            title: "GitHub PR #7".to_string(),
+            subtitle: subtitle.to_string(),
+            body: format!("[GitHub PR #7](https://github.com/acme/repo/pull/7) — {subtitle}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn link_pr_creates_attachment_and_comment_on_first_publish() {
+        let (base_url, requests) = test_server::spawn(vec![
+            attachment_link_response("att-1"),
+            comment_create_response("comment-1"),
+        ])
+        .await;
+        let client = linear_test_ctx(base_url, "initiative-1").client;
+
+        let outcome = link_pr_with_client(
+            &client,
+            &link_request("Open · in review"),
+            &PrLinkageIds::default(),
+        )
+        .await;
+
+        assert_eq!(outcome.ids.attachment_id.as_deref(), Some("att-1"));
+        assert_eq!(outcome.ids.comment_id.as_deref(), Some("comment-1"));
+        assert!(outcome.error.is_none());
+
+        let requests = requests.lock().await;
+        assert!(requests
+            .iter()
+            .any(|req| req.body.contains("attachmentLinkURL")));
+        assert!(requests
+            .iter()
+            .any(|req| req.body.contains("commentCreate")));
+    }
+
+    #[tokio::test]
+    async fn link_pr_updates_existing_linkage_without_duplicating() {
+        let (base_url, requests) = test_server::spawn(vec![
+            attachment_update_response("att-1"),
+            comment_update_response("comment-1"),
+        ])
+        .await;
+        let client = linear_test_ctx(base_url, "initiative-1").client;
+        let prior = PrLinkageIds {
+            attachment_id: Some("att-1".to_string()),
+            comment_id: Some("comment-1".to_string()),
+        };
+
+        let outcome = link_pr_with_client(
+            &client,
+            &link_request("Open · completes task on merge"),
+            &prior,
+        )
+        .await;
+
+        assert!(outcome.error.is_none());
+        assert_eq!(outcome.ids, prior);
+
+        let requests = requests.lock().await;
+        // Existing ids drive in-place updates, never a second create.
+        assert!(requests
+            .iter()
+            .any(|req| req.body.contains("attachmentUpdate")));
+        assert!(requests
+            .iter()
+            .any(|req| req.body.contains("commentUpdate")));
+        assert!(!requests
+            .iter()
+            .any(|req| req.body.contains("commentCreate")));
+        assert!(!requests
+            .iter()
+            .any(|req| req.body.contains("attachmentLinkURL")));
+        // The refreshed state rides the update body.
+        assert!(requests
+            .iter()
+            .any(|req| req.body.contains("completes task on merge")));
+    }
+
+    #[tokio::test]
+    async fn link_pr_records_error_then_completes_on_retry() {
+        // First publish: attachment links, but the comment write fails.
+        let (base_url, _requests) = test_server::spawn(vec![
+            attachment_link_response("att-1"),
+            json_response(
+                StatusCode::OK,
+                json!({ "errors": [{ "message": "linear is down" }] }),
+            ),
+        ])
+        .await;
+        let client = linear_test_ctx(base_url, "initiative-1").client;
+
+        let degraded = link_pr_with_client(
+            &client,
+            &link_request("Open · in review"),
+            &PrLinkageIds::default(),
+        )
+        .await;
+
+        // Partial progress is preserved: the attachment id survives for the retry.
+        assert_eq!(degraded.ids.attachment_id.as_deref(), Some("att-1"));
+        assert!(degraded.ids.comment_id.is_none());
+        assert!(degraded.error.is_some());
+
+        // Retry with the surviving ids: the attachment updates in place and the
+        // missing comment is created, clearing the error.
+        let (base_url, requests) = test_server::spawn(vec![
+            attachment_update_response("att-1"),
+            comment_create_response("comment-1"),
+        ])
+        .await;
+        let client = linear_test_ctx(base_url, "initiative-1").client;
+
+        let healed =
+            link_pr_with_client(&client, &link_request("Open · in review"), &degraded.ids).await;
+
+        assert!(healed.error.is_none());
+        assert_eq!(healed.ids.attachment_id.as_deref(), Some("att-1"));
+        assert_eq!(healed.ids.comment_id.as_deref(), Some("comment-1"));
+
+        let requests = requests.lock().await;
+        assert!(requests
+            .iter()
+            .any(|req| req.body.contains("attachmentUpdate")));
+        assert!(requests
+            .iter()
+            .any(|req| req.body.contains("commentCreate")));
     }
 
     // Env vars are process-global; serialize the forwarded-token tests so a

@@ -3003,13 +3003,15 @@ const TASK_PR_COLUMNS: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
-    github_head_sha, ci_observation, parent_pr_id, github_observation
+    github_head_sha, ci_observation, parent_pr_id, github_observation,
+    linear_attachment_id, linear_comment_id, linear_link_error
     FROM task_prs";
 const TASK_PR_SELECT: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
-    github_head_sha, ci_observation, parent_pr_id, github_observation
+    github_head_sha, ci_observation, parent_pr_id, github_observation,
+    linear_attachment_id, linear_comment_id, linear_link_error
     FROM task_prs WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
@@ -3432,8 +3434,9 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             publication_requested_at, after_merge, next_slug,
             github_number, github_url, merge_commit, abandoned_at,
             created_at, updated_at, github_head_sha, ci_observation, parent_pr_id,
-            github_observation
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            github_observation,
+            linear_attachment_id, linear_comment_id, linear_link_error
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             pr.id.as_str(),
             pr.task_session_id.as_str(),
@@ -3454,6 +3457,9 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             task_pr_ci_json(pr)?,
             pr.parent_pr_id.as_ref().map(TaskPrId::as_str),
             task_pr_github_observation_json(pr)?,
+            pr.linear_attachment_id.as_deref(),
+            pr.linear_comment_id.as_deref(),
+            pr.linear_link_error.as_deref(),
         ],
     )?;
     Ok(())
@@ -3468,7 +3474,8 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             publication_requested_at=?7, after_merge=?8, next_slug=?9,
             github_number=?10, github_url=?11, merge_commit=?12,
             abandoned_at=?13, updated_at=?15, github_head_sha=?16,
-            ci_observation=?17, parent_pr_id=?18, github_observation=?19
+            ci_observation=?17, parent_pr_id=?18, github_observation=?19,
+            linear_attachment_id=?20, linear_comment_id=?21, linear_link_error=?22
          WHERE id=?1 AND task_session_id=?2 AND sequence=?3 AND slug=?4
            AND branch=?5 AND base_commit=?6 AND created_at=?14",
         params![
@@ -3491,6 +3498,9 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             task_pr_ci_json(pr)?,
             pr.parent_pr_id.as_ref().map(TaskPrId::as_str),
             task_pr_github_observation_json(pr)?,
+            pr.linear_attachment_id.as_deref(),
+            pr.linear_comment_id.as_deref(),
+            pr.linear_link_error.as_deref(),
         ],
     )
     .map_err(StoreError::from)
@@ -3819,6 +3829,9 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
             .map(crate::store::rows::unix_to_datetime),
         ci_observation,
         github_observation,
+        linear_attachment_id: row.get::<_, Option<String>>(19)?,
+        linear_comment_id: row.get::<_, Option<String>>(20)?,
+        linear_link_error: row.get::<_, Option<String>>(21)?,
         created_at: crate::store::rows::unix_to_datetime(row.get(13)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(14)?),
     };

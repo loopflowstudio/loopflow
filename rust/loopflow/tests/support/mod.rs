@@ -371,6 +371,9 @@ fn register_task_with_process(
         updated_at: now,
         ci_observation: None,
         github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");

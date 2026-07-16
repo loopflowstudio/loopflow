@@ -2132,6 +2132,9 @@ mod tests {
             updated_at: now,
             ci_observation: None,
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
         };
         store.create_task_session(&session, &pr).await.unwrap();
         session.begin_generation(format!("task-{provider}"));
@@ -2411,6 +2414,9 @@ mod tests {
                 woken_failure_set: None,
             }),
             github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: now,
             updated_at: now,
         };

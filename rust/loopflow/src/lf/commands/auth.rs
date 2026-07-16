@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
+use crate::lf::commands::profile::find_provider_account;
 use crate::lf::AuthCommand;
 use crate::profile::{EmailAddress, HostId, LocalChromeProfile, ProfileId, ProfileProviderAccount};
 use crate::provider_account::{
@@ -108,6 +109,11 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             .await
         }
         AuthCommand::Reset { provider, account } => reset_account(provider, account).await,
+        AuthCommand::Exec {
+            provider,
+            account,
+            args,
+        } => exec_account(provider, account, args).await,
         AuthCommand::External(args) => {
             let provider = args
                 .first()
@@ -830,6 +836,52 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
     let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]")?;
     time::Date::parse(value.trim(), &format)
         .map_err(|_| anyhow!("invalid paid-through date '{value}': expected YYYY-MM-DD"))
+}
+
+/// Replace this process with the provider's CLI running on the managed
+/// account's credential home, so direct use shares the session lf routes
+/// through instead of evicting it with a fresh ambient login.
+async fn exec_account(raw_provider: &str, raw_account: &str, args: &[String]) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let store = open_account_store().await?;
+    let account = find_provider_account(&store, provider, raw_account).await?;
+    let home = account
+        .home
+        .clone()
+        .ok_or_else(|| anyhow!("account '{}' has no managed credential home", raw_account))?;
+    let mut command = Command::new(provider.as_str());
+    command.args(args);
+    match provider {
+        Provider::Claude => {
+            command
+                .env("CLAUDE_CONFIG_DIR", &home)
+                .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
+                .env_remove("ANTHROPIC_API_KEY");
+        }
+        Provider::Codex => {
+            command
+                .env("CODEX_HOME", &home)
+                .env_remove("CODEX_ACCESS_TOKEN")
+                .env_remove("OPENAI_API_KEY");
+        }
+        _ => unreachable!("parse_managed_provider admits Claude and Codex only"),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(anyhow!(
+            "failed to exec {}: {}",
+            provider.as_str(),
+            command.exec()
+        ))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command
+            .status()
+            .with_context(|| format!("failed to run {}", provider.as_str()))?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
 }
 
 async fn reset_account(raw_provider: &str, raw_account: &str) -> Result<()> {

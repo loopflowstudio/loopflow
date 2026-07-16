@@ -353,6 +353,16 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
+```bash
+lf auth exec codex engineering            # interactive codex on the managed account
+lf auth exec claude jack@loopflow.studio  # provider CLI shares the routed session
+```
+
+`lf auth exec` replaces the process with the provider's CLI running on the
+managed account's credential home. Logging into a managed account with a bare
+`codex login`/`claude` creates a second session and evicts the managed one
+("needs re-login"); exec is how direct use and lf routing share one session.
+
 `lf usage` leads with each managed account's subscription state — provider-
 reported plan, session and weekly windows as percent *used*, reset times —
 from stored observations (harness streams report them mid-run) topped up by a

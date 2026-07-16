@@ -257,7 +257,7 @@ async fn show_repo_route(
     Ok(())
 }
 
-async fn find_provider_account(
+pub(crate) async fn find_provider_account(
     store: &SharedStore,
     provider: Provider,
     raw_account: &str,

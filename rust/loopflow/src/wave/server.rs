@@ -528,7 +528,7 @@ async fn conversation_handler(
 /// The door is opaque on resident ops: this handler validates SHAPE only —
 /// `from` rides `say` and nothing else; `text` may be empty only for
 /// `interrupt` — then hands the op to the runtime uninterpreted
-/// ([`WaveRuntime::deliver`]). What steer or interrupt *means* lives with the
+/// ([`WaveRuntime::try_deliver`]). What steer or interrupt *means* lives with the
 /// resident, not the ear. Honest partial: the `{turn, state}` echo still
 /// leaks that a bare interrupt appends nothing (`turn: null`), but that fact
 /// comes back from the runtime's return, not from the door interpreting.
@@ -560,7 +560,15 @@ async fn messages_handler(
             "text is required for every op but interrupt".to_string(),
         ));
     }
-    let turn = state.runtime.deliver(body.op, body.text);
+    let turn = state
+        .runtime
+        .try_deliver(body.op, body.text)
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("message was not accepted: {err}"),
+            )
+        })?;
     Ok(Json(PostMessageResponse {
         turn,
         state: state.runtime.loop_state().name().to_string(),
@@ -947,6 +955,7 @@ pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
 mod tests {
     use super::*;
     use crate::chat::turns::ChatTurn;
+    use crate::wave::journal::{journal_path, read_events, EventKind, JournalAppendStage};
 
     fn whole_broadcast(id: &str) -> TurnBroadcast {
         let turn = ChatTurn::user(id.to_string(), "hi".to_string());
@@ -1064,6 +1073,85 @@ mod tests {
         assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
         requested.wait().await;
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn message_write_failures_are_not_accepted_and_can_be_retried() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let app = router(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            None,
+            None,
+            ShutdownDoor::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/messages");
+        let body = serde_json::json!({"op": "message", "text": "keep this"});
+        let mut turn_rx = runtime.subscribe_turns();
+        let mut inbox_rx = runtime.subscribe_inbox();
+
+        for failure in [JournalAppendStage::Write, JournalAppendStage::Flush] {
+            runtime.fail_next_journal_append(failure);
+            let response = client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .expect("failed append response");
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            assert!(response
+                .text()
+                .await
+                .expect("error body")
+                .contains("message was not accepted"));
+            assert!(runtime.thread_snapshot().is_empty());
+            assert!(runtime.pending_messages().is_empty());
+            assert!(read_events(&journal_path(tmp.path(), "ship")).is_empty());
+            assert!(matches!(
+                turn_rx.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ));
+            assert!(matches!(
+                inbox_rx.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ));
+        }
+
+        let response = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .expect("retry response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let accepted: serde_json::Value = response.json().await.expect("accepted body");
+        assert_eq!(accepted["turn"]["id"], "turn-1");
+        assert_eq!(accepted["turn"]["role"], "user");
+        assert_eq!(accepted["turn"]["text"], "keep this");
+        assert_eq!(runtime.thread_snapshot().len(), 1);
+        assert_eq!(runtime.pending_messages().len(), 1);
+
+        let events = read_events(&journal_path(tmp.path(), "ship"));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].kind, EventKind::UserMessage { .. }));
+        server.abort();
+        let _ = server.await;
+        drop(runtime);
+
+        let reopened = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
+        let transcript = reopened.thread_snapshot();
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(transcript[0].id, "turn-1");
+        assert_eq!(transcript[0].text, "keep this");
     }
 
     #[tokio::test]

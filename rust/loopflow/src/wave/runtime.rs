@@ -37,9 +37,12 @@ use crate::receipt::Receipt;
 use crate::security::sanitize_fs_component;
 use crate::task::TaskObservation;
 use crate::wave::channel::matches_prefix;
+#[cfg(test)]
+use crate::wave::journal::JournalAppendStage;
 use crate::wave::journal::{
     fold_thread, journal_path, project_observation_message, restore_pending,
-    task_observation_message, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
+    task_observation_message, EventKind, Journal, JournalAppendError, MessageId, MessageOp,
+    PendingMessage, Usage,
 };
 use crate::wave::memory::Memory;
 use crate::wave::playhead::{
@@ -915,28 +918,51 @@ impl WaveRuntime {
     /// and appends no turn — `None`; every other delivery journals a
     /// `UserMessage`, commits the user turn, and queues for the loop.
     pub fn deliver(&self, op: MessageOp, text: String) -> Option<ChatTurn> {
+        self.try_deliver(op, text)
+            .expect("journal truth must accept a message before runtime delivery")
+    }
+
+    /// Deliver one human op only after its journal row is durable.
+    ///
+    /// The HTTP door uses this form so a failed write returns a non-success
+    /// response and leaves the transcript, pending queue, and live broadcasts
+    /// untouched. The caller may retry the same message.
+    ///
+    /// # Errors
+    /// The message's journal append could not be written and flushed.
+    pub fn try_deliver(
+        &self,
+        op: MessageOp,
+        text: String,
+    ) -> Result<Option<ChatTurn>, JournalAppendError> {
         if op == MessageOp::Interrupt && text.trim().is_empty() {
             self.deliver_interrupt();
-            return None;
+            return Ok(None);
         }
-        Some(self.deliver_message(text, op, None))
+        self.try_deliver_message(text, op, None).map(Some)
     }
 
     /// Deliver an attributed emission folded off the bus — a worker report,
     /// child-wave escalation, or CLI FYI. Same journal row, thread commit, and
     /// inbox path as any user message; the byline rides along.
     pub fn deliver_say(&self, text: String, from: String) -> ChatTurn {
-        self.deliver_message(text, MessageOp::Say, Some(from))
+        self.try_deliver_message(text, MessageOp::Say, Some(from))
+            .expect("journal truth must accept a bus report before runtime delivery")
     }
 
-    fn deliver_message(&self, text: String, op: MessageOp, from: Option<String>) -> ChatTurn {
+    fn try_deliver_message(
+        &self,
+        text: String,
+        op: MessageOp,
+        from: Option<String>,
+    ) -> Result<ChatTurn, JournalAppendError> {
         let mut inner = self.inner();
-        let event = inner.journal.append(|seq| EventKind::UserMessage {
+        let event = inner.journal.try_append(|seq| EventKind::UserMessage {
             id: MessageId(format!("msg-{seq}")),
             op,
             text: text.clone(),
             from: from.clone(),
-        });
+        })?;
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
         turn.created_at = event.at_rfc3339();
@@ -951,7 +977,12 @@ impl WaveRuntime {
         // order — sending after release lets two deliveries invert. A send
         // error just means no live subscribers; the pending fold has it.
         let _ = self.inbox_tx.send(InboxItem::Message(pending));
-        turn
+        Ok(turn)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_journal_append(&self, failure: JournalAppendStage) {
+        self.inner().journal.fail_next_append(failure);
     }
 
     /// Deliver a bare interrupt (no text). Nothing is journaled here — the

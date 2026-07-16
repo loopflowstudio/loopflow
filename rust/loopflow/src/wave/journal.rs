@@ -685,6 +685,24 @@ pub struct Journal {
     file: File,
     next_seq: u64,
     narrator: Narrator,
+    #[cfg(test)]
+    next_append_failure: Option<JournalAppendStage>,
+}
+
+/// A journal append failed before it became durable.
+#[derive(Debug, thiserror::Error)]
+#[error("journal append at seq {seq} failed during {operation}: {source}")]
+pub struct JournalAppendError {
+    seq: u64,
+    operation: &'static str,
+    #[source]
+    source: std::io::Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JournalAppendStage {
+    Write,
+    Flush,
 }
 
 impl Journal {
@@ -753,6 +771,8 @@ impl Journal {
                 file,
                 next_seq,
                 narrator: Narrator::default(),
+                #[cfg(test)]
+                next_append_failure: None,
             },
             events,
         ))
@@ -766,31 +786,111 @@ impl Journal {
         self.next_seq
     }
 
-    /// Append one event, building its kind from the seq it will get (so ids
-    /// like `"turn-<seq>"` live inside the event that mints them). Flushes the
-    /// line. A write failure is logged, not propagated — the in-memory state
-    /// stays live and the fault is loud in the logs.
+    /// Append one event, stopping the process if persistence fails.
+    ///
+    /// Most runtime paths cannot recover locally: their next action projects
+    /// the event into memory, so continuing would split the live view from
+    /// restart truth. Request paths that can report failure use
+    /// [`Self::try_append`] directly instead.
     pub fn append(&mut self, build: impl FnOnce(u64) -> EventKind) -> Event {
+        self.try_append(build)
+            .expect("journal truth must persist before projecting an event in memory")
+    }
+
+    /// Append and flush one event before advancing its sequence or narrating
+    /// it. A failed write is rolled back to the prior byte boundary so the
+    /// same runtime can retry without leaving a torn tail or consuming an id.
+    ///
+    /// # Errors
+    /// Serialization, file inspection, write, flush, or rollback failure.
+    pub fn try_append(
+        &mut self,
+        build: impl FnOnce(u64) -> EventKind,
+    ) -> Result<Event, JournalAppendError> {
         let event = Event {
             v: FORMAT_VERSION,
             seq: self.next_seq,
             at: OffsetDateTime::now_utc(),
             kind: build(self.next_seq),
         };
-        self.next_seq += 1;
-        match serde_json::to_string(&event) {
-            Ok(line) => {
-                if let Err(err) = writeln!(self.file, "{line}").and_then(|_| self.file.flush()) {
-                    tracing::error!(seq = event.seq, error = %err, "failed to append journal event");
-                } else {
-                    self.narrator.narrate(&event.kind);
-                }
-            }
-            Err(err) => {
-                tracing::error!(seq = event.seq, error = %err, "failed to serialize journal event");
-            }
+        let mut line = serde_json::to_vec(&event).map_err(|source| JournalAppendError {
+            seq: event.seq,
+            operation: "serialization",
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
+        })?;
+        line.push(b'\n');
+        let checkpoint = self
+            .file
+            .metadata()
+            .map_err(|source| JournalAppendError {
+                seq: event.seq,
+                operation: "file inspection",
+                source,
+            })?
+            .len();
+
+        let write_result = match self.take_injected_failure(JournalAppendStage::Write) {
+            Some(source) => Err(source),
+            None => self.file.write_all(&line),
+        };
+        if let Err(source) = write_result {
+            return Err(self.rollback(event.seq, checkpoint, "write", source));
         }
-        event
+
+        let flush_result = match self.take_injected_failure(JournalAppendStage::Flush) {
+            Some(source) => Err(source),
+            None => self.file.flush(),
+        };
+        if let Err(source) = flush_result {
+            return Err(self.rollback(event.seq, checkpoint, "flush", source));
+        }
+
+        self.next_seq += 1;
+        self.narrator.narrate(&event.kind);
+        Ok(event)
+    }
+
+    fn rollback(
+        &mut self,
+        seq: u64,
+        checkpoint: u64,
+        operation: &'static str,
+        source: std::io::Error,
+    ) -> JournalAppendError {
+        match self.file.set_len(checkpoint) {
+            Ok(()) => JournalAppendError {
+                seq,
+                operation,
+                source,
+            },
+            Err(rollback) => JournalAppendError {
+                seq,
+                operation: "write rollback",
+                source: std::io::Error::new(
+                    source.kind(),
+                    format!(
+                        "{operation} failed: {source}; truncating to byte {checkpoint} also failed: {rollback}"
+                    ),
+                ),
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_append(&mut self, failure: JournalAppendStage) {
+        self.next_append_failure = Some(failure);
+    }
+
+    fn take_injected_failure(
+        &mut self,
+        #[cfg_attr(not(test), allow(unused_variables))] expected: JournalAppendStage,
+    ) -> Option<std::io::Error> {
+        #[cfg(test)]
+        if self.next_append_failure == Some(expected) {
+            self.next_append_failure = None;
+            return Some(std::io::Error::other("injected journal append failure"));
+        }
+        None
     }
 }
 

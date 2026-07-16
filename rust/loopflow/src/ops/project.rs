@@ -286,7 +286,7 @@ pub(crate) fn reserve_project_session(
         let initial = ChildDirective::initial(
             ChildRef::Project(session.id.clone()),
             directive,
-            project_command_source(&session)?,
+            project_command_source(&store, &session).await?,
         );
         if let Err(error) = store
             .create_project_session_with_directive(&session, &initial)
@@ -725,24 +725,16 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
     })
 }
 
-fn project_command_source(session: &ProjectSession) -> OpsResult<ChildCommandSource> {
-    match std::env::var(crate::engine::wave_context::WAVE_ID_ENV) {
-        Ok(value) => {
-            let wave_id = WaveId::parse(&value)
-                .map_err(|error| project_error(format!("invalid ambient Wave id: {error}")))?;
-            if wave_id != session.wave_id {
-                return Err(project_error(format!(
-                    "Wave {wave_id} cannot control Project {} owned by Wave {}",
-                    session.launch.project.slug, session.wave_id
-                )));
-            }
-            Ok(ChildCommandSource::Wave(wave_id))
-        }
-        Err(std::env::VarError::NotPresent) => Ok(ChildCommandSource::Human),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            Err(project_error("ambient Wave id is not valid UTF-8"))
-        }
-    }
+async fn project_command_source(
+    store: &SharedStore,
+    session: &ProjectSession,
+) -> OpsResult<ChildCommandSource> {
+    super::util::resolve_child_command_source(
+        store,
+        &session.wave_id,
+        &format!("Project {}", session.launch.project.slug),
+    )
+    .await
 }
 
 fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<ProjectControlResult> {
@@ -755,7 +747,7 @@ fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<Pro
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
         let project_id = session.launch.project.id.as_str().to_string();
-        let source = project_command_source(&session)?;
+        let source = project_command_source(&store, &session).await?;
         let result = super::child::queue_command(
             &store,
             super::child::ChildSession::Project(Box::new(session)),
@@ -797,7 +789,7 @@ pub fn project_resume(
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
         let project_id = session.launch.project.id.as_str().to_string();
-        let source = project_command_source(&session)?;
+        let source = project_command_source(&store, &session).await?;
         let result = super::child::resume_session(
             &store,
             super::child::ChildSession::Project(Box::new(session)),

@@ -31,8 +31,7 @@ pub(crate) fn configure_vendor_tokio_env(command: &mut tokio::process::Command) 
         .env(crate::store::CONTROL_DB_PATH_ENV, control_db)
         .env_remove("LF_BIN")
         .env_remove("LF_HOME")
-        .env_remove("LF_DB_PATH")
-        .env_remove(crate::store::DEV_PRODUCTION_DB_OPT_IN_ENV);
+        .env_remove("LF_DB_PATH");
     Ok(())
 }
 
@@ -54,8 +53,7 @@ fn set_vendor_std_env(
         .env(crate::store::CONTROL_DB_PATH_ENV, control_db)
         .env_remove("LF_BIN")
         .env_remove("LF_HOME")
-        .env_remove("LF_DB_PATH")
-        .env_remove(crate::store::DEV_PRODUCTION_DB_OPT_IN_ENV);
+        .env_remove("LF_DB_PATH");
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +76,6 @@ mod environment_tests {
             .env("LF_BIN", "/ambient/lf")
             .env("LF_HOME", "/production")
             .env("LF_DB_PATH", "/production/loopflow.db")
-            .env("LF_ALLOW_PRODUCTION_DB_FROM_DEV", "1")
             .env("LF_CONTROL_HOME", "/old-control");
 
         set_vendor_std_env(
@@ -95,7 +92,6 @@ mod environment_tests {
         assert_eq!(environment["LF_HOME"], None);
         assert_eq!(environment["LF_DB_PATH"], None);
         assert_eq!(environment["LF_BIN"], None);
-        assert_eq!(environment["LF_ALLOW_PRODUCTION_DB_FROM_DEV"], None);
         assert_eq!(
             environment["LF_CONTROL_BIN"],
             Some(OsString::from("/control/lf"))

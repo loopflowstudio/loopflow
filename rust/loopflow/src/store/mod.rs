@@ -1,6 +1,6 @@
 //! Daemonless local persistence shared by `lf`, Waves, Projects, and Tasks.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -110,7 +110,6 @@ impl StorageConfig {
 pub const CONTROL_BIN_ENV: &str = "LF_CONTROL_BIN";
 pub const CONTROL_HOME_ENV: &str = "LF_CONTROL_HOME";
 pub const CONTROL_DB_PATH_ENV: &str = "LF_CONTROL_DB_PATH";
-pub const DEV_PRODUCTION_DB_OPT_IN_ENV: &str = "LF_ALLOW_PRODUCTION_DB_FROM_DEV";
 
 fn machine_home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
@@ -174,12 +173,7 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
         }
         lf_home_dir().join(candidate)
     };
-    guard_development_database(
-        &path,
-        crate::build_info::provenance(),
-        std::env::var_os(DEV_PRODUCTION_DB_OPT_IN_ENV),
-        &machine_home_dir(),
-    )?;
+    guard_development_database(&path, crate::build_info::provenance(), &machine_home_dir())?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -201,10 +195,9 @@ fn select_store_env_value(
 fn guard_development_database(
     path: &Path,
     provenance: crate::build_info::BuildProvenance,
-    opt_in: Option<impl AsRef<OsStr>>,
     home: &Path,
 ) -> Result<(), std::io::Error> {
-    if provenance.is_release() || opt_in.as_ref().is_some_and(|value| value.as_ref() == "1") {
+    if provenance.is_release() {
         return Ok(());
     }
     let production = home.join(".lf/loopflow.db");
@@ -214,7 +207,7 @@ fn guard_development_database(
     Err(std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
         format!(
-            "development lf ({}) refuses production database {}; use a release lf or set {DEV_PRODUCTION_DB_OPT_IN_ENV}=1 to break glass",
+            "development lf ({}) refuses production database {}; use an installed release lf",
             crate::build_info::source_identity(),
             production.display()
         ),
@@ -938,28 +931,14 @@ mod tests {
     }
 
     #[test]
-    fn development_production_gate_requires_exact_break_glass_value() {
+    fn development_production_gate_has_no_override() {
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path();
         let production = home.join(".lf/loopflow.db");
-        assert!(guard_development_database(
-            &production,
-            BuildProvenance::Development,
-            None::<&str>,
-            home,
-        )
-        .is_err());
-        assert!(guard_development_database(
-            &production,
-            BuildProvenance::Development,
-            Some("true"),
-            home,
-        )
-        .is_err());
-        guard_development_database(&production, BuildProvenance::Development, Some("1"), home)
-            .unwrap();
-        guard_development_database(&production, BuildProvenance::Release, None::<&str>, home)
-            .unwrap();
+        assert!(
+            guard_development_database(&production, BuildProvenance::Development, home,).is_err()
+        );
+        guard_development_database(&production, BuildProvenance::Release, home).unwrap();
     }
 
     #[test]
@@ -995,7 +974,6 @@ mod tests {
         assert!(guard_development_database(
             &alias.join("loopflow.db"),
             BuildProvenance::Development,
-            None::<&str>,
             &home,
         )
         .is_err());
@@ -1010,7 +988,6 @@ mod tests {
         assert!(guard_development_database(
             &home.join(".lf/new/../loopflow.db"),
             BuildProvenance::Development,
-            None::<&str>,
             &home,
         )
         .is_err());
@@ -1027,13 +1004,7 @@ mod tests {
         let alias = directory.path().join("alias.db");
         std::fs::hard_link(&production, &alias).unwrap();
 
-        assert!(guard_development_database(
-            &alias,
-            BuildProvenance::Development,
-            None::<&str>,
-            &home,
-        )
-        .is_err());
+        assert!(guard_development_database(&alias, BuildProvenance::Development, &home,).is_err());
     }
 
     fn make_wave(repo: &str) -> Wave {

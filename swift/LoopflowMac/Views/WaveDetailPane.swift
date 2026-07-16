@@ -303,6 +303,15 @@ private struct WavePlanView: View {
     }
 
     private func refreshDetail() async {
+        if AppTestMode.current() == .mockWaves {
+            if wave.name == MockWaveFixture.detailWaveName,
+               let snapshot = MockWaveFixture.selectedWaveDetail() {
+                reading.update(snapshot)
+            } else {
+                reading.clear()
+            }
+            return
+        }
         guard wave.isRegistered else {
             reading.clear()
             return

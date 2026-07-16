@@ -531,6 +531,10 @@ struct WavesView: View {
     }
 
     private func syncRepoStates() async {
+        if AppTestMode.current() == .mockWaves {
+            seedMockWaves()
+            return
+        }
         if AppTestMode.current() != nil { return }
         ensureRepoStates()
 
@@ -545,6 +549,25 @@ struct WavesView: View {
             for state in repoStates.values {
                 state.markRefreshFailed()
             }
+        }
+    }
+
+    /// Seed the populated Wave surface from `MockWaveFixture`, bypassing the
+    /// registry, so the `mock-waves` UI-test mode renders the stable list lenses
+    /// and auto-selects a Wave into its full detail hierarchy. Idempotent.
+    private func seedMockWaves() {
+        let repo = PortfolioRepo(path: MockWaveFixture.repoPath, lastOpened: Date())
+        if !portfolioService.repos.contains(where: { $0.path == repo.path }) {
+            portfolioService.addRepo(repo.url)
+        }
+        repos = [repo]
+        let state = repoStates[repo.path]
+            ?? PortfolioRepoState(repo: repo, registryQuery: RegistryQueryLocal.shared)
+        state.applyConnectedWaves(MockWaveFixture.waves, plans: MockWaveFixture.plans)
+        repoStates[repo.path] = state
+        if selectedWaveId == nil,
+           let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
+            selectedWaveId = waveSelectionId(selected)
         }
     }
 

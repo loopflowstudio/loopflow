@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 
 // -- Identity -----------------------------------------------------------------
 
@@ -396,8 +397,12 @@ fn backup_before_migration(
             }
         })
         .collect::<String>();
-    let backup_path = path.with_file_name(format!("{file_name}.backup-{safe_version}"));
-    if valid_backup(&backup_path, &previous) {
+    let history = migration_history_fingerprint(conn)?;
+    let backup_path = path.with_file_name(format!(
+        "{file_name}.backup-{safe_version}-{}",
+        &history[..16]
+    ));
+    if valid_backup(&backup_path, &history) {
         return Ok(Some(backup_path));
     }
 
@@ -448,7 +453,7 @@ fn backup_before_migration(
     Ok(Some(backup_path))
 }
 
-fn valid_backup(path: &Path, expected_version: &str) -> bool {
+fn valid_backup(path: &Path, expected_history: &str) -> bool {
     let Ok(connection) = rusqlite::Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -458,8 +463,48 @@ fn valid_backup(path: &Path, expected_version: &str) -> bool {
     let integrity: rusqlite::Result<String> =
         connection.pragma_query_value(None, "integrity_check", |row| row.get(0));
     integrity.as_deref() == Ok("ok")
-        && latest_applied_version_sqlite(&connection)
-            .is_ok_and(|version| version.as_deref() == Some(expected_version))
+        && migration_history_fingerprint(&connection)
+            .is_ok_and(|history| history == expected_history)
+}
+
+fn migration_history_fingerprint(conn: &rusqlite::Connection) -> StoreResult<String> {
+    let mut digest = Sha256::new();
+    let versions = applied_versions(conn)?;
+    digest.update((versions.len() as u64).to_be_bytes());
+    for version in versions {
+        hash_text(&mut digest, &version);
+    }
+    let schema = product_schema(conn)?;
+    digest.update((schema.len() as u64).to_be_bytes());
+    for object in schema {
+        hash_text(&mut digest, &object.object_type);
+        hash_text(&mut digest, &object.name);
+        hash_text(&mut digest, &object.table_name);
+        hash_text(&mut digest, &object.sql);
+        digest.update((object.foreign_keys.len() as u64).to_be_bytes());
+        for foreign_key in object.foreign_keys {
+            digest.update(foreign_key.id.to_be_bytes());
+            digest.update(foreign_key.sequence.to_be_bytes());
+            hash_text(&mut digest, &foreign_key.table);
+            hash_text(&mut digest, &foreign_key.from);
+            match foreign_key.to {
+                Some(to) => {
+                    digest.update([1]);
+                    hash_text(&mut digest, &to);
+                }
+                None => digest.update([0]),
+            }
+            hash_text(&mut digest, &foreign_key.on_update);
+            hash_text(&mut digest, &foreign_key.on_delete);
+            hash_text(&mut digest, &foreign_key.match_clause);
+        }
+    }
+    Ok(hex::encode(digest.finalize()))
+}
+
+fn hash_text(digest: &mut Sha256, value: &str) {
+    digest.update((value.len() as u64).to_be_bytes());
+    digest.update(value.as_bytes());
 }
 
 fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
@@ -494,6 +539,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 
     adopt_legacy_baseline(conn, set)?;
     adopt_divergent_history(conn, set)?;
+    adopt_permuted_history(conn, set)?;
 
     let applied = applied_versions(conn)?;
     for migration in pending_migrations(&applied, set)? {
@@ -505,6 +551,68 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
     }
 
     validate_schema(conn, set)
+}
+
+/// Canonicalize a ledger whose migration names are exactly a known leading
+/// prefix but whose branch-local ordinals were assigned in another order. The
+/// product schema must already equal the canonical prefix before any ledger row
+/// moves; migration SQL is never replayed during this repair.
+fn adopt_permuted_history(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
+    let applied = applied_versions(conn)?;
+    let Some(prefix_len) = permuted_history(&applied, set) else {
+        return Ok(());
+    };
+
+    let expected = rusqlite::Connection::open_in_memory()?;
+    for migration in &set[..prefix_len] {
+        expected.execute_batch(migration.sql)?;
+    }
+    if product_schema(conn)? != product_schema(&expected)? {
+        return Err(incompatible());
+    }
+
+    let mut applied_at = conn
+        .prepare("SELECT applied_at FROM schema_migrations ORDER BY applied_at, rowid")?
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    applied_at.sort_unstable();
+
+    conn.execute("DELETE FROM schema_migrations", [])?;
+    for (migration, applied_at) in set[..prefix_len].iter().zip(applied_at) {
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+            (migration.version(), applied_at),
+        )?;
+    }
+    Ok(())
+}
+
+fn permuted_history(applied: &[String], set: &[Migration]) -> Option<usize> {
+    if applied.len() > set.len() {
+        return None;
+    }
+    let canonical = set[..applied.len()]
+        .iter()
+        .map(Migration::version)
+        .collect::<Vec<_>>();
+    if applied == canonical {
+        return None;
+    }
+
+    let mut applied_names = applied
+        .iter()
+        .map(|version| {
+            MigrationId::parse_version(version)?;
+            version.split_once('_').map(|(_, name)| name)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let mut canonical_names = set[..applied.len()]
+        .iter()
+        .map(|migration| migration.name)
+        .collect::<Vec<_>>();
+    applied_names.sort_unstable();
+    canonical_names.sort_unstable();
+    (applied_names == canonical_names).then_some(applied.len())
 }
 
 /// Rewrite a pre-namespace baseline stamp to its release-scoped id. The bytes on
@@ -693,10 +801,9 @@ pub fn validate_set(set: &[Migration]) -> Result<(), String> {
     Ok(())
 }
 
-/// A database matches only if every product table and every column matches the
-/// schema the migration chain builds. Comparing table names alone lets a database
-/// built from an older edit of a migration open cleanly and then fail each query
-/// with a raw `no such column` error instead of the recreate message.
+/// A database matches only if its complete product schema matches the schema the
+/// migration chain builds. Names alone miss type, constraint, index, trigger,
+/// and foreign-key drift.
 fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
     let expected = rusqlite::Connection::open_in_memory()?;
     for migration in set {
@@ -709,17 +816,79 @@ fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResul
     Ok(())
 }
 
-/// Every product table with its columns, in declaration order. `schema_migrations`
-/// is bookkeeping rather than product schema, so no migration declares it.
-fn product_schema(conn: &rusqlite::Connection) -> StoreResult<Vec<(String, Vec<String>)>> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProductSchemaObject {
+    object_type: String,
+    name: String,
+    table_name: String,
+    sql: String,
+    foreign_keys: Vec<ForeignKeyDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ForeignKeyDefinition {
+    id: i64,
+    sequence: i64,
+    table: String,
+    from: String,
+    to: Option<String>,
+    on_update: String,
+    on_delete: String,
+    match_clause: String,
+}
+
+/// Every product table, index, and trigger with defining SQL and
+/// explicit foreign-key metadata. `schema_migrations` is bookkeeping rather
+/// than product schema, so no migration declares it.
+fn product_schema(conn: &rusqlite::Connection) -> StoreResult<Vec<ProductSchemaObject>> {
+    let mut statement = conn.prepare(
+        "SELECT type, name, tbl_name, COALESCE(sql, '')
+         FROM sqlite_master
+         WHERE type IN ('table', 'index', 'trigger')
+           AND name NOT LIKE 'sqlite_%'
+           AND name != 'schema_migrations'
+         ORDER BY type, name",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
     let mut schema = Vec::new();
-    for table in user_tables(conn)? {
-        if table == "schema_migrations" {
-            continue;
-        }
-        let mut statement = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-        let rows = statement.query_map([], |row| row.get(1))?;
-        schema.push((table, rows.collect::<Result<Vec<_>, _>>()?));
+    for row in rows {
+        let (object_type, name, table_name, sql) = row?;
+        let foreign_keys = if object_type == "table" {
+            let quoted = format!("\"{}\"", name.replace('"', "\"\""));
+            let mut foreign_key_statement =
+                conn.prepare(&format!("PRAGMA foreign_key_list({quoted})"))?;
+            let foreign_keys = foreign_key_statement
+                .query_map([], |row| {
+                    Ok(ForeignKeyDefinition {
+                        id: row.get(0)?,
+                        sequence: row.get(1)?,
+                        table: row.get(2)?,
+                        from: row.get(3)?,
+                        to: row.get(4)?,
+                        on_update: row.get(5)?,
+                        on_delete: row.get(6)?,
+                        match_clause: row.get(7)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            foreign_keys
+        } else {
+            Vec::new()
+        };
+        schema.push(ProductSchemaObject {
+            object_type,
+            name,
+            table_name,
+            sql: sql.trim().to_string(),
+            foreign_keys,
+        });
     }
     Ok(schema)
 }
@@ -769,6 +938,9 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
         return Ok(true);
     }
     if divergent_history(&applied, MIGRATIONS).is_some() {
+        return Ok(true);
+    }
+    if permuted_history(&applied, MIGRATIONS).is_some() {
         return Ok(true);
     }
     Ok(!pending_migrations(&applied, MIGRATIONS)?.is_empty())
@@ -838,13 +1010,66 @@ mod tests {
         }
     }
 
+    fn apply_permuted_history(conn: &rusqlite::Connection) {
+        let context_start = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "context_pressure")
+            .unwrap();
+        apply_set(conn, &MIGRATIONS[..context_start]).unwrap();
+        conn.execute("UPDATE schema_migrations SET applied_at = rowid", [])
+            .unwrap();
+        let applied_at = conn
+            .query_row("SELECT MAX(applied_at) FROM schema_migrations", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap();
+        let permutation = [
+            ("0.11.009_profiles", "profiles"),
+            (
+                "0.11.010_provider_account_lifecycle",
+                "provider_account_lifecycle",
+            ),
+            ("0.11.011_context_pressure", "context_pressure"),
+            (
+                "0.11.012_context_input_normalization",
+                "context_input_normalization",
+            ),
+        ];
+        for (offset, (version, name)) in permutation.into_iter().enumerate() {
+            let migration = MIGRATIONS
+                .iter()
+                .find(|migration| migration.name == name)
+                .unwrap();
+            conn.execute_batch(migration.sql).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                (version, applied_at + offset as i64 + 1),
+            )
+            .unwrap();
+        }
+    }
+
     fn columns(conn: &rusqlite::Connection, table: &str) -> Vec<String> {
-        product_schema(conn)
+        let quoted = format!("\"{}\"", table.replace('"', "\"\""));
+        let mut statement = conn
+            .prepare(&format!("PRAGMA table_info({quoted})"))
+            .unwrap();
+        statement
+            .query_map([], |row| row.get(1))
             .unwrap()
-            .into_iter()
-            .find(|(name, _)| name == table)
-            .map(|(_, columns)| columns)
+            .collect::<Result<Vec<_>, _>>()
             .unwrap()
+    }
+
+    fn find_backup(directory: &std::path::Path, prefix: &str) -> std::path::PathBuf {
+        std::fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with(prefix))
+            })
+            .unwrap_or_else(|| panic!("no backup starts with {prefix:?}"))
     }
 
     #[test]
@@ -902,7 +1127,7 @@ mod tests {
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
-            .any(|(table, _)| table == "task_sessions"));
+            .any(|object| object.object_type == "table" && object.name == "task_sessions"));
 
         apply_sqlite(&conn).unwrap();
         assert_eq!(
@@ -961,6 +1186,75 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn live_permuted_history_converges_without_losing_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_permuted_history(&conn);
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-live', 'Live', '/repo', 1)",
+            [],
+        )
+        .unwrap();
+
+        apply_sqlite_with_backup(&conn, &path).unwrap();
+
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            "0.11.015_interaction_reviews"
+        );
+        assert_eq!(
+            applied_versions(&conn).unwrap(),
+            MIGRATIONS
+                .iter()
+                .map(Migration::version)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            conn.query_row("SELECT name FROM waves WHERE id = 'wave-live'", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+            "Live"
+        );
+        let backup = rusqlite::Connection::open(find_backup(
+            directory.path(),
+            "loopflow.db.backup-0.11.012_context_input_normalization-",
+        ))
+        .unwrap();
+        assert_eq!(
+            applied_versions(&backup).unwrap()[10..],
+            [
+                "0.11.009_profiles",
+                "0.11.010_provider_account_lifecycle",
+                "0.11.011_context_pressure",
+                "0.11.012_context_input_normalization",
+            ]
+        );
+    }
+
+    #[test]
+    fn product_schema_detects_constraint_and_index_drift() {
+        let expected = open();
+        expected
+            .execute_batch(
+                "CREATE TABLE example (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 CREATE INDEX idx_example_value ON example(value);",
+            )
+            .unwrap();
+        let drifted = open();
+        drifted
+            .execute_batch("CREATE TABLE example (id TEXT PRIMARY KEY, value TEXT);")
+            .unwrap();
+
+        assert_ne!(
+            product_schema(&expected).unwrap(),
+            product_schema(&drifted).unwrap()
+        );
     }
 
     #[test]
@@ -1462,9 +1756,10 @@ mod tests {
 
         apply_sqlite_with_backup(&conn, &path).unwrap();
 
-        let backup_path = directory
-            .path()
-            .join("loopflow.db.backup-0.11.011_provider_account_lifecycle");
+        let backup_path = find_backup(
+            directory.path(),
+            "loopflow.db.backup-0.11.011_provider_account_lifecycle-",
+        );
         let backup = rusqlite::Connection::open(backup_path).unwrap();
         assert_eq!(
             latest_applied_version_sqlite(&backup).unwrap().as_deref(),
@@ -1485,7 +1780,7 @@ mod tests {
 
         apply_sqlite_with_backup(&conn, &path).unwrap();
 
-        let backup_path = directory.path().join("loopflow.db.backup-0.10.001_initial");
+        let backup_path = find_backup(directory.path(), "loopflow.db.backup-0.10.001_initial-");
         let backup = rusqlite::Connection::open(backup_path).unwrap();
         assert_eq!(
             latest_applied_version_sqlite(&backup).unwrap().as_deref(),
@@ -1564,9 +1859,10 @@ mod tests {
             .unwrap(),
             "after migration"
         );
-        let backup = rusqlite::Connection::open(
-            directory.path().join("loopflow.db.backup-0.10.001_initial"),
-        )
+        let backup = rusqlite::Connection::open(find_backup(
+            directory.path(),
+            "loopflow.db.backup-0.10.001_initial-",
+        ))
         .unwrap();
         assert_eq!(
             backup

@@ -16,8 +16,9 @@ migration that leaves a dangling reference rolls back as one unit.
 
 Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the
-database. The filename carries the previously applied migration, so at least the
-previous schema generation remains available.
+database. The filename carries the previously applied migration and a fingerprint
+of the complete ledger plus product schema, so a backup from another branch-local
+history cannot be mistaken for the state being repaired.
 
 ## The one rule
 
@@ -64,6 +65,7 @@ before anything is cut. Same script, both paths.
 | --- | --- |
 | Behind the chain | applies the missing tail and continues |
 | Pre-namespace `001_initial` stamp | adopted as `0.10.001_initial` — same bytes, no data moved |
+| Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
 | Carries an unknown id | reports the unknown and latest-known ids — a newer release or a divergent local build wrote it |
 | Skipped a migration, or drifted from the chain's schema | *delete loopflow.db and rerun* |
 

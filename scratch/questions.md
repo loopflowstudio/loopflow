@@ -2,6 +2,13 @@
 
 ## Existing-repository migration
 
+- Linear currently refuses a second team with “limit of teams allowed in your
+  current plan.” No binding changed during the failed PRD attempt. A distinct
+  Task tag requires a distinct Linear team, and keys are workspace-global, so
+  the production migration needs enough team capacity for every deliberately
+  distinct Wave identity. Do not collapse domain Waves onto shared archetype
+  teams merely to work around the provider limit.
+
 - Loopflow already has Product, Infrastructure, and Intelligence. Do not author
   Operations until a concrete recurring-operation Project exists; an empty
   fourth Wave would contradict the lazy bootstrap rule.

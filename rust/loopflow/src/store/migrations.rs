@@ -314,6 +314,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "usage_deltas",
         sql: include_str!("migrations/0.11.025_usage_deltas.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 26,
+        },
+        name: "lineage_boundary",
+        sql: include_str!("migrations/0.11.026_lineage_boundary.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1405,7 +1414,8 @@ mod tests {
                 "0.11.022_task_session_successors".to_string(),
                 "0.11.023_capture_pruned_state".to_string(),
                 "0.11.024_ci_incidents".to_string(),
-                "0.11.025_usage_deltas".to_string()
+                "0.11.025_usage_deltas".to_string(),
+                "0.11.026_lineage_boundary".to_string()
             ]
         );
     }
@@ -1414,23 +1424,76 @@ mod tests {
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
         apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        // The withheld tail's own effect is what proves it stayed withheld, so
+        // this row is bait for `0.11.026_lineage_boundary`: a parent no row
+        // records, which only the tail retires.
+        conn.execute_batch(
+            "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
+             VALUES ('trace_a', 'proc_orphan', 'proc_ghost', 0, 100, 'run', 'started')",
+        )
+        .unwrap();
 
         validate_sqlite(&conn).unwrap();
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.024_ci_incidents")
+            Some("0.11.025_usage_deltas")
         );
         assert!(capture_status_accepts(&conn, "pruned"));
         assert_eq!(
             conn.query_row(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_account_limits'",
+                "SELECT parent_process_id FROM run_events WHERE process_id = 'proc_orphan'",
                 [],
-                |row| row.get::<_, String>(0),
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+            Some("proc_ghost".to_string()),
+            "a validation-only open must not run the tail's backfill"
+        );
+    }
+
+    /// The seven dangling parents `lf doctor` found were written before the
+    /// journal refused to point at a parent it never recorded. Retire the
+    /// pointer, keep the run: the rows are evidence, the pointer is a ghost.
+    #[test]
+    fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
+        let conn = open();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
+             VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
+                    ('trace_a', 'proc_child',  'proc_root',  0, 101, 'run', 'started'),
+                    ('trace_b', 'proc_orphan', 'proc_ghost', 0, 102, 'run', 'started')",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        let parents = |process: &str| -> Option<Option<String>> {
+            conn.query_row(
+                "SELECT parent_process_id FROM run_events WHERE process_id = ?1",
+                [process],
+                |row| row.get::<_, Option<String>>(0),
             )
             .optional()
-            .unwrap(),
-            None
+            .unwrap()
+        };
+        assert_eq!(
+            parents("proc_orphan"),
+            Some(None),
+            "a parent no row records is dropped, and the run itself stays"
+        );
+        assert_eq!(
+            parents("proc_child"),
+            Some(Some("proc_root".to_string())),
+            "a parent the ledger holds is untouched"
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM run_events", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            3,
+            "the migration retires pointers, never rows"
         );
     }
 
@@ -1442,7 +1505,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 4]).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"

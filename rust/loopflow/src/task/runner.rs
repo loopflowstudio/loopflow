@@ -24,7 +24,9 @@ use crate::interaction_review::{
     InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
     InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
 };
+use crate::interactive_handoff::{InteractiveHandoffOutcome, InteractiveHandoffParent};
 use crate::store::{open_existing_store, SharedStore};
+use crate::task::interactive_rendezvous::{self, Rendezvous};
 use crate::task::{
     PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskSession, TaskSessionId,
     TaskSessionStatus,
@@ -109,6 +111,13 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id, lease)).await?;
 
     let mut flow = resume_task_phase(&session)?;
+    // Reconcile any interactive handoff the parent's prior body opened before this
+    // body runs a provider turn. A terminal outcome advances the flow past the
+    // interactive step; a still-open handoff parks the parent on a human, and this
+    // body ends without ever starting the provider.
+    if reconcile_interactive_rendezvous_at_birth(&store, &mut session, lease, &mut flow).await? {
+        return finish_parked(&store, &mut session, lease, None).await;
+    }
     let mut prepared =
         prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
@@ -296,6 +305,32 @@ The durable reviewer outcome is:\n{}",
                                 harness.as_mut(),
                                 "provider turn failed",
                             ).await;
+                        }
+                        if flow_turn_active
+                            && status == Lifecycle::Completed
+                            && parked_on_interactive_handoff(&store, &session).await?
+                        {
+                            // The agent opened an interactive handoff this turn.
+                            // Park without advancing: clear the active body as
+                            // interrupted so the interactive step stays current,
+                            // then end this body waiting on a human.
+                            finish_task_flow_turn(&mut flow, Lifecycle::Interrupted)?;
+                            record_task_flow_position(&mut session, &flow)?;
+                            set_and_record_status(
+                                &store,
+                                &mut session,
+                                lease,
+                                TaskSessionStatus::Waiting,
+                                "interactive handoff open; waiting for a human",
+                            )
+                            .await?;
+                            return finish_parked(
+                                &store,
+                                &mut session,
+                                lease,
+                                Some(harness.as_mut()),
+                            )
+                            .await;
                         }
                         let resume_interrupted_flow =
                             flow_turn_active && status == Lifecycle::Interrupted;
@@ -1010,6 +1045,132 @@ async fn completed_interaction_review(
         .outcome
         .ok_or_else(|| anyhow!("completed interaction review {review_id} has no outcome"))?;
     Ok(Some((disposition, outcome)))
+}
+
+/// Reconcile the parent against any interactive handoff before this body runs a
+/// provider turn. Returns `true` when the parent is parked on a human and the
+/// body must end without starting a turn. A terminal outcome — this generation's
+/// or an earlier one's — advances the flow past the interactive step so the
+/// runner continues with the next step; a failed handoff blocks the parent.
+async fn reconcile_interactive_rendezvous_at_birth(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    flow: &mut Playhead,
+) -> Result<bool> {
+    let parent = InteractiveHandoffParent::Task(session.id.clone());
+    match interactive_rendezvous::resolve(store, &parent, lease.generation).await? {
+        Rendezvous::None => Ok(false),
+        Rendezvous::Waiting => {
+            set_and_record_status(
+                store,
+                session,
+                lease,
+                TaskSessionStatus::Waiting,
+                "interactive handoff open; waiting for a human",
+            )
+            .await?;
+            Ok(true)
+        }
+        Rendezvous::Resume { outcome, fresh } => {
+            resume_interactive_step(store, session, lease, flow, outcome, fresh).await
+        }
+    }
+}
+
+/// Resolve a terminal interactive handoff at body birth. Completion or hand-back
+/// advances the flow past the interactive step (returns `false` — proceed);
+/// failure blocks the parent for an operator (returns `true` — parked). Evidence
+/// is recorded once, on the generation that wins the wake claim (`fresh`).
+async fn resume_interactive_step(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    flow: &mut Playhead,
+    outcome: InteractiveHandoffOutcome,
+    fresh: bool,
+) -> Result<bool> {
+    if fresh {
+        let detail = match &outcome {
+            InteractiveHandoffOutcome::Completed { summary }
+            | InteractiveHandoffOutcome::HandedBack { summary } => summary.clone(),
+            InteractiveHandoffOutcome::Failed { reason } => reason.clone(),
+        };
+        store
+            .append_task_event_for_lease(
+                &session.id,
+                lease,
+                &TaskEventKind::Progress {
+                    summary: format!(
+                        "interactive handoff {}: {detail}",
+                        outcome.status().as_str()
+                    ),
+                },
+            )
+            .await?;
+    }
+    match outcome {
+        InteractiveHandoffOutcome::Failed { reason } => {
+            set_and_record_status(
+                store,
+                session,
+                lease,
+                TaskSessionStatus::Blocked,
+                format!("interactive handoff failed: {reason}"),
+            )
+            .await?;
+            Ok(true)
+        }
+        InteractiveHandoffOutcome::Completed { .. }
+        | InteractiveHandoffOutcome::HandedBack { .. } => {
+            advance_past_interactive_step(flow, session)?;
+            record_task_flow_position(session, flow)?;
+            store.update_task_session_for_lease(session, lease).await?;
+            Ok(false)
+        }
+    }
+}
+
+/// Advance the flow cursor one step past the resolved interactive step, reusing
+/// the ordinary body start/finish path so the playhead settles exactly as it
+/// would after a completed provider turn.
+fn advance_past_interactive_step(flow: &mut Playhead, session: &TaskSession) -> Result<()> {
+    open_task_flow_body(flow, session)?;
+    finish_task_flow_turn(flow, Lifecycle::Completed)?;
+    Ok(())
+}
+
+/// True when the parent has an unresolved interactive handoff — open, or terminal
+/// but not yet woken. The agent opened one this turn, so the parent must park
+/// rather than advance: a still-open handoff waits on a human, and a
+/// completed-this-turn handoff must be woken exactly once by the next body's birth
+/// reconcile, not advanced here (which would skip the following step).
+async fn parked_on_interactive_handoff(store: &SharedStore, session: &TaskSession) -> Result<bool> {
+    let parent = InteractiveHandoffParent::Task(session.id.clone());
+    let handoffs = store.list_interactive_handoffs(Some(&parent)).await?;
+    Ok(interactive_rendezvous::pending(&handoffs).is_some())
+}
+
+/// End a parked body: the session status is already `Waiting` or `Blocked`, so
+/// only the process is settled. The parent stays non-terminal and resumes when a
+/// later body reconciles the handoff outcome.
+async fn finish_parked(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    harness: Option<&mut dyn Harness>,
+) -> Result<()> {
+    if let Some(harness) = harness {
+        let _ = harness.stop().await;
+    }
+    if let Some(process) = &mut session.latest_process {
+        process.state = ChildLeaseState::Finished;
+        process.outcome = Some(ChildBodyOutcome::Interrupted {
+            reason: "interactive handoff; waiting on a human".to_string(),
+        });
+    }
+    store.finish_task_process(session, lease).await?;
+    Ok(())
 }
 
 fn record_task_flow_position(session: &mut TaskSession, flow: &Playhead) -> Result<()> {
@@ -2304,5 +2465,90 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("scripted interrupt failed")));
+    }
+
+    fn task_handoff_request(
+        session: &TaskSession,
+        lease: &ChildWriteLease,
+    ) -> crate::interactive_handoff::OpenInteractiveHandoff {
+        crate::interactive_handoff::OpenInteractiveHandoff {
+            parent: crate::interactive_handoff::InteractiveHandoffParent::Task(session.id.clone()),
+            home: crate::engine::wave_home::WaveHome::parse("jack@local").unwrap(),
+            cwd: session.worktree.clone(),
+            provider: session.provider.clone(),
+            provider_session_id: session.provider_session_id.clone(),
+            body_generation: lease.generation,
+            reason: "Needs an interactive login".to_string(),
+            environment: std::collections::BTreeMap::new(),
+            attach_argv: vec!["tmux".to_string(), "attach".to_string()],
+        }
+    }
+
+    #[tokio::test]
+    async fn parked_on_interactive_handoff_tracks_the_open_row() {
+        let (store, session, lease) = conformance_session("codex").await;
+        assert!(!super::parked_on_interactive_handoff(&store, &session)
+            .await
+            .unwrap());
+        let (handoff, created) = store
+            .open_interactive_handoff(task_handoff_request(&session, &lease))
+            .await
+            .unwrap();
+        assert!(created);
+        assert!(super::parked_on_interactive_handoff(&store, &session)
+            .await
+            .unwrap());
+        // A terminal-but-unclaimed handoff still parks the body: the next birth
+        // reconcile must claim the wake exactly once, not this turn's advance.
+        store
+            .finish_interactive_handoff(
+                &handoff.id,
+                &crate::interactive_handoff::InteractiveHandoffOutcome::Completed {
+                    summary: "human finished the login".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(super::parked_on_interactive_handoff(&store, &session)
+            .await
+            .unwrap());
+        // Once a generation claims the wake, the rendezvous is fully resolved and
+        // the parent runs normally.
+        assert!(store
+            .claim_interactive_handoff_wake(&handoff.id, lease.generation)
+            .await
+            .unwrap());
+        assert!(!super::parked_on_interactive_handoff(&store, &session)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn finish_parked_settles_the_body_without_a_terminal_status() {
+        let (store, mut session, lease) = conformance_session("codex").await;
+        session.set_status(
+            TaskSessionStatus::Waiting,
+            "interactive handoff open; waiting for a human",
+        );
+        store
+            .update_task_session_for_lease(&session, &lease)
+            .await
+            .unwrap();
+
+        super::finish_parked(&store, &mut session, &lease, None)
+            .await
+            .unwrap();
+
+        assert_eq!(session.status, TaskSessionStatus::Waiting);
+        assert!(!session.status.is_terminal());
+        let process = session.latest_process.as_ref().unwrap();
+        assert_eq!(
+            process.state,
+            crate::child_session::ChildLeaseState::Finished
+        );
+        // The parked body leaves the Session durably non-terminal, so a later
+        // resume can reconcile the handoff outcome.
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
     }
 }

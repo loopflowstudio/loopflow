@@ -176,7 +176,7 @@ Then read and edit tasks:
 
 ```bash
 lf pm init --wave infra --team-key INF                              # connect or rebind Initiative + team
-lf pm reteam --wave infra --apply                                   # move Projects, then Issues without a writing body
+lf pm reteam --wave infra --apply                                   # move the hierarchy only when no Task body is writing
 lf pm sync --wave infra                                             # refresh SQLite
 lf pm status                                                        # show linked waves and task counts
 lf pm show --wave infra                                             # read; refresh when stale

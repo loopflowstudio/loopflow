@@ -1560,15 +1560,39 @@ fn identifier_has_team_prefix(identifier: &str, team_key: &str) -> bool {
     identifier.trim().to_ascii_uppercase().starts_with(&prefix)
 }
 
-/// Whether a Project sits on a team other than the wave's bound team. `None`
-/// team ids means the read did not resolve teams (an older snapshot) — unknown,
-/// not a mismatch, so no false positive. An empty set is a real mismatch: the
-/// Project belongs to no team the wave owns.
-fn project_off_team(bound_team: &str, project_team_ids: Option<&[String]>) -> bool {
+/// Whether a Project's resolved ownership differs from exactly the wave's team.
+/// `None` means the read did not resolve teams (an older snapshot) — unknown,
+/// not a mismatch, so no false positive. Empty, foreign, and multi-team sets all
+/// need repair because one Project belongs to one Wave-owned team.
+fn project_needs_reteam(bound_team: &str, project_team_ids: Option<&[String]>) -> bool {
     match project_team_ids {
         None => false,
-        Some(team_ids) => !team_ids.iter().any(|id| id == bound_team),
+        Some(team_ids) => team_ids.len() != 1 || team_ids[0] != bound_team,
     }
+}
+
+/// Refuse the whole apply when any Task body can still write the old identifier.
+/// The plan is read-only up to this point, so this preserves the hierarchy rather
+/// than moving its Project and idle siblings around the protected Task.
+fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
+    if deferrals.is_empty() {
+        return Ok(());
+    }
+
+    let protected = deferrals
+        .iter()
+        .map(|deferral| {
+            format!(
+                "{} `{}` ({})",
+                deferral.identifier, deferral.title, deferral.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(OpsError::Message(format!(
+        "cannot apply reteam while {} Task body(s) can still write the old identifier: {protected}. No Projects or Tasks were moved; stop those bodies and rerun the dry-run.",
+        deferrals.len()
+    )))
 }
 
 pub fn pm_reteam(
@@ -1621,10 +1645,11 @@ async fn pm_reteam_async(
     let mut historical = 0usize;
 
     for project in &projects {
-        // A Project stranded on a foreign team is moved onto the wave's team. A
-        // Project whose teams already include it is left alone (idempotent). An
-        // unresolved team set (`None`, older snapshot) is skipped, never guessed.
-        if project_off_team(&team_id, project.team_ids.as_deref()) {
+        // A Project without exactly the wave's team is moved onto it. A
+        // multi-team Project is repaired too: ownership is singular, not merely
+        // membership. An unresolved team set (`None`, older snapshot) is skipped,
+        // never guessed.
+        if project_needs_reteam(&team_id, project.team_ids.as_deref()) {
             project_moves.push(PmReteamProjectMove {
                 id: project.id.clone(),
                 name: project.name.clone(),
@@ -1682,6 +1707,7 @@ async fn pm_reteam_async(
     }
 
     if options.apply {
+        ensure_reteam_apply_safe(&deferrals)?;
         // Projects first: a Project must own the team before its issues land there
         // cleanly. `teamIds` is a set, so this pulls it off the shared team.
         for pm in &project_moves {
@@ -1874,11 +1900,10 @@ async fn pm_sync_async(
                     project.name, project.id
                 ));
             }
-            // A Project stranded on a foreign team (e.g. the shared team it was
-            // created against before the wave was bound) is invisible to the
-            // team-agnostic read path — flag it and name the `reteam` repair.
+            // A Project stranded on a foreign team (or simultaneously attached
+            // to the bound and a legacy team) violates singular Wave ownership.
             if let Some(team_id) = &bound_team {
-                if project_off_team(team_id, project.team_ids.as_deref()) {
+                if project_needs_reteam(team_id, project.team_ids.as_deref()) {
                     let teams = project.team_ids.as_deref().unwrap_or_default().join(", ");
                     diagnostics.push(format!(
                         "Linear Project `{}` ({}) in wave/{wave} belongs to team(s) [{teams}], \
@@ -2613,21 +2638,48 @@ mod tests {
     }
 
     #[test]
-    fn project_off_team_flags_only_a_resolved_foreign_team() {
+    fn project_needs_reteam_requires_exactly_one_bound_team() {
         // Unknown teams (older snapshot) → never a mismatch.
-        assert!(!project_off_team("team-prd", None));
-        // Bound team present in the set → owned.
-        assert!(!project_off_team(
+        assert!(!project_needs_reteam("team-prd", None));
+        // Exactly the bound team → owned.
+        assert!(!project_needs_reteam(
+            "team-prd",
+            Some(&["team-prd".to_string()])
+        ));
+        // The bound team plus a legacy team still violates one-team ownership.
+        assert!(project_needs_reteam(
             "team-prd",
             Some(&["team-prd".to_string(), "team-shared".to_string()])
         ));
         // Bound team absent → stranded.
-        assert!(project_off_team(
+        assert!(project_needs_reteam(
             "team-prd",
             Some(&["team-shared".to_string()])
         ));
         // Belongs to no team at all → stranded.
-        assert!(project_off_team("team-prd", Some(&[])));
+        assert!(project_needs_reteam("team-prd", Some(&[])));
+    }
+
+    #[test]
+    fn reteam_apply_stops_before_mutation_when_any_task_body_is_writing() {
+        let deferrals = vec![
+            PmReteamDeferral {
+                identifier: "W2-157".to_string(),
+                title: "Unify practice targets".to_string(),
+                reason: "running body".to_string(),
+            },
+            PmReteamDeferral {
+                identifier: "W2-166".to_string(),
+                title: "Resolve team ownership".to_string(),
+                reason: "starting body".to_string(),
+            },
+        ];
+
+        let error = ensure_reteam_apply_safe(&deferrals).expect_err("apply must stop");
+        let message = error.to_string();
+        assert!(message.contains("W2-157 `Unify practice targets` (running body)"));
+        assert!(message.contains("W2-166 `Resolve team ownership` (starting body)"));
+        assert!(message.contains("No Projects or Tasks were moved"));
     }
 
     #[test]

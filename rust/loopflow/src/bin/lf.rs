@@ -1532,6 +1532,11 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)
             }
+            Some(Commands::Receipt { cmd }) => match cmd {
+                loopflow::lf::ReceiptCommand::Show { token, wave, json } => {
+                    loopflow::lf::commands::receipt::run(token, wave.as_deref(), *json)
+                }
+            },
             Some(Commands::Ssh {
                 host,
                 repo,

@@ -275,14 +275,19 @@ lf chat --follow -w intelligence            # watch and speak from one terminal 
 lf chat --history --json -w intelligence    # read the saved tail while stopped
 lf memory                                   # print the wave's MEMORY.md
 lf memory add "buttons: variants unified"   # publish one replayable fact
+lf memory add "workers report via stream" --receipt chat_turn:turn-3
 lf memory log                               # print facts added since the last update
+lf memory log --json                        # facts with their evidence receipts
 lf memory update < MEMORY.md                # replace it from stdin
+lf receipt show chat_turn:turn-3            # drill one receipt to its record
+lf receipt show pr:loopflow/loopflow#912 --json
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
-| `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
+| `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `log --json` emits facts with their evidence receipts; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact, with repeatable `--receipt kind:reference` evidence bindings |
+| `lf receipt show TOKEN` | Drill one evidence receipt (`kind:reference`) to its canonical local record — a journal turn, run-events report, trace turn, PM snapshot item, or Task PR. `--json` emits the resolved record |
 
 Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
 human shell, pass `--wave`; repository location does not identify one of the
@@ -341,7 +346,7 @@ lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # additive spend by repo and provider
 lf usage --json --days 30       # additive skill/run boundary rows
 lf top                          # last-hour provider throughput + live sessions
-lf doctor                       # audit continuity, identity, lineage, coverage
+lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
 
@@ -360,6 +365,10 @@ run/launch/turn address.
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print
 when the database is too new or came from a divergent development build.
+The `receipts` check sweeps every wave's memory facts for receipt health:
+missing (zero receipts), orphaned (reference resolves to no known record),
+and cross-wave (receipt wave differs from the claim's wave). During the
+post-contract grace window all findings are warnings, not failures.
 
 ## Measuring Codebase Weight
 

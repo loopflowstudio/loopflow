@@ -658,6 +658,15 @@ impl SqliteStore {
         task_pr_on(&conn, pr_id)
     }
 
+    /// Every Task PR across all sessions — the scan surface for `pr:` receipt
+    /// resolution, which names `owner/repo#N` rather than a loopflow PR id.
+    pub fn all_task_prs(&self) -> StoreResult<Vec<TaskPr>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!("{TASK_PR_COLUMNS} ORDER BY created_at"))?;
+        let rows = statement.query_map([], map_task_pr_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn active_task_pr(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(

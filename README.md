@@ -41,6 +41,8 @@ lf wave designer              # one persistent Wave loop, until Ctrl-C
 lf chat --steer "ship the button audit first" # steer the live body, else queue
 lf chat --history --json -w designer # read saved Chat without a listener
 lf memory add "buttons: variants unified" # curate what it knows
+lf memory add "workers report via stream" --receipt chat_turn:turn-3
+lf receipt show chat_turn:turn-3 --json   # drill a receipt to its evidence
 lf stop designer              # stop its listener and resident gracefully
 ```
 

@@ -127,6 +127,14 @@ impl Receipt {
     }
 }
 
+/// Extract the PR number from a `pr:` receipt reference (`owner/repo#N[@sha]`).
+/// Returns `None` when the reference lacks a `#N` segment.
+pub fn parse_pr_number(reference: &str) -> Option<u32> {
+    let after_hash = reference.split_once('#')?.1;
+    let number_str = after_hash.split('@').next()?;
+    number_str.parse().ok()
+}
+
 impl fmt::Display for Receipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} (wave {})", self.token(), self.wave)
@@ -197,5 +205,15 @@ mod tests {
             Receipt::parse("chat_turn:  ", "product"),
             Err(ReceiptParseError::EmptyReference(_))
         ));
+    }
+
+    #[test]
+    fn parse_pr_number_extracts_from_owner_repo_hash_n() {
+        assert_eq!(parse_pr_number("loopflow/loopflow#912"), Some(912));
+        assert_eq!(parse_pr_number("loopflow/loopflow#912@abc1234"), Some(912));
+        assert_eq!(parse_pr_number("no-number"), None);
+        assert_eq!(parse_pr_number("owner/repo"), None);
+        assert_eq!(parse_pr_number("owner/repo#abc"), None);
+        assert_eq!(parse_pr_number("owner/repo#0"), Some(0));
     }
 }

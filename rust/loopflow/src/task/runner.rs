@@ -18,7 +18,12 @@ use crate::child_session::{
     ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
     ChildDirective, ChildLeaseState, ChildRef, ChildWriteLease,
 };
+use crate::engine::InteractionPolicy;
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
+use crate::interaction_review::{
+    InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
+    InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
+};
 use crate::store::{open_existing_store, SharedStore};
 use crate::task::{
     PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskSession, TaskSessionId,
@@ -28,6 +33,12 @@ use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
 use crate::wave::Wave;
+
+#[derive(Debug)]
+struct PreparedTaskStep {
+    turn: crate::lf::commands::run::PreparedHarnessTurn,
+    review: Option<InteractionReview>,
+}
 
 pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Result<()> {
     let lease = task_write_lease_from_env().map_err(|error| anyhow!(error))?;
@@ -98,7 +109,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id, lease)).await?;
 
     let mut flow = resume_task_phase(&session)?;
-    let prepared = prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
+    let mut prepared =
+        prepare_task_flow_step(&store, &mut session, lease, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -106,7 +118,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     store
         .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
         .await?;
-    harness.start(&prepared.config).await?;
+    harness.start(&prepared.turn.config).await?;
     session.provider = harness_name;
     session.provider_session_id = harness.provider_session_id();
     if let Some(process) = &mut session.latest_process {
@@ -143,37 +155,60 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     {
         return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
     }
-    let mut flow_turn_active = false;
-    let mut sent_pending = false;
-    while let Some(input) = pending.pop_front() {
-        if !pending_input_is_current(&store, &session, lease, &input).await? {
-            continue;
+    let mut review_recovery = None;
+    let mut interaction_review = if let Some(review) = prepared.review.take() {
+        open_interaction_review_body(&store, &session, lease, &mut flow, &review).await?;
+        match review.status {
+            InteractionReviewStatus::Requested => {}
+            InteractionReviewStatus::Active => {
+                review_recovery = Some(PendingInput::system(format!(
+                    "Resume interaction review {} after a Task process restart. Inspect the \
+existing provider transcript for the latest reviewer question, then answer it with \
+`lf task review reply {} \"<answer and evidence>\"`.",
+                    review.id, review.id
+                )));
+            }
+            InteractionReviewStatus::Completed => {
+                let disposition = review.disposition.ok_or_else(|| {
+                    anyhow!(
+                        "completed interaction review {} has no disposition",
+                        review.id
+                    )
+                })?;
+                let outcome = review.outcome.as_deref().ok_or_else(|| {
+                    anyhow!("completed interaction review {} has no outcome", review.id)
+                })?;
+                review_recovery = Some(PendingInput::system(format!(
+                    "Recover the already-completed interaction review {} with disposition `{}`. \
+The durable reviewer outcome is:\n{}",
+                    review.id,
+                    disposition.as_str(),
+                    outcome
+                )));
+            }
         }
-        let command = input.command_id.map(|id| (id, input.effect));
-        apply_input(
-            &store,
-            &session,
-            lease,
-            harness.as_mut(),
-            &input.text,
-            command,
-            input.decision,
-        )
-        .await?;
-        sent_pending = true;
-        break;
+        Some(review.id)
+    } else {
+        None
+    };
+    if pending.is_empty() {
+        pending.extend(review_recovery);
     }
-    if !sent_pending {
+    let mut flow_turn_active = false;
+    let mut provider_turn_active =
+        apply_next_pending(&store, &session, lease, harness.as_mut(), &mut pending).await?;
+    if !provider_turn_active && interaction_review.is_none() {
         start_task_flow_turn(
             &store,
             &mut session,
             lease,
             harness.as_mut(),
             &mut flow,
-            prepared,
+            prepared.turn,
         )
         .await?;
         flow_turn_active = true;
+        provider_turn_active = true;
     }
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
@@ -212,10 +247,19 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                     lease,
                     commands,
                     harness.as_mut(),
-                    true,
+                    provider_turn_active,
                     &mut pending,
                 ).await? {
                     return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
+                }
+                if !provider_turn_active {
+                    provider_turn_active = apply_next_pending(
+                        &store,
+                        &session,
+                        lease,
+                        harness.as_mut(),
+                        &mut pending,
+                    ).await?;
                 }
             }
             event = event_rx.recv() => {
@@ -243,6 +287,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
                     ConversationEvent::TurnCompleted { status, .. } => {
+                        provider_turn_active = false;
                         if status == Lifecycle::Failed {
                             return finish_failed(
                                 &store,
@@ -254,12 +299,23 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                         }
                         let resume_interrupted_flow =
                             flow_turn_active && status == Lifecycle::Interrupted;
+                        let completed_review = if flow_turn_active {
+                            None
+                        } else if let Some(review_id) = interaction_review.as_ref() {
+                            completed_interaction_review(&store, review_id).await?
+                        } else {
+                            None
+                        };
+                        let review_body_completed = completed_review.is_some();
                         let mut flow_iteration_completed = if flow_turn_active {
                             finish_task_flow_turn(&mut flow, status)?
+                        } else if review_body_completed {
+                            interaction_review = None;
+                            finish_task_flow_turn(&mut flow, Lifecycle::Completed)?
                         } else {
                             false
                         };
-                        if flow_turn_active {
+                        if flow_turn_active || review_body_completed {
                             let latest = store
                                 .get_task_session(&session.id)
                                 .await?
@@ -298,6 +354,33 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                 gate_fingerprint = None;
                                 last_text.clear();
                             }
+                            if matches!(
+                                completed_review.as_ref().map(|(disposition, _)| disposition),
+                                Some(InteractionReviewDisposition::ChangesRequested)
+                            ) && session.lifecycle_phase == TaskLifecyclePhase::Gate
+                            {
+                                state_fingerprint = task_state_fingerprint(&session)?;
+                                gate_fingerprint = None;
+                                session.enter_iterate()?;
+                                session.set_status(
+                                    TaskSessionStatus::Running,
+                                    "Task gate requested changes; returning to iteration",
+                                );
+                                store.update_task_session_for_lease(&session, lease).await?;
+                                interaction_review = start_resumed_task_phase(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    harness.as_mut(),
+                                    &mut flow,
+                                    wave.name(),
+                                )
+                                .await?;
+                                flow_turn_active = interaction_review.is_none();
+                                provider_turn_active = flow_turn_active;
+                                last_text.clear();
+                                continue 'runner;
+                            }
                             while let Some(input) = pending.pop_front() {
                                 if !pending_input_is_current(&store, &session, lease, &input).await? {
                                     continue;
@@ -316,6 +399,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     command,
                                     input.decision,
                                 ).await?;
+                                provider_turn_active = true;
+                                continue 'runner;
+                            }
+                            if interaction_review.is_some() {
+                                last_text.clear();
                                 continue 'runner;
                             }
                             let approved_gate = if flow_iteration_completed
@@ -331,7 +419,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                         "Task gate requested changes; returning to iteration",
                                     );
                                     store.update_task_session_for_lease(&session, lease).await?;
-                                    start_resumed_task_phase(
+                                    interaction_review = start_resumed_task_phase(
                                         &store,
                                         &mut session,
                                         lease,
@@ -340,7 +428,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                         wave.name(),
                                     )
                                     .await?;
-                                    flow_turn_active = true;
+                                    flow_turn_active = interaction_review.is_none();
+                                    provider_turn_active = flow_turn_active;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -357,7 +446,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     &flow,
                                 )
                                 .await?;
-                                start_task_flow_turn(
+                                interaction_review = start_prepared_task_step(
                                     &store,
                                     &mut session,
                                     lease,
@@ -366,7 +455,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     prepared,
                                 )
                                 .await?;
-                                flow_turn_active = true;
+                                flow_turn_active = interaction_review.is_none();
+                                provider_turn_active = flow_turn_active;
                                 continue 'runner;
                             }
                             let summary = progress_summary(&last_text);
@@ -437,7 +527,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     &flow,
                                 )
                                 .await?;
-                                start_task_flow_turn(
+                                interaction_review = start_prepared_task_step(
                                     &store,
                                     &mut session,
                                     lease,
@@ -446,7 +536,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     prepared,
                                 )
                                 .await?;
-                                flow_turn_active = true;
+                                flow_turn_active = interaction_review.is_none();
+                                provider_turn_active = flow_turn_active;
                                 last_text.clear();
                                 continue 'runner;
                             } else if let Some(pr) = observed_pr
@@ -477,7 +568,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                         &flow,
                                     )
                                     .await?;
-                                    start_task_flow_turn(
+                                    interaction_review = start_prepared_task_step(
                                         &store,
                                         &mut session,
                                         lease,
@@ -486,7 +577,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                         prepared,
                                     )
                                     .await?;
-                                    flow_turn_active = true;
+                                    flow_turn_active = interaction_review.is_none();
+                                    provider_turn_active = flow_turn_active;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -511,7 +603,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                 );
                                 gate_fingerprint = Some(task_gate_fingerprint(&session)?);
                                 store.update_task_session_for_lease(&session, lease).await?;
-                                start_resumed_task_phase(
+                                interaction_review = start_resumed_task_phase(
                                     &store,
                                     &mut session,
                                     lease,
@@ -520,7 +612,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     wave.name(),
                                 )
                                 .await?;
-                                flow_turn_active = true;
+                                flow_turn_active = interaction_review.is_none();
+                                provider_turn_active = flow_turn_active;
                                 last_text.clear();
                                 continue 'runner;
                             }
@@ -612,7 +705,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     &flow,
                                 )
                                 .await?;
-                                start_task_flow_turn(
+                                interaction_review = start_prepared_task_step(
                                     &store,
                                     &mut session,
                                     lease,
@@ -621,7 +714,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
                                     prepared,
                                 )
                                 .await?;
-                                flow_turn_active = true;
+                                flow_turn_active = interaction_review.is_none();
+                                provider_turn_active = flow_turn_active;
                                 continue 'runner;
                             }
                         }
@@ -656,7 +750,7 @@ async fn prepare_task_flow_step(
     lease: &ChildWriteLease,
     wave_name: &str,
     flow: &Playhead,
-) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
+) -> Result<PreparedTaskStep> {
     let latest = store
         .get_task_session(&session.id)
         .await?
@@ -704,7 +798,92 @@ async fn prepare_task_flow_step(
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
-    Ok(prepared)
+    let skill = crate::engine::load_skill(&step.step, Path::new(&session.worktree))?;
+    let review = if skill.interactive.unwrap_or(false)
+        && session.phase_plan().interaction_policy == InteractionPolicy::Defer
+    {
+        let id = InteractionReviewId::new();
+        let request = InteractionReview {
+            id: id.clone(),
+            wave_id: session.wave_id.clone(),
+            project_session_id: session.project_session_id.clone(),
+            task_session_id: session.id.clone(),
+            phase: session.lifecycle_phase,
+            phase_epoch: session.phase_epoch,
+            flow: session.phase_plan().flow.clone(),
+            step: step.step.clone(),
+            step_index: step.index,
+            phase_iteration: step.iteration,
+            policy: InteractionPolicy::Defer,
+            reviewer: InteractionReviewer::Project(session.project_session_id.clone()),
+            status: InteractionReviewStatus::Requested,
+            reason: session
+                .gate_proposal
+                .as_ref()
+                .map(|proposal| proposal.reason.clone())
+                .unwrap_or_else(|| session.status_reason.clone()),
+            prompt: interaction_review_prompt(
+                &id,
+                &step.step,
+                skill
+                    .content
+                    .as_deref()
+                    .unwrap_or("Follow the named skill."),
+            ),
+            evidence: InteractionReviewEvidence {
+                worktree: session.worktree.clone(),
+                branch: pr.branch.clone(),
+                base_commit: pr.base_commit.clone(),
+                head_commit: crate::engine::git::rev_parse(&session.worktree, "HEAD")?,
+                worktree_fingerprint: task_state_fingerprint(session)?,
+                pr: pr.github().map(|github| InteractionReviewPr {
+                    number: github.number,
+                    url: github.url.clone(),
+                }),
+            },
+            requested_by_generation: lease.generation,
+            reviewer_generation: None,
+            disposition: None,
+            outcome: None,
+            requested_at: time::OffsetDateTime::now_utc(),
+            completed_at: None,
+        };
+        let review = store
+            .open_interaction_review(session, &request, lease)
+            .await?
+            .0;
+        session.status_reason = format!(
+            "Task {} cycle {}, interactive step {} is {} in Project review {}",
+            session.lifecycle_phase.as_str(),
+            session.lifecycle_cycle(),
+            step.step,
+            review.status.as_str(),
+            review.id
+        );
+        store.update_task_session_for_lease(session, lease).await?;
+        Some(review)
+    } else {
+        None
+    };
+    Ok(PreparedTaskStep {
+        turn: prepared,
+        review,
+    })
+}
+
+fn interaction_review_prompt(
+    review_id: &InteractionReviewId,
+    skill: &str,
+    instructions: &str,
+) -> String {
+    format!(
+        "Conduct the interactive `{skill}` exercise as the parent reviewer for this Task. \
+Do not implement the child work yourself. Inspect the supplied evidence and apply the skill \
+instructions from the reviewer role. Ask the Task a FIFO question with \
+`lf project review message {review_id} \"<question>\"`. Finish with \
+`lf project review complete {review_id} --disposition approved|changes-requested \
+--outcome \"<findings and evidence>\"`.\n\n{instructions}"
+    )
 }
 
 fn open_task_flow_body(flow: &mut Playhead, session: &TaskSession) -> Result<()> {
@@ -738,6 +917,51 @@ async fn start_task_flow_turn(
     Ok(())
 }
 
+async fn open_interaction_review_body(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: &ChildWriteLease,
+    flow: &mut Playhead,
+    review: &InteractionReview,
+) -> Result<()> {
+    if review.task_session_id != session.id
+        || review.phase_epoch != session.phase_epoch
+        || review.step_index != session.phase_cursor
+        || review.phase_iteration != session.phase_iteration
+    {
+        anyhow::bail!(
+            "interaction review {} is stale for this Task step",
+            review.id
+        );
+    }
+    open_task_flow_body(flow, session)?;
+    store
+        .mark_child_directive_applied_for_lease(
+            &ChildRef::Task(session.id.clone()),
+            lease,
+            session.current_directive_version,
+        )
+        .await?;
+    Ok(())
+}
+
+async fn start_prepared_task_step(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    harness: &mut dyn Harness,
+    flow: &mut Playhead,
+    mut prepared: PreparedTaskStep,
+) -> Result<Option<InteractionReviewId>> {
+    if let Some(review) = prepared.review.take() {
+        open_interaction_review_body(store, session, lease, flow, &review).await?;
+        Ok(Some(review.id))
+    } else {
+        start_task_flow_turn(store, session, lease, harness, flow, prepared.turn).await?;
+        Ok(None)
+    }
+}
+
 async fn start_resumed_task_phase(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -745,10 +969,10 @@ async fn start_resumed_task_phase(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     wave_name: &str,
-) -> Result<()> {
+) -> Result<Option<InteractionReviewId>> {
     *flow = resume_task_phase(session)?;
     let prepared = prepare_task_flow_step(store, session, lease, wave_name, flow).await?;
-    start_task_flow_turn(store, session, lease, harness, flow, prepared).await
+    start_prepared_task_step(store, session, lease, harness, flow, prepared).await
 }
 
 fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
@@ -766,6 +990,26 @@ fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool>
     Ok(events
         .iter()
         .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
+}
+
+async fn completed_interaction_review(
+    store: &SharedStore,
+    review_id: &InteractionReviewId,
+) -> Result<Option<(InteractionReviewDisposition, String)>> {
+    let review = store
+        .get_interaction_review(review_id)
+        .await?
+        .ok_or_else(|| anyhow!("interaction review {review_id} disappeared"))?;
+    if review.status != InteractionReviewStatus::Completed {
+        return Ok(None);
+    }
+    let disposition = review
+        .disposition
+        .ok_or_else(|| anyhow!("completed interaction review {review_id} has no disposition"))?;
+    let outcome = review
+        .outcome
+        .ok_or_else(|| anyhow!("completed interaction review {review_id} has no outcome"))?;
+    Ok(Some((disposition, outcome)))
 }
 
 fn record_task_flow_position(session: &mut TaskSession, flow: &Playhead) -> Result<()> {
@@ -823,6 +1067,33 @@ async fn pending_input_is_current(
     input: &PendingInput,
 ) -> Result<bool> {
     input_is_current(store, ChildTarget::Task(&session.id, lease), input).await
+}
+
+async fn apply_next_pending(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: &ChildWriteLease,
+    harness: &mut dyn Harness,
+    pending: &mut VecDeque<PendingInput>,
+) -> Result<bool> {
+    while let Some(input) = pending.pop_front() {
+        if !pending_input_is_current(store, session, lease, &input).await? {
+            continue;
+        }
+        let command = input.command_id.map(|id| (id, input.effect));
+        apply_input(
+            store,
+            session,
+            lease,
+            harness,
+            &input.text,
+            command,
+            input.decision,
+        )
+        .await?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 async fn handle_attachment(
@@ -1256,7 +1527,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        absorb_commands, apply_input, handle_attachment, progress_summary, task_seed, CommandStop,
+        absorb_commands, apply_input, apply_next_pending, handle_attachment,
+        interaction_review_prompt, prepare_task_flow_step, progress_summary, resume_task_phase,
+        task_seed, CommandStop,
     };
     use crate::child_session::{
         ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
@@ -1266,6 +1539,7 @@ mod tests {
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::id::WaveId;
+    use crate::interaction_review::InteractionReviewId;
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
@@ -1273,8 +1547,8 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        PmWritebackState, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId,
-        TaskSessionStatus,
+        PmWritebackState, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
+        TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
 
@@ -1451,6 +1725,115 @@ mod tests {
         let summary = progress_summary(&"x".repeat(2_500));
         assert_eq!(summary.chars().count(), 2_000);
         assert!(summary.ends_with('…'));
+    }
+
+    #[test]
+    fn deferred_review_prompt_assigns_the_skill_and_two_way_protocol() {
+        let review_id = InteractionReviewId::new();
+        let prompt = interaction_review_prompt(&review_id, "demo", "Prove each Done When.");
+
+        assert!(prompt.contains("interactive `demo` exercise"));
+        assert!(prompt.contains(&format!("lf project review message {review_id}")));
+        assert!(prompt.contains(&format!("lf project review complete {review_id}")));
+        assert!(prompt.contains("Prove each Done When."));
+    }
+
+    #[tokio::test]
+    async fn headless_interactive_step_opens_parent_review_with_current_evidence() {
+        let repo = tempfile::tempdir().unwrap();
+        for args in [
+            ["init", "-b", "main"].as_slice(),
+            ["config", "user.email", "loopflow@example.com"].as_slice(),
+            ["config", "user.name", "Loopflow Test"].as_slice(),
+        ] {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(repo.path().join("README.md"), "review evidence\n").unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .args(["commit", "-m", "evidence"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+
+        let (store, mut session, lease) = conformance_session("codex").await;
+        let command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "Prepare the Task for review".to_string(),
+            },
+        );
+        let directive = ChildDirective::replacement(
+            ChildRef::Task(session.id.clone()),
+            1,
+            "Prepare the Task for review".to_string(),
+            command.source.clone(),
+            command.id.clone(),
+        );
+        store
+            .create_child_command_with_directive(&command, &directive)
+            .await
+            .unwrap();
+        session.current_directive_version = 1;
+        session.worktree = repo.path().to_path_buf();
+        session.lifecycle = TaskLifecyclePlan::headless("task");
+        session.lifecycle_phase = TaskLifecyclePhase::Gate;
+        session.phase_epoch = 3;
+        session.gate_cycle = 1;
+        session.gate_proposal = Some(TaskGateProposal {
+            status: TaskSessionStatus::Waiting,
+            reason: "prove the delivered behavior".to_string(),
+        });
+        store
+            .update_task_session_for_lease(&session, &lease)
+            .await
+            .unwrap();
+        let flow = resume_task_phase(&session).unwrap();
+
+        let prepared = prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow)
+            .await
+            .unwrap();
+        let review = prepared.review.expect("demo is deferred to the Project");
+
+        assert_eq!(review.phase, TaskLifecyclePhase::Gate);
+        assert_eq!(review.phase_epoch, 3);
+        assert_eq!(review.step, "demo");
+        assert_eq!(
+            review.reviewer,
+            crate::interaction_review::InteractionReviewer::Project(
+                session.project_session_id.clone()
+            )
+        );
+        assert_eq!(review.evidence.worktree, repo.path());
+        assert_eq!(
+            review.evidence.head_commit,
+            crate::engine::git::rev_parse(repo.path(), "HEAD").unwrap()
+        );
+        assert!(review.prompt.contains("lf project review message"));
+        assert!(review.prompt.contains("lf project review complete"));
+        assert!(session.status_reason.contains(review.id.as_str()));
+        assert!(session.status_reason.contains("Project review"));
+        assert_eq!(
+            store
+                .interaction_review_at(&session.id, 3, 0, 0)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            review.id
+        );
     }
 
     #[tokio::test]
@@ -1655,18 +2038,11 @@ mod tests {
             assert_eq!(harness.interrupts, 0, "{provider}");
             assert!(harness.sent.is_empty(), "{provider}");
             for expected in ["first", "second"] {
-                let input = pending.pop_front().expect("queued follow-up");
-                apply_input(
-                    &store,
-                    &session,
-                    &lease,
-                    &mut harness,
-                    &input.text,
-                    input.command_id.map(|id| (id, input.effect)),
-                    input.decision,
-                )
-                .await
-                .unwrap();
+                assert!(
+                    apply_next_pending(&store, &session, &lease, &mut harness, &mut pending,)
+                        .await
+                        .unwrap()
+                );
                 assert_eq!(harness.sent.last().map(String::as_str), Some(expected));
             }
             assert_eq!(

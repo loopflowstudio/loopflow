@@ -118,7 +118,7 @@ struct ReferenceTextView: NSViewRepresentable {
 
     // MARK: - Reference URL scheme
 
-    static let scheme = "x-loopflow-ref"
+    nonisolated static let scheme = "x-loopflow-ref"
 
     nonisolated static func referenceURL(kind: ChatReferenceKind, identifier: String) -> URL? {
         let encoded = identifier.addingPercentEncoding(

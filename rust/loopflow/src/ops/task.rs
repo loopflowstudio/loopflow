@@ -33,7 +33,9 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
 };
-use crate::store::{open_existing_store, SharedStore, StoreError};
+use crate::store::{
+    open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, StoreError,
+};
 use crate::task::{
     AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
     GithubPr, Observation, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
@@ -258,16 +260,13 @@ pub struct StackedRebase {
 
 /// Resolve a Task's current cross-Task stack from durable ids, consulting
 /// GitHub because an out-of-band parent merge can precede registry reconcile.
+/// A worktree that is not a Task worktree yields `None`; a Task worktree whose
+/// registry is missing/inaccessible/incompatible is refused with an actionable
+/// authority error, so a stacked rebase never silently degrades to generic.
 pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
-    let key = worktree.display().to_string();
     block_on_task(async move {
-        let Some(store) = open_existing_store().await.map(Arc::new) else {
-            return Ok(None);
-        };
-        let Some(session) = store
-            .get_task_session_by_worktree(&key)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
+        let TaskAuthority::Authority { store, session, .. } =
+            resolve_task_authority(worktree).await?
         else {
             return Ok(None);
         };
@@ -332,6 +331,9 @@ pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
 
 /// Persist the exact base reached by a successful deterministic rebase. Clear
 /// the parent link only when its work is now present on the default branch.
+/// Refuses with an actionable authority error if the registry is not usable, so
+/// a post-rebase base is never silently dropped — the rebase already pushed, so
+/// the operator must know the durable record did not advance with it.
 pub fn record_stack_rebase(
     stacked: &StackedRebase,
     new_base: &str,
@@ -340,9 +342,11 @@ pub fn record_stack_rebase(
     let pr_id = stacked.child.id.clone();
     let new_base = new_base.to_string();
     block_on_task(async move {
-        let Some(store) = open_existing_store().await.map(Arc::new) else {
-            return Ok(());
-        };
+        let store = Arc::new(
+            open_registry_for_authority()
+                .await
+                .map_err(registry_authority_error)?,
+        );
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // collapse only repoints the mutable row to the post-merge truth.
@@ -1069,6 +1073,79 @@ async fn task_for_worktree(
     Ok(found.map(|session| (session, None)))
 }
 
+/// Proven authority to run a Task-owned PR operation, or an explicit decision
+/// that this worktree is not a Task worktree.
+///
+/// The PR publication, stacking, submit, and land entry points share this one
+/// resolver so they cannot disagree about what counts as authority. A missing
+/// or incompatible registry never collapses to [`TaskAuthority::NotATaskWorktree`]
+/// silently: only a registry file that provably does not exist (no tasks have
+/// ever been registered on this machine) and no ambient Task id together prove
+/// "not a Task," which preserves ordinary non-Task PR flows. Everything else
+/// that cannot be opened is a refusal with an actionable authority error, so a
+/// Task entry point never degrades to generic PR behavior.
+#[derive(Debug)]
+enum TaskAuthority {
+    /// This worktree is not a Task worktree. Task-specific bookkeeping is an
+    /// explicit no-op; the ordinary PR flow continues unchanged.
+    NotATaskWorktree,
+    /// Proven authority: the registry is healthy and a Task Session owns this
+    /// worktree. `lease` is present only when an ambient Task body proved it.
+    /// Boxed so the `NotATaskWorktree` no-op variant stays small.
+    Authority {
+        store: SharedStore,
+        session: Box<TaskSession>,
+        lease: Option<ChildWriteLease>,
+    },
+}
+
+/// Turn a [`RegistryUnavailable`] into an actionable authority error. The
+/// message always names the recovery action so the operator can move.
+fn registry_authority_error(err: RegistryUnavailable) -> OpsError {
+    task_error(match err {
+        RegistryUnavailable::MissingFile { path } => format!(
+            "Task PR authority refused: the shared Loopflow registry {} is missing. \
+             Start the owning Wave (it creates the registry) or run `lf doctor`.",
+            path.display()
+        ),
+        RegistryUnavailable::Unresolved { error } => format!(
+            "Task PR authority refused: the shared Loopflow registry path is not usable: {error}. \
+             Fix LF_DB_PATH/LF_HOME or run `lf doctor`."
+        ),
+        RegistryUnavailable::Incompatible { path, error } => format!(
+            "Task PR authority refused: the shared Loopflow registry {} is present but \
+             inaccessible or schema-incompatible: {error}. Run `lf doctor`.",
+            path.display()
+        ),
+    })
+}
+
+/// Resolve Task authority for a PR entry point at `repo`.
+///
+/// - Registry opens and a session claims this worktree → [`TaskAuthority::Authority`].
+/// - Registry opens and no session claims it → [`TaskAuthority::NotATaskWorktree`].
+/// - Registry file missing and no ambient Task id → [`TaskAuthority::NotATaskWorktree`]
+///   (no registry means no tasks exist, so this is provably an ordinary PR).
+/// - Registry missing with an ambient Task id, or present but unopenable → refuse.
+async fn resolve_task_authority(repo: &Path) -> OpsResult<TaskAuthority> {
+    let ambient = std::env::var_os("LF_TASK_SESSION_ID").is_some();
+    let store = match open_registry_for_authority().await {
+        Ok(store) => Arc::new(store),
+        Err(RegistryUnavailable::MissingFile { .. }) if !ambient => {
+            return Ok(TaskAuthority::NotATaskWorktree);
+        }
+        Err(err) => return Err(registry_authority_error(err)),
+    };
+    match task_for_worktree(&store, repo).await? {
+        Some((session, lease)) => Ok(TaskAuthority::Authority {
+            store,
+            session: Box::new(session),
+            lease,
+        }),
+        None => Ok(TaskAuthority::NotATaskWorktree),
+    }
+}
+
 pub(crate) fn request_task_pr_publication(
     repo: &Path,
     after_merge: AfterMerge,
@@ -1079,10 +1156,12 @@ pub(crate) fn request_task_pr_publication(
         return Err(task_error("--complete and --next cannot be used together"));
     }
     block_on_task(async move {
-        let Some(store) = open_existing_store().await.map(Arc::new) else {
-            return Ok(false);
-        };
-        let Some((session, lease)) = task_for_worktree(&store, repo).await? else {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(repo).await?
+        else {
             return Ok(false);
         };
         let mut pr = store
@@ -1174,8 +1253,11 @@ fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()>
 }
 
 /// Prove the active Task PR's range contains only Task-authored work before any
-/// GitHub side effect. A worktree with no Task Session is a no-op — plain,
-/// non-Task PRs are unaffected.
+/// GitHub side effect. A worktree that is provably not a Task worktree is an
+/// explicit no-op — plain, non-Task PRs are unaffected. A Task worktree whose
+/// registry is missing, inaccessible, or schema-incompatible is refused with an
+/// actionable authority error before any push, so it never degrades to generic
+/// PR behavior.
 ///
 /// Let `B` = recorded `base_commit`, `O` = `origin/<default>` tip (or local
 /// `<default>` when the repo has no remote), `H` = `HEAD`, and
@@ -1198,10 +1280,12 @@ fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()>
 pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
-        let Some(store) = open_existing_store().await.map(Arc::new) else {
-            return Ok(());
-        };
-        let Some((session, lease)) = task_for_worktree(&store, &repo).await? else {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
             return Ok(());
         };
         verify_task_pr_range_with_authority(&store, &session, lease.as_ref(), &repo).await
@@ -1314,10 +1398,12 @@ pub(crate) fn attach_task_github_pr(
     github_pr: Option<&crate::ops::pr::PrInfo>,
 ) -> OpsResult<bool> {
     block_on_task(async move {
-        let Some(store) = open_existing_store().await.map(Arc::new) else {
-            return Ok(false);
-        };
-        let Some((session, lease)) = task_for_worktree(&store, repo).await? else {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(repo).await?
+        else {
             return Ok(false);
         };
         let mut pr = store
@@ -1415,12 +1501,15 @@ pub(crate) fn abandon_task_pr(
     progress: &impl crate::ops::progress::Progress,
 ) -> OpsResult<bool> {
     block_on_task(async move {
-        let Some(store) = open_existing_store().await.map(Arc::new) else {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(repo).await?
+        else {
             return Ok(false);
         };
-        let Some((mut session, lease)) = task_for_worktree(&store, repo).await? else {
-            return Ok(false);
-        };
+        let mut session = session;
         let mut pr = store
             .active_task_pr(&session.id)
             .await

@@ -20,11 +20,18 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SECONDS_TO_CAPTURE=15
 TARGET_REPO="$REPO"
+MOCK=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) TARGET_REPO="$2"; shift 2 ;;
     --seconds) SECONDS_TO_CAPTURE="$2"; shift 2 ;;
+    # --mock launches the `mock-waves` UI-test mode: a fixture-seeded populated
+    # Wave surface, auto-selected into its full detail hierarchy, with NO
+    # registry. This drives the WaveDetailPane selection + Chat-render path (the
+    # @StateObject->@ObservedObject fix site) at cold launch on a machine whose
+    # `lf` can't serve W2-123 lens data — no interaction needed.
+    --mock) MOCK=1; shift ;;
     *) echo "unknown arg: $1"; exit 2 ;;
   esac
 done
@@ -40,11 +47,21 @@ LOG="$(mktemp -t lf_attributegraph.XXXXXX.log)"
 LOG_PID=$!
 sleep 1.5
 
-"$BIN" --repo "$TARGET_REPO" >/dev/null 2>&1 &
+if [ "$MOCK" -eq 1 ]; then
+  "$BIN" -ui-test-mode mock-waves >/dev/null 2>&1 &
+else
+  "$BIN" --repo "$TARGET_REPO" >/dev/null 2>&1 &
+fi
 APP_PID=$!
 
-echo "App launched (pid $APP_PID). Exercise the matrix now:"
-echo "  cold launch · repo switch · Wave select · refresh · Chat select · open a sheet/dialog"
+if [ "$MOCK" -eq 1 ]; then
+  echo "App launched (pid $APP_PID) in mock-waves mode — a populated Wave is"
+  echo "auto-selected, so cold launch + Wave selection + Chat render are captured"
+  echo "with no interaction. Open a sheet during the window to also cover that."
+else
+  echo "App launched (pid $APP_PID). Exercise the matrix now:"
+  echo "  cold launch · repo switch · Wave select · refresh · Chat select · open a sheet/dialog"
+fi
 for ((s=SECONDS_TO_CAPTURE; s>0; s--)); do printf "\r  capturing… %2ds " "$s"; sleep 1; done
 printf "\n"
 

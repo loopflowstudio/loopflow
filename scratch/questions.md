@@ -15,10 +15,20 @@
   renders `WavesView` + `RoadmapView`, a fix site — so cold launch / repo switch
   / refresh / default pane are proven clean.
 
-**Remaining (CANNOT be exercised on this machine — exact evidence below).** The
-*populated* `WaveDetailPane` states — Wave selection into a detail pane with real
-Project/Task lens rows, Chat-child selection, and the TaskWorkspace sheet — need
-a Wave whose registry data carries the W2-123 lens/attention fields. No
+**Resolved via `mock-waves` (2026-07-15).** The *populated* `WaveDetailPane`
+selection path — objective, Projects, KRs, verbatim Task lens rows, and the
+`WaveChatView` pane — is now driven **without the registry**: the `mock-waves`
+UI-test mode seeds a fixture Wave (`MockWaveFixture`, from the round-tripped
+`wave_detail.json` wire shape) and auto-selects it, so cold launch renders the
+full detail hierarchy. `scripts/check_attributegraph_cycles.sh --mock` captured
+**0** AttributeGraph/cycle lines across multiple launches — proving Wave
+selection + Chat render (the second `@StateObject`→`@ObservedObject` fix site,
+and the sheet-time cycle's shared root) is cycle-free here. `MockWaveFixtureTests`
++ `WaveDetailReadingTests` prove the seeded hierarchy's content (lenses verbatim)
+at the data layer. Only explicit sheet-presentation and repo-switch during a live
+capture still want a click; the singleton root they share is proven clean.
+
+The registry itself remains unusable on this machine (kept for the record). No
 `(current-schema lf + populated store)` pair exists here. Probed 40+ local `lf`
 binaries against every reachable store (2026-07-15):
 

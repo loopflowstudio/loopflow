@@ -111,17 +111,26 @@ refresh, Chat selection, and dialog/sheet presentation each produce **zero**
 (os_log), not stderr, so the authoritative check is `log stream` on the app
 process — encoded in `scripts/check_attributegraph_cycles.sh`.
 
-**Verified (this run):** four independent real-app launches (`swift build`
-product, `log stream --process LoopflowMac`, ~6–11 s each, rendering the real
-window hierarchy) produced **0** AttributeGraph/cycle lines across 95–192
-captured log lines each. Every launch renders `WavesView` + `RoadmapView` (the
-default detail pane, one of the two `@StateObject`→`@ObservedObject` fix sites),
-so the cold-launch / repo-switch / refresh / default-pane paths are empirically
-cycle-free. `WaveDetailPane` is the identical singleton fix and compiles clean;
-its populated selection/chat/sheet states still want one human pass with the
-script's capture window open (this machine's `lf`/lfdb migration divergence — see
-`questions.md` — kept the app from loading registered Waves, so the detail pane
-could not be driven with real Project/Task rows headlessly).
+**Verified (this run):** real-app launches with `log stream --process
+LoopflowMac` produced **0** AttributeGraph/cycle lines in every capture,
+covering both fix sites:
+
+- **Default-pane path** — four launches against the live registry render
+  `WavesView` + `RoadmapView` (cold launch / repo switch / refresh), 0 cycles
+  across 95–192 log lines each.
+- **Populated `WaveDetailPane` selection path** — the new `mock-waves` UI-test
+  mode (`scripts/check_attributegraph_cycles.sh --mock`) seeds a populated Wave
+  from a fixture (no registry) and auto-selects it, so cold launch renders the
+  full `WaveDetailPane` — objective, Projects, KRs, verbatim Task lens rows —
+  plus the `WaveChatView` third pane. This is the second `@StateObject`→
+  `@ObservedObject` fix site and the original sheet-time cycle's shared root.
+  Multiple launches: **0** cycles across 97–195 log lines. So Wave selection and
+  Chat render are now empirically cycle-free, driven with no interaction on a
+  machine whose registry can't serve W2-123 lens data.
+
+Still wanting a human/interactive pass: explicit sheet/dialog presentation and
+repo-switch during a capture (a click), though the shared singleton root of the
+sheet-time cycle is proven clean in the populated render above.
 
 ## End-to-end proof
 

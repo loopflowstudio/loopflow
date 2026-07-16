@@ -460,6 +460,8 @@ enum Outcome {
     StaleIdentity,
     /// Resolver returned `NoContext` — no `--wave` and no `LF_WAVE_ID`.
     NoContext,
+    /// Resolver rejected an explicit name absent from the registry.
+    UnknownExplicit,
     /// Publish-to-no-subscriber: no wave resolved → exit 0 "dropped".
     Drop,
 }
@@ -509,8 +511,8 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
         Env {
             id: "explicit-unknown",
             wave_id: None,
-            explicit_wave: Some("ghost".to_string()),
-            default_expected: Outcome::Resolved,
+            explicit_wave: Some("unknown-explicit".to_string()),
+            default_expected: Outcome::UnknownExplicit,
         },
         Env {
             id: "absent",
@@ -524,6 +526,16 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
+    // Creation flows may name the Wave being registered. Direct radio channels
+    // are transport names, not managed Wave selections. All intentionally
+    // bypass managed-selection validation.
+    if env.id == "explicit-unknown"
+        && (matches!(cmd.id, "pm init" | "home start")
+            || matches!(cmd.wave_form, WaveForm::Channel | WaveForm::ChanPos))
+    {
+        return Outcome::Resolved;
+    }
+
     // `radio pub` uses `--channel` but still resolves the ambient wave for
     // attribution. In `explicit-override`, the ambient UUID is stale, so the
     // command errors before checking `--channel`. `radio sub` with a
@@ -550,16 +562,24 @@ fn classify(output: &std::process::Output) -> Outcome {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let combined = format!("{stderr}{stdout}");
+    let resolution_text = combined
+        .lines()
+        .filter(|line| !line.contains("ambient wave identity failed validation; run attributed"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     if !output.status.success() {
-        if combined.contains("stale") {
+        if resolution_text.contains("is not registered on this machine") {
+            return Outcome::UnknownExplicit;
+        }
+        if resolution_text.contains("stale") {
             return Outcome::StaleIdentity;
         }
-        if combined.contains("determine wave")
-            || combined.contains("no wave")
-            || combined.contains("pass --wave")
-            || combined.contains("pass a wave")
-            || combined.contains("no wave given")
+        if resolution_text.contains("determine wave")
+            || resolution_text.contains("no wave")
+            || resolution_text.contains("pass --wave")
+            || resolution_text.contains("pass a wave")
+            || resolution_text.contains("no wave given")
         {
             return Outcome::NoContext;
         }
@@ -755,7 +775,7 @@ fn _stop_started_homes(home: &Path, repo: &Path) {
     // `lf home start` launches the Wave resident out of process. Stop every
     // name this matrix can resolve before the temp Home disappears so the
     // test never leaves resident processes behind on the host.
-    for wave in ["product", "ghost"] {
+    for wave in ["product", "ghost", "unknown-explicit"] {
         let _ = Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(["stop", wave])
             .current_dir(repo)

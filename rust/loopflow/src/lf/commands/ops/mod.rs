@@ -522,7 +522,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 // Linear, not a registry row). Normalize-only for explicit;
                 // ambient still uses the shared validating resolver.
                 let name = if let Some(raw) = explicit {
-                    crate::ops::resolve_wave_name(Some(raw))
+                    crate::ops::normalize_wave_name(raw)
                         .ok_or_else(|| anyhow!("--wave requires a non-empty wave name"))?
                 } else {
                     ambient_wave(None)?

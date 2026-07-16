@@ -16,7 +16,9 @@ use std::path::Path;
 use anyhow::anyhow;
 
 use crate::engine::wave_config::{default_local_home, read_wave_home};
-use crate::engine::wave_context::{resolve_managed_wave_name_sync, resolve_run_wave_name};
+use crate::engine::wave_context::{
+    resolve_managed_wave_name_sync, resolve_run_wave_name, WaveResolveError,
+};
 use crate::engine::wave_home::{
     HomeActionDto, HomeRuntimeDto, HomeState, WaveHome, HOME_ROUTED_ENV, WAVE_HOME_ENV,
 };
@@ -37,9 +39,15 @@ pub fn run(cmd: &HomeCommand, repo: &Path) -> anyhow::Result<()> {
 /// row on first run). Ambient falls back to `LF_WAVE_ID`. Read-only consumers
 /// (`probe_cmd`) use the shared validating resolver instead.
 fn resolve_wave_name(wave: Option<&str>) -> anyhow::Result<String> {
-    wave.and_then(crate::ops::util::normalize_wave_name)
-        .or_else(resolve_run_wave_name)
-        .ok_or_else(|| anyhow!("no wave given and none in context; pass a wave name"))
+    if let Some(name) = wave.and_then(crate::ops::util::normalize_wave_name) {
+        return Ok(name);
+    }
+    resolve_managed_wave_name_sync(None).map_err(|error| match error {
+        WaveResolveError::NoContext => {
+            anyhow!("no wave given and none in context; pass a wave name")
+        }
+        other => other.into(),
+    })
 }
 
 fn probe_cmd(wave: Option<&str>, json: bool, repo: &Path) -> anyhow::Result<()> {

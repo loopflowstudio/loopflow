@@ -159,70 +159,24 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
 
     let now = chrono::Utc::now().timestamp();
-    let guard = now - RECONCILE_AGE_GUARD_HOURS * 3600;
-    let stamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let pruned_reason = format!("conversation artifact absent at reconcile {stamp}");
-    let finalized_reason = "capture interrupted; process ended without finalizing";
-
-    let terminal: [&str; 3] = ["complete", "partial", "prompt_only"];
-    let mut pruned: Vec<ReconcileEntry> = Vec::new();
-    let mut recent_missing: Vec<ReconcileEntry> = Vec::new();
-    let mut finalized: Vec<ReconcileEntry> = Vec::new();
-
-    for launch in &launches {
-        let process_ended = events.iter().any(|event| {
-            event.process_id == launch.process_id && event.node == "run" && event.event != "started"
-        });
-        let stale = launch.started_at < guard;
-        let file_present = conversation_artifact_present(&launch.conversation_path);
-
-        if !file_present {
-            // Artifact is gone. Terminal launches are always candidates; a
-            // `capturing` launch is a candidate only once its process is
-            // provably dead (or stale past the guard) — a live process may
-            // still be writing, and `begin` always creates the file, so an
-            // absent file on a live `capturing` launch is a transient race,
-            // not a tombstone target.
-            let dead = terminal.contains(&launch.capture_status.as_str())
-                || (launch.capture_status == "capturing" && (process_ended || stale));
-            if !dead {
-                continue;
-            }
-            // Age guard: a terminal launch is old when it ended before the
-            // guard; a `capturing` launch never set `ended_at`, so use the
-            // stale-start check instead. Without this line, `--apply` during an
-            // active capture regression would tombstone the evidence.
-            let old = launch.ended_at.is_some_and(|ended| ended < guard) || stale;
-            if old || all {
-                pruned.push(ReconcileEntry::from_launch(launch, &pruned_reason));
-            } else {
-                recent_missing.push(ReconcileEntry::from_launch(launch, &pruned_reason));
-            }
-            continue;
-        }
-
-        // File is present. Finalize an orphaned `capturing` launch whose
-        // process ended without calling `finish()` — making it terminal and
-        // honest rather than stuck.
-        if launch.capture_status == "capturing" && (process_ended || stale) {
-            finalized.push(ReconcileEntry::from_launch(launch, finalized_reason));
-        }
-    }
+    let plan = plan_reconcile(&launches, &events, now, all, &|path| {
+        crate::trace::resolve_artifact(path).is_ok_and(|path| path.is_file())
+    });
 
     if apply {
-        for entry in &pruned {
+        for entry in &plan.pruned {
             store.reconcile_launch_capture(&entry.id, "pruned", Some(&entry.reason), now)?;
         }
-        for entry in &finalized {
+        for entry in &plan.finalized {
             store.reconcile_launch_capture(&entry.id, "partial", Some(&entry.reason), now)?;
         }
     }
 
     let report = ReconcileReport {
         applied: apply,
-        pruned,
-        recent_missing,
-        finalized,
+        pruned: plan.pruned,
+        recent_missing: plan.recent_missing,
+        finalized: plan.finalized,
     };
 
     if json {
@@ -250,8 +204,77 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn conversation_artifact_present(conversation_path: &str) -> bool {
-    crate::trace::resolve_artifact(conversation_path).is_ok_and(|path| path.is_file())
+/// The reconcile decision for every launch, derived without touching the store
+/// or the clock: `now` is supplied and `artifact_present` resolves a
+/// conversation path to "is the file really there". Pure so the age guard and
+/// the dead-process rules can be tested directly — the classification is the
+/// part that must not be wrong, since `--apply` acts on it.
+fn plan_reconcile(
+    launches: &[crate::trace::AgentLaunchRow],
+    events: &[crate::store::RunEventRow],
+    now: i64,
+    all: bool,
+    artifact_present: &dyn Fn(&str) -> bool,
+) -> ReconcilePlan {
+    const TERMINAL: [&str; 3] = ["complete", "partial", "prompt_only"];
+    let guard = now - RECONCILE_AGE_GUARD_HOURS * 3600;
+    let stamp = chrono::DateTime::from_timestamp(now, 0)
+        .unwrap_or_default()
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    let pruned_reason = format!("conversation artifact absent at reconcile {stamp}");
+    let finalized_reason = "capture interrupted; process ended without finalizing";
+
+    let mut plan = ReconcilePlan::default();
+    for launch in launches {
+        let process_ended = events.iter().any(|event| {
+            event.process_id == launch.process_id && event.node == "run" && event.event != "started"
+        });
+        let stale = launch.started_at < guard;
+
+        if !artifact_present(&launch.conversation_path) {
+            // Artifact is gone. Terminal launches are always candidates; a
+            // `capturing` launch is a candidate only once its process is
+            // provably dead (or stale past the guard) — a live process may
+            // still be writing, and `begin` always creates the file, so an
+            // absent file on a live `capturing` launch is a transient race,
+            // not a tombstone target.
+            let dead = TERMINAL.contains(&launch.capture_status.as_str())
+                || (launch.capture_status == "capturing" && (process_ended || stale));
+            if !dead {
+                continue;
+            }
+            // Age guard: a terminal launch is old when it ended before the
+            // guard; a `capturing` launch never set `ended_at`, so fall back to
+            // the stale-start check. Without this line, `--apply` during an
+            // active capture regression would tombstone the evidence.
+            let old = launch.ended_at.is_some_and(|ended| ended < guard) || stale;
+            if old || all {
+                plan.pruned
+                    .push(ReconcileEntry::from_launch(launch, &pruned_reason));
+            } else {
+                plan.recent_missing
+                    .push(ReconcileEntry::from_launch(launch, &pruned_reason));
+            }
+            continue;
+        }
+
+        // File is present. Finalize an orphaned `capturing` launch whose
+        // process ended without calling `finish()` — making it terminal and
+        // honest rather than stuck.
+        if launch.capture_status == "capturing" && (process_ended || stale) {
+            plan.finalized
+                .push(ReconcileEntry::from_launch(launch, finalized_reason));
+        }
+    }
+    plan
+}
+
+#[derive(Debug, Default)]
+struct ReconcilePlan {
+    pruned: Vec<ReconcileEntry>,
+    recent_missing: Vec<ReconcileEntry>,
+    finalized: Vec<ReconcileEntry>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1244,10 +1267,182 @@ pub(crate) fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        boundary_spans, format_duration, format_tokens, own_spend, summarize_execs,
+        boundary_spans, format_duration, format_tokens, own_spend, plan_reconcile, summarize_execs,
         trace_id_for_address, trace_spans, SpanDto,
     };
     use crate::store::RunEventRow;
+    use crate::trace::AgentLaunchRow;
+
+    const NOW: i64 = 1_800_000_000;
+    const HOUR: i64 = 3_600;
+
+    /// A launch whose conversation artifact is named but whose presence the
+    /// test decides via the `artifact_present` closure.
+    fn launch(
+        id: &str,
+        capture_status: &str,
+        started_at: i64,
+        ended_at: Option<i64>,
+    ) -> AgentLaunchRow {
+        AgentLaunchRow {
+            id: id.to_string(),
+            run_id: format!("run-{id}"),
+            process_id: id.to_string(),
+            started_at,
+            ended_at,
+            repo: "/src/loopflow".to_string(),
+            worktree: "/src/loopflow".to_string(),
+            wave: None,
+            flow: None,
+            skill: None,
+            project: None,
+            task: None,
+            provider: "codex".to_string(),
+            model: None,
+            surface: "headless".to_string(),
+            capture_status: capture_status.to_string(),
+            incomplete_reason: None,
+            outcome: "completed".to_string(),
+            artifact_dir: format!("{id}/dir"),
+            conversation_path: format!("{id}/conversation.jsonl"),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 1,
+            conversation_bytes: 10,
+        }
+    }
+
+    fn absent(_: &str) -> bool {
+        false
+    }
+
+    fn present(_: &str) -> bool {
+        true
+    }
+
+    #[test]
+    fn a_long_gone_terminal_capture_is_tombstoned() {
+        let launches = vec![launch(
+            "old",
+            "complete",
+            NOW - 200 * HOUR,
+            Some(NOW - 100 * HOUR),
+        )];
+
+        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+
+        assert_eq!(plan.pruned.len(), 1, "{plan:?}");
+        assert_eq!(plan.pruned[0].id, "old");
+        assert!(
+            plan.pruned[0]
+                .reason
+                .contains("conversation artifact absent"),
+            "{}",
+            plan.pruned[0].reason
+        );
+        assert!(plan.recent_missing.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn a_recently_missing_capture_is_reported_not_swept() {
+        // The anti-masking line: a capture that vanished an hour ago is
+        // evidence of a live regression, not history to acknowledge.
+        let launches = vec![launch(
+            "fresh",
+            "complete",
+            NOW - 2 * HOUR,
+            Some(NOW - HOUR),
+        )];
+
+        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+
+        assert!(
+            plan.pruned.is_empty(),
+            "fresh loss must not tombstone: {plan:?}"
+        );
+        assert_eq!(plan.recent_missing.len(), 1, "{plan:?}");
+        assert_eq!(plan.recent_missing[0].id, "fresh");
+    }
+
+    #[test]
+    fn all_overrides_the_age_guard_for_recent_losses() {
+        let launches = vec![launch(
+            "fresh",
+            "complete",
+            NOW - 2 * HOUR,
+            Some(NOW - HOUR),
+        )];
+
+        let plan = plan_reconcile(&launches, &[], NOW, true, &absent);
+
+        assert_eq!(plan.pruned.len(), 1, "{plan:?}");
+        assert!(plan.recent_missing.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn an_orphaned_capturing_launch_with_its_file_is_finalized_partial() {
+        // Interrupted run: `begin` wrote the file, the process died before
+        // `finish`. The file is here, so this is finalization, not a tombstone.
+        let launches = vec![launch("stuck", "capturing", NOW - HOUR, None)];
+        let events = vec![row("stuck", 1, NOW - HOUR, "run", "completed")];
+
+        let plan = plan_reconcile(&launches, &events, NOW, false, &present);
+
+        assert_eq!(plan.finalized.len(), 1, "{plan:?}");
+        assert_eq!(plan.finalized[0].id, "stuck");
+        assert!(
+            plan.finalized[0].reason.contains("capture interrupted"),
+            "{}",
+            plan.finalized[0].reason
+        );
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn a_live_capturing_launch_is_left_alone() {
+        // Still running, no terminal run event, inside the guard: the file may
+        // be mid-write and the row is not ours to touch.
+        let launches = vec![launch("live", "capturing", NOW - HOUR, None)];
+
+        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+        assert!(plan.recent_missing.is_empty(), "{plan:?}");
+        assert!(plan.finalized.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn an_intact_terminal_capture_needs_no_reconciliation() {
+        let launches = vec![launch(
+            "good",
+            "complete",
+            NOW - 200 * HOUR,
+            Some(NOW - 100 * HOUR),
+        )];
+
+        let plan = plan_reconcile(&launches, &[], NOW, false, &present);
+
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+        assert!(plan.finalized.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn an_already_pruned_launch_is_not_reconciled_twice() {
+        // Idempotence: re-running reconcile must not re-tombstone a tombstone.
+        let launches = vec![launch(
+            "done",
+            "pruned",
+            NOW - 200 * HOUR,
+            Some(NOW - 100 * HOUR),
+        )];
+
+        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+        assert!(plan.recent_missing.is_empty(), "{plan:?}");
+        assert!(plan.finalized.is_empty(), "{plan:?}");
+    }
 
     fn row(run_id: &str, seq: i64, ts: i64, node: &str, event: &str) -> RunEventRow {
         RunEventRow {

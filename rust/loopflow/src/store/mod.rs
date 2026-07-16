@@ -2051,6 +2051,354 @@ mod tests {
         assert!(store.create_project_session(&parallel).await.is_err());
     }
 
+    // W2-243: route existing Task Sessions to the successor Project Session.
+    // The historical project_session_id is provenance; the live successor is the
+    // routing target. These three tests prove the five Done-when criteria.
+
+    #[tokio::test]
+    async fn resolve_task_project_route_targets_live_successor_and_fails_dead_chains() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        // A live Project Session routes to itself — no successor needed.
+        let predecessor = make_project_session(&wave);
+        store.create_project_session(&predecessor).await.unwrap();
+        let task = make_task_session(&wave, &predecessor);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let route = crate::ops::project::resolve_task_project_route(&store, &task)
+            .await
+            .unwrap();
+        assert!(!route.succeeded);
+        assert_eq!(route.historical, predecessor.id);
+        assert_eq!(route.current, predecessor.id);
+
+        // Abandon the predecessor and create a successor for the same Linear
+        // project. The Task still records the predecessor as provenance; routing
+        // follows the chain to the successor.
+        let mut abandoned = predecessor.clone();
+        abandoned.set_status(ProjectSessionStatus::Abandoned, "replaced append-only");
+        store.update_project_session(&abandoned).await.unwrap();
+        let mut successor = make_project_session(&wave);
+        successor.status_reason = format!("successor to {}", predecessor.id);
+        successor.created_at += time::Duration::SECOND;
+        successor.updated_at = successor.created_at;
+        store.create_project_session(&successor).await.unwrap();
+        let route = crate::ops::project::resolve_task_project_route(&store, &task)
+            .await
+            .unwrap();
+        assert!(route.succeeded);
+        assert_eq!(route.historical, predecessor.id);
+        assert_eq!(route.current, successor.id);
+        assert!(!route.current_status.is_terminal());
+
+        // Broken chain: the successor is terminal too, and no further successor
+        // exists. Routing fails actionably, naming the dead session and project.
+        let mut dead_successor = successor.clone();
+        dead_successor.set_status(ProjectSessionStatus::Abandoned, "no successor");
+        store.update_project_session(&dead_successor).await.unwrap();
+        let error = crate::ops::project::resolve_task_project_route(&store, &task)
+            .await
+            .expect_err("dead chain must fail actionably");
+        let message = error.to_string();
+        assert!(message.contains("no live successor"), "{message}");
+        assert!(message.contains(&predecessor.id.to_string()), "{message}");
+    }
+
+    #[tokio::test]
+    async fn successor_consumes_observations_addressed_to_predecessor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let predecessor = make_project_session(&wave);
+        store.create_project_session(&predecessor).await.unwrap();
+        let task = make_task_session(&wave, &predecessor);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        // Enqueue a project-observable event while the predecessor is live. The
+        // observation is addressed to the historical predecessor (provenance).
+        // DecisionRequested is project-observable but not root-wave-observable,
+        // so it enqueues exactly one Project observation without nudging the Wave.
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::DecisionRequested {
+                    decision_id: ChildDecisionId::new(),
+                    prompt: "pick a path".to_string(),
+                    options: vec!["a".to_string(), "b".to_string()],
+                },
+            )
+            .await
+            .unwrap();
+        let predecessor_queue = store
+            .pending_observations(&ObservationRecipient::Project {
+                session_id: predecessor.id.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(predecessor_queue.len(), 1);
+        assert_eq!(
+            predecessor_queue[0].recipient,
+            ObservationRecipient::Project {
+                session_id: predecessor.id.clone()
+            }
+        );
+
+        // Abandon the predecessor and create a successor for the same project.
+        let mut abandoned = predecessor.clone();
+        abandoned.set_status(ProjectSessionStatus::Abandoned, "replaced append-only");
+        store.update_project_session(&abandoned).await.unwrap();
+        let mut successor = make_project_session(&wave);
+        successor.status = ProjectSessionStatus::Created;
+        successor.status_reason = "successor".to_string();
+        successor.latest_process = None;
+        successor.created_at += time::Duration::SECOND;
+        successor.updated_at = successor.created_at;
+        store.create_project_session(&successor).await.unwrap();
+
+        // The chain query routes the predecessor-addressed observation to the
+        // successor without rewriting the outbox recipient.
+        let chain = store
+            .pending_project_observations_for_chain(predecessor.launch.project.id.as_str())
+            .await
+            .unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(
+            chain[0].recipient,
+            ObservationRecipient::Project {
+                session_id: predecessor.id.clone()
+            }
+        );
+
+        // The successor consumes the observation under its own write lease.
+        successor.begin_generation("successor-consume".to_string());
+        let successor_lease = store
+            .reserve_project_process(&successor, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut successor.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        successor.set_status(ProjectSessionStatus::Running, "consuming chain");
+        store
+            .activate_project_process(&successor, &successor_lease)
+            .await
+            .unwrap();
+        let inserted = store
+            .consume_task_observation_for_project_for_lease(
+                &successor.id,
+                &chain[0],
+                &successor_lease,
+            )
+            .await
+            .unwrap();
+        assert!(
+            inserted,
+            "successor must consume the predecessor's observation"
+        );
+
+        // The observation is delivered; the predecessor's own-id queue drains.
+        assert!(store
+            .pending_observations(&ObservationRecipient::Project {
+                session_id: predecessor.id.clone()
+            })
+            .await
+            .unwrap()
+            .is_empty());
+        // The successor recorded TaskObserved under its own id — only the
+        // successor wakes to the Task's event.
+        let events = store.project_events_after(&successor.id, 0).await.unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            ProjectEventKind::TaskObserved { ref task_session_id, .. }
+            if task_session_id == &task.id
+        )));
+    }
+
+    #[tokio::test]
+    async fn successor_completes_review_assigned_to_predecessor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        // Predecessor Project + a gate Task with a Defer review assigned to it.
+        let mut predecessor = make_project_session(&wave);
+        predecessor.status = ProjectSessionStatus::Created;
+        predecessor.status_reason = "reserved".to_string();
+        predecessor.latest_process = None;
+        store.create_project_session(&predecessor).await.unwrap();
+        predecessor.begin_generation("project-reviewer".to_string());
+        let predecessor_lease = store
+            .reserve_project_process(&predecessor, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut predecessor.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        predecessor.set_status(ProjectSessionStatus::Running, "reviewer active");
+        store
+            .activate_project_process(&predecessor, &predecessor_lease)
+            .await
+            .unwrap();
+
+        let mut task = make_task_session(&wave, &predecessor);
+        task.lifecycle = crate::task::TaskLifecyclePlan::headless("task");
+        task.lifecycle_phase = TaskLifecyclePhase::Gate;
+        task.phase_epoch = 3;
+        task.gate_cycle = 1;
+        task.gate_proposal = Some(TaskGateProposal {
+            status: TaskSessionStatus::Waiting,
+            reason: "PR ready".to_string(),
+        });
+        task.set_status(TaskSessionStatus::Waiting, "ready for gate review");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("task-review".to_string());
+        let task_lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut task.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        task.set_status(TaskSessionStatus::Running, "review requested");
+        store
+            .activate_task_process(&task, &task_lease)
+            .await
+            .unwrap();
+
+        let review = InteractionReview {
+            id: InteractionReviewId::new(),
+            wave_id: wave.id().clone(),
+            project_session_id: predecessor.id.clone(),
+            task_session_id: task.id.clone(),
+            phase: task.lifecycle_phase,
+            phase_epoch: task.phase_epoch,
+            flow: task.phase_plan().flow.clone(),
+            step: "demo".to_string(),
+            step_index: 0,
+            phase_iteration: task.phase_iteration,
+            policy: task.phase_plan().interaction_policy,
+            reviewer: InteractionReviewer::Project(predecessor.id.clone()),
+            status: InteractionReviewStatus::Requested,
+            reason: "prove the successor routing".to_string(),
+            prompt: "Demonstrate each Done When criterion.".to_string(),
+            evidence: InteractionReviewEvidence {
+                worktree: task.worktree.clone(),
+                branch: "jack/reviewed-task".to_string(),
+                base_commit: "base".to_string(),
+                head_commit: "head".to_string(),
+                worktree_fingerprint: "fingerprint".to_string(),
+                pr: None,
+            },
+            requested_by_generation: task_lease.generation,
+            reviewer_generation: None,
+            disposition: None,
+            outcome: None,
+            requested_at: OffsetDateTime::now_utc(),
+            completed_at: None,
+        };
+        let (opened, created) = store
+            .open_interaction_review(&task, &review, &task_lease)
+            .await
+            .unwrap();
+        assert!(created);
+
+        // Abandon the predecessor and stand up a successor for the same project.
+        let mut abandoned = predecessor.clone();
+        abandoned.set_status(ProjectSessionStatus::Abandoned, "replaced append-only");
+        store.update_project_session(&abandoned).await.unwrap();
+        let mut successor = make_project_session(&wave);
+        successor.status = ProjectSessionStatus::Created;
+        successor.status_reason = "successor".to_string();
+        successor.latest_process = None;
+        successor.created_at += time::Duration::SECOND;
+        successor.updated_at = successor.created_at;
+        store.create_project_session(&successor).await.unwrap();
+        successor.begin_generation("successor-reviewer".to_string());
+        let successor_lease = store
+            .reserve_project_process(&successor, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut successor.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        successor.set_status(ProjectSessionStatus::Running, "successor reviewer active");
+        store
+            .activate_project_process(&successor, &successor_lease)
+            .await
+            .unwrap();
+
+        // A Project outside the chain may not conduct the predecessor's review.
+        let mut other = make_project_session(&wave);
+        other.launch.project.id = LinearProjectId::new("project-other").unwrap();
+        other.status = ProjectSessionStatus::Created;
+        other.latest_process = None;
+        other.created_at += time::Duration::SECOND * 2;
+        other.updated_at = other.created_at;
+        store.create_project_session(&other).await.unwrap();
+        other.begin_generation("other-reviewer".to_string());
+        let other_lease = store
+            .reserve_project_process(&other, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut other.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        other.set_status(ProjectSessionStatus::Running, "outside the chain");
+        store
+            .activate_project_process(&other, &other_lease)
+            .await
+            .unwrap();
+        assert!(store
+            .complete_project_interaction_review(
+                &opened.id,
+                &other.id,
+                &other_lease,
+                InteractionReviewDisposition::Approved,
+                "outside the chain",
+            )
+            .await
+            .is_err());
+
+        // The successor conducts the review assigned to the predecessor.
+        let (completed, changed) = store
+            .complete_project_interaction_review(
+                &opened.id,
+                &successor.id,
+                &successor_lease,
+                InteractionReviewDisposition::Approved,
+                "successor approves the routed review",
+            )
+            .await
+            .expect("successor must complete the predecessor's review");
+        assert!(changed);
+        assert_eq!(completed.status, InteractionReviewStatus::Completed);
+    }
+
     #[tokio::test]
     async fn child_directives_reserve_replace_and_incorporate_atomically() {
         let dir = tempfile::tempdir().unwrap();

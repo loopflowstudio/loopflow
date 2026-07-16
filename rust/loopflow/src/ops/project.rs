@@ -23,6 +23,7 @@ use crate::project_session::{
 };
 use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
 use crate::store::{open_existing_store, SharedStore, Store};
+use crate::task::TaskSession;
 use crate::wave::Wave;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -654,13 +655,25 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             .map_err(|error| project_error(error.to_string()))?
             .into_iter()
             .last();
-        let pending_observations = store
-            .pending_observations(&crate::child_session::ObservationRecipient::Project {
-                session_id: session.id.clone(),
-            })
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .len() as u32;
+        let pending_observations = if session.status.is_terminal() {
+            // A terminal predecessor owns no live observations; its own-id
+            // count drains to 0 as the successor consumes the chain.
+            store
+                .pending_observations(&crate::child_session::ObservationRecipient::Project {
+                    session_id: session.id.clone(),
+                })
+                .await
+                .map_err(|error| project_error(error.to_string()))?
+                .len() as u32
+        } else {
+            // The live successor counts the whole project chain: observations
+            // addressed to a terminal predecessor are routed to it.
+            store
+                .pending_project_observations_for_chain(session.launch.project.id.as_str())
+                .await
+                .map_err(|error| project_error(error.to_string()))?
+                .len() as u32
+        };
         let mut history = store
             .list_project_sessions(Some(wave.id()))
             .await
@@ -964,9 +977,14 @@ pub fn project_review_message(
         let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
             project_error("review messages must run inside the assigned Project Session")
         })?;
-        if ambient != review.project_session_id.as_str() {
+        let ambient_id = ProjectSessionId::parse(&ambient).map_err(|error| {
+            project_error(format!("invalid ambient Project Session id: {error}"))
+        })?;
+        if !acting_session_may_conduct_review(&store, &ambient_id, &review.project_session_id)
+            .await?
+        {
             return Err(project_error(format!(
-                "Project Session {ambient} cannot conduct review {review_id} assigned to {}",
+                "Project Session {ambient} cannot conduct review {review_id} assigned to {}; it is not the live successor for that Project",
                 review.project_session_id
             )));
         }
@@ -974,12 +992,7 @@ pub fn project_review_message(
             project_error(format!("Project body has no write authority: {error}"))
         })?;
         store
-            .send_project_interaction_review_message(
-                &review_id,
-                &review.project_session_id,
-                &lease,
-                &text,
-            )
+            .send_project_interaction_review_message(&review_id, &ambient_id, &lease, &text)
             .await
             .map_err(|error| project_error(error.to_string()))
     })
@@ -1006,9 +1019,14 @@ pub fn project_review_complete(
         let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
             project_error("review completion must run inside the assigned Project Session")
         })?;
-        if ambient != review.project_session_id.as_str() {
+        let ambient_id = ProjectSessionId::parse(&ambient).map_err(|error| {
+            project_error(format!("invalid ambient Project Session id: {error}"))
+        })?;
+        if !acting_session_may_conduct_review(&store, &ambient_id, &review.project_session_id)
+            .await?
+        {
             return Err(project_error(format!(
-                "Project Session {ambient} cannot complete review {review_id} assigned to {}",
+                "Project Session {ambient} cannot complete review {review_id} assigned to {}; it is not the live successor for that Project",
                 review.project_session_id
             )));
         }
@@ -1018,7 +1036,7 @@ pub fn project_review_complete(
         let (completed, _) = store
             .complete_project_interaction_review(
                 &review_id,
-                &review.project_session_id,
+                &ambient_id,
                 &lease,
                 disposition,
                 &outcome,
@@ -1192,6 +1210,153 @@ pub(crate) async fn wake_project_session(session_id: &ProjectSessionId) -> OpsRe
         launch_project_process(&store, &mut session).await?;
     }
     Ok(())
+}
+
+/// The resolved routing target for a Task Session's parent Project.
+///
+/// `historical` is the Project Session the Task was born under
+/// (`task.project_session_id`) — provenance, preserved. `current` is the live
+/// routing target: the same session when it is still live, or its non-terminal
+/// successor when the historical session was abandoned/completed and replaced.
+/// `succeeded` is true when routing had to follow the chain to a successor.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TaskProjectRoute {
+    pub historical: ProjectSessionId,
+    pub current: ProjectSessionId,
+    pub current_status: ProjectSessionStatus,
+    pub succeeded: bool,
+}
+
+/// Resolve a Task Session's parent Project to its live routing target.
+///
+/// The historical `project_session_id` is preserved as provenance and never
+/// treated as the live routing key. When it is terminal, the successor is the
+/// latest session for the same Linear project id. A terminal historical session
+/// with no live successor fails actionably.
+pub async fn resolve_task_project_route(
+    store: &Store,
+    task: &TaskSession,
+) -> OpsResult<TaskProjectRoute> {
+    let historical = task.project_session_id.clone();
+    let Some(recorded) = store
+        .get_project_session(&historical)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+    else {
+        return Err(project_error(format!(
+            "Task {} Project Session {historical} is not registered; cannot route observations",
+            task.launch.issue.identifier
+        )));
+    };
+    if !recorded.status.is_terminal() {
+        return Ok(TaskProjectRoute {
+            historical: historical.clone(),
+            current: historical,
+            current_status: recorded.status,
+            succeeded: false,
+        });
+    }
+    let Some(successor) = store
+        .get_project_session_by_project(task.launch.project.id.as_str())
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+    else {
+        return Err(actionable_dead_chain(
+            &task.launch.issue.identifier,
+            &historical,
+            recorded.status,
+            &task.launch.project,
+        ));
+    };
+    if successor.id == historical || successor.status.is_terminal() {
+        return Err(actionable_dead_chain(
+            &task.launch.issue.identifier,
+            &historical,
+            recorded.status,
+            &task.launch.project,
+        ));
+    }
+    Ok(TaskProjectRoute {
+        historical,
+        current: successor.id.clone(),
+        current_status: successor.status,
+        succeeded: true,
+    })
+}
+
+fn actionable_dead_chain(
+    issue_identifier: &str,
+    historical: &ProjectSessionId,
+    historical_status: ProjectSessionStatus,
+    project: &crate::session_context::LinearProjectSnapshot,
+) -> OpsError {
+    OpsError::Message(format!(
+        "Task {} Project Session {historical} is {}; no live successor exists for project {} ({}). \
+         Resume or restart the Project: `lf project run {}`.",
+        issue_identifier,
+        historical_status.as_str(),
+        project.id.as_str(),
+        project.slug,
+        project.slug,
+    ))
+}
+
+/// Wake the live successor Project Session for a Task observation, not the
+/// terminal predecessor the Task was born under. Best-effort: the observation is
+/// already enqueued to the historical recipient and is drained by the successor
+/// through project-chain consumption, so a broken chain surfaces a warning
+/// without losing the observation.
+pub(crate) async fn wake_task_project_route(store: &Store, task: &TaskSession) -> OpsResult<()> {
+    match resolve_task_project_route(store, task).await {
+        Ok(route) => {
+            if route.succeeded {
+                tracing::info!(
+                    task = %task.id,
+                    historical_project_session = %route.historical,
+                    routing_project_session = %route.current,
+                    "Task observation routed to successor Project Session"
+                );
+            }
+            wake_project_session(&route.current).await
+        }
+        Err(error) => {
+            tracing::warn!(task = %task.id, %error, "Task observation wake could not resolve a live Project Session; observation stays queued");
+            Ok(())
+        }
+    }
+}
+
+/// Whether the acting Project Session may conduct a review assigned to
+/// `review_project_session_id`. The acting session must be the live (non-
+/// terminal) session for the same Linear project — the successor conducting a
+/// review assigned to a terminal predecessor. The historical assignment is
+/// preserved; routing is resolved, not rewritten.
+async fn acting_session_may_conduct_review(
+    store: &SharedStore,
+    acting: &ProjectSessionId,
+    review_project_session_id: &ProjectSessionId,
+) -> OpsResult<bool> {
+    if acting == review_project_session_id {
+        return Ok(true);
+    }
+    let Some(acting_session) = store
+        .get_project_session(acting)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+    else {
+        return Ok(false);
+    };
+    if acting_session.status.is_terminal() {
+        return Ok(false);
+    }
+    let Some(review_session) = store
+        .get_project_session(review_project_session_id)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+    else {
+        return Ok(false);
+    };
+    Ok(acting_session.launch.project.id.as_str() == review_session.launch.project.id.as_str())
 }
 
 /// Complete the mechanical half of an authored project-promotion flow: pin

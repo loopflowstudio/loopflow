@@ -244,6 +244,10 @@ pub struct ProjectRuntimeSnapshot {
 pub struct TaskRuntimeSnapshot {
     pub session_id: String,
     pub project_session_id: String,
+    /// The live Project Session this Task routes to (successor when the
+    /// historical owner is terminal). `None` when the chain is broken. The app
+    /// derives "routed to a successor" by comparing this to `project_session_id`.
+    pub routing_project_session_id: Option<String>,
     pub status: TaskSessionStatus,
     pub reason: String,
     pub status_at: String,
@@ -1025,9 +1029,15 @@ async fn snapshot_task_runtime(
         step: Some(task.lifecycle_phase.as_str().to_string()),
         reason: task.status_reason.clone(),
     };
+    let routing_project_session_id =
+        match crate::ops::project::resolve_task_project_route(store.as_ref(), task).await {
+            Ok(route) => Some(route.current.to_string()),
+            Err(_) => None,
+        };
     Ok(TaskRuntimeSnapshot {
         session_id: task.id.to_string(),
         project_session_id: task.project_session_id.to_string(),
+        routing_project_session_id,
         status: task.status,
         reason: task.status_reason.clone(),
         status_at: format_time(task.status_at).unwrap_or_default(),
@@ -1048,13 +1058,21 @@ async fn snapshot_project_runtime(
             .latest_process
             .as_ref()
             .is_some_and(|process| liveness.is_alive(&process.tmux_name));
-    let pending_observations = store
-        .pending_observations(&ObservationRecipient::Project {
-            session_id: project.id.clone(),
-        })
-        .await
-        .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
-        .len() as u32;
+    let pending_observations = if project.status.is_terminal() {
+        store
+            .pending_observations(&ObservationRecipient::Project {
+                session_id: project.id.clone(),
+            })
+            .await
+            .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
+            .len() as u32
+    } else {
+        store
+            .pending_project_observations_for_chain(project.launch.project.id.as_str())
+            .await
+            .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
+            .len() as u32
+    };
     let latest_event_at = store
         .latest_project_event_at(&project.id)
         .await
@@ -3000,6 +3018,7 @@ mod tests {
         TaskRuntimeSnapshot {
             session_id: format!("ts_{}", status.as_str()),
             project_session_id: "ps_1".to_string(),
+            routing_project_session_id: Some("ps_1".to_string()),
             status,
             reason: reason.to_string(),
             status_at,

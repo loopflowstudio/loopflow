@@ -118,6 +118,14 @@ pub struct TaskSessionSnapshot {
     pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
     pub project_session_id: String,
+    /// The live Project Session this Task routes to: the historical owner when
+    /// it is still live, or its non-terminal successor. `None` when the recorded
+    /// Project Session is terminal and no live successor exists (broken chain).
+    pub routing_project_session_id: Option<String>,
+    /// True when routing followed the chain to a successor — i.e. the Task's
+    /// historical `project_session_id` is a terminal predecessor and a live
+    /// successor now owns its observations, reviews, and reconciliation.
+    pub project_route_succeeded: bool,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
     pub status: TaskSessionStatus,
@@ -2891,6 +2899,17 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .await
             .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
         let active_pr = prs.iter().find(|pr| pr.is_active()).map(|pr| pr.id.clone());
+        // Resolve the live routing target for this Task's parent Project. The
+        // historical project_session_id stays as provenance; the routing target
+        // is its non-terminal successor when the historical session is terminal.
+        // A broken chain (terminal historical, no live successor) surfaces as
+        // `None` rather than failing status — the actionable failure belongs to
+        // the routing operations (wake, review), not the read.
+        let (routing_project_session_id, project_route_succeeded) =
+            match crate::ops::project::resolve_task_project_route(store.as_ref(), &session).await {
+                Ok(route) => (Some(route.current.to_string()), route.succeeded),
+                Err(_) => (None, false),
+            };
         Ok(TaskSessionSnapshot {
             issue_id: session.launch.issue.id.as_str().to_string(),
             issue_identifier: session.launch.issue.identifier,
@@ -2901,6 +2920,8 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             pm_writeback: session.pm_writeback,
             wave: wave.name().to_string(),
             project_session_id: session.project_session_id.to_string(),
+            routing_project_session_id,
+            project_route_succeeded,
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,
             status: session.status,

@@ -2399,6 +2399,28 @@ impl SqliteStore {
         Ok(observations)
     }
 
+    pub fn pending_project_observations_for_chain(
+        &self,
+        project_id: &str,
+    ) -> StoreResult<Vec<ObservationOutboxRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id, recipient_kind, recipient_id, source_kind, source_id,
+                    event_id, payload_json, delivered_at
+             FROM observation_outbox
+             WHERE recipient_kind='project'
+               AND recipient_id IN (SELECT id FROM project_sessions WHERE project_id=?1)
+               AND delivered_at IS NULL
+             ORDER BY id",
+        )?;
+        let rows = statement.query_map(params![project_id], map_observation_row)?;
+        let mut observations = Vec::new();
+        for row in rows {
+            observations.push(row?);
+        }
+        Ok(observations)
+    }
+
     pub fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -2452,12 +2474,6 @@ impl SqliteStore {
                 "Project Session can consume only supervised Task observations".to_string(),
             ));
         };
-        if recipient_id != project_session_id {
-            return Err(StoreError::InvalidData(format!(
-                "observation {} belongs to Project Session {recipient_id}",
-                observation.id
-            )));
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(lease) = lease {
@@ -2466,6 +2482,39 @@ impl SqliteStore {
                 &ChildRef::Project(project_session_id.clone()),
                 lease,
             )?;
+        }
+        // The outbox recipient is the Project Session the Task was born under
+        // (provenance). A live successor consumes observations addressed to any
+        // session in its project chain; the recipient must share the consuming
+        // successor's Linear project id, but it need not be the successor itself.
+        if recipient_id != project_session_id {
+            let recipient_project_id: Option<String> = transaction
+                .query_row(
+                    "SELECT project_id FROM project_sessions WHERE id=?1",
+                    params![recipient_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let successor_project_id: String = transaction.query_row(
+                "SELECT project_id FROM project_sessions WHERE id=?1",
+                params![project_session_id.as_str()],
+                |row| row.get(0),
+            )?;
+            match recipient_project_id {
+                Some(recipient_project_id) if recipient_project_id == successor_project_id => {}
+                Some(_) => {
+                    return Err(StoreError::InvalidData(format!(
+                        "observation {} belongs to Project Session {recipient_id} outside the chain of {project_session_id}",
+                        observation.id
+                    )));
+                }
+                None => {
+                    return Err(StoreError::InvalidData(format!(
+                        "observation {} belongs to unknown Project Session {recipient_id}",
+                        observation.id
+                    )));
+                }
+            }
         }
         let exists: bool = transaction.query_row(
             "SELECT EXISTS(

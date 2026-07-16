@@ -327,7 +327,12 @@ impl SqliteStore {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        if review.reviewer != InteractionReviewer::Project(project_session_id.clone()) {
+        let InteractionReviewer::Project(reviewer_id) = &review.reviewer else {
+            return Err(StoreError::InvalidData(
+                "only the assigned Project reviewer may complete this review".to_string(),
+            ));
+        };
+        if !project_review_chain_ok(&transaction, project_session_id, reviewer_id)? {
             return Err(StoreError::InvalidData(
                 "only the assigned Project reviewer may complete this review".to_string(),
             ));
@@ -608,6 +613,31 @@ fn same_waitpoint(left: &InteractionReview, right: &InteractionReview) -> bool {
         && left.reviewer == right.reviewer
 }
 
+fn project_review_chain_ok(
+    conn: &rusqlite::Connection,
+    acting: &ProjectSessionId,
+    reviewer: &ProjectSessionId,
+) -> StoreResult<bool> {
+    if acting == reviewer {
+        return Ok(true);
+    }
+    let acting_project: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM project_sessions WHERE id=?1",
+            params![acting.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let reviewer_project: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM project_sessions WHERE id=?1",
+            params![reviewer.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(matches!((acting_project, reviewer_project), (Some(a), Some(r)) if a == r))
+}
+
 fn require_open_project_review(
     conn: &rusqlite::Connection,
     review_id: &InteractionReviewId,
@@ -621,8 +651,13 @@ fn require_open_project_review(
         )
         .optional()?
         .ok_or(StoreError::NotFound)?;
-    if review.reviewer != InteractionReviewer::Project(project_session_id.clone())
-        || review.status.is_terminal()
+    let InteractionReviewer::Project(reviewer_id) = &review.reviewer else {
+        return Err(StoreError::InvalidData(
+            "interaction review is not open for this Project reviewer".to_string(),
+        ));
+    };
+    if review.status.is_terminal()
+        || !project_review_chain_ok(conn, project_session_id, reviewer_id)?
     {
         return Err(StoreError::InvalidData(
             "interaction review is not open for this Project reviewer".to_string(),

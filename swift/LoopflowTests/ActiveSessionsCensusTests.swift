@@ -152,6 +152,22 @@ struct ActiveSessionsCensusTests {
 
     // MARK: - Helpers
 
+    @Test("Task runtime exposes the historical owner and current routing target")
+    func runtimeExposesProjectRoute() throws {
+        let data = try loadFixtureData("active_sessions_census.json")
+        let input = try JSONDecoder().decode(CensusInput.self, from: data)
+        let tasks = input.roadmap.waves.flatMap(\.projects).flatMap(\.items).flatMap(\.tasks)
+
+        let dead = try #require(tasks.first { $0.runtime?.sessionId == "ts_dead" })
+        let deadRuntime = try #require(dead.runtime)
+        #expect(deadRuntime.projectSessionId == "ps_prod")
+        #expect(deadRuntime.routingProjectSessionId == "ps_prod_2")
+
+        let alive = try #require(tasks.first { $0.runtime?.sessionId == "ts_alive" })
+        let aliveRuntime = try #require(alive.runtime)
+        #expect(aliveRuntime.routingProjectSessionId == "ps_prod")
+    }
+
     private func group(_ id: String) throws -> ActiveSessionWaveGroup {
         try #require(census().groups.first { $0.id == id })
     }

@@ -18,7 +18,7 @@ use crate::child_session::{
     project_write_lease_from_env, unincorporated_directive_version, BoundaryResult,
     ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
     ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState, ChildRef,
-    ChildWriteLease, ObservationRecipient,
+    ChildWriteLease,
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::project_session::{
@@ -776,8 +776,11 @@ async fn inspect_outcome(
         .await?
         .into_iter()
         .filter(|task| {
+            // Route status-triggered reconciliation to the current successor:
+            // a Task born under a terminal predecessor is supervised by the
+            // live successor for the same Linear project, not stranded on the
+            // dead session it was created under.
             task.launch.project.id.as_str() == session.launch.project.id.as_str()
-                && task.project_session_id == session.id
         })
         .collect::<Vec<_>>();
     for task in &mut tasks {
@@ -901,10 +904,13 @@ async fn consume_task_observations(
     session: &mut ProjectSession,
     lease: &ChildWriteLease,
 ) -> Result<Vec<String>> {
-    let recipient = ObservationRecipient::Project {
-        session_id: session.id.clone(),
-    };
-    let observations = store.pending_observations(&recipient).await?;
+    // The successor consumes the whole project chain: observations addressed to
+    // a terminal predecessor the Task was born under are routed here, not
+    // stranded on the dead session. The outbox recipient stays the historical
+    // owner; this read is the live routing key.
+    let observations = store
+        .pending_project_observations_for_chain(session.launch.project.id.as_str())
+        .await?;
     let mut prompts = Vec::new();
     for observation in observations {
         let event = match &observation.payload {

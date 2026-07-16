@@ -4047,10 +4047,10 @@ mod tests {
 
     use super::{
         _defer_task_interactions, cached_github_observation, changes_snapshot,
-        derive_workspace_slug, diff_snapshot, ensure_working_pr,
-        ensure_working_pr_with_authority, file_snapshot, next_pr_slug, parse_pr_slug,
-        parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
-        recover_stalled_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
+        derive_workspace_slug, diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority,
+        file_snapshot, next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
+        reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
+        refuse_dirty_between_prs, refuse_if_canonical_ahead,
         require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
         task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
         TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,

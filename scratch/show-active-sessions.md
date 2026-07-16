@@ -168,12 +168,24 @@ Open performs exactly one `lf handoff attach` per click; attach is replay-safe.
 
 ## PR plan (serial, one Task worktree)
 
-- **PR 1** — `lf handoff list` + `InteractiveHandoffListRow` DTO + fixture +
-  Rust/Swift round-trip tests + docs. Ships the missing contract.
-- **PR 2** — `ActiveSessionsCensus` model + census fixture + census/accessibility
-  tests; `RegistryQuery.activeHandoffs()` / `attachHandoff()`.
-- **PR 3** — `ControlView` + `ActiveSessionsView` + the narrow `WaveDetailPane`
-  header button/sheet; live wiring and the real-Wave census check.
+- **PR 1 — DONE (committed, green).** `lf handoff list [--active] [--parent]
+  --json` + `InteractiveHandoffListRow` DTO + `interactive_handoff_list.json`
+  fixture + Rust/Swift round-trips + `RegistryQuery.activeHandoffs()` /
+  `attachHandoff()` + docs. Verified: `cargo test -p loopflow --lib handoff`
+  (18 passed), `swift test --filter DTOFixtureTests` (6 passed). Ships the
+  missing enumeration contract; `activeHandoffs()`/`attachHandoff()` came forward
+  with the decode since they are its natural consumers.
+- **PR 2 — next.** `ActiveSessionsCensus` model (pure projection: red
+  propagation, evidence classification, control derivation) + a mixed census
+  fixture + census/accessibility tests. Registry-independent, `swift test`-only.
+- **PR 3 — after.** `ControlView` + `ActiveSessionsView` + the narrow
+  `WaveDetailPane` header button/sheet; live wiring and the real-Wave census
+  check.
+
+PR 2 and PR 3 remain to build. They could not be rotated onto separate serial
+PRs this run: the shared registry is unreachable from any 0.11.1-line `lf` (see
+`questions.md`), so `lf pr next` / `lf task acknowledge` cannot run on this
+machine. PR 1 stands alone as a complete, reviewable contract completion.
 
 Order lets each PR verify independently; PR 1 unblocks the Swift decode, PR 2 is
 pure/testable, PR 3 is the visible destination and stays a narrow shell edit so

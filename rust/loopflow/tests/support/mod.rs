@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::child_session::{ChildExecutionContext, ChildProcessGeneration};
+use loopflow::child_session::ChildProcessGeneration;
 use loopflow::id::WaveId;
 use loopflow::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
 use loopflow::session_context::{
@@ -224,10 +224,9 @@ pub fn register_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    let db_path = home.join("loopflow.db");
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
-        .block_on(open_store(&StorageConfig::sqlite(db_path.clone())))
+        .block_on(open_store(&StorageConfig::sqlite(home.join("loopflow.db"))))
         .expect("open task test store");
     let now = OffsetDateTime::now_utc();
     let wave = Wave::new(
@@ -235,11 +234,6 @@ pub fn register_task(
         "task-pr-tests".to_string(),
         worktree.display().to_string(),
     );
-    let execution = ChildExecutionContext {
-        lf_bin: std::path::PathBuf::from("/usr/bin/false"),
-        db_path,
-        lf_home: home.to_path_buf(),
-    };
     let project = ProjectSession {
         id: ProjectSessionId::new(),
         launch: ProjectLaunchReceipt {
@@ -274,8 +268,8 @@ pub fn register_task(
             started_at: now,
             state: loopflow::child_session::ChildLeaseState::Legacy,
             outcome: None,
+            provenance: None,
         }),
-        execution: Some(execution.clone()),
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -313,7 +307,6 @@ pub fn register_task(
         provider: "codex".to_string(),
         provider_session_id: None,
         latest_process: None,
-        execution: Some(execution),
         abandon_intent: None,
         created_at: now,
         updated_at: now,

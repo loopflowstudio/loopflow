@@ -660,10 +660,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             provider,
             provider_session_id: None,
             latest_process: None,
-            execution: Some(
-                crate::engine::process::pinned_execution_context()
-                    .map_err(|error| task_error(error.to_string()))?,
-            ),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1518,16 +1514,12 @@ pub(crate) async fn relaunch_inactive_process(
 }
 
 async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
-    // Resolve the pinned context before reserving anything: a Session that cannot
-    // name its own binary must not burn a generation discovering that.
-    let execution = session.execution.clone().ok_or_else(|| {
-        task_error(format!(
-            "Task {} predates pinned execution context and cannot be relaunched safely; \
-             abandon it and run the Linear task again to create a Session that records \
-             its own `lf` and database",
-            session.launch.issue.identifier
-        ))
-    })?;
+    // Resolve the current Home lf before reserving anything, ignoring any
+    // LF_CONTROL_* pin a legacy body carries: we always launch through the
+    // current binary, store, and home. A missing or incompatible lf fails
+    // without burning a generation reservation.
+    let execution = crate::engine::process::current_home_execution_context()
+        .map_err(|error| task_error(format!("cannot resolve current lf binary: {error}")))?;
     let tmux_name = format!(
         "lf-task-{}-{}",
         tmux_session_slug(&session.launch.issue.identifier),
@@ -1535,6 +1527,9 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     );
     let from = session.status;
     let mut launch = session.clone();
+    // The reserved generation records no provenance: nothing has run yet. The
+    // child stamps its own binary's provenance when it boots (mark_booted), so
+    // the audit row describes what ran, never merely what launched it.
     let generation = launch.begin_generation(tmux_name.clone());
     let Some(lease) = store
         .reserve_task_process(&launch, from)
@@ -3180,7 +3175,7 @@ mod tests {
         refuse_if_canonical_ahead, resolve_task_flow, resolve_upstream_base,
         verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
     };
-    use crate::child_session::{ChildCommandSource, ChildExecutionContext, ChildProcessGeneration};
+    use crate::child_session::{ChildCommandSource, ChildProcessGeneration};
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
@@ -3225,6 +3220,92 @@ mod tests {
             .contains("durable Task flows currently require skills"));
     }
 
+    /// The launch resolver ignores `LF_CONTROL_BIN`. A legacy body carries
+    /// `LF_CONTROL_BIN` pointing at the (real, existing) binary that created it;
+    /// launch must not relaunch through it. Here `LF_CONTROL_BIN` names a real
+    /// binary while the current Home `LF_BIN` is gone: the launch fails at
+    /// binary resolution, proving the control pin was never consulted (had it
+    /// been, resolution would have succeeded through the real control binary).
+    #[tokio::test]
+    async fn launch_task_process_ignores_control_bin_and_resolves_current_home() {
+        let home = tempfile::tempdir().unwrap();
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let now = OffsetDateTime::now_utc();
+        let mut session = TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new("issue-no-pin").unwrap(),
+                    identifier: "INF-NO-PIN".to_string(),
+                    title: "Resolve through current lf".to_string(),
+                    description: "Never read the pinned binary".to_string(),
+                },
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-no-pin").unwrap(),
+                    slug: "no-pin".to_string(),
+                    name: "No pin".to_string(),
+                    prompt_context: String::new(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: WaveId::new(),
+            project_session_id: ProjectSessionId::new(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Waiting,
+            status_reason: "ready".to_string(),
+            status_at: now,
+            worktree: home.path().join("worktree"),
+            workspace_slug: "task-no-pin".to_string(),
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        // LF_CONTROL_BIN names a real, existing binary (the historical pin);
+        // the current Home LF_BIN is gone. The launch must fail at resolution
+        // without burning a generation or spawning tmux.
+        let previous_control_bin = std::env::var_os("LF_CONTROL_BIN");
+        let previous_lf_bin = std::env::var_os("LF_BIN");
+        std::env::set_var("LF_CONTROL_BIN", "/bin/sh");
+        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
+        let result = super::launch_task_process(&store, &mut session).await;
+        match previous_lf_bin {
+            Some(value) => std::env::set_var("LF_BIN", value),
+            None => std::env::remove_var("LF_BIN"),
+        }
+        match previous_control_bin {
+            Some(value) => std::env::set_var("LF_CONTROL_BIN", value),
+            None => std::env::remove_var("LF_CONTROL_BIN"),
+        }
+
+        let error = result.expect_err("launch must fail when the current Home lf is missing");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot resolve current lf binary"),
+            "launch must resolve the current Home lf, not the LF_CONTROL_BIN pin: {error}"
+        );
+        // No generation was reserved: the session never started a process.
+        assert!(session.latest_process.is_none());
+    }
+
     fn changed_workspace() -> (tempfile::TempDir, String, TaskSessionId) {
         let repo = tempfile::tempdir().expect("create temp repo");
         git(repo.path(), &["init", "-b", "main"]);
@@ -3256,9 +3337,8 @@ mod tests {
         base_commit: &str,
     ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
         let home = tempfile::tempdir().expect("task home");
-        let db_path = home.path().join("loopflow.db");
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path.clone()))
+            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
                 .await
                 .expect("open store"),
         );
@@ -3268,11 +3348,6 @@ mod tests {
             "task-pr-rotation".to_string(),
             repo.path().display().to_string(),
         );
-        let execution = ChildExecutionContext {
-            lf_bin: std::path::PathBuf::from("/usr/bin/false"),
-            db_path,
-            lf_home: home.path().to_path_buf(),
-        };
         let project = ProjectSession {
             id: ProjectSessionId::new(),
             launch: ProjectLaunchReceipt {
@@ -3308,8 +3383,8 @@ mod tests {
                 started_at: now,
                 state: crate::child_session::ChildLeaseState::Active,
                 outcome: None,
+                provenance: None,
             }),
-            execution: Some(execution.clone()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -3347,7 +3422,6 @@ mod tests {
             provider: "codex".to_string(),
             provider_session_id: None,
             latest_process: None,
-            execution: Some(execution),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -3460,6 +3534,7 @@ mod tests {
             started_at: now - time::Duration::hours(1),
             state: lease_state,
             outcome: None,
+            provenance: None,
         });
         let pr = TaskPr {
             id: TaskPrId::new(),

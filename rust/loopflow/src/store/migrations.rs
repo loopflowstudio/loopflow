@@ -242,6 +242,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "migration_provenance",
         sql: include_str!("migrations/0.11.017_migration_provenance.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 18,
+        },
+        name: "session_body_provenance",
+        sql: include_str!("migrations/0.11.018_session_body_provenance.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1301,7 +1310,8 @@ mod tests {
                 "0.11.014_task_lifecycle".to_string(),
                 "0.11.015_interaction_reviews".to_string(),
                 "0.11.016_task_linear_observations".to_string(),
-                "0.11.017_migration_provenance".to_string()
+                "0.11.017_migration_provenance".to_string(),
+                "0.11.018_session_body_provenance".to_string()
             ]
         );
     }
@@ -1315,11 +1325,11 @@ mod tests {
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.016_task_linear_observations")
+            Some("0.11.017_migration_provenance")
         );
-        assert!(!columns(&conn, "schema_migrations")
+        assert!(!columns(&conn, "task_sessions")
             .iter()
-            .any(|column| column == "checksum"));
+            .any(|column| column == "process_provenance_json"));
     }
 
     #[test]

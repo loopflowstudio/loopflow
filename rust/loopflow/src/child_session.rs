@@ -237,6 +237,34 @@ pub enum ObservationRecipient {
     Project { session_id: ProjectSessionId },
 }
 
+/// Immutable audit record for the lf binary that launched a process generation.
+/// Provenance says what ran; it never selects what runs next.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinaryProvenance {
+    pub version: String,
+    pub provenance: String,
+    pub source_identity: String,
+}
+
+impl BinaryProvenance {
+    pub fn current() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            provenance: crate::build_info::provenance().to_string(),
+            source_identity: crate::build_info::source_identity(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_tests() -> Self {
+        Self {
+            version: "0.0.0-test".to_string(),
+            provenance: "development".to_string(),
+            source_identity: "test".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 /// Durable receipt for one child-process write lease. `generation` is the
 /// monotonically increasing fencing token: only the current generation may
@@ -255,9 +283,25 @@ pub struct ChildProcessGeneration {
     pub started_at: OffsetDateTime,
     pub state: ChildLeaseState,
     pub outcome: Option<ChildBodyOutcome>,
+    /// Immutable binary provenance: which lf actually booted this generation,
+    /// stamped by that process itself at boot. `None` until the generation has
+    /// booted (a reserved-but-never-started generation ran nothing), and for
+    /// generations recorded before this field was added.
+    pub provenance: Option<BinaryProvenance>,
 }
 
 impl ChildProcessGeneration {
+    /// Stamp the running process's identity as it boots this generation: its
+    /// pid, process group, and the provenance of the binary that is actually
+    /// executing it. Called from inside the child body, so `current()` reflects
+    /// the booting binary — provenance describes what ran, not what launched it.
+    pub(crate) fn mark_booted(&mut self) {
+        self.pid = Some(std::process::id());
+        self.process_group_id = crate::engine::process::current_process_group_id();
+        self.state = ChildLeaseState::Active;
+        self.provenance = Some(BinaryProvenance::current());
+    }
+
     pub(crate) fn observe_provider(
         &mut self,
         provider: &str,
@@ -292,33 +336,15 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The executable and store a Session runs against, pinned once when the
-/// Session is created.
-///
-/// Re-deriving these per process is how a Session gets relaunched by a
-/// worktree's `target/debug/lf` against the live registry: the launching
-/// process's own binary and environment decided the child's, so whoever
-/// happened to type the command chose the child's execution context. Pinning
-/// makes the Session the authority, and every relaunch reproduces the context
-/// the Session was born with.
+/// The `lf` binary, store, and home a Session launches through, resolved fresh
+/// at the launch boundary from the current Home — never persisted as Session
+/// state. A transient bundle carried from the resolver to the tmux spawn; a
+/// Session no longer pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
     pub db_path: PathBuf,
     pub lf_home: PathBuf,
-}
-
-#[cfg(test)]
-impl ChildExecutionContext {
-    /// A pinned context for tests that do not care which binary or store a
-    /// Session names — only that it names one.
-    pub(crate) fn for_tests() -> Self {
-        Self {
-            lf_bin: PathBuf::from("/usr/local/bin/lf"),
-            db_path: PathBuf::from("/tmp/loopflow-test/loopflow.db"),
-            lf_home: PathBuf::from("/tmp/loopflow-test"),
-        }
-    }
 }
 
 /// A recorded request to end a Session, durable from the moment the Abandon
@@ -981,6 +1007,7 @@ mod tests {
             started_at: time::OffsetDateTime::UNIX_EPOCH,
             state: ChildLeaseState::Reserved,
             outcome: None,
+            provenance: None,
         };
         assert!(!serde_json::to_string(&evidence).unwrap().contains(&raw));
     }

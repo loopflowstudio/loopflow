@@ -4285,6 +4285,7 @@ mod tests {
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
         ChildCommandSource, ChildCommandState, ChildLeaseState, ChildProcessGeneration, ChildRef,
+        MAX_RECOVERY_ATTEMPTS,
     };
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
@@ -5135,19 +5136,35 @@ mod tests {
         (home, store, session)
     }
 
-    /// The proof: a Task whose body died comes back with nobody asking.
+    /// Pin the body launcher to a binary that does not exist.
     ///
-    /// The seeded lease names a tmux session no server knows, so the liveness
-    /// probe reads the body as genuinely gone — the same evidence a
-    /// `tmux kill-session` produces. The worktree stays real, so the successor
-    /// clears the same adoption preconditions an explicit resume would.
-    #[tokio::test]
-    async fn a_killed_body_under_a_live_task_recovers_with_no_human_action() {
-        let repo = TestRepo::new();
+    /// A successful spawn needs a real Home `lf`, tmux, and `/bin/zsh` — a CI
+    /// container has none of them, so a test that spawns passes only on a
+    /// developer laptop and is no proof at all. Pinning the launch to a missing
+    /// binary fails it the *same way everywhere*, which leaves the recovery
+    /// decision — the part this module owns — as the only variable.
+    /// `launch_task_process` owns the spawn and is tested separately.
+    fn pin_unlaunchable_body() -> Option<std::ffi::OsString> {
+        let previous = std::env::var_os("LF_BIN");
+        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
+        previous
+    }
+
+    fn restore_lf_bin(previous: Option<std::ffi::OsString>) {
+        match previous {
+            Some(value) => std::env::set_var("LF_BIN", value),
+            None => std::env::remove_var("LF_BIN"),
+        }
+    }
+
+    async fn stranded_task(
+        repo: &TestRepo,
+        branch: &str,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession) {
         let base = repo.head_sha();
-        let (_home, store, mut session, _pr) = rotation_task_with_lease(
-            &repo,
-            "jack/w2-267-recovers",
+        let (home, store, session, _pr) = rotation_task_with_lease(
+            repo,
+            branch,
             &base,
             Some((ChildLeaseState::Active, TaskSessionStatus::Running, None)),
         )
@@ -5155,36 +5172,35 @@ mod tests {
         // The body owned its PR branch when it died; put the worktree back where
         // it was so the successor clears the same adoption preconditions an
         // explicit resume would.
-        git(repo.path(), &["checkout", "-b", "jack/w2-267-recovers"]);
-        let generation_before = session
-            .latest_process
-            .as_ref()
-            .expect("a dead body to recover")
-            .generation;
+        git(repo.path(), &["checkout", "-b", branch]);
+        (home, store, session)
+    }
 
-        let recovered = recover_stranded_task_body(&store, &mut session)
-            .await
-            .expect("recover a Task whose body died");
+    /// The proof: a Task whose body died is re-dispatched with nobody asking.
+    ///
+    /// The seeded lease names a tmux session no server knows, so the liveness
+    /// probe reads the body as genuinely gone — the same evidence a
+    /// `tmux kill-session` produces. No human command is issued anywhere in this
+    /// test; the supervision path decides on its own.
+    #[tokio::test]
+    async fn a_killed_body_under_a_live_task_is_redispatched_with_no_human_action() {
+        let repo = TestRepo::new();
+        let (_home, store, mut session) = stranded_task(&repo, "jack/w2-267-recovers").await;
 
-        assert!(recovered, "a dead body under a live Task must be recovered");
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        // A fresh generation holds the Session: the strand is over.
-        assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("a successor body")
-                .generation,
-            generation_before + 1,
-        );
-        assert!(
-            persisted.status.is_process_active(),
-            "the recovered Session must claim a body again, not sit at {}",
-            persisted.status.as_str()
-        );
-        // ...and it says so durably, once, with its attempt bounded.
+        let pinned = pin_unlaunchable_body();
+        let outcome = recover_stranded_task_body(&store, &mut session).await;
+        restore_lf_bin(pinned);
+
+        // The spawn is pinned to fail, so recovery reports the launch error...
+        assert!(outcome.is_err(), "the pinned-missing binary must fail");
+        // ...but it had already reaped the strand and recorded its attempt, and
+        // it did so without any human typing `lf task resume`.
         let events = store.recent_task_events(&session.id, 64).await.unwrap();
-        assert_eq!(count_recovery_attempts(&events), 1);
+        assert_eq!(
+            count_recovery_attempts(&events),
+            1,
+            "recovery must durably record the attempt it made"
+        );
         assert!(
             events.iter().any(|event| matches!(
                 event.kind,
@@ -5192,6 +5208,57 @@ mod tests {
             )),
             "recovery must be observable, not silent"
         );
+    }
+
+    /// Retry is bounded: a strand that cannot launch stops and says why rather
+    /// than minting dead generations forever.
+    ///
+    /// This runs the real dispatcher against a launch that always fails — the
+    /// W2-210 shape, where the body's binary is gone. Each failed launch counts
+    /// as an attempt (`launch_task_process` reaps as `Lost` on the way out), so
+    /// the budget is spent by design rather than reset.
+    #[tokio::test]
+    async fn an_unlaunchable_strand_exhausts_instead_of_minting_dead_generations() {
+        let repo = TestRepo::new();
+        let (_home, store, mut session) = stranded_task(&repo, "jack/w2-267-exhausts").await;
+
+        for expected in 1..=MAX_RECOVERY_ATTEMPTS {
+            let mut current = store.get_task_session(&session.id).await.unwrap().unwrap();
+            let pinned = pin_unlaunchable_body();
+            let _ = recover_stranded_task_body(&store, &mut current).await;
+            restore_lf_bin(pinned);
+            let events = store.recent_task_events(&session.id, 64).await.unwrap();
+            assert_eq!(
+                count_recovery_attempts(&events),
+                expected,
+                "attempt {expected} must be recorded"
+            );
+        }
+
+        // The budget is spent. The next pass must refuse to mint another
+        // generation and must say why instead.
+        let mut spent = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let pinned = pin_unlaunchable_body();
+        let recovered = recover_stranded_task_body(&store, &mut spent).await;
+        restore_lf_bin(pinned);
+        let recovered = recovered.expect("a spent budget surfaces rather than erroring");
+        assert!(!recovered, "an exhausted strand must not redispatch");
+
+        let events = store.recent_task_events(&session.id, 64).await.unwrap();
+        assert_eq!(
+            count_recovery_attempts(&events),
+            MAX_RECOVERY_ATTEMPTS,
+            "exhaustion must not append a further attempt"
+        );
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskSessionStatus::Failed);
+        assert!(
+            persisted.status_reason.contains("did not survive"),
+            "an exhausted strand must say why: {}",
+            persisted.status_reason
+        );
+        session = persisted;
+        let _ = &session;
     }
 
     /// The other half of the proof, and the triage's central trap: a Task that

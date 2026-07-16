@@ -930,17 +930,28 @@ fn strand_verdict(process: &ChildProcessGeneration) -> StrandVerdict {
 /// Consecutive recovery attempts behind `events` (newest first).
 ///
 /// Progress-relative rather than absolute: a recovery of its own appends only
-/// lease and status churn, so anything else in the log means a body booted and
-/// did real work, which resets the count. A Session that recovers, works, and
-/// later strands again therefore gets a full budget rather than inheriting an
-/// old one.
+/// lease, status, and failure churn, so anything else in the log means a body
+/// booted and did real work, which resets the count. A Session that recovers,
+/// works, and later strands again therefore gets a full budget rather than
+/// inheriting an old one.
+///
+/// `Failed` is churn here, and that is load-bearing rather than lenient. A
+/// recovery whose launch fails writes one itself (`launch_task_process` reaps
+/// the body and calls `record_task_failure` on its way out), so counting it as
+/// progress would reset the budget on every failed launch and retry an
+/// unlaunchable Session forever — the exact dead-generation loop the bound
+/// exists to prevent. Treating it as churn cannot hide real work: a body that
+/// booted and did something logs a non-churn event *before* it fails, and this
+/// walk stops there.
 pub(crate) fn count_recovery_attempts(events: &[TaskEvent]) -> u32 {
     let mut attempts = 0;
     for event in events {
         match event.kind {
             TaskEventKind::BodyRecoveryAttempted { .. } => attempts += 1,
             // The churn a recovery itself writes; keep walking past it.
-            TaskEventKind::BodyLeaseChanged { .. } | TaskEventKind::StatusChanged { .. } => {}
+            TaskEventKind::BodyLeaseChanged { .. }
+            | TaskEventKind::StatusChanged { .. }
+            | TaskEventKind::Failed { .. } => {}
             // Any other durable event is real progress.
             _ => break,
         }
@@ -1568,6 +1579,37 @@ mod tests {
                 },
             ),
             recovery_event(2, 1),
+        ];
+        assert_eq!(count_recovery_attempts(&events), 2);
+    }
+
+    /// A failed launch must not reset the budget.
+    ///
+    /// `launch_task_process` reaps the body and calls `record_task_failure` on
+    /// its way out, which writes `Failed`. Counting that as progress would give
+    /// an unlaunchable Session a fresh budget on every attempt and retry it
+    /// forever — caught in the live dispatcher by
+    /// `an_unlaunchable_strand_exhausts_instead_of_minting_dead_generations`.
+    #[test]
+    fn a_failed_launch_does_not_reset_the_recovery_budget() {
+        let events = vec![
+            other_event(
+                6,
+                TaskEventKind::Failed {
+                    error: "cannot resolve current lf binary".to_string(),
+                    resumable: true,
+                },
+            ),
+            other_event(
+                5,
+                TaskEventKind::StatusChanged {
+                    from: crate::task::TaskSessionStatus::Starting,
+                    to: crate::task::TaskSessionStatus::Failed,
+                    reason: "launch failed".to_string(),
+                },
+            ),
+            recovery_event(4, 2),
+            recovery_event(3, 1),
         ];
         assert_eq!(count_recovery_attempts(&events), 2);
     }

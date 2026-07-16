@@ -77,7 +77,7 @@ struct MessageRow: View {
         // straight into the text view, so nothing sits between an arriving SSE
         // frame and the glyph.
         let presentation = self.presentation
-        let segments = parseMessageSegments(presentation.prose)
+        let segments = parseMessageSegments(presentation.conclusion)
         VStack(alignment: .leading, spacing: Spacing.sm) {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
@@ -90,6 +90,10 @@ struct MessageRow: View {
                 case .code(let language, let code):
                     CodeBlockView(language: language, content: code)
                 }
+            }
+
+            if presentation.hasSteps {
+                stepsDisclosure(presentation.steps)
             }
 
             if !presentation.hasProse, turn.status == .running {
@@ -108,6 +112,27 @@ struct MessageRow: View {
                     .id("streaming-cursor-\(turn.id)")
             }
         }
+    }
+
+    /// Operational narration the harness tagged `commentary`, folded away so the
+    /// wave's decision reads first. The raw record is untouched; this only curates
+    /// what the eye meets. References inside a step stay live.
+    private func stepsDisclosure(_ steps: [String]) -> some View {
+        DisclosureGroup(steps.count == 1 ? "Show 1 step" : "Show \(steps.count) steps") {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                    ReferenceTextView(
+                        text: step,
+                        textColor: palette.textSecondary,
+                        references: references
+                    )
+                }
+            }
+            .padding(.top, Spacing.xs)
+        }
+        .font(Typography.caption(11))
+        .foregroundStyle(palette.textSecondary)
+        .accessibilityIdentifier("wave-chat-steps")
     }
 
     private var accentBar: some View {

@@ -13,9 +13,16 @@ struct ReferenceContext {
     /// Navigate to a Task's detail in the plan pane (the existing child-selection
     /// hook). The argument is the Linear issue key, e.g. `W2-174`.
     let onOpenTask: (String) -> Void
+    /// Navigate to a Project's detail in the plan pane. The argument is the PM
+    /// slug, e.g. `wave-chat`.
+    let onOpenProject: (String) -> Void
 
     @MainActor
-    static let inert = ReferenceContext(githubBase: nil, onOpenTask: { _ in })
+    static let inert = ReferenceContext(
+        githubBase: nil,
+        onOpenTask: { _ in },
+        onOpenProject: { _ in }
+    )
 }
 
 /// Selectable prose for a Chat turn that renders typed references (`W2-174`,
@@ -196,9 +203,11 @@ struct ReferenceTextView: NSViewRepresentable {
             switch kind {
             case .task:
                 references.onOpenTask(identifier)
+            case .project:
+                references.onOpenProject(identifier)
             case .pullRequest:
                 if let externalURL { NSWorkspace.shared.open(externalURL) }
-            case .project, .evidence:
+            case .evidence:
                 break
             }
         }
@@ -336,17 +345,17 @@ private struct ReferencePopover: View {
 
     private var actionLabel: String? {
         switch kind {
-        case .task: return "Show in plan"
+        case .task, .project: return "Show in plan"
         case .pullRequest: return externalURL == nil ? nil : "Open on GitHub"
-        case .project, .evidence: return nil
+        case .evidence: return nil
         }
     }
 
     private var actionIcon: String {
         switch kind {
-        case .task: return "list.bullet.rectangle"
+        case .task, .project: return "list.bullet.rectangle"
         case .pullRequest: return "arrow.up.right.square"
-        case .project, .evidence: return "arrow.up.right.square"
+        case .evidence: return "arrow.up.right.square"
         }
     }
 }

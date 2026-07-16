@@ -72,6 +72,51 @@ struct ChatReferenceTests {
         #expect(parseChatReferences(in: "path/to/#889abc").isEmpty)
     }
 
+    @Test("Detects an authored project:<slug> reference")
+    func detectsProjectReference() {
+        let matches = parseChatReferences(in: "advancing project:wave-chat this cycle")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .project)
+        #expect(matches.first?.identifier == "wave-chat")
+        #expect(matches.first?.displayText == "project:wave-chat")
+    }
+
+    @Test("Detects an authored evidence:<token> reference")
+    func detectsEvidenceReference() {
+        let matches = parseChatReferences(in: "see evidence:run-abc123 for the p95")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .evidence)
+        #expect(matches.first?.identifier == "run-abc123")
+        #expect(matches.first?.displayText == "evidence:run-abc123")
+    }
+
+    @Test("Project and evidence names without the authored prefix are left alone")
+    func unprefixedNamesNotLinked() {
+        // Real narration names these in prose with no identifier; only the
+        // authored form links, so bare words never become false references.
+        #expect(parseChatReferences(in: "the Loopflow API Project is alive").isEmpty)
+        #expect(parseChatReferences(in: "generation 2 is the evidence here").isEmpty)
+    }
+
+    @Test("All four kinds coexist in one message, ordered")
+    func allKindsOrdered() {
+        let matches = parseChatReferences(
+            in: "W2-174 lands as PR #889 under project:wave-chat, evidence:sha-9f2"
+        )
+        #expect(matches.map(\.kind) == [.task, .pullRequest, .project, .evidence])
+        #expect(matches.map(\.identifier) == ["W2-174", "889", "wave-chat", "sha-9f2"])
+    }
+
+    @Test("An authored token wins over a Task match nested inside it")
+    func authoredWinsOverNestedTask() {
+        // `evidence:W2-174` is one evidence reference, not evidence wrapping a
+        // stray W2-174 Task match; ranges never overlap.
+        let matches = parseChatReferences(in: "logged evidence:W2-174 for the run")
+        #expect(matches.count == 1)
+        #expect(matches.first?.kind == .evidence)
+        #expect(matches.first?.identifier == "W2-174")
+    }
+
     @Test("Plain prose with no references returns nothing quickly")
     func noReferences() {
         #expect(parseChatReferences(in: "The restarted Project Session is healthy.").isEmpty)

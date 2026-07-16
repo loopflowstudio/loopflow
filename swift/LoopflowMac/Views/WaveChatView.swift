@@ -45,6 +45,9 @@ struct WaveChatView: View {
             githubBase: githubBase,
             onOpenTask: { key in
                 onSelectChild(WaveWorkSelection(kind: .task, id: key))
+            },
+            onOpenProject: { slug in
+                onSelectChild(WaveWorkSelection(kind: .project, id: slug))
             }
         )
     }

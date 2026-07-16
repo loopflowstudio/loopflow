@@ -3040,6 +3040,199 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn terminal_task_history_keeps_one_current_successor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        // A completed predecessor and a live successor share issue id,
+        // identifier, and worktree. The schema permits it (terminal history),
+        // and resolution selects the live successor.
+        let mut predecessor = make_task_session(&wave, &project);
+        predecessor.set_status(TaskSessionStatus::Completed, "PR merged");
+        predecessor.created_at = OffsetDateTime::from_unix_timestamp(1_000).unwrap();
+        predecessor.updated_at = OffsetDateTime::from_unix_timestamp(1_000).unwrap();
+        store
+            .create_task_session(&predecessor, &make_task_pr(&predecessor))
+            .await
+            .unwrap();
+
+        let mut successor = make_task_session(&wave, &project);
+        successor.status_reason = "successor to the completed attempt".to_string();
+        successor.created_at = OffsetDateTime::from_unix_timestamp(2_000).unwrap();
+        successor.updated_at = OffsetDateTime::from_unix_timestamp(2_000).unwrap();
+        store
+            .create_task_session(&successor, &make_task_pr(&successor))
+            .await
+            .unwrap();
+
+        // Terminal predecessor never wins an operational lookup while a live
+        // successor exists, by every key.
+        assert_eq!(
+            store
+                .get_task_session_by_issue("INF-123")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            successor.id
+        );
+        assert_eq!(
+            store
+                .get_task_session_by_issue("issue-uuid")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            successor.id
+        );
+        assert_eq!(
+            store
+                .get_task_session_by_worktree("/repo.inf-123")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            successor.id
+        );
+
+        // A second live successor for the same key is rejected: one current.
+        let mut parallel = make_task_session(&wave, &project);
+        parallel.created_at = OffsetDateTime::from_unix_timestamp(3_000).unwrap();
+        parallel.updated_at = OffsetDateTime::from_unix_timestamp(3_000).unwrap();
+        assert!(store
+            .create_task_session(&parallel, &make_task_pr(&parallel))
+            .await
+            .is_err());
+
+        // When the live successor completes, resolution falls back to the most
+        // recent terminal predecessor so status reads still resolve a Task.
+        let mut terminal = successor.clone();
+        terminal.set_status(TaskSessionStatus::Completed, "second PR merged");
+        terminal.updated_at = OffsetDateTime::from_unix_timestamp(4_000).unwrap();
+        store.update_task_session(&terminal).await.unwrap();
+        let resolved = store
+            .get_task_session_by_issue("INF-123")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.id, terminal.id);
+        assert_eq!(resolved.status, TaskSessionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn task_session_resolution_fails_actionably_on_multiple_live_successors() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        // Two live sessions collide only across the issue_id OR identifier
+        // columns: the partial unique index blocks two lives on the same column,
+        // but a lookup keyed on `issue_id = ? OR issue_identifier = ?` can match
+        // one row by id and a different row by identifier. That cross-match is
+        // actionable ambiguity, never a silent pick.
+        let mut a = make_task_session(&wave, &project);
+        a.launch.issue.id = LinearIssueId::new("issue-a").unwrap();
+        a.launch.issue.identifier = "INF-200".to_string();
+        a.worktree = PathBuf::from("/repo.a");
+        store
+            .create_task_session(&a, &make_task_pr(&a))
+            .await
+            .unwrap();
+
+        let mut b = make_task_session(&wave, &project);
+        b.launch.issue.id = LinearIssueId::new("INF-200").unwrap();
+        b.launch.issue.identifier = "INF-201".to_string();
+        b.worktree = PathBuf::from("/repo.b");
+        store
+            .create_task_session(&b, &make_task_pr(&b))
+            .await
+            .unwrap();
+
+        // `INF-200` matches `a` by identifier and `b` by issue id: two live.
+        let error = store
+            .get_task_session_by_issue("INF-200")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("2 live Task Sessions"), "{error}");
+        assert!(error.contains("INF-200"), "{error}");
+        assert!(error.contains("INF-201"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn rebind_task_issue_identifier_targets_the_current_successor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        let mut predecessor = make_task_session(&wave, &project);
+        predecessor.set_status(TaskSessionStatus::Completed, "PR merged");
+        predecessor.created_at = OffsetDateTime::from_unix_timestamp(1_000).unwrap();
+        predecessor.updated_at = OffsetDateTime::from_unix_timestamp(1_000).unwrap();
+        store
+            .create_task_session(&predecessor, &make_task_pr(&predecessor))
+            .await
+            .unwrap();
+
+        let mut successor = make_task_session(&wave, &project);
+        successor.set_status(TaskSessionStatus::Waiting, "awaiting review");
+        successor.created_at = OffsetDateTime::from_unix_timestamp(2_000).unwrap();
+        successor.updated_at = OffsetDateTime::from_unix_timestamp(2_000).unwrap();
+        store
+            .create_task_session(&successor, &make_task_pr(&successor))
+            .await
+            .unwrap();
+
+        // Rebind updates the live successor only; the terminal predecessor
+        // keeps its historical identifier as history.
+        assert!(store
+            .rebind_task_issue_identifier("issue-uuid", "INF-123", "PRD-8")
+            .await
+            .unwrap());
+
+        let rebound = store
+            .get_task_session_by_issue("PRD-8")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rebound.id, successor.id);
+        assert_eq!(rebound.launch.issue.identifier, "PRD-8");
+
+        // The completed predecessor is still reachable by its own id and keeps
+        // the original identifier — rebind did not rewrite history.
+        let predecessor_row = store
+            .get_task_session(&predecessor.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(predecessor_row.launch.issue.identifier, "INF-123");
+        assert_eq!(predecessor_row.status, TaskSessionStatus::Completed);
+
+        // Idempotent: rebinding the current successor to its own identifier is a
+        // no-op, not an error.
+        assert!(!store
+            .rebind_task_issue_identifier("issue-uuid", "INF-123", "PRD-8")
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
     async fn task_pr_persists_github_and_ci_observations() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))

@@ -1809,6 +1809,130 @@ mod tests {
         );
     }
 
+    #[test]
+    fn task_session_successor_migration_preserves_history_and_enforces_one_current() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        // Apply every migration except the successor rebuild, then seed a
+        // completed Task plus its PR and event history.
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+                 VALUES ('w1', 'infrastructure', '/repo', 1);
+             INSERT INTO project_sessions (
+                 id, project_id, project_slug, project_name,
+                 project_prompt_context, wave_id, pm_snapshot_synced_at,
+                 status, status_reason, status_at, iteration,
+                 observation_cursor, agent, provider, created_at, updated_at,
+                 current_directive_version, incorporated_directive_version
+             ) VALUES (
+                 'ps1', 'project-1', 'developer-efficiency',
+                 'Developer Efficiency', 'Definition', 'w1', 1,
+                 'running', 'project turn active', 1, 1, 0,
+                 'codex', 'codex', 1, 1, 1, 1
+             );
+             INSERT INTO task_sessions (
+                 id, issue_id, issue_identifier, issue_title, issue_description,
+                 project_id, project_slug, project_name, project_prompt_context,
+                 wave_id, status, status_reason, status_at, worktree,
+                 workspace_slug, agent, provider, created_at, updated_at,
+                 pm_snapshot_synced_at, pm_writeback_json, project_session_id,
+                 current_directive_version, incorporated_directive_version
+             ) VALUES (
+                 'ts_old', 'issue-1', 'INF-123', 'Add hello world', 'Ship one command',
+                 'project-1', 'developer-efficiency', 'Developer Efficiency', 'Definition',
+                 'w1', 'completed', 'PR merged', 2, '/repo.inf-123',
+                 'task-old', 'codex', 'codex', 1, 2,
+                 1, '\"current\"', 'ps1', 1, 1
+             );
+             INSERT INTO task_prs (
+                 id, task_session_id, sequence, slug, branch, base_commit,
+                 created_at, updated_at
+             ) VALUES (
+                 'pr_old', 'ts_old', 1, 'task-old', 'jack/task-old', 'deadbeef', 1, 2
+             );
+             INSERT INTO task_events (session_id, kind_json, created_at)
+                 VALUES ('ts_old', '{\"kind\":\"completed\",\"summary\":\"history\"}', 2);",
+        )
+        .unwrap();
+
+        // The successor rebuild preserves every row and its child references.
+        apply_sqlite(&conn).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT issue_identifier, status FROM task_sessions WHERE id = 'ts_old'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap(),
+            ("INF-123".to_string(), "completed".to_string())
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM task_prs WHERE task_session_id = 'ts_old'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM task_events WHERE session_id = 'ts_old'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+
+        // A live successor may share the issue id, identifier, and worktree with
+        // the completed predecessor (terminal history).
+        conn.execute_batch(
+            "INSERT INTO task_sessions (
+                 id, issue_id, issue_identifier, issue_title, issue_description,
+                 project_id, project_slug, project_name, project_prompt_context,
+                 wave_id, status, status_reason, status_at, worktree,
+                 workspace_slug, agent, provider, created_at, updated_at,
+                 pm_snapshot_synced_at, pm_writeback_json, project_session_id,
+                 current_directive_version, incorporated_directive_version
+             ) VALUES (
+                 'ts_new', 'issue-1', 'INF-123', 'Add hello world', 'Ship one command',
+                 'project-1', 'developer-efficiency', 'Developer Efficiency', 'Definition',
+                 'w1', 'created', 'successor attempt', 3, '/repo.inf-123',
+                 'task-new', 'codex', 'codex', 3, 3,
+                 1, '\"current\"', 'ps1', 1, 0
+             );",
+        )
+        .unwrap();
+        // A second live successor for the same key is rejected: one current.
+        assert!(conn
+            .execute_batch(
+                "INSERT INTO task_sessions (
+                     id, issue_id, issue_identifier, issue_title, issue_description,
+                     project_id, project_slug, project_name, project_prompt_context,
+                     wave_id, status, status_reason, status_at, worktree,
+                     workspace_slug, agent, provider, created_at, updated_at,
+                     pm_snapshot_synced_at, pm_writeback_json, project_session_id,
+                     current_directive_version, incorporated_directive_version
+                 ) VALUES (
+                     'ts_parallel', 'issue-1', 'INF-123', 'Add hello world', 'Ship one command',
+                     'project-1', 'developer-efficiency', 'Developer Efficiency', 'Definition',
+                     'w1', 'created', 'parallel attempt', 3, '/repo.inf-123',
+                     'task-parallel', 'codex', 'codex', 3, 3,
+                     1, '\"current\"', 'ps1', 1, 0
+                 );"
+            )
+            .is_err());
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_key_check", [], |row| row
+                .get::<_, String>(0))
+                .optional()
+                .unwrap(),
+            None
+        );
+    }
+
     /// The upgrade every shipped database takes: a pre-namespace `001_initial`
     /// stamp is adopted, and everything released after it runs on top.
     #[test]

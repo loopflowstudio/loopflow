@@ -1225,6 +1225,9 @@ mod tests {
         assert_eq!(format_relative_delta(172_800), "2d");
     }
 
+    // The env lock must span the awaited import so no parallel test swaps
+    // LF_HOME mid-flight; the single-threaded test runtime makes that safe.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn codex_import_without_stored_credentials_names_the_ambient_limit() {
         // Codex import adopts an existing auth.json in the account home; with

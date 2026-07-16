@@ -3219,8 +3219,8 @@ mod tests {
         verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{
-        ChildCommand, ChildCommandKind, ChildCommandSource, ChildExecutionContext,
-        ChildProcessGeneration, ChildRef,
+        ChildCommand, ChildCommandKind, ChildCommandSource, ChildProcessGeneration,
+        ChildRef,
     };
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
@@ -4130,11 +4130,6 @@ mod tests {
             dir.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let execution = ChildExecutionContext {
-            lf_bin: std::path::PathBuf::from("/usr/bin/false"),
-            db_path: dir.path().join("registry.db"),
-            lf_home: dir.path().to_path_buf(),
-        };
         let project = ProjectSession {
             id: ProjectSessionId::new(),
             launch: ProjectLaunchReceipt {
@@ -4169,8 +4164,8 @@ mod tests {
                 started_at: now,
                 state: crate::child_session::ChildLeaseState::Active,
                 outcome: None,
+                provenance: None,
             }),
-            execution: Some(execution.clone()),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -4220,8 +4215,8 @@ mod tests {
                 started_at: now - time::Duration::seconds(30),
                 state: crate::child_session::ChildLeaseState::Active,
                 outcome: None,
+                provenance: None,
             }),
-            execution: Some(execution),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -4283,6 +4278,7 @@ mod tests {
             started_at: OffsetDateTime::now_utc() - time::Duration::seconds(30),
             state: crate::child_session::ChildLeaseState::Active,
             outcome: None,
+            provenance: None,
         });
         store.update_task_session(&idle).await.unwrap();
 

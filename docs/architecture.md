@@ -97,12 +97,12 @@ and traces. Callers open it directly. Installed release builds share
 Builds made from a source checkout use
 `~/.lf-dev/worktrees/<source-identity>/loopflow.db`, so branches cannot migrate
 one another's development store. They refuse `~/.lf/loopflow.db` even when it
-arrives through `LF_DB_PATH`; `LF_ALLOW_PRODUCTION_DB_FROM_DEV=1` is the
-break-glass override. Release packaging stamps its provenance explicitly.
+arrives through `LF_DB_PATH`. Release packaging stamps its provenance
+explicitly; there is no development override for the release database.
 
 Session runners carry their pinned binary and store through the internal
 `LF_CONTROL_BIN`, `LF_CONTROL_HOME`, and `LF_CONTROL_DB_PATH` variables. Provider
-agents do not inherit `LF_BIN`, `LF_HOME`, `LF_DB_PATH`, or the break-glass flag.
+agents do not inherit `LF_BIN`, `LF_HOME`, or `LF_DB_PATH`.
 Before an existing on-disk database advances, SQLite writes an atomic backup
 named for the previously applied migration.
 

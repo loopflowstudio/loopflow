@@ -44,8 +44,10 @@ pub struct Cli {
     pub model: Option<String>,
 
     /// Run as this managed provider account (login email or account id),
-    /// overriding the repo's profile route for this invocation and its children
-    #[arg(long = "account", alias = "profile")]
+    /// overriding the repo's route for this invocation and its children.
+    /// Accounts spend; a profile is only the Chrome venue accounts log in
+    /// through, so it is never a run-time selector.
+    #[arg(long = "account")]
     pub account: Option<String>,
 
     /// Skip permission prompts

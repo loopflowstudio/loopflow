@@ -27,6 +27,7 @@ struct WaveChatView: View {
     @State private var confirmStop = false
     @State private var isFollowingLatest = true
     @State private var isNearTranscriptBottom = true
+    @State private var githubBase: URL?
     @FocusState private var composerFocused: Bool
 
     enum LaunchState: Equatable {
@@ -36,6 +37,17 @@ struct WaveChatView: View {
     }
 
     private var identity: String { "\(repoPath)|\(waveName)" }
+
+    /// Turns typed references in a message into inline links: a Task selects its
+    /// detail in the plan pane; a PR opens on GitHub from the resolved origin.
+    private var referenceContext: ReferenceContext {
+        ReferenceContext(
+            githubBase: githubBase,
+            onOpenTask: { key in
+                onSelectChild(WaveWorkSelection(kind: .task, id: key))
+            }
+        )
+    }
 
     private static let timestampFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -55,6 +67,12 @@ struct WaveChatView: View {
             composer
         }
         .background(palette.background)
+        .task(id: identity) {
+            // Resolve the PR link target off the Chat path so it never delays the
+            // conversation coming up.
+            let repo = repoPath
+            githubBase = await Task.detached { resolveGitHubBase(repoPath: repo) }.value
+        }
         .task(id: identity) {
             connection?.stop()
             sendError = nil
@@ -133,7 +151,8 @@ struct WaveChatView: View {
                             MessageRow(
                                 turn: turn,
                                 timestampLabel: timestampLabel(for: turn),
-                                attemptFailure: failures[turn.id]
+                                attemptFailure: failures[turn.id],
+                                references: referenceContext
                             )
                                 .id(turn.id)
                         }

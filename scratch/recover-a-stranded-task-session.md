@@ -297,6 +297,98 @@ fencing CAS, not on there being exactly one caller.
    A dwell requirement would add a tunable that buys nothing these two do not
    already guarantee, so recovery stays single-sample.
 
+## The read model already specifies this feature
+
+Clarify turned up the strongest evidence yet that this is a missing dispatcher
+rather than new behaviour. For a dead body under active intent, `observe()`
+(`child_session.rs:850-858`) already returns:
+
+```rust
+BodyCategory::Stopped,
+"no live body for active intent; a wake will adopt or start one",
+BodyOwner::Loopflow,
+```
+
+The read model **already promises a wake** and **already assigns ownership to
+Loopflow**. The same Session's `status_reason` says *"resume the same Task Session
+with `lf task resume`"* — a human instruction. The two surfaces contradict each
+other, and the read model is the one telling the truth about intent. This design
+makes `status_reason` stop lying.
+
+Better still, `BodyCategory::Recovering` already exists (`child_session.rs:634`) —
+*"Loopflow revoked a lost/stalled body and is starting its successor"* — is already
+mirrored in Swift (`swift/Loopflow/Models/WaveWorkMap.swift:78`), and is
+**constructed nowhere in the codebase**. The observable surface for this exact
+feature was designed across CLI/Mac/iOS and left unbuilt.
+
+So "bounded and observable" needs **zero wire changes**: recovery-in-flight sets
+the existing `Recovering` category, and the strand itself is already `Stopped` +
+`Loopflow`.
+
+## Computable design contract
+
+**User-visible outcome.** A developer whose Task body dies no longer types
+anything. The Session returns to `running` on its own within ~10s, and every
+surface that already reads `BodyObservation` (CLI, Mac, iOS, chat, Now/Roadmap)
+shows `recovering` while it happens. A Session that *cannot* recover stops at a
+bounded attempt count and says why, once, naming the handoff command.
+
+**End-to-end proof.** One scenario crossing the source of truth and every
+consumer: kill a live body with `tmux kill-session`; within one 5s supervision
+tick the `task_sessions` row moves `running → running` at `generation+1` with a
+`BodyRecoveryAttempted` event appended, `lf task status` renders the attempt, and
+`observe()` reports `recovering` then `working`. Beside it, a `completed` Task
+whose body is reaped as `lost` appends no event and changes no row.
+
+**Source of truth.** The `task_sessions` row — `status`, `process_lease_state`,
+`process_generation`, `process_outcome_json` — plus `task_events` for the durable
+attempt count. Everything else is derived: `BodyObservation` is a pure projection
+(`observe()`), `lf task status` renders the row, and the Mac/iOS surfaces decode
+`BodyCategory`. No new authoritative state is introduced.
+
+**Affected surfaces and consumers.**
+
+| Surface | Change | Why |
+|---|---|---|
+| `task_sessions` row | none (schema) | status/outcome/lease columns already exist |
+| `task_events` | new `TaskEventKind::BodyRecoveryAttempted` | **not** a wire DTO — no Swift mirror, no `tests/fixtures/dto/` fixture (verified) |
+| `BodyCategory` | construct existing `Recovering` | already in Rust *and* the Swift mirror; zero DTO churn |
+| `status_reason` | new prose on recovery/exhaustion | free-form `String`, already rendered everywhere |
+| `lf task status` | renders the above | no shape change |
+| Mac / iOS | none | `recovering` already decodable today |
+
+No DTO field is added, so `tests/fixtures/dto/` needs no update and the
+hand-maintained Rust/Swift mirrors cannot drift. This is deliberate: the attempt
+count rides `status_reason` prose plus a durable event rather than a new wire
+field.
+
+**Absent and error states.**
+
+- *No `latest_process`* — nothing to recover; `LeaveAlone`.
+- *tmux absent on this machine* — unobservable. `supervise_project_task_bodies`
+  already returns early when `!tmux_installed()`; a body is **never** asserted dead
+  from an unobservable machine (`observe()` returns `Unobservable`).
+- *Reservation inside the 10s startup grace* — recovery in flight; `LeaveAlone`
+  (decision 7).
+- *`outcome::Failed`* — the body recorded its own verdict; `Surface` once, never
+  retry.
+- *Attempts exhausted (3)* — `Surface` with the last real reason; the classifier
+  then returns `LeaveAlone`, so exhaustion cannot mint further generations.
+- *Relaunch itself fails* — `launch_task_process` already reaps as `Lost` and calls
+  `record_task_failure` (`ops/task.rs:1649-1670`); that failure counts as an
+  attempt, so a persistently unlaunchable Session exhausts and stops rather than
+  looping.
+- *Unsafe worktree/branch state* — `task_recovery_adoption` owns this refusal; the
+  classifier does not duplicate it (verified per directive).
+
+**Operational boundary.** Recovery is observed on the existing 5s
+`TASK_SUPERVISION_INTERVAL` tick, so detection-to-redispatch is ≤5s plus one tmux
+probe; the demo's ~10s allows a `wait_until_running` boot. Recovery adds one
+`tmux_live_sessions()` batch probe per tick that the loop **already performs** —
+no new subprocess, no new process, no network. Bounded at 3 attempts per strand.
+
+**Exclusions.** As listed under Scope below.
+
 ## Scope
 
 **In scope**
@@ -307,7 +399,9 @@ fencing CAS, not on there being exactly one caller.
 - `LaunchIntent::Recovery` + `recovery_restart_bar` (`ops/child.rs`, `task/mod.rs`)
 - Retire the `settled` gate at `runner.rs:812-820` in favour of the classifier
 - `TaskEventKind::BodyRecoveryAttempted { generation, attempt, reason }` for the
-  durable attempt count and observability
+  durable attempt count and observability (internal — not a wire DTO)
+- Construct the existing, never-constructed `BodyCategory::Recovering` in
+  `observe()` while a successor is starting
 - Integration test: kill a body, assert `running` with no human action; assert a
   `completed` Task's reaped body triggers nothing
 

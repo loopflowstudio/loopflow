@@ -13,7 +13,6 @@ pub mod credential_socket;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
-#[cfg(any(target_os = "macos", test))]
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
@@ -30,7 +29,6 @@ use base64::Engine;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
-#[cfg(any(target_os = "macos", test))]
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
 #[cfg(target_os = "macos")]
@@ -2453,6 +2451,61 @@ pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthE
     }
 }
 
+/// Copy the ambient Codex OAuth credential into an isolated profile.
+///
+/// # Errors
+///
+/// Returns an error when the ambient credential is missing, is not a ChatGPT
+/// OAuth credential, or cannot be written into the private profile.
+pub fn capture_codex_profile_credentials(codex_home: &Path) -> Result<(), AuthError> {
+    let source = home_dir_or_cwd().join(".codex/auth.json");
+    let credential = SecretString::new(fs::read_to_string(&source).map_err(|error| {
+        AuthError::Filesystem(format!("read ambient Codex credential: {error}"))
+    })?);
+    write_codex_profile_credentials(codex_home, &credential)
+}
+
+fn write_codex_profile_credentials(
+    codex_home: &Path,
+    credential: &SecretString,
+) -> Result<(), AuthError> {
+    let json = serde_json::from_str(credential.expose_secret()).map_err(|error| {
+        AuthError::Filesystem(format!("parse ambient Codex credential: {error}"))
+    })?;
+    if codex_token_from_auth_json(&json).is_none() {
+        return Err(AuthError::Filesystem(
+            "ambient Codex credential does not contain a ChatGPT OAuth access token".to_string(),
+        ));
+    }
+    fs::create_dir_all(codex_home).map_err(|error| {
+        AuthError::Filesystem(format!("create {}: {error}", codex_home.display()))
+    })?;
+    let destination = codex_home.join("auth.json");
+    let mut temporary = tempfile::NamedTempFile::new_in(codex_home).map_err(|error| {
+        AuthError::Filesystem(format!("create private Codex credential file: {error}"))
+    })?;
+    temporary
+        .write_all(credential.expose_secret().as_bytes())
+        .map_err(|error| {
+            AuthError::Filesystem(format!("write private Codex credential file: {error}"))
+        })?;
+    temporary.as_file().sync_all().map_err(|error| {
+        AuthError::Filesystem(format!("sync private Codex credential file: {error}"))
+    })?;
+    temporary.persist(&destination).map_err(|error| {
+        AuthError::Filesystem(format!("install private Codex credential file: {error}"))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o600)).map_err(|error| {
+            AuthError::Filesystem(format!("protect {}: {error}", destination.display()))
+        })?;
+    }
+    Ok(())
+}
+
 #[cfg(any(target_os = "macos", test))]
 fn write_claude_profile_credentials(
     config_dir: &Path,
@@ -2614,6 +2667,10 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
     let auth_path = codex_home.join("auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    codex_token_from_auth_json(&json)
+}
+
+fn codex_token_from_auth_json(json: &serde_json::Value) -> Option<ProviderToken> {
     // Store OAuth access tokens only.
     // Never capture manual API keys from Codex auth state.
     let token = json
@@ -2625,7 +2682,7 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
                 .and_then(|v| v.as_str())
         })?;
     let expires_at = read_json_expires_at(
-        &json,
+        json,
         &[
             "expires_at",
             "expiresAt",
@@ -2633,7 +2690,7 @@ fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
             "access_token_expires_at",
         ],
     );
-    let login = codex_login_from_auth(&json);
+    let login = codex_login_from_auth(json);
     Some(ProviderToken {
         provider: "codex".to_string(),
         access_token: token.to_string(),
@@ -4469,6 +4526,45 @@ mod tests {
 
         let token = extract_codex_token(tmp.path()).expect("oauth token should load");
         assert_eq!(token.login.as_deref(), Some("engineering@example.com"));
+    }
+
+    #[test]
+    fn write_codex_profile_credentials_installs_private_oauth_state() {
+        let tmp = tempdir().expect("tempdir");
+        let claims = URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
+        let id_token = format!("header.{claims}.signature");
+        let credential = SecretString::new(
+            serde_json::json!({
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": "nested-oauth-token",
+                    "id_token": id_token,
+                }
+            })
+            .to_string(),
+        );
+
+        write_codex_profile_credentials(tmp.path(), &credential).expect("install Codex credential");
+
+        let token = extract_codex_token_from_home(tmp.path()).expect("OAuth token");
+        assert_eq!(token.login.as_deref(), Some("engineering@example.com"));
+        let permissions = fs::metadata(tmp.path().join("auth.json"))
+            .expect("credential metadata")
+            .permissions()
+            .mode();
+        assert_eq!(permissions & 0o777, 0o600);
+    }
+
+    #[test]
+    fn write_codex_profile_credentials_rejects_manual_api_keys() {
+        let tmp = tempdir().expect("tempdir");
+        let credential = SecretString::new(r#"{"api_key":"manual-key"}"#.to_string());
+
+        let error = write_codex_profile_credentials(tmp.path(), &credential)
+            .expect_err("manual API key must not be imported");
+
+        assert!(error.to_string().contains("ChatGPT OAuth access token"));
+        assert!(!tmp.path().join("auth.json").exists());
     }
 
     #[test]

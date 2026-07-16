@@ -19,10 +19,11 @@ use crate::provider_account::{
     parse_account_id, remove_account_profile,
 };
 use crate::provider_auth::{
-    capture_claude_profile_credentials, disconnect_provider_account_auth,
-    drive_claude_browser_authorization, no_event_sink, prepare_provider_account_access_token,
-    provider_account_auth_status, start_provider_account_auth, AuthStatus, ClaudeKeychainGuard,
-    Provider, ProviderAuthService, ProviderAuthSnapshot,
+    capture_claude_profile_credentials, capture_codex_profile_credentials,
+    disconnect_provider_account_auth, drive_claude_browser_authorization, no_event_sink,
+    prepare_provider_account_access_token, provider_account_auth_status,
+    start_provider_account_auth, AuthStatus, ClaudeKeychainGuard, Provider, ProviderAuthService,
+    ProviderAuthSnapshot,
 };
 use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
@@ -276,7 +277,7 @@ async fn connect_managed_account(
             }
         }
     };
-    let login = verified_login_for_chrome_profile(Some(&chrome_profile), login)?;
+    let login = resolve_profile_login(provider, Some(&chrome_profile), login)?;
     register_managed_account(
         store,
         provider,
@@ -423,11 +424,6 @@ async fn import_account(
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
-    if provider != Provider::Claude {
-        return Err(anyhow!(
-            "existing login import is supported for Claude only"
-        ));
-    }
     let account_id = parse_account_id(raw_account)?;
     let provider_profile = ensure_account_profile(provider, &account_id)?;
     let chrome_profile = resolve_auth_chrome_profile(raw_profile, raw_chrome_profile).await?;
@@ -437,7 +433,12 @@ async fn import_account(
         .filter(|label| label.contains('@'))
         .map(String::from);
 
-    let login = if provider_profile.join(".credentials.json").is_file() {
+    let credential_exists = match provider {
+        Provider::Claude => provider_profile.join(".credentials.json").is_file(),
+        Provider::Codex => provider_profile.join("auth.json").is_file(),
+        _ => false,
+    };
+    let login = if credential_exists {
         match provider_account_auth_status(provider, provider_profile.clone()).await? {
             AuthStatus::Active { login } => login,
             other => {
@@ -450,26 +451,44 @@ async fn import_account(
             }
         }
     } else {
-        let ambient = read_ambient_claude_status()?;
-        if !ambient.logged_in {
-            return Err(anyhow!("the ambient Claude CLI is not logged in"));
-        }
-        if let (Some(expected), Some(actual)) = (paired_login.as_deref(), ambient.email.as_deref())
-        {
-            if !expected.eq_ignore_ascii_case(actual) {
-                return Err(anyhow!(
-                    "ambient Claude login '{}' does not match paired Chrome profile '{}'",
-                    actual,
-                    expected
-                ));
+        match provider {
+            Provider::Claude => {
+                let ambient = read_ambient_claude_status()?;
+                if !ambient.logged_in {
+                    return Err(anyhow!("the ambient Claude CLI is not logged in"));
+                }
+                if let (Some(expected), Some(actual)) =
+                    (paired_login.as_deref(), ambient.email.as_deref())
+                {
+                    if !expected.eq_ignore_ascii_case(actual) {
+                        return Err(anyhow!(
+                            "ambient Claude login '{}' does not match paired Chrome profile '{}'",
+                            actual,
+                            expected
+                        ));
+                    }
+                }
+                capture_claude_profile_credentials(&provider_profile)?;
+                ambient.email.or(paired_login)
             }
+            Provider::Codex => {
+                capture_codex_profile_credentials(&provider_profile)?;
+                match provider_account_auth_status(provider, provider_profile.clone()).await? {
+                    AuthStatus::Active { login } => login,
+                    other => {
+                        return Err(anyhow!(
+                            "ambient Codex credential produced status {}",
+                            other.as_str()
+                        ))
+                    }
+                }
+            }
+            _ => return Err(anyhow!("{} account import is unsupported", provider)),
         }
-        capture_claude_profile_credentials(&provider_profile)?;
-        ambient.email.or(paired_login)
     };
 
     require_managed_access_token(provider, &account_id, &provider_profile).await?;
-    let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login)?;
+    let login = resolve_profile_login(provider, chrome_profile.as_ref(), login)?;
     let store = open_account_store().await?;
     register_managed_account(&store, provider, &account_id, provider_profile, login, None).await?;
     println!(
@@ -552,7 +571,8 @@ async fn resolve_profile_chrome_profile(
     })
 }
 
-fn verified_login_for_chrome_profile(
+fn resolve_profile_login(
+    provider: Provider,
     chrome_profile: Option<&LocalChromeProfile>,
     provider_login: Option<String>,
 ) -> Result<Option<String>> {
@@ -562,12 +582,15 @@ fn verified_login_for_chrome_profile(
     let Some(expected) = expected_login else {
         return Ok(provider_login);
     };
-    let actual = provider_login.as_deref().ok_or_else(|| {
-        anyhow!(
-            "provider did not report a login email for Chrome profile '{}'",
-            expected
-        )
-    })?;
+    let Some(actual) = provider_login.as_deref() else {
+        return match provider {
+            Provider::Claude => Ok(Some(expected.to_string())),
+            _ => Err(anyhow!(
+                "provider did not report a login email for Chrome profile '{}'",
+                expected
+            )),
+        };
+    };
     if !expected.eq_ignore_ascii_case(actual) {
         return Err(anyhow!(
             "provider login '{}' does not match Chrome profile '{}'",
@@ -1022,7 +1045,7 @@ mod tests {
     use super::{
         account_for_profile, account_id_for_profile, format_account, format_relative_delta,
         format_snapshot, parse_paid_through, parse_routing_state, register_managed_account,
-        verified_login_for_chrome_profile,
+        resolve_profile_login,
     };
 
     fn managed_account(provider: Provider, account_id: &str, login: &str) -> ProviderAccount {
@@ -1146,26 +1169,47 @@ mod tests {
     }
 
     #[test]
-    fn chrome_profile_and_provider_login_must_name_the_same_account() {
+    fn codex_profile_and_provider_login_must_name_the_same_account() {
         let chrome_profile = LocalChromeProfile {
             directory: "Profile 7".to_string(),
             label: "primary@example.com".to_string(),
         };
 
         assert_eq!(
-            verified_login_for_chrome_profile(
+            resolve_profile_login(
+                Provider::Codex,
                 Some(&chrome_profile),
                 Some("PRIMARY@EXAMPLE.COM".to_string()),
             )
             .unwrap(),
             Some("PRIMARY@EXAMPLE.COM".to_string())
         );
-        assert!(verified_login_for_chrome_profile(
+        assert!(resolve_profile_login(
+            Provider::Codex,
             Some(&chrome_profile),
             Some("personal@example.com".to_string()),
         )
         .is_err());
-        assert!(verified_login_for_chrome_profile(Some(&chrome_profile), None).is_err());
+        assert!(resolve_profile_login(Provider::Codex, Some(&chrome_profile), None).is_err());
+    }
+
+    #[test]
+    fn claude_uses_the_selected_profile_when_status_omits_email() {
+        let chrome_profile = LocalChromeProfile {
+            directory: "Profile 7".to_string(),
+            label: "primary@example.com".to_string(),
+        };
+
+        assert_eq!(
+            resolve_profile_login(Provider::Claude, Some(&chrome_profile), None).unwrap(),
+            Some("primary@example.com".to_string())
+        );
+        assert!(resolve_profile_login(
+            Provider::Claude,
+            Some(&chrome_profile),
+            Some("personal@example.com".to_string()),
+        )
+        .is_err());
     }
 
     #[test]

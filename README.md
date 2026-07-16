@@ -561,9 +561,11 @@ These addresses are placeholders. Profiles, account bindings, and repository
 routes live in the local Loopflow database; Loopflow ships no account topology.
 
 `auth connect --profile` reuses a matching account or creates one, opens the
-profile's bound Chrome directory, verifies the provider login, and binds the
-account to the profile. Reconnect through the same profile; Loopflow follows
-shared mappings to the owning browser identity.
+profile's bound Chrome directory, and binds the account to the profile. Codex
+verifies the login email from its ID token. Claude Code does not expose an
+account email after OAuth, so Loopflow uses the selected Chrome profile email;
+if Claude reports an email, it must match. Reconnect through the same profile;
+Loopflow follows shared mappings to the owning browser identity.
 
 Codex account connection uses Codex's native local OAuth callback. Loopflow
 waits for the human to approve it and verifies the login email from Codex's ID
@@ -576,8 +578,9 @@ is connected. If the controller is unavailable, Loopflow falls back to a hidden
 terminal prompt for the one-time handoff code. `profile create
 --chrome-profile` binds the profile directory, name, or signed-in email on this
 host; `auth connect --profile` reuses that binding. `auth import` adopts an
-existing isolated Claude credential—or the current macOS Keychain login when
-the account home is empty—without another OAuth flow.
+existing isolated Claude or Codex credential without another OAuth flow. When
+the account home is empty, it copies the current macOS Claude Keychain login or
+the ambient Codex OAuth login into the isolated account home.
 
 Each provider account keeps independent auth and session state under
 `~/.lf/accounts/`. Profiles reuse those accounts and give each repository a

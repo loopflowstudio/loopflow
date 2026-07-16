@@ -1451,7 +1451,7 @@ pub enum AuthCommand {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Adopt an existing Claude login into a managed account
+    /// Adopt an existing Claude or Codex OAuth login into a managed account
     Import {
         provider: String,
         /// Create or register this isolated OAuth account profile

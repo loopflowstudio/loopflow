@@ -103,17 +103,53 @@ why Sessions sat frozen for hours.
 **One dispatcher, keyed on durable status, bounded by a durable attempt count.**
 
 The rule, in one line: *recovery fires when the Session's own durable status
-claims a body that does not exist.*
+claims a body that does not exist, or records a strand that a resume would fix.*
 
-This single predicate subsumes the entire PR-phase argument:
+Precisely — recovery fires on a non-terminal Task with no live body and a `Lost`
+outcome, where the status is either:
+
+- **`Starting`/`Running`** (`is_process_active()`) — the Session believes it is
+  working and is not. A live strand.
+- **`Failed`** — the Session already recorded the strand. A frozen strand.
+
+This subsumes the entire PR-phase argument:
 
 - A cleanly delivered Task parks at `Waiting`. Recovery **never** fires on
-  `Waiting`, so W2-129 is preserved by construction — not by a PR bar.
-- A Task at `Running`/`Starting` with no live body believes it is working and is
-  not. That is unambiguously a strand, whatever its PR phase. This covers the 13.
+  `Waiting`, so W2-129 is preserved by construction — not by a PR bar. The
+  reviewer's own 13 manual resumes worked *because* the operator path is
+  deliberately unbarred (`task/mod.rs:687-688`); that is not evidence the
+  supervisor path should be unbarred too.
+- A Task at `Running`/`Starting` with no live body is unambiguously a strand,
+  whatever its PR phase. This covers the 13.
 - PR settlement stops gating recovery (the parent's correction holds) *without*
   re-introducing W2-129 (my objection holds). Status does the gating; phase does
   not.
+
+### Why `Failed` is in the predicate (review change 1)
+
+An earlier draft keyed only on `is_process_active()`, which is
+`matches!(self, Starting | Running)` (`task/mod.rs:217-219`) — it **excludes
+`Failed`**. That draft's predicate excluded the exact rows its own Measure section
+counts: W2-135 is `status=failed` + `outcome=lost`, frozen at gen 9. Replacing
+`ops/task.rs:1806` stops *new* strands from reaching `failed`, but the KR says "no
+Task strands on a dead body," not "no new strands form." A classifier that ignores
+`Failed` could never drain the backlog.
+
+Including `Failed` is safe **because of decision 2**: `status::Failed` and
+`outcome::Failed` are different axes, and the outcome tag already discriminates
+them.
+
+| Session | status | outcome | verdict |
+|---|---|---|---|
+| W2-135 | `Failed` | `Lost` | Redispatch — Loopflow's own reap verdict |
+| W2-212 | `Failed` | `Failed` (codex usage limit) | Surface once — the body's recorded verdict |
+
+Widening the status axis therefore costs nothing and drains the pre-existing rows
+with the same classifier. It is also cheaper than it looks:
+`reconcile_process_liveness` does **not** open with the `is_process_active` guard —
+it reaps the stale lease *first* (`:1726-1754`: "A dead lease is reaped regardless
+of Session status"), and only then early-returns at `:1758`. So W2-135's lease is
+already `finished` and is ready to reserve gen 10 today. There is nothing to unwind.
 
 Three pieces:
 
@@ -123,14 +159,21 @@ Clock-free, store-free, unit-testable.
 
 ```rust
 pub(crate) enum StrandedPlan {
-    /// Body alive, Task terminal/abandoning, or Waiting/Blocked on purpose.
+    /// Body alive; Task terminal or abandoning; Waiting/Blocked on purpose; or a
+    /// reservation still inside its startup grace.
     LeaveAlone,
-    /// The body vanished without recording a terminal outcome. Start gen+1.
+    /// Status is `Starting`/`Running`/`Failed` with no live body and a `Lost`
+    /// outcome, on a non-terminal Task. Start gen+1.
     Redispatch { attempt: u32 },
-    /// The body recorded why it stopped, or recovery is spent. Say so once.
+    /// The body recorded why it stopped (`outcome::Failed`), or recovery is
+    /// spent. Say so once, with the handoff command.
     Surface { reason: String },
 }
 ```
+
+`Failed` appears in `Redispatch`'s status set and *not* in `LeaveAlone`'s — the
+ambiguity the reviewer flagged between decision 1's wording and this enum is
+resolved in favour of including it.
 
 **2. Discriminate on `outcome.kind`, structurally — not by parsing prose.**
 
@@ -192,6 +235,8 @@ fencing CAS, not on there being exactly one caller.
 | Does the 5s tick see dead bodies today? | No — it filters on `live_sessions.contains(&process.tmux_name)` (`task.rs:1832-1839`). | Widening this filter is the change; the tick itself is sound. |
 | Is there a daemon/trigger to reuse? | No. The `triggers:` registry was deleted (`wave_config.rs:339`); `lf cron` is a launchd plist manager, wrong tier. The wave resident is the only self-reviving tier. | Reuse the parent runner's tick. Do not build a daemon. |
 | Can two relaunchers race? | `reserve_task_process` CASes on generation + `finished` lease. | Safe by fencing, not by convention. |
+| Can recovery double-dispatch a Session that is already coming back? | No. A relaunch in flight holds a `Reserved` lease: `child_body_reservation_is_fresh` (`child.rs:23-31`) hides it for 10s, and the CAS refuses to re-reserve a non-`finished` lease. | Recovery stays single-sample; no dwell tunable (decision 7). |
+| Does keying on `is_process_active()` cover the strands the metric counts? | **No** — it is `Starting \| Running` only (`task/mod.rs:217-219`). W2-135 (`failed` + `lost`, gen 9) would be ignored by the very classifier meant to drain it. | Predicate widened to include `Failed` + `outcome::Lost`. Safe because the outcome tag discriminates W2-135 from W2-212. |
 | Does generation count bound retries? | No — W2-178 is at gen 17 from legitimate PR rotations. | Needs a distinct, progress-relative attempt counter. |
 | Is "never touch a completed Task" already satisfied? | Partly. `inspect_outcome:787` skips terminal, and `task_recovery_adoption:793` skips unsafe worktrees — but the 5s tick has neither. | Verified as directed: reuse `terminal_or_abandon_bar` in the classifier; do not duplicate the adoption check. |
 
@@ -207,9 +252,11 @@ fencing CAS, not on there being exactly one caller.
 
 ## Key decisions
 
-1. **Recovery keys on `status.is_process_active()` with no live body — never on
-   `lost`, never on PR phase.** The one predicate that is neither lagging nor
-   ambiguous. It is also the reason W2-129 stays fixed for free.
+1. **Recovery keys on durable status — `Starting`/`Running`/`Failed` with no live
+   body and a `Lost` outcome, on a non-terminal Task. Never on `lost` alone, never
+   on PR phase.** The one signal that is neither lagging nor ambiguous. It is also
+   the reason W2-129 stays fixed for free, and including `Failed` is what lets one
+   classifier both stop new strands and drain the existing ones.
 2. **`Lost` vs `Failed` is the retry discriminator, structurally.** Loopflow's own
    reap verdict (`Lost`) is recoverable; a body's recorded verdict (`Failed`) is
    not. No prose parsing.
@@ -221,11 +268,34 @@ fencing CAS, not on there being exactly one caller.
    a failing required check on a live open PR; recovery's trigger is a dead body.
    They share `relaunch_inactive_process` and nothing else.
 5. **W2-249 still owns attempt resolution.** Recovery triggers; W2-249 settles.
-6. **A dead *Project* Session still strands its Tasks. Out of scope, stated
-   plainly.** Recovery runs on the parent's tick, so a parent that is not running
-   observes nothing. Fixing that means the wave tier (the only self-reviving one)
-   and is a separate bet. This design removes the *flow-turn* dependency, not the
-   *live-parent* dependency — an honest partial win, not a silent one.
+6. **A dead *Project* Session still strands its Tasks. Out of scope, and filed as
+   real work** — *"Recover a Task Session whose parent Project Session is dead"*
+   (`7e7be305-83fb-4689-ac7e-c1260d962924`, developer-efficiency). Recovery runs on
+   the parent's tick, so a parent that is not running observes nothing. This design
+   removes the *flow-turn* dependency, not the *live-parent* dependency.
+
+   Carried into that task, from the reviewer: the harm actually observed was
+   Sessions frozen for **hours**, which fits the dead-parent case better than the
+   flow-turn case — this wave sits idle with no live listener between iterations.
+   **So this increment may be the smaller half of the problem.** That is a reason
+   for the follow-on to be real and carry the evidence, not a reason to widen this
+   increment into a second dispatcher.
+
+7. **The observation race is already closed by existing fencing; no dwell needed.**
+   A Session mid-relaunch can read `failed` for a moment without being stranded
+   (W2-237 and W2-235 both self-healed between two consecutive reads this
+   iteration). Single-sample recovery is nonetheless safe, by two independent
+   guards:
+   - `child_body_reservation_is_fresh` (`ops/child.rs:23-31`) early-returns for a
+     `Reserved` lease inside the 10s `CHILD_STARTUP_GRACE` — a relaunch in flight
+     is invisible to recovery.
+   - `reserve_task_process` (`store/sqlite/child_sessions.rs:477-530`) CASes on
+     `COALESCE(process_generation,0) = <prev>` **and** a `finished` lease. A
+     `Reserved` or `Active` lease cannot be re-reserved; a losing racer gets
+     `Ok(None)`.
+
+   A dwell requirement would add a tunable that buys nothing these two do not
+   already guarantee, so recovery stays single-sample.
 
 ## Scope
 
@@ -246,7 +316,8 @@ fencing CAS, not on there being exactly one caller.
   body exit (`9e3c71ba`)
 - Attempt resolution after recovery (W2-249 / `bd3d4f6d`)
 - The ci-fix wake path (W2-230 / W2-229)
-- Recovering Tasks under a **dead Project Session** (decision 6)
+- Recovering Tasks under a **dead Project Session** — decision 6, filed as
+  `7e7be305-83fb-4689-ac7e-c1260d962924`
 - Provider handoff *automation* — recovery surfaces the handoff command; it does
   not choose a provider
 
@@ -299,12 +370,20 @@ turns on.
 - **New risk introduced**: recovery still depends on a live parent runner
   (decision 6). Named, not hidden.
 
-## Open question for the reviewer
+## Review status
 
-Decision 6 is the one I would most like challenged. Recovery on the parent's tick
-fixes the flow-turn dependency but not the dead-parent case. The alternative — a
-wave-tier sweep — is the only self-reviving tier, but it crosses a tier boundary
-and would be a second dispatcher, which the directive rightly forbids. I chose the
-bounded win. If the dead-parent case is the one you actually care about, this
-design is one increment short and should be re-scoped before implementation
-rather than after.
+Reviewed by the parent Project Session, `changes_requested`, both required changes
+applied:
+
+1. **Predicate excluded the rows the metric counts** — resolved via the reviewer's
+   option (a): `Failed` + `outcome::Lost` is now in the `Redispatch` set, so one
+   classifier both stops new strands and drains the pre-existing ones. See *"Why
+   `Failed` is in the predicate"*.
+2. **Decision 6 filed as real work** — `7e7be305-83fb-4689-ac7e-c1260d962924`,
+   carrying the frozen-for-hours evidence that it may be the larger half.
+
+Not required, addressed anyway: the observation race is closed by the existing
+`Reserved`-lease grace plus the `reserve_task_process` CAS, so recovery stays
+single-sample with no dwell tunable (decision 7).
+
+Decision 6 resolved: keep the bounded win, do not re-scope.

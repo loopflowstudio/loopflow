@@ -18,13 +18,20 @@ Assumption taken: the directive's "read `status_reason` before retry" is honoure
 by reading the outcome tag, which is the same information without the string
 matching.
 
-## Open for the parent Project Session
+## Resolved at review (2026-07-16)
 
-**Decision 6 — the dead-parent case.** Recovery runs on the Project runner's 5s
-tick, which removes the flow-turn dependency but not the live-parent dependency. A
-Task whose Project Session is itself dead still strands. Fixing that means the
-wave tier (the only self-reviving tier) and would be a second dispatcher, which
-the directive forbids. Chose the bounded win; flagged rather than hidden.
+**Decision 6 — the dead-parent case.** Reviewer: keep the bounded win, do not
+re-scope. Filed as `7e7be305-83fb-4689-ac7e-c1260d962924` ("Recover a Task Session
+whose parent Project Session is dead"), carrying the reviewer's caveat that the
+observed harm — Sessions frozen for *hours* — fits the dead-parent case better
+than the flow-turn case, so this increment may be the smaller half.
 
-If the dead-parent case is the real target, this design is one increment short and
-should be re-scoped before implementation.
+**Predicate vs metric.** The first draft keyed recovery on `is_process_active()`
+(`Starting | Running`), which excludes `Failed` — and therefore excluded W2-135,
+the very row the Measure query counts. Resolved by including `Failed` +
+`outcome::Lost`; safe because `status::Failed` and `outcome::Failed` are different
+axes and the tag already discriminates W2-135 (recoverable) from W2-212 (terminal).
+
+## No open questions
+
+Both required review changes are applied. Nothing blocks implementation.

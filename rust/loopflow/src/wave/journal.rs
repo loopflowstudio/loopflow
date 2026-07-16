@@ -177,8 +177,9 @@ pub enum EventKind {
     },
     TurnItem {
         turn_id: String,
-        /// A `Message` item is a prose fragment (folds into `ChatTurn.text`);
-        /// anything else folds into `ChatTurn.items`.
+        /// A prose `Message` folds into `ChatTurn.text`; a `commentary` message
+        /// and every non-message item stay in `ChatTurn.items` (see
+        /// `ChatTurn::absorb_item`).
         item: ConversationItem,
     },
     TurnSteered {

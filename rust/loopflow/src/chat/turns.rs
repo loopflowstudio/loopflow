@@ -220,22 +220,33 @@ impl ChatTurn {
         Ok(())
     }
 
-    /// The one turn-growth rule every projection shares: `Message` prose
-    /// joins into `text` (newline-separated), every other item appends to
-    /// `items`. The listener's open-turn snapshot, the journal fold
-    /// (`fold_thread`), and the resident's adapter (`EventAdapter`) all grow
-    /// turns through this — a second copy is the live-vs-replay split-brain
-    /// the journal exists to kill.
+    /// The one turn-growth rule every projection shares. The listener's
+    /// open-turn snapshot, the journal fold (`fold_thread`), and the resident's
+    /// adapter (`EventAdapter`) all grow turns through this — a second copy is
+    /// the live-vs-replay split-brain the journal exists to kill.
+    ///
+    /// Prose joins `text`: a `stream` fragment concatenates verbatim, any other
+    /// message (a `final_answer`, an untagged span) joins newline-separated.
+    /// The one exception is `commentary` — operational narration the provider
+    /// tagged as process, not conclusion. It stays a discrete item so the
+    /// surface can curate it behind a disclosure (see Swift `turnPresentation`);
+    /// folding it into `text` erased the tag and left that curation with nothing
+    /// to fold. Every non-message item appends to `items` as before.
     pub fn absorb_item(&mut self, item: ConversationItem) {
         if let ConversationItem::Message { text, phase, .. } = &item {
-            if phase.as_deref() == Some("stream") {
-                self.text.push_str(text);
-            } else {
-                self.push_text(text);
+            match phase.as_deref() {
+                Some("stream") => {
+                    self.text.push_str(text);
+                    return;
+                }
+                Some("commentary") => {}
+                _ => {
+                    self.push_text(text);
+                    return;
+                }
             }
-        } else {
-            self.items.push(item);
         }
+        self.items.push(item);
     }
 
     /// Close the body that produced this turn, if it had one. Every terminal
@@ -661,6 +672,37 @@ mod tests {
 
         assert_eq!(turn.text, "first\nsecond");
         assert_eq!(turn.items.len(), 1, "prose joins text, tools append");
+    }
+
+    #[test]
+    fn absorb_item_keeps_commentary_as_a_curatable_item() {
+        // The provider tags operational narration `commentary`; it must survive
+        // the fold as a discrete item so the surface can curate it. Folding it
+        // into `text` (as every message once did) erased the tag.
+        let mut turn = ChatTurn::user("turn-10".into(), String::new());
+        turn.role = ChatRole::Assistant;
+        turn.absorb_item(ConversationItem::Message {
+            id: "m-0".into(),
+            text: "I'm using `wave_clarify` to audit the plan.".into(),
+            phase: Some("commentary".into()),
+        });
+        turn.absorb_item(ConversationItem::Message {
+            id: "m-1".into(),
+            text: "Clarification complete.".into(),
+            phase: Some("final_answer".into()),
+        });
+
+        // The conclusion is the prose; the narration waits in items, untangled
+        // from the text so `turnPresentation` can fold it behind a disclosure.
+        assert_eq!(turn.text, "Clarification complete.");
+        assert_eq!(turn.items.len(), 1);
+        match &turn.items[0] {
+            ConversationItem::Message { text, phase, .. } => {
+                assert_eq!(phase.as_deref(), Some("commentary"));
+                assert!(text.contains("wave_clarify"));
+            }
+            other => panic!("expected the commentary message in items, got {other:?}"),
+        }
     }
 
     #[test]

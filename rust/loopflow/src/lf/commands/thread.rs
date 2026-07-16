@@ -27,7 +27,7 @@ use anyhow::Result;
 use crate::chat::turns::{
     ChatRole, ChatTurn, ChildActivityKind, ChildActivitySubject, ChildControlActivity, TurnDelta,
 };
-use crate::chat::types::Lifecycle;
+use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::lf::commands::chat::{resolve_target, CliContext};
 use crate::lf::WaveTargetArgs;
 use crate::wave::journal::ellipsize;
@@ -110,6 +110,7 @@ pub(crate) async fn follow(wave: Option<&str>) -> Result<()> {
 struct TurnProgress {
     opened: bool,
     text_chars: usize,
+    items_shown: usize,
     finished: bool,
 }
 
@@ -221,6 +222,25 @@ impl Renderer {
 
         progress.opened = true;
 
+        // Operational narration the provider tagged `commentary` rides as a
+        // discrete item, not folded into `text` (see `ChatTurn::absorb_item`),
+        // so the GUI can curate it. The live follow has no disclosure to fold
+        // behind — this is the raw conversation — so it prints the narration as
+        // the wave speaking, exactly as it read when it lived in `text`. Every
+        // other item (commands, edits, tools) stays execution evidence, unshown.
+        if turn.items.len() > progress.items_shown {
+            for item in &turn.items[progress.items_shown..] {
+                if let ConversationItem::Message { text, phase, .. } = item {
+                    if phase.as_deref() == Some("commentary") {
+                        for fragment in text.split('\n').filter(|f| !f.trim().is_empty()) {
+                            lines.push(format!("wave › {fragment}"));
+                        }
+                    }
+                }
+            }
+            progress.items_shown = turn.items.len();
+        }
+
         // New prose since the last frame of this id, one line per fragment.
         // The wave's speech is the content: it prints whole, never elided.
         if turn.text.chars().count() > progress.text_chars {
@@ -309,6 +329,66 @@ mod tests {
 
     fn stream_message_item(id: &str, text: &str) -> String {
         format!("{{\"type\":\"message\",\"id\":\"{id}\",\"text\":\"{text}\",\"phase\":\"stream\"}}")
+    }
+
+    fn commentary_message_item(id: &str, text: &str) -> String {
+        format!(
+            "{{\"type\":\"message\",\"id\":\"{id}\",\"text\":\"{text}\",\"phase\":\"commentary\"}}"
+        )
+    }
+
+    /// The GUI curates `commentary` narration behind a disclosure; the live
+    /// follow has no such surface, so it prints the narration as the wave
+    /// speaking — the same reading it had before the fold kept it out of `text`.
+    /// Execution items stay hidden.
+    #[test]
+    fn commentary_items_render_as_the_wave_speaking() {
+        let mut renderer = Renderer::new();
+
+        assert!(renderer
+            .lines_for(&Frame {
+                event: "turn".into(),
+                data: turn_json("turn-10", "assistant", "", "running", "[]"),
+            })
+            .is_empty());
+
+        // A commentary increment reads as conversation, once.
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "turn-delta".into(),
+                data: turn_delta_json(
+                    "turn-10",
+                    &commentary_message_item("m-0", "Auditing the plan first."),
+                ),
+            }),
+            vec!["wave › Auditing the plan first."]
+        );
+
+        // The conclusion streams as prose after it.
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "turn-delta".into(),
+                data: turn_delta_json("turn-10", &stream_message_item("text-0", "Done.")),
+            }),
+            vec!["wave › Done."]
+        );
+
+        // A re-baselining whole-turn frame reprints nothing already shown.
+        assert!(renderer
+            .lines_for(&Frame {
+                event: "turn".into(),
+                data: turn_json(
+                    "turn-10",
+                    "assistant",
+                    "Done.",
+                    "completed",
+                    &format!(
+                        "[{}]",
+                        commentary_message_item("m-0", "Auditing the plan first.")
+                    ),
+                ),
+            })
+            .is_empty());
     }
 
     /// The wire the server actually sends now: a whole `turn` frame opens the

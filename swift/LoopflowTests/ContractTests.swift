@@ -137,6 +137,37 @@ struct ContractTests {
         #expect(roundTripped == delta)
     }
 
+    @Test("absorbing keeps commentary as a curatable item, not folded into prose")
+    func absorbingKeepsCommentaryAsItem() throws {
+        let opened = try ChatTurn(
+            id: "turn-10", role: .assistant, text: "", status: .running, items: [],
+            createdAt: "2026-07-10T17:52:05Z", from: nil, body: nil, activity: nil
+        )
+        // Operational narration the provider tagged `commentary` must survive as
+        // a discrete item so `turnPresentation` can fold it behind a disclosure;
+        // the conclusion stays the prose.
+        let withStep = try opened.absorbing(
+            .message(id: "m-0", text: "Using `wave_clarify` to audit the plan.", phase: "commentary")
+        )
+        let withConclusion = try withStep.absorbing(
+            .message(id: "m-1", text: "Clarification complete.", phase: "final_answer")
+        )
+
+        #expect(withConclusion.text == "Clarification complete.")
+        #expect(withConclusion.items.count == 1)
+        guard case let .message(_, stepText, phase) = withConclusion.items[0] else {
+            Issue.record("the commentary should ride as a message item")
+            return
+        }
+        #expect(phase == "commentary")
+        #expect(stepText.contains("wave_clarify"))
+
+        // And it curates: the conclusion leads, the narration folds into a step.
+        let view = turnPresentation(withConclusion)
+        #expect(view.conclusion == "Clarification complete.")
+        #expect(view.steps.count == 1)
+    }
+
     @Test("child activity cannot masquerade as an ordinary conversation turn")
     func childActivityEnvelopeIsChecked() throws {
         let activity = try fixtureJSON("dto/child_control_activity.json")

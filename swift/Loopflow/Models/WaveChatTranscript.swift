@@ -46,11 +46,14 @@ public struct TurnPresentation: Equatable, Sendable {
 
 /// Project one wire turn into the one human-facing conversation.
 ///
-/// Streamed prose (`turn.text`) is the conclusion. A `.message` item the harness
-/// tagged `commentary` is operational narration — it becomes a curated step;
-/// every other message (including `final_answer` and untagged prose) reads with
-/// the conclusion. A turn that is *only* commentary keeps that text as its
-/// conclusion rather than hiding all of itself.
+/// Prose (`turn.text`) is the conclusion — streamed fragments plus any
+/// `final_answer` or untagged message, joined by the fold (`ChatTurn.absorbing`).
+/// A `.message` item the provider tagged `commentary` is operational narration:
+/// the fold keeps it out of `text` and in `items`, and here it becomes a curated
+/// step. A turn that is *only* commentary keeps that text as its conclusion
+/// rather than hiding all of itself. A pure token-streamed turn carries no
+/// commentary tag, so it reads whole — the honest boundary until a harness tags
+/// its streamed segments.
 public func turnPresentation(_ turn: ChatTurn) -> TurnPresentation {
     var conclusion = turn.text
     var steps: [String] = []

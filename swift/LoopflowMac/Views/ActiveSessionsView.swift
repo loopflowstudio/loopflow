@@ -38,7 +38,12 @@ struct ActiveSessionsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(palette.background)
-        .task { await load() }
+        .task {
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
         .refreshable { await load() }
         .sheet(item: $openTarget) { target in
             HandoffAttachSheet(sessionId: target.id, query: query) { openTarget = nil }

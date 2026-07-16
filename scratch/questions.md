@@ -26,6 +26,19 @@ binary matching the DB and can record acknowledgment/advancement; the local shel
 `lf` cannot. This does not block the design or the registry-independent slices
 (PR 1 `lf handoff list` is pure `cargo`-testable code).
 
+## Verification gap: live Product Wave census not run against the real registry
+
+The contract's proof includes "the real Product Wave census agrees with CLI
+identity and counts." `ActiveSessionsCensus` is verified exhaustively against the
+mixed fixture (`ActiveSessionsCensusTests`, 8 tests), and the view compiles and
+loads from `lf roadmap` + `lf runs` + `lf handoff list`. But the live comparison
+could not run: the same migration collision makes `lf roadmap`/`lf runs`/`lf
+handoff list` error on this machine's shell. When the registry is reachable
+(matching binary), the check is: open Control from a Wave header and confirm the
+Active Sessions groups/rows match `lf roadmap` + `lf runs` + `lf handoff list
+--active` output by identity and count. The projection is pure, so a fixture
+match is strong evidence; the live run is the remaining confirmation.
+
 ## Decision taken (reversible): compose in Swift, complete one contract in Rust
 
 Considered a single unified `lf sessions --json` census projection in Rust vs.

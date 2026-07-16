@@ -167,24 +167,25 @@ impl SqliteStore {
         new_identifier: &str,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let current = conn
-            .query_row(
-                "SELECT id, issue_identifier, status, process_lease_state
-                 FROM task_sessions WHERE issue_id=?1",
-                params![issue_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some((session_id, current_identifier, status, lease_state)) = current else {
+        // A team migration rebinds the *current* successor for an issue, not a
+        // terminal predecessor kept as history. `issue_id` can now match several
+        // rows (one live successor plus completed/abandoned predecessors), so
+        // resolve the current one through the same rule as the operational
+        // lookups rather than `query_row`, which errors on the second row.
+        let query = format!("{TASK_SESSION_COLUMNS} WHERE issue_id=?1");
+        let mut statement = conn.prepare(&query)?;
+        let rows = statement.query_map(params![issue_id], map_task_session_row)?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        let Some(current) = resolve_current_task_session(issue_id, sessions)? else {
             return Ok(false);
         };
+        let session_id = current.id.as_str().to_string();
+        let current_identifier = current.launch.issue.identifier.as_str();
+        let status = current.status.as_str();
+        let lease_state = current.latest_process.as_ref().map(|process| process.state);
         if current_identifier == new_identifier {
             return Ok(false);
         }
@@ -193,8 +194,11 @@ impl SqliteStore {
                 "Task Session {session_id} identifies issue {issue_id} as {current_identifier}, not {old_identifier}"
             )));
         }
-        if matches!(status.as_str(), "starting" | "running")
-            || matches!(lease_state.as_deref(), Some("reserved" | "active"))
+        if matches!(status, "starting" | "running")
+            || matches!(
+                lease_state,
+                Some(ChildLeaseState::Reserved) | Some(ChildLeaseState::Active)
+            )
         {
             return Err(StoreError::InvalidData(format!(
                 "Task Session {session_id} has an active body; stop it before changing {old_identifier} to {new_identifier}"
@@ -203,10 +207,10 @@ impl SqliteStore {
         let changed = conn.execute(
             "UPDATE task_sessions
              SET issue_identifier=?3, updated_at=?4
-             WHERE issue_id=?1 AND issue_identifier=?2
+             WHERE id=?1 AND issue_identifier=?2
                AND status NOT IN ('starting', 'running')
                AND COALESCE(process_lease_state, 'finished') NOT IN ('reserved', 'active')",
-            params![issue_id, old_identifier, new_identifier, now_unix()],
+            params![session_id, old_identifier, new_identifier, now_unix()],
         )?;
         if changed == 0 {
             return Err(StoreError::InvalidData(format!(
@@ -691,31 +695,26 @@ impl SqliteStore {
 
     pub fn task_session_by_issue(&self, issue: &str) -> StoreResult<Option<TaskSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A terminal Task Session keeps its row for attributable history while a
-        // successor carries its direction forward, so one Linear issue may have a
-        // terminal predecessor plus a single non-terminal successor. Resolve to
-        // the non-terminal Session if any, else the newest terminal one — never
-        // error on a count >1. The partial unique index guarantees at most one
-        // non-terminal Session per issue.
-        let query = format!(
-            "{TASK_SESSION_COLUMNS} WHERE issue_id = ?1 OR issue_identifier = ?1 \
-             ORDER BY CASE WHEN status IN ('completed', 'abandoned') THEN 1 ELSE 0 END, \
-             created_at DESC"
-        );
+        let query = format!("{TASK_SESSION_COLUMNS} WHERE issue_id = ?1 OR issue_identifier = ?1");
         let mut statement = conn.prepare(&query)?;
-        let mut rows = statement.query_map(params![issue], map_task_session_row)?;
-        match rows.next() {
-            Some(row) => Ok(Some(row?)),
-            None => Ok(None),
+        let rows = statement.query_map(params![issue], map_task_session_row)?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
         }
+        resolve_current_task_session(issue, sessions)
     }
 
     pub fn task_session_by_worktree(&self, worktree: &str) -> StoreResult<Option<TaskSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!("{TASK_SESSION_COLUMNS} WHERE worktree = ?1");
-        conn.query_row(&query, params![worktree], map_task_session_row)
-            .optional()
-            .map_err(StoreError::from)
+        let mut statement = conn.prepare(&query)?;
+        let rows = statement.query_map(params![worktree], map_task_session_row)?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        resolve_current_task_session(worktree, sessions)
     }
 
     pub fn list_task_sessions(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<TaskSession>> {
@@ -2850,6 +2849,51 @@ fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
     session
         .validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
+/// Select the current Task Session from every row sharing an issue, identifier,
+/// or worktree key. The unique live successor wins; terminal predecessors
+/// (completed/abandoned) are history and never win while a live successor
+/// exists. When only terminal history remains, the most recent predecessor is
+/// returned so `task status`, completion, and PR webhook reads still resolve a
+/// Task rather than reporting none. Two or more live successors are actionable
+/// ambiguity, not a silent pick — the partial unique indexes guarantee one live
+/// per key, but a lookup keyed on `issue_id OR issue_identifier` can still match
+/// two different live rows on the two columns.
+fn resolve_current_task_session(
+    key: &str,
+    sessions: Vec<TaskSession>,
+) -> StoreResult<Option<TaskSession>> {
+    let mut live: Vec<TaskSession> = sessions
+        .iter()
+        .filter(|session| !session.status.is_terminal())
+        .cloned()
+        .collect();
+    match live.len() {
+        0 => Ok(sessions
+            .into_iter()
+            .max_by_key(|session| (session.updated_at, session.created_at))),
+        1 => Ok(live.pop()),
+        count => {
+            live.sort_by_key(|session| session.created_at);
+            let detail = live
+                .iter()
+                .map(|session| {
+                    format!(
+                        "{} ({}, {})",
+                        session.id.as_str(),
+                        session.launch.issue.identifier,
+                        session.status.as_str()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(StoreError::InvalidData(format!(
+                "{count} live Task Sessions resolve to {key:?}: {detail}; \
+                 stop all but one before operating"
+            )))
+        }
+    }
 }
 
 fn validate_handoff_request(request: &ChildBodyHandoffRequest) -> StoreResult<()> {

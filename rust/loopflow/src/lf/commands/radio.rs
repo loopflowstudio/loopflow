@@ -25,7 +25,9 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::engine::wave_context::{resolve_ambient_channel, AmbientChannelRef};
+use crate::engine::wave_context::{
+    resolve_ambient_channel, resolve_managed_wave_name, AmbientChannelRef,
+};
 use crate::lf::commands::chat::{parent_wave, CliContext};
 use crate::lf::commands::util::message_text;
 use crate::store::SharedStore;
@@ -57,7 +59,7 @@ pub(crate) async fn run_with_context(
         eprintln!("no registry store here; broadcast dropped");
         return Ok(());
     };
-    let ambient = ambient_wave(context, store).await;
+    let ambient = ambient_wave(context, store).await?;
     let own = ambient.as_ref().map(AmbientWave::channel);
     let Some(channel) = target_channel(store, channel, parent, ambient.as_ref()).await? else {
         eprintln!("no wave here; broadcast dropped");
@@ -93,17 +95,30 @@ impl AmbientWave {
 
 /// The invoking context: the shared ambient rule (`LF_CHANNEL`, else
 /// `LF_WAVE_ID`), with the Wave row resolved when the registry has it.
-pub(crate) async fn ambient_wave(context: &CliContext, store: &SharedStore) -> Option<AmbientWave> {
-    match resolve_ambient_channel(
+/// `Ok(None)` is the no-context drop; a stale `LF_WAVE_ID` is a loud error, not
+/// a silent drop — the context is wrong, not absent.
+pub(crate) async fn ambient_wave(
+    context: &CliContext,
+    store: &SharedStore,
+) -> Result<Option<AmbientWave>> {
+    let Some(reference) = resolve_ambient_channel(
         context.env_channel.as_deref(),
         context.env_wave_id.as_deref(),
-    )? {
+    ) else {
+        return Ok(None);
+    };
+    match reference {
         AmbientChannelRef::WaveId(id) => {
-            let row = store.get_wave(&id.parse().ok()?).await.ok().flatten()?;
-            Some(AmbientWave {
-                channel: wave_channel_name(row.name()),
-                row: Some(row),
-            })
+            // The shared ambient-Wave rule: durable UUID → registry name, else a
+            // hand-set name used directly. A stale UUID errors loudly.
+            let name = resolve_managed_wave_name(Some(&**store), None, Some(&id))
+                .await
+                .map_err(|err| anyhow!("{err}"))?;
+            let row = store.get_wave_by_name(&name).await.ok().flatten();
+            Ok(Some(AmbientWave {
+                channel: wave_channel_name(&name),
+                row,
+            }))
         }
         AmbientChannelRef::Channel(name) => {
             let row = store
@@ -111,15 +126,18 @@ pub(crate) async fn ambient_wave(context: &CliContext, store: &SharedStore) -> O
                 .await
                 .ok()
                 .flatten();
-            Some(AmbientWave { channel: name, row })
+            Ok(Some(AmbientWave { channel: name, row }))
         }
     }
 }
 
 /// The invoking context's channel name — what a subscriber tunes in to by
 /// default.
-pub(crate) async fn ambient_channel(context: &CliContext, store: &SharedStore) -> Option<String> {
-    Some(ambient_wave(context, store).await?.channel)
+pub(crate) async fn ambient_channel(
+    context: &CliContext,
+    store: &SharedStore,
+) -> Result<Option<String>> {
+    Ok(ambient_wave(context, store).await?.map(|wave| wave.channel))
 }
 
 /// Where the broadcast lands: an explicit channel, the parent wave's channel,
@@ -227,6 +245,53 @@ mod tests {
         let heard = store.read_bus_after(heard[0].id).await.expect("bus rows");
         assert_eq!(heard[0].channel, "ship.a");
         assert_eq!(heard[0].byline, "ship.b");
+    }
+
+    /// A hand-set `LF_WAVE_ID=<name>` (not a UUID) publishes on that wave's
+    /// channel — before the shared resolver the `id.parse()` failed and the
+    /// broadcast dropped silently.
+    #[tokio::test]
+    async fn a_hand_set_name_env_publishes_on_its_channel() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let wave = make_wave("goals", tmp.path(), None);
+        store.create_wave(&wave).await.expect("seed wave");
+
+        let context = CliContext {
+            store: Some(store.clone()),
+            repo: None,
+            env_wave_id: Some("goals".to_string()),
+            env_channel: None,
+        };
+        run_with_context(&context, &["all green".into()], None, false, None)
+            .await
+            .expect("publish");
+
+        let rows = store.read_bus_after(0).await.expect("bus rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].channel, "goals");
+        assert_eq!(rows[0].byline, "goals");
+    }
+
+    /// A stale `LF_WAVE_ID=<uuid>` (no registry row) is a loud error, not the
+    /// no-subscriber drop — the context is wrong, not absent.
+    #[tokio::test]
+    async fn a_stale_wave_id_is_a_loud_error() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let stale = crate::id::WaveId::new().to_string();
+
+        let context = CliContext {
+            store: Some(store.clone()),
+            repo: None,
+            env_wave_id: Some(stale.clone()),
+            env_channel: None,
+        };
+        let err = run_with_context(&context, &["nobody".into()], None, false, None)
+            .await
+            .expect_err("stale id is loud");
+        assert!(err.to_string().contains("stale"), "{err}");
+        assert!(store.read_bus_after(0).await.expect("bus rows").is_empty());
     }
 
     /// Publish-to-no-subscriber: no wave context anywhere drops with exit 0.

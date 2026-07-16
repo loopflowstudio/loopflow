@@ -1056,8 +1056,19 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             schedule,
         } => {
             let repo_root = find_repo_root()?;
+            // The one ambient-Wave rule, like every PM arm: `--wave` wins, else
+            // `LF_WAVE_ID` (UUID → registry name, hand-set name as fallback). A
+            // scheduled invocation needs a concrete wave, so `NoContext` is the
+            // familiar "pass --wave" error.
+            let wave = crate::engine::wave_context::resolve_managed_wave_name_sync(wave.as_deref())
+                .map_err(|err| match err {
+                    crate::engine::wave_context::WaveResolveError::NoContext => {
+                        anyhow!("cannot determine wave; pass --wave <name>")
+                    }
+                    other => other.into(),
+                })?;
             let spec = CronSpec {
-                wave: wave.clone(),
+                wave,
                 flow: flow.clone(),
                 schedule: crate::ops::parse_schedule(schedule)?,
                 working_directory: repo_root,

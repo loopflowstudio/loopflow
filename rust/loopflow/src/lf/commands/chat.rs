@@ -45,7 +45,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::chat::turns::ChatTurn;
 use crate::engine::wave_context::{
-    read_endpoint_pointer, resolve_ambient_channel, wave_origin, AmbientChannelRef,
+    read_endpoint_pointer, resolve_ambient_channel, resolve_managed_wave_name, wave_origin,
+    AmbientChannelRef,
 };
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
@@ -393,24 +394,36 @@ pub(crate) async fn resolve_target(
 
     // The invoking context's channel: the shared ambient rule (LF_CHANNEL
     // first, else LF_WAVE_ID) — the same resolution context assembly uses. The
-    // invoking WAVE is the channel's family head.
+    // invoking WAVE is the channel's family head. Only resolved when the target
+    // is the ambient wave (default or `--parent`); an explicit `--wave` always
+    // wins, so its stale/mis-set env is never consulted.
     let mut own_row: Option<Wave> = None;
     let mut own_name: Option<String> = None;
-    match resolve_ambient_channel(env_channel, env_wave_id) {
-        Some(AmbientChannelRef::WaveId(id)) => {
-            if let (Some(store), Ok(id)) = (store, id.parse()) {
-                own_row = store.get_wave(&id).await?;
+    if args.wave.is_none() {
+        match resolve_ambient_channel(env_channel, env_wave_id) {
+            Some(AmbientChannelRef::WaveId(id)) => {
+                // The shared ambient-Wave rule: `LF_WAVE_ID` as a durable UUID
+                // maps to its registry name, else a hand-set name is used
+                // directly. A UUID the registry has never seen is a loud
+                // `StaleIdentity` error, never a silent drop.
+                let name = resolve_managed_wave_name(store.map(|store| &**store), None, Some(&id))
+                    .await
+                    .map_err(|err| anyhow!("{err}"))?;
+                own_row = match store {
+                    Some(store) => store.get_wave_by_name(&name).await?,
+                    None => None,
+                };
+                own_name = Some(name);
             }
-            own_name = own_row.as_ref().map(|row| row.name().to_string());
-        }
-        Some(AmbientChannelRef::Channel(name)) => {
-            let head = family_head(&name).to_string();
-            if let Some(store) = store {
-                own_row = store.get_wave_by_name(&head).await?;
+            Some(AmbientChannelRef::Channel(name)) => {
+                let head = family_head(&name).to_string();
+                if let Some(store) = store {
+                    own_row = store.get_wave_by_name(&head).await?;
+                }
+                own_name = Some(head);
             }
-            own_name = Some(head);
+            None => {}
         }
-        None => {}
     }
 
     let (target_row, target_name): (Option<Wave>, String) = if let Some(name) = &args.wave {
@@ -625,6 +638,56 @@ mod tests {
         .expect("wave context");
         assert_eq!(resolved.name, "ship");
         assert_eq!(resolved.endpoint.as_deref(), Some("127.0.0.1:4242"));
+    }
+
+    /// A hand-set `LF_WAVE_ID=<name>` (not a UUID) resolves to that wave —
+    /// before the shared resolver this fell through `id.parse()` and dropped
+    /// the message silently.
+    #[tokio::test]
+    async fn resolve_target_uses_a_hand_set_name_env() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(&origin).unwrap();
+        let (addr, _runtime, _inbox) = boot_server(&origin, "ship").await;
+        let wave = make_wave("ship", &origin, None);
+        store.create_wave(&wave).await.expect("seed wave");
+
+        let resolved = resolve_target(
+            &WaveTargetArgs::default(),
+            Some(&store),
+            None,
+            Some("ship"),
+            None,
+        )
+        .await
+        .expect("resolve")
+        .expect("hand-set name is a wave context");
+        assert_eq!(resolved.name, "ship");
+        assert_eq!(resolved.endpoint.as_deref(), Some(addr.as_str()));
+    }
+
+    /// A stale `LF_WAVE_ID=<uuid>` (registry has no such row) is a loud error,
+    /// not a silent drop — the context is wrong, not absent. Reads surface it;
+    /// publishes no longer succeed-as-drop on it.
+    #[tokio::test]
+    async fn resolve_target_errors_on_a_stale_wave_id() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let stale = crate::id::WaveId::new().to_string();
+
+        let err = resolve_target(
+            &WaveTargetArgs::default(),
+            Some(&store),
+            None,
+            Some(&stale),
+            None,
+        )
+        .await
+        .expect_err("stale id is a loud error");
+        let message = err.to_string();
+        assert!(message.contains("stale"), "{message}");
+        assert!(message.contains(&stale), "{message}");
     }
 
     /// Publish-to-no-subscriber: no env wave, no registry, and a repo that is

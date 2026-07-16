@@ -1208,9 +1208,9 @@ pub enum PrCommand {
 pub enum CronCommand {
     /// Install or replace a scheduled lf invocation
     Add {
-        /// Wave name passed to `lf <flow> --wave <wave>`
+        /// Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted)
         #[arg(short = 'w', long = "wave")]
-        wave: String,
+        wave: Option<String>,
         /// Flow or skill name to run
         #[arg(long = "flow")]
         flow: String,

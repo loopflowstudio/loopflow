@@ -511,7 +511,11 @@ mod tests {
     fn share_is_of_input_plus_output() {
         assert_eq!(format_share(50, 200), "25%");
         assert_eq!(format_share(0, 0), "-");
-        assert_eq!(format_share(1, 1_000_000), "<1%", "small spend stays visible");
+        assert_eq!(
+            format_share(1, 1_000_000),
+            "<1%",
+            "small spend stays visible"
+        );
         assert_eq!(format_share(0, 200), "0%");
     }
 

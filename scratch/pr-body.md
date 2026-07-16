@@ -51,7 +51,7 @@ by agent-session impressions.
 
 - Full repository gate passed after rebasing onto current main.
 - Python: 59 passed.
-- Rust: formatting and clippy passed; 1,409 tests passed, 2 skipped.
+- Rust: formatting and clippy passed; 1,418 tests passed, 2 skipped.
 - Website: 59 passed, 3 skipped.
 - Swift: 133 tests across 23 suites passed; multiplatform boundaries passed.
 - E2E smoke passed; Xcode app/UI-test `build-for-testing` passed.

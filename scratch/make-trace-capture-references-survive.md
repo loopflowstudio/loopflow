@@ -235,16 +235,17 @@ tombstone a file that a correct resolver would have found. `lf_home_dir()` is
 
 ## Scope
 
-- **In scope:** `.020` migration adding `pruned` (next free ordinal post-rebase;
-  `.018`/`.019` claimed on main by #986 and `task_pr_github_observation`);
+- **In scope:** `.021` migration adding `pruned` (next free ordinal post-rebase;
+  `.018`/`.019`/`.020` claimed on main by #986, `task_pr_github_observation`, and
+  #1010 `task_pr_linear_linkage`);
   `finish()`/write-path unaffected but reason plumbing for tombstones; `lf runs
   reconcile [--apply] [--all] [--json]`; `check_capture` `pruned` arm + pruned
   count in detail; `trace_root()` unification with `lf_home_dir()` (already
   applied in the working patch); behavior tests; a production-shaped
   doctor+reconcile proof against a **copied** store.
-- **Sequencing (directive v3):** #986 merged 2026-07-16, so rebase onto main
-  first, allocate `.020` mechanically, then finish reconcile/tombstone impl +
-  tests. Keep canonical main clean.
+- **Sequencing:** rebased onto main after #986 and #1010 merged (2026-07-16), so
+  the migration was reallocated `.020` → `.021` mechanically against main's actual
+  high-water mark. Keep canonical main clean.
 - **Out of scope:** building trace retention/GC (only the state + ordering
   contract it will use); rewriting or deleting the production DB by hand; changes
   to `agent_turns`/context schema; W2-236's shared classification helpers; the

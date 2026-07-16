@@ -1160,7 +1160,8 @@ fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()>
 /// - `B` ancestor of `M` — `O` advanced past a stale or squash-merged base. Safe:
 ///   heal `base_commit → M` so the durable evidence and `lf task changes` stay
 ///   truthful, then publish the minimal `M..H` range.
-/// - divergent — ambiguous ancestry; refuse.
+/// - divergent — ambiguous ancestry; refuse, naming the commits and files on
+///   both sides (`M..B` and `B..M`) plus the safe rebase.
 ///
 /// Empty-range and dirty-worktree checks stay with `request_task_pr_publication`,
 /// which runs after the publication path commits pending work; this gate proves
@@ -1256,11 +1257,24 @@ async fn verify_task_pr_range_with_authority(
         return Ok(());
     }
 
-    // Neither is an ancestor of the other: genuinely ambiguous ancestry.
+    // Neither is an ancestor of the other: genuinely ambiguous ancestry. Name
+    // the commits and files on both sides so the user can identify exactly which
+    // work is foreign without opening raw internals.
+    let base_side = format!("{merge_base}..{base}");
+    let upstream_side = format!("{base}..{merge_base}");
+    let base_commits = git_output(repo, &["log", "--oneline", "--no-decorate", &base_side])?;
+    let base_files = git_output(repo, &["diff", "--name-only", &base_side])?;
+    let upstream_commits =
+        git_output(repo, &["log", "--oneline", "--no-decorate", &upstream_side])?;
+    let upstream_files = git_output(repo, &["diff", "--name-only", &upstream_side])?;
     Err(task_error(format!(
         "Task {identifier} PR base {} and {base_ref} have diverged with no common lineage at \
-         the recorded base. Refused before any push. Re-cut the branch from {base_ref} or run \
-         git rebase --onto {base_ref} {} {branch}",
+         the recorded base. Refused before any push.\n\
+         Commits on the recorded base not on {base_ref}:\n{base_commits}\
+         affecting files:\n{base_files}\n\
+         Commits on {base_ref} not reachable from the recorded base:\n{upstream_commits}\
+         affecting files:\n{upstream_files}\n\
+         Recover with:\n  git rebase --onto {base_ref} {} {branch}",
         short(&base),
         short(&base),
     )))
@@ -4446,6 +4460,182 @@ mod tests {
         verify_task_pr_range_with_authority(&store, &session, None, repo.path())
             .await
             .expect("rotated continuation PR verifies");
+    }
+
+    #[tokio::test]
+    async fn verify_refuses_divergent_ancestry_naming_both_sides() {
+        let repo = TestRepo::new();
+        let origin_tip = repo.head_sha(); // P
+
+        // A foreign commit advances local main ahead of origin (not pushed).
+        repo.create_file("foreign.txt", "not this task's work\n");
+        repo.stage_all();
+        repo.commit("foreign canonical-main commit");
+        let contaminated_base = repo.head_sha(); // F = P → F
+
+        // Cut the task branch from the contaminated base.
+        let branch = "jack/divergent";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "task work\n");
+        repo.stage_all();
+        repo.commit("task commit");
+
+        // Undo the foreign commit on main and advance origin with a *different*
+        // commit so the recorded base and origin diverge from P.
+        repo.checkout("main");
+        git(repo.path(), &["reset", "--hard", &origin_tip]);
+        repo.create_file("upstream.txt", "landed upstream\n");
+        repo.stage_all();
+        repo.commit("upstream advance");
+        repo.push(); // origin/main = P → U
+
+        // Rebase the task branch onto the current origin, simulating a manual
+        // recovery that forgot to update the recorded base. After this, the
+        // branch history is U → task', but the record still says base = F.
+        repo.checkout(branch);
+        git(
+            repo.path(),
+            &[
+                "rebase",
+                "--onto",
+                "origin/main",
+                &contaminated_base,
+                branch,
+            ],
+        );
+
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
+
+        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect_err("divergent ancestry must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("diverged"),
+            "expected divergence refusal, got: {message}"
+        );
+        // The base side (M..B) names the foreign commit.
+        assert!(
+            message.contains("foreign canonical-main commit"),
+            "refusal must name the base-side foreign commit, got: {message}"
+        );
+        assert!(
+            message.contains("foreign.txt"),
+            "refusal must name the base-side file, got: {message}"
+        );
+        // The upstream side (B..M) names the upstream commit.
+        assert!(
+            message.contains("upstream advance"),
+            "refusal must name the upstream-side commit, got: {message}"
+        );
+        assert!(
+            message.contains("upstream.txt"),
+            "refusal must name the upstream-side file, got: {message}"
+        );
+        assert!(
+            message.contains("rebase --onto"),
+            "refusal must print the recovery action, got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_refuses_contaminated_range_without_a_remote() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha(); // P
+
+        // Drop the remote: the no-remote path must still catch contamination.
+        git(repo.path(), &["remote", "remove", "origin"]);
+
+        // Advance local main with a foreign commit, cut the branch from it, then
+        // reset main to P — the recorded base is off-local-main.
+        repo.create_file("foreign.txt", "not this task's work\n");
+        repo.stage_all();
+        repo.commit("foreign local-main commit");
+        let contaminated_base = repo.head_sha();
+
+        let branch = "jack/no-remote-contaminated";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "task work\n");
+        repo.stage_all();
+        repo.commit("task commit");
+
+        repo.checkout("main");
+        git(repo.path(), &["reset", "--hard", &base]);
+        repo.checkout(branch);
+
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
+
+        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect_err("no-remote contaminated range must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("contaminated"),
+            "expected contamination refusal, got: {message}"
+        );
+        assert!(
+            message.contains("foreign local-main commit"),
+            "refusal must name the foreign commit, got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_refuses_contaminated_range_after_squash_merged_parent() {
+        // Serial PR shape: PR1 was squash-merged, so origin/main carries a
+        // squash commit rather than PR1's original commits. PR2 was cut from
+        // PR1's original tip (not the squash), so its recorded base carries
+        // commits origin/main doesn't have — the contaminated case.
+        let repo = TestRepo::new();
+
+        // PR1: two commits cut from the initial origin tip.
+        let first_branch = "jack/pr-one";
+        repo.create_branch(first_branch);
+        repo.create_file("pr1-a.txt", "a\n");
+        repo.stage_all();
+        repo.commit("PR1 first commit");
+        repo.create_file("pr1-b.txt", "b\n");
+        repo.stage_all();
+        repo.commit("PR1 second commit");
+        let pr1_tip = repo.head_sha();
+
+        // Squash-merge PR1: origin/main gets a single squash commit on P.
+        repo.checkout("main");
+        git(repo.path(), &["merge", "--squash", first_branch]);
+        repo.stage_all();
+        repo.commit("squash-merge PR1");
+        repo.push();
+
+        // PR2 cut from PR1's original tip (the pre-squash branch), not from the
+        // squash commit — the real-world mistake this test catches.
+        let second_branch = "jack/pr-two";
+        git(repo.path(), &["branch", second_branch, &pr1_tip]);
+        repo.checkout(second_branch);
+        repo.create_file("pr2.txt", "PR2 work\n");
+        repo.stage_all();
+        repo.commit("PR2 commit");
+
+        let (_home, store, session, _pr) = rotation_task(&repo, second_branch, &pr1_tip).await;
+
+        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect_err("squash-merged parent contamination must refuse");
+        let message = err.to_string();
+        assert!(
+            message.contains("contaminated"),
+            "expected contamination refusal after squash-merge, got: {message}"
+        );
+        assert!(
+            message.contains("PR1 first commit"),
+            "refusal must name the first pre-squash commit, got: {message}"
+        );
+        assert!(
+            message.contains("PR1 second commit"),
+            "refusal must name the second pre-squash commit, got: {message}"
+        );
+        assert!(
+            message.contains("rebase --onto"),
+            "refusal must print the recovery action, got: {message}"
+        );
     }
 
     #[test]

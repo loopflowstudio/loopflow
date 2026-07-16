@@ -80,6 +80,8 @@ pub struct TraceCaptureContext {
     pub repo: PathBuf,
     pub worktree: PathBuf,
     pub wave: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
 }
@@ -130,7 +132,7 @@ impl ContextCoverage {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ContextAssetKind {
@@ -339,6 +341,8 @@ pub struct ContextAssetSpec {
     pub source_path: Option<String>,
     pub included_by: String,
     pub content: String,
+    /// Attribute intentional duplicate renderings; false for speech and short vendor names.
+    pub match_all_occurrences: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -496,11 +500,34 @@ fn render_attributed_channel(
         while let Some(relative) = text[offset..].find(&spec.content) {
             let start = offset + relative;
             let end = start + spec.content.len();
-            if claimed
+            let mut blockers = claimed
                 .iter()
-                .all(|(other_start, other_end, _)| end <= *other_start || start >= *other_end)
-            {
-                claimed.push((start, end, spec));
+                .filter_map(|(other_start, other_end, _)| {
+                    let overlap_start = start.max(*other_start);
+                    let overlap_end = end.min(*other_end);
+                    (overlap_start < overlap_end).then_some((overlap_start, overlap_end))
+                })
+                .collect::<Vec<_>>();
+            blockers.sort_unstable();
+
+            // Specs are ordered from specific sources to enclosing messages.
+            // Preserve earlier ownership and give the enclosing source its gaps.
+            let mut cursor = start;
+            for (blocker_start, blocker_end) in blockers {
+                if blocker_start > cursor {
+                    let mut fragment = spec.clone();
+                    fragment.content = text[cursor..blocker_start].to_string();
+                    claimed.push((cursor, blocker_start, fragment));
+                }
+                cursor = cursor.max(blocker_end);
+            }
+            if cursor < end {
+                let mut fragment = spec.clone();
+                fragment.content = text[cursor..end].to_string();
+                claimed.push((cursor, end, fragment));
+            }
+
+            if !spec.match_all_occurrences {
                 break;
             }
             offset = end;
@@ -523,6 +550,7 @@ fn render_attributed_channel(
         source_path: None,
         included_by: "provider_invocation".to_string(),
         content: content.to_string(),
+        match_all_occurrences: false,
     };
 
     let mut segments = Vec::new();
@@ -714,6 +742,8 @@ pub struct AgentLaunchRow {
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
     pub provider: String,
     pub model: Option<String>,
     pub surface: String,
@@ -747,6 +777,9 @@ pub struct AgentTurnRow {
     pub task_tokens: i64,
     pub supplied_context_tokens: i64,
     pub provider_input_tokens: Option<i64>,
+    pub provider_total_input_tokens: Option<i64>,
+    pub peak_input_tokens: Option<i64>,
+    pub context_window_tokens: Option<i64>,
     pub provider_output_tokens: Option<i64>,
     pub reasoning_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
@@ -966,6 +999,8 @@ impl TraceCapture {
             wave: context.wave,
             flow: context.flow,
             skill: context.skill,
+            project: context.project,
+            task: context.task,
             provider: start.provider,
             model: start.model,
             surface: start.surface,
@@ -1003,6 +1038,9 @@ impl TraceCapture {
             task_tokens,
             supplied_context_tokens: system_tokens + task_tokens,
             provider_input_tokens: None,
+            provider_total_input_tokens: None,
+            peak_input_tokens: None,
+            context_window_tokens: None,
             provider_output_tokens: None,
             reasoning_tokens: None,
             cache_read_tokens: None,
@@ -1105,6 +1143,9 @@ impl TraceCapture {
             task_tokens,
             supplied_context_tokens: task_tokens,
             provider_input_tokens: None,
+            provider_total_input_tokens: None,
+            peak_input_tokens: None,
+            context_window_tokens: None,
             provider_output_tokens: None,
             reasoning_tokens: None,
             cache_read_tokens: None,
@@ -1155,6 +1196,11 @@ impl TraceCapture {
     fn apply_usage_to_turn(&mut self) {
         if self.usage_observed {
             self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
+            self.turn.provider_total_input_tokens =
+                self.usage.total_input_tokens.map(|value| value as i64);
+            self.turn.peak_input_tokens = self.usage.peak_input_tokens.map(|value| value as i64);
+            self.turn.context_window_tokens =
+                self.usage.context_window_tokens.map(|value| value as i64);
             self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
             self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
             self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
@@ -1216,6 +1262,8 @@ impl TraceCapture {
                 self.usage.cache_read_tokens = Some(
                     self.usage.cache_read_tokens.unwrap_or(0) + cache_read_tokens.unwrap_or(0),
                 );
+                self.usage.total_input_tokens =
+                    Some(self.usage.input_tokens + self.usage.cache_read_tokens.unwrap_or(0));
                 RecordedConversationPayload::Usage {
                     usage: self.usage.clone(),
                 }
@@ -1563,6 +1611,7 @@ mod tests {
                 source_path: None,
                 included_by: "test".to_string(),
                 content: "GUIDE".to_string(),
+                match_all_occurrences: false,
             }],
             Vec::new(),
         );
@@ -1589,6 +1638,122 @@ mod tests {
     }
 
     #[test]
+    fn semantic_attribution_covers_repeated_and_nested_sources() {
+        let prepared = PreparedTurnContext::from_attributed_prompts(
+            "",
+            "GUIDE\nouter MEMORY remainder\nGUIDE",
+            vec![
+                ContextAssetSpec {
+                    channel: ContextChannel::Task,
+                    kind: ContextAssetKind::OperatingInstructions,
+                    scope: ContextScope::Global,
+                    label: "guide".to_string(),
+                    source_path: None,
+                    included_by: "test".to_string(),
+                    content: "GUIDE".to_string(),
+                    match_all_occurrences: true,
+                },
+                ContextAssetSpec {
+                    channel: ContextChannel::Task,
+                    kind: ContextAssetKind::Memory,
+                    scope: ContextScope::Wave,
+                    label: "memory".to_string(),
+                    source_path: None,
+                    included_by: "test".to_string(),
+                    content: "MEMORY".to_string(),
+                    match_all_occurrences: true,
+                },
+                ContextAssetSpec {
+                    channel: ContextChannel::Task,
+                    kind: ContextAssetKind::Goal,
+                    scope: ContextScope::Step,
+                    label: "inherited launch goal".to_string(),
+                    source_path: None,
+                    included_by: "message".to_string(),
+                    content: "outer MEMORY remainder".to_string(),
+                    match_all_occurrences: false,
+                },
+            ],
+            Vec::new(),
+        );
+
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::OperatingInstructions)
+                .count(),
+            2
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Goal)
+                .count(),
+            2
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Assembly)
+                .map(|asset| asset.bytes)
+                .sum::<u64>(),
+            2
+        );
+        assert_eq!(
+            prepared.total_tokens(),
+            prepared
+                .assets()
+                .map(|asset| asset.attributed_tokens)
+                .sum::<u64>()
+        );
+    }
+
+    #[test]
+    fn first_match_sources_do_not_claim_matching_words_elsewhere() {
+        let prepared = PreparedTurnContext::from_attributed_prompts(
+            "",
+            "go then go",
+            vec![ContextAssetSpec {
+                channel: ContextChannel::Task,
+                kind: ContextAssetKind::UserMessage,
+                scope: ContextScope::User,
+                label: "user message".to_string(),
+                source_path: None,
+                included_by: "message".to_string(),
+                content: "go".to_string(),
+                match_all_occurrences: false,
+            }],
+            Vec::new(),
+        );
+
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::UserMessage)
+                .count(),
+            1
+        );
+        assert_eq!(
+            prepared
+                .task
+                .assets
+                .iter()
+                .filter(|asset| asset.kind == ContextAssetKind::Assembly)
+                .map(|asset| asset.bytes)
+                .sum::<u64>(),
+            8
+        );
+    }
+
+    #[test]
     fn large_prompt_attribution_remains_exact() {
         let sections = (0..12)
             .map(|index| {
@@ -1610,6 +1775,7 @@ mod tests {
                 source_path: None,
                 included_by: "test".to_string(),
                 content,
+                match_all_occurrences: false,
             })
             .collect();
 
@@ -1637,6 +1803,8 @@ mod tests {
             repo: guard.home().to_path_buf(),
             worktree: guard.home().to_path_buf(),
             wave: Some("intelligence".to_string()),
+            project: Some("context".to_string()),
+            task: Some("W2-71".to_string()),
             flow: None,
             skill: Some("implement".to_string()),
         };
@@ -1661,6 +1829,8 @@ mod tests {
         let launches = store.agent_launches_matching(run_id.as_str()).unwrap();
         assert_eq!(launches.len(), 1);
         assert_eq!(launches[0].capture_status, "complete");
+        assert_eq!(launches[0].project.as_deref(), Some("context"));
+        assert_eq!(launches[0].task.as_deref(), Some("W2-71"));
         assert!(!std::path::Path::new(&launches[0].artifact_dir).is_absolute());
         let conversation = super::resolve_artifact(&launches[0].conversation_path).unwrap();
         assert!(conversation.is_file());

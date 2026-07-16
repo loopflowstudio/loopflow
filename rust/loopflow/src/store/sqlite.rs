@@ -1385,11 +1385,12 @@ impl SqliteStore {
         tx.execute(
             "INSERT INTO agent_launches (
                 id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                skill, provider, model, surface, capture_status, incomplete_reason, outcome,
-                artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                provider_session_path, conversation_event_count, conversation_bytes
+                skill, project, task, provider, model, surface, capture_status,
+                incomplete_reason, outcome, artifact_dir, conversation_path,
+                provider_events_path, provider_session_id, provider_session_path,
+                conversation_event_count, conversation_bytes
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             params![
                 launch.id,
                 launch.run_id,
@@ -1401,6 +1402,8 @@ impl SqliteStore {
                 launch.wave,
                 launch.flow,
                 launch.skill,
+                launch.project,
+                launch.task,
                 launch.provider,
                 launch.model,
                 launch.surface,
@@ -1502,9 +1505,10 @@ impl SqliteStore {
         // append order when a fast flow starts several agents in one second.
         self.query_agent_launches(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, provider, model, surface, capture_status, incomplete_reason, outcome,
-                    artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                    provider_session_path, conversation_event_count, conversation_bytes
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes
              FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
@@ -1513,9 +1517,10 @@ impl SqliteStore {
     pub fn agent_launches_since(&self, since: i64) -> StoreResult<Vec<AgentLaunchRow>> {
         self.query_agent_launches(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                    skill, provider, model, surface, capture_status, incomplete_reason, outcome,
-                    artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                    provider_session_path, conversation_event_count, conversation_bytes
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes
              FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
@@ -1540,19 +1545,21 @@ impl SqliteStore {
                 wave: row.get(7)?,
                 flow: row.get(8)?,
                 skill: row.get(9)?,
-                provider: row.get(10)?,
-                model: row.get(11)?,
-                surface: row.get(12)?,
-                capture_status: row.get(13)?,
-                incomplete_reason: row.get(14)?,
-                outcome: row.get(15)?,
-                artifact_dir: row.get(16)?,
-                conversation_path: row.get(17)?,
-                provider_events_path: row.get(18)?,
-                provider_session_id: row.get(19)?,
-                provider_session_path: row.get(20)?,
-                conversation_event_count: row.get(21)?,
-                conversation_bytes: row.get(22)?,
+                project: row.get(10)?,
+                task: row.get(11)?,
+                provider: row.get(12)?,
+                model: row.get(13)?,
+                surface: row.get(14)?,
+                capture_status: row.get(15)?,
+                incomplete_reason: row.get(16)?,
+                outcome: row.get(17)?,
+                artifact_dir: row.get(18)?,
+                conversation_path: row.get(19)?,
+                provider_events_path: row.get(20)?,
+                provider_session_id: row.get(21)?,
+                provider_session_path: row.get(22)?,
+                conversation_event_count: row.get(23)?,
+                conversation_bytes: row.get(24)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -1574,9 +1581,10 @@ impl SqliteStore {
                 "SELECT id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
                     input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
                     system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
-                    provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
-                    cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
-                    first_event_seq, last_event_seq
+                    provider_total_input_tokens, peak_input_tokens, context_window_tokens,
+                    provider_output_tokens, reasoning_tokens, cache_read_tokens,
+                    cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
+                    context_persist_ms, first_event_seq, last_event_seq
              FROM agent_turns WHERE launch_id IN ({placeholders})
              ORDER BY started_at, rowid, ordinal"
             );
@@ -1745,12 +1753,14 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
         "INSERT INTO agent_turns (
             id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status, input_op,
             context_coverage, tokenizer, system_prompt_path, task_prompt_path, system_tokens,
-            task_tokens, supplied_context_tokens, provider_input_tokens, provider_output_tokens,
-            reasoning_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
-            context_gather_ms, context_render_ms, context_persist_ms, first_event_seq,
-            last_event_seq
+            task_tokens, supplied_context_tokens, provider_input_tokens,
+            provider_total_input_tokens, peak_input_tokens, context_window_tokens,
+            provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
+            cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
+            first_event_seq, last_event_seq
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
+            ?28, ?29)",
         params![
             turn.id,
             turn.launch_id,
@@ -1768,6 +1778,9 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.task_tokens,
             turn.supplied_context_tokens,
             turn.provider_input_tokens,
+            turn.provider_total_input_tokens,
+            turn.peak_input_tokens,
+            turn.context_window_tokens,
             turn.provider_output_tokens,
             turn.reasoning_tokens,
             turn.cache_read_tokens,
@@ -1842,9 +1855,11 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
     conn.execute(
         "UPDATE agent_turns SET
             provider_turn_id = ?2, ended_at = ?3, status = ?4,
-            provider_input_tokens = ?5, provider_output_tokens = ?6, reasoning_tokens = ?7,
-            cache_read_tokens = ?8, cache_write_tokens = ?9, cost_usd = ?10,
-            first_event_seq = ?11, last_event_seq = ?12
+            provider_input_tokens = ?5, provider_total_input_tokens = ?6,
+            peak_input_tokens = ?7, context_window_tokens = ?8,
+            provider_output_tokens = ?9, reasoning_tokens = ?10,
+            cache_read_tokens = ?11, cache_write_tokens = ?12, cost_usd = ?13,
+            first_event_seq = ?14, last_event_seq = ?15
          WHERE id = ?1",
         params![
             turn.id,
@@ -1852,6 +1867,9 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
             turn.ended_at,
             turn.status,
             turn.provider_input_tokens,
+            turn.provider_total_input_tokens,
+            turn.peak_input_tokens,
+            turn.context_window_tokens,
             turn.provider_output_tokens,
             turn.reasoning_tokens,
             turn.cache_read_tokens,
@@ -1882,15 +1900,18 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         task_tokens: row.get(13)?,
         supplied_context_tokens: row.get(14)?,
         provider_input_tokens: row.get(15)?,
-        provider_output_tokens: row.get(16)?,
-        reasoning_tokens: row.get(17)?,
-        cache_read_tokens: row.get(18)?,
-        cache_write_tokens: row.get(19)?,
-        cost_usd: row.get(20)?,
-        context_gather_ms: row.get(21)?,
-        context_render_ms: row.get(22)?,
-        context_persist_ms: row.get(23)?,
-        first_event_seq: row.get(24)?,
-        last_event_seq: row.get(25)?,
+        provider_total_input_tokens: row.get(16)?,
+        peak_input_tokens: row.get(17)?,
+        context_window_tokens: row.get(18)?,
+        provider_output_tokens: row.get(19)?,
+        reasoning_tokens: row.get(20)?,
+        cache_read_tokens: row.get(21)?,
+        cache_write_tokens: row.get(22)?,
+        cost_usd: row.get(23)?,
+        context_gather_ms: row.get(24)?,
+        context_render_ms: row.get(25)?,
+        context_persist_ms: row.get(26)?,
+        first_event_seq: row.get(27)?,
+        last_event_seq: row.get(28)?,
     })
 }

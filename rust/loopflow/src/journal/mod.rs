@@ -461,6 +461,7 @@ pub fn trace_capture_context(
     skill: Option<String>,
 ) -> Option<crate::trace::TraceCaptureContext> {
     let context = current_context()?;
+    let (project, task) = child_work_attribution();
     Some(crate::trace::TraceCaptureContext {
         run_id: context.run_id,
         process_id: context.process_id,
@@ -470,9 +471,35 @@ pub fn trace_capture_context(
             .unwrap_or_else(|| worktree.to_path_buf()),
         worktree: worktree.to_path_buf(),
         wave: context.wave,
+        project,
+        task,
         flow,
         skill,
     })
+}
+
+fn child_work_attribution() -> (Option<String>, Option<String>) {
+    let Ok(store) = open_ledger() else {
+        return (None, None);
+    };
+    if let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") {
+        if let Ok(id) = crate::task::TaskSessionId::parse(&value.to_string_lossy()) {
+            if let Ok(Some(session)) = store.task_session(&id) {
+                return (
+                    Some(session.launch.project.slug),
+                    Some(session.launch.issue.identifier),
+                );
+            }
+        }
+    }
+    if let Some(value) = std::env::var_os("LF_PROJECT_SESSION_ID") {
+        if let Ok(id) = crate::project_session::ProjectSessionId::parse(&value.to_string_lossy()) {
+            if let Ok(Some(session)) = store.project_session(&id) {
+                return (Some(session.launch.project.slug), None);
+            }
+        }
+    }
+    (None, None)
 }
 
 #[cfg(not(test))]

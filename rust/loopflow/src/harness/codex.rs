@@ -192,9 +192,13 @@ pub(super) fn process_notification(
             });
         }
         "thread/tokenUsage/updated" => {
-            // Usage arrives mid-turn as cumulative snapshots; hold the latest
-            // and report it with the terminal TurnCompleted.
-            state.pending_usage = Some(codex_mapping::map_token_usage(params));
+            // Usage arrives mid-turn as cumulative snapshots. Keep the latest
+            // lifetime totals and the highest single-request window pressure.
+            let mut latest = codex_mapping::map_token_usage(params);
+            if let Some(previous) = state.pending_usage.take() {
+                retain_higher_context_pressure(&mut latest, &previous);
+            }
+            state.pending_usage = Some(latest);
         }
         "item/started" | "item/completed" => {
             // The server echoes the client's own input (turn/start and
@@ -311,6 +315,26 @@ pub(super) fn process_notification(
         _ => {
             // Unknown notifications silently ignored.
         }
+    }
+}
+
+fn retain_higher_context_pressure(latest: &mut TurnUsage, previous: &TurnUsage) {
+    let Some(previous_peak) = previous.peak_input_tokens else {
+        return;
+    };
+    let Some(previous_window) = previous.context_window_tokens else {
+        return;
+    };
+    let latest_is_higher = match (latest.peak_input_tokens, latest.context_window_tokens) {
+        (Some(peak), Some(window)) => {
+            u128::from(peak) * u128::from(previous_window)
+                >= u128::from(previous_peak) * u128::from(window)
+        }
+        _ => false,
+    };
+    if !latest_is_higher {
+        latest.peak_input_tokens = Some(previous_peak);
+        latest.context_window_tokens = Some(previous_window);
     }
 }
 

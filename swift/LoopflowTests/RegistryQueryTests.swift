@@ -289,6 +289,69 @@ struct RegistryQueryTests {
         #expect(report.checks[0].status == "ok")
     }
 
+    @Test("Context Lab sends one filter query and decodes one atomic snapshot")
+    func contextLabUsesOneAggregateQuery() async throws {
+        let fixture = try String(contentsOf: contextLabFixtureURL(), encoding: .utf8)
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == nil)
+            #expect(args == [
+                "context", "--json", "--started-after", "100", "--started-before", "200",
+                "--repo", "/src/loopflow", "--wave", "intelligence",
+                "--project", "context", "--task", "W2-71",
+                "--skill", "implement", "--provider", "codex", "--model", "gpt-5",
+                "--surface", "headless", "--outcome", "completed",
+                "--capture-state", "complete",
+                "--steered-only", "--current-revision-only",
+            ])
+            return fixture
+        }
+        let selection = SessionSetQuery(
+            repoPaths: ["/src/loopflow"],
+            startedAfter: 100,
+            startedBefore: 200,
+            waves: ["intelligence"],
+            projects: ["context"],
+            tasks: ["W2-71"],
+            flows: [],
+            skills: ["implement"],
+            providers: ["codex"],
+            models: ["gpt-5"],
+            surfaces: ["headless"],
+            outcomes: [.completed],
+            captureStates: [.complete],
+            steeredOnly: true,
+            currentRevisionOnly: true
+        )
+
+        let snapshot = try await query.contextLab(selection)
+
+        #expect(snapshot.query == selection)
+        #expect(snapshot.aggregateRoot.attributedTokens == 800)
+        #expect(snapshot.evidence[0].representatives[0].address.launchId == "launch-1")
+    }
+
+    @Test("Trace bodies load only through the explicit content query")
+    func traceContentUsesExactAddress() async throws {
+        let address = TraceAddress(runId: "run-1", launchId: "launch-1", turnId: "turn-1")
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == nil)
+            #expect(args == [
+                "trace", "run-1", "--json", "--content",
+                "--launch", "launch-1", "--turn", "turn-1",
+            ])
+            return """
+            {"address":{"run_id":"run-1","launch_id":"launch-1","turn_id":"turn-1"},"system_prompt":{"path":null,"content":null,"unavailable_reason":"turn has no system prompt"},"task_prompt":{"path":"/trace/task.txt","content":"exact task","unavailable_reason":null},"conversation":{"path":"/trace/events.jsonl","content":null,"unavailable_reason":"missing"}}
+            """
+        }
+
+        let trace = try await query.traceContent(address)
+
+        #expect(trace.address == address)
+        #expect(trace.taskPrompt.content == "exact task")
+        #expect(trace.systemPrompt.unavailableReason == "turn has no system prompt")
+        #expect(trace.conversation.content == nil)
+    }
+
     @Test("PM snapshot maps projects and KR proof into the wave plan")
     func planDecodesProjects() async throws {
         let json = """
@@ -309,6 +372,24 @@ struct RegistryQueryTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
+    @Test("Task handoff refreshes the Wave plan before launch")
+    func planCanSyncProjects() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["pm", "show", "--wave", "goals", "--json", "--sync"])
+            #expect(cwd == "/tmp/repo")
+            return """
+            {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[],"items":[]}
+            """
+        }
+
+        _ = try await query.plan(
+            wave: "goals",
+            objective: "",
+            cwd: "/tmp/repo",
+            sync: true
+        )
+    }
+
     @Test("a failed lf query surfaces as an error")
     func failedQueryThrows() async {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("lf exploded") }
@@ -316,6 +397,14 @@ struct RegistryQueryTests {
             _ = try await query.waves(repoPath: "/tmp/repo-a")
         }
     }
+}
+
+private func contextLabFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/context_lab_snapshot.json")
 }
 
 private actor CallCounter {

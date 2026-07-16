@@ -1,0 +1,241 @@
+{
+  "query": {
+    "repo_paths": [
+      "/src/loopflow"
+    ],
+    "started_after": 100,
+    "started_before": 200,
+    "waves": [
+      "intelligence"
+    ],
+    "projects": [
+      "context"
+    ],
+    "tasks": [
+      "W2-71"
+    ],
+    "flows": [],
+    "skills": [
+      "implement"
+    ],
+    "providers": [
+      "codex"
+    ],
+    "models": [
+      "gpt-5"
+    ],
+    "surfaces": [
+      "headless"
+    ],
+    "outcomes": [
+      "completed"
+    ],
+    "capture_states": [
+      "complete"
+    ],
+    "steered_only": true,
+    "current_revision_only": true
+  },
+  "coverage": {
+    "complete_launches": 1,
+    "partial_launches": 0,
+    "prompt_only_launches": 0,
+    "capturing_launches": 0,
+    "attributed_turns": 1,
+    "provider_total_only_turns": 0,
+    "unknown_turns": 1,
+    "prompt_artifacts_available": 1,
+    "conversations_available": 1,
+    "source_observable_agent_sessions": 1
+  },
+  "totals": {
+    "runs": 1,
+    "agent_sessions": 1,
+    "turns": 2,
+    "initial_prompt_tokens": 1000,
+    "initial_prompt_agent_sessions": 1,
+    "median_initial_prompt_tokens": 1000,
+    "p95_initial_prompt_tokens": 1000,
+    "instruction_tokens": 800,
+    "lifetime_input_tokens": 2400,
+    "lifetime_input_agent_sessions": 1,
+    "median_lifetime_input_tokens": 2400,
+    "p95_lifetime_input_tokens": 2400,
+    "median_peak_context_percent": 45.0,
+    "p95_peak_context_percent": 45.0,
+    "peak_context_agent_sessions": 1,
+    "completed_launches": 1,
+    "failed_launches": 0,
+    "interrupted_launches": 0,
+    "running_launches": 0,
+    "steering_turns": 0,
+    "steered_launches": 0
+  },
+  "aggregate_root": {
+    "id": "session-set",
+    "level": "session_set",
+    "kind": null,
+    "label": "Initial prompts",
+    "source_path": null,
+    "content_sha256": null,
+    "attributed_tokens": 800,
+    "run_count": 1,
+    "agent_session_count": 1,
+    "turn_count": 2,
+    "children": [
+      {
+        "id": "context-kind",
+        "level": "kind",
+        "kind": "operating_instructions",
+        "label": "Operating Instructions",
+        "source_path": null,
+        "content_sha256": null,
+        "attributed_tokens": 800,
+        "run_count": 1,
+        "agent_session_count": 1,
+        "turn_count": 1,
+        "children": [
+          {
+            "id": "context-source",
+            "level": "source",
+            "kind": "operating_instructions",
+            "label": "LOOPFLOW.md",
+            "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
+            "content_sha256": null,
+            "attributed_tokens": 800,
+            "run_count": 1,
+            "agent_session_count": 1,
+            "turn_count": 1,
+            "children": [
+              {
+                "id": "context-revision",
+                "level": "revision",
+                "kind": "operating_instructions",
+                "label": "0123456789",
+                "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
+                "content_sha256": "0123456789abcdef",
+                "attributed_tokens": 800,
+                "run_count": 1,
+                "agent_session_count": 1,
+                "turn_count": 1,
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "sessions": [
+    {
+      "id": "launch-1",
+      "run_id": "run-1",
+      "started_at": 110,
+      "outcome": "completed",
+      "steering_turns": 0,
+      "lifetime_input_tokens": 2400,
+      "peak_context_percent": 45.0,
+      "provider": "codex",
+      "model": "gpt-5",
+      "surface": "headless",
+      "wave": "intelligence",
+      "project": "context",
+      "task": "W2-71",
+      "flow": null,
+      "skill": "implement",
+      "turns": [
+        {
+          "id": "turn-1",
+          "ordinal": 1,
+          "supplied_context_tokens": 1000,
+          "assets": [
+            {
+              "node_id": "context-revision",
+              "kind": "operating_instructions",
+              "label": "LOOPFLOW.md",
+              "attributed_tokens": 800
+            }
+          ]
+        },
+        {
+          "id": "turn-2",
+          "ordinal": 2,
+          "supplied_context_tokens": null,
+          "assets": []
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "context-source",
+      "label": "LOOPFLOW.md",
+      "kind": "operating_instructions",
+      "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
+      "impressions": 1,
+      "observed_revisions": 1,
+      "last_seen": 120,
+      "current_revision_node_id": "context-revision"
+    },
+    {
+      "id": "context-native-source",
+      "label": "CLAUDE.md",
+      "kind": "repo_instructions",
+      "source_path": "/src/loopflow/CLAUDE.md",
+      "impressions": null,
+      "observed_revisions": 0,
+      "last_seen": null,
+      "current_revision_node_id": null
+    }
+  ],
+  "evidence": [
+    {
+      "node_id": "context-revision",
+      "label": "LOOPFLOW.md",
+      "kind": "operating_instructions",
+      "source_path": "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
+      "content_sha256": "0123456789abcdef",
+      "current_content_sha256": "0123456789abcdef",
+      "current_source_sha256": "fedcba9876543210",
+      "precedence_layers": [
+        "operate"
+      ],
+      "measurements": {
+        "exposed_sessions": 1,
+        "exposed_launches": 1,
+        "exposed_turns": 1,
+        "attributed_tokens": 800,
+        "median_tokens_per_exposed_turn": 800,
+        "p95_tokens_per_exposed_turn": 800,
+        "first_seen": 120,
+        "last_seen": 120,
+        "completed_launches": 1,
+        "failed_launches": 0,
+        "steering_turns": 0,
+        "complete_capture_launches": 1,
+        "provider_models": [
+          {
+            "provider": "codex",
+            "model": "gpt-5",
+            "exposed_launches": 1
+          }
+        ]
+      },
+      "representatives": [
+        {
+          "role": "smooth_complete",
+          "address": {
+            "run_id": "run-1",
+            "launch_id": "launch-1",
+            "turn_id": "turn-1"
+          },
+          "outcome": "completed",
+          "supplied_context_tokens": 1000,
+          "selected_source_tokens": 800,
+          "prompt_artifact_available": true,
+          "conversation_available": true
+        }
+      ]
+    }
+  ]
+}

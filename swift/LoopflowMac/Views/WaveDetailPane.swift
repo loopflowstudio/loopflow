@@ -40,6 +40,7 @@ struct WaveDetailPane: View {
     let onClose: () -> Void
 
     @Environment(\.palette) private var palette
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: WaveWorkSelection?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
@@ -95,6 +96,19 @@ struct WaveDetailPane: View {
                 .foregroundStyle(palette.textSecondary)
 
             Spacer()
+
+            Button {
+                openWindow(
+                    id: "context-lab",
+                    value: ContextLabRoute.wave(repoPath: repoPath, wave: wave.name)
+                )
+            } label: {
+                Label("Context Lab", systemImage: "text.magnifyingglass")
+                    .font(Typography.caption())
+            }
+            .buttonStyle(.borderless)
+            .help("Study the instructions seen by this Wave's agent sessions")
+            .accessibilityIdentifier("wave-context-lab")
 
             Button {
                 onClose()

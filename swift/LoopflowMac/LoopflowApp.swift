@@ -60,35 +60,6 @@ struct LoopflowApp: App {
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
-
-        WindowGroup(id: "repo", for: URL.self) { $repoURL in
-            WavesView(
-                portfolioService: portfolioService,
-                initialRepoPath: repoURL?.path
-            )
-            .tint(.loopflowBurgundy)
-            .preferredColorScheme(theme.preferredScheme)
-            .environment(\.palette, theme.palette)
-        }
-        .windowStyle(.automatic)
-        .defaultSize(width: 1080, height: 760)
-
-        Window("Portfolio", id: "portfolio") {
-            WavesView(portfolioService: portfolioService)
-                .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-        }
-        .defaultSize(width: 1080, height: 760)
-
-        Window("Telemetry", id: "telemetry") {
-            TelemetryDashboardView()
-                .tint(.loopflowBurgundy)
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-        }
-        .defaultSize(width: 1180, height: 860)
-
         .commands {
             CommandGroup(after: .appSettings) {
                 Picker("Appearance", selection: Binding(
@@ -137,6 +108,65 @@ struct LoopflowApp: App {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
+
+        WindowGroup(id: "repo", for: URL.self) { $repoURL in
+            WavesView(
+                portfolioService: portfolioService,
+                initialRepoPath: repoURL?.path
+            )
+            .tint(.loopflowBurgundy)
+            .preferredColorScheme(theme.preferredScheme)
+            .environment(\.palette, theme.palette)
+        }
+        .windowStyle(.automatic)
+        .defaultSize(width: 1080, height: 760)
+
+        Window("Portfolio", id: "portfolio") {
+            WavesView(portfolioService: portfolioService)
+                .tint(.loopflowBurgundy)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+        }
+        .defaultSize(width: 1080, height: 760)
+
+        Window("Telemetry", id: "telemetry") {
+            TelemetryDashboardView()
+                .tint(.loopflowBurgundy)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+        }
+        .defaultSize(width: 1180, height: 860)
+
+        WindowGroup("Context Lab", id: "context-lab", for: ContextLabRoute.self) { $route in
+            if let route, route.isWaveScoped {
+                ContextLabView(route: route)
+                .frame(minWidth: 1120, minHeight: 680)
+                .tint(.loopflowBurgundy)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+            } else {
+                ContentUnavailableView(
+                    "Open Context Lab from a Wave",
+                    systemImage: "water.waves",
+                    description: Text("Select a Wave, then open Context Lab from its header.")
+                )
+                .frame(minWidth: 720, minHeight: 480)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+            }
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1420, height: 900)
+
+        WindowGroup("Task workspace", id: "task-workspace", for: TaskWorkspaceRoute.self) { $route in
+            if let route, route.context.isWaveScoped {
+                TaskWorkspaceWindow(route: route)
+                    .tint(.loopflowBurgundy)
+                    .preferredColorScheme(theme.preferredScheme)
+                    .environment(\.palette, theme.palette)
+            }
+        }
+        .defaultSize(width: 1180, height: 820)
     }
 
     @MainActor

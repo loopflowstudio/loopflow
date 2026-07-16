@@ -117,7 +117,7 @@ struct RoadmapView: View {
                 attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
-                opensAgent: true
+                initialSection: .agent
             )
         }
         .confirmationDialog(

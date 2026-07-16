@@ -188,18 +188,27 @@ Inspect exactly what an agent received and what Loopflow observed:
 lf runs                         # skill calls with context, tokens, and cost
 lf top                          # last-hour throughput and live lf processes
 lf execs                        # every lf process, including lookups
-lf trace <exec-id>
-lf trace <exec-id> --events
-lf trace <exec-id> --events --jsonl --launch <launch-id-prefix>
-lf context --days 14 --wave intelligence
+lf trace <exec-or-trace-id>
+lf trace <exec-or-trace-id> --events
+lf trace <exec-or-trace-id> --events --jsonl --launch <launch-id-prefix>
+lf trace <exec-or-trace-id> --json --content --launch <launch-id> --turn <turn-id>
+lf context --days 14 --repo "$PWD" --wave intelligence --project context --task W2-71 --json
+lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 ```
 
-`lf trace` keeps prompt and normalized conversation artifacts below
+`lf trace` accepts the exec ids shown by `lf execs` and the trace ids carried by
+Context Lab evidence. It keeps prompt and normalized conversation artifacts below
 `~/.lf/traces`; it prints paths and metadata by default, never prompt or event
-bodies. `--events` explicitly reads the recorded exchange. `lf context --json`
-emits turn, asset, and inclusion-decision rows for local analysis. Human
-context summaries keep initial assembled context separate from follow-up input
-and provider-reported history.
+bodies. `--events` explicitly reads the recorded exchange; `--content` opens
+the exact prompt and normalized conversation for one trace address.
+`lf context --json` emits one atomic session-set snapshot: totals, coverage,
+context flame, prompt-ordered lanes, canonical revisions, and representative
+trace addresses. Project and Task filters use durable launch attribution; old
+unattributed launches do not guess from worktree names. Missing capture remains
+missing rather than becoming zero. `--steered-only` requires an observed steer
+turn. `--current-revision-only` keeps launches containing a resolvable
+file-backed instruction revision that matches the file currently on disk;
+unresolvable revision identity never silently counts as current.
 
 ### Crons
 

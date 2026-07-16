@@ -652,6 +652,19 @@ fn find_skill_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     Err(LoadError::SkillNotFound(name.to_string()))
 }
 
+/// The editable file that supplied a file-backed skill. Built-in skills return
+/// `None`: their embedded content has no source file in an installed binary.
+pub fn find_skill_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
+    if let Ok(path) = find_skill_path(name, repo) {
+        return Some(path);
+    }
+    if crate::engine::builtins::resolve_builtin_skill(name).is_some() {
+        return None;
+    }
+    let path = agent_skill_path(name, repo);
+    path.is_file().then_some(path)
+}
+
 fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     let wave_goal = repo.join("wave").join(name).join("GOAL.md");
     if exact_path_exists(&wave_goal) {
@@ -722,8 +735,11 @@ fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 
 /// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
 fn load_agent_skill(name: &str, repo: &Path) -> Option<String> {
-    let skill_path = repo.join(".agents/skills").join(name).join("SKILL.md");
-    fs::read_to_string(&skill_path).ok()
+    fs::read_to_string(agent_skill_path(name, repo)).ok()
+}
+
+fn agent_skill_path(name: &str, repo: &Path) -> PathBuf {
+    repo.join(".agents/skills").join(name).join("SKILL.md")
 }
 
 // -----------------------------------------------------------------------------
@@ -1504,6 +1520,19 @@ Be careful.
         let skill = load_skill("my-tool", tmp.path()).unwrap();
         assert_eq!(skill.name, "my-tool");
         assert!(skill.content.unwrap().contains("Do the thing."));
+    }
+
+    #[test]
+    fn find_skill_source_path_finds_agent_skills() {
+        let tmp = TempDir::new().unwrap();
+        let skill_path = tmp.path().join(".agents/skills/my-tool/SKILL.md");
+        fs::create_dir_all(skill_path.parent().unwrap()).unwrap();
+        fs::write(&skill_path, "Do the thing.").unwrap();
+
+        assert_eq!(
+            find_skill_source_path("my-tool", tmp.path()),
+            Some(skill_path)
+        );
     }
 
     #[test]

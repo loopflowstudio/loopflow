@@ -33,6 +33,21 @@ or unstarted, and unknown means the required evidence could not be read.
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
 
+Select a Wave, then open **Context Lab** from its header. Compare that Wave's
+aggregate initial-prompt flame and prompt-ordered agent-session lanes, or rank
+current instruction sources by captured agent-session impressions. Select a skill or
+`LOOPFLOW.md` to read main's current file beside exact trace evidence. Choose a
+Refinement Project once per multi-Project Wave, then **Refine in task-worker**
+creates a Task and opens its running agent. The Project destination does not
+filter the Wave evidence. Repo and Wave stay fixed for the window; saved views
+store only filters inside that scope. Historical attribution gaps stay unattributed.
+Selecting a segment never opens prompt bodies;
+**Open trace** is the explicit boundary. Saved views retain only the query and visualization mode.
+The research-state filters can require observed steering or a launch containing
+a current resolvable file-backed instruction revision. Revision comparisons stay unavailable until
+both revisions have enough launches with comparable capture, provider/model mix,
+and observation spans.
+
 ## Product ownership
 
 - **Wave Chat** owns the human conversation, the active Wave turn, and
@@ -46,8 +61,8 @@ codebase tree, and registry health.
   attaches through `lf task attach`, and keys terminal tabs by Task Session id.
   Lifecycle mutations remain `lf task run/resume/interrupt`.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf ls/status/roadmap/runs/usage/doctor/tokens --json`; the app does not
-  maintain a second roadmap or lifecycle database. Unavailable per-Wave
+  `lf ls/status/roadmap/runs/usage/doctor/tokens/context/trace --json`; the app
+  does not maintain a second roadmap or lifecycle database. Unavailable per-Wave
   evidence renders its reason, and refresh failures leave the last successful
   roadmap or selected Wave detail visible.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
@@ -60,6 +75,8 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
+- `LoopflowMac/Views/ContextLabView.swift` — session-set filters, flames, lanes, and evidence
+- `LoopflowMac/Views/ContextLabHandoffView.swift` — explicit trace bodies and Task refinement handoff
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `Loopflow/Services/WaveChatClient.swift` — per-Wave event and message client

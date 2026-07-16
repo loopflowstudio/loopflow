@@ -26,6 +26,12 @@ enum WaveLaunchError: LocalizedError, Equatable {
     }
 }
 
+struct TaskStartReceipt: Decodable, Sendable, Equatable {
+    let issueIdentifier: String
+    let project: String
+    let wave: String
+}
+
 enum LocalWaveAgentLauncher {
     private static let resolutionCache = ResolvedLfCache()
 
@@ -94,6 +100,27 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
+    /// Create and start one Task with the normal PM and worker lifecycle.
+    static func startTask(
+        repoPath: String,
+        title: String,
+        project: String,
+        directive: String
+    ) throws -> TaskStartReceipt {
+        let origin = WaveOrigin.resolve(repoPath)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let stdout = try runCheckedOutput(
+            taskStartCommand(
+                lfPath: lfPath,
+                title: title,
+                project: project,
+                directive: directive
+            ),
+            cwd: origin
+        )
+        return try taskStartReceipt(stdout)
+    }
+
     /// Restart the existing Task Session without creating another worktree or
     /// status record.
     static func resumeTask(repoPath: String, issue: String) throws {
@@ -118,6 +145,32 @@ enum LocalWaveAgentLauncher {
 
     static func taskRunCommand(lfPath: String, issue: String) -> [String] {
         [lfPath, "task", "run", issue]
+    }
+
+    static func taskStartCommand(
+        lfPath: String,
+        title: String,
+        project: String,
+        directive: String
+    ) -> [String] {
+        [
+            lfPath, "task", "start", title,
+            "--project", project,
+            "--directive", directive,
+            "--json",
+        ]
+    }
+
+    static func taskStartReceipt(_ stdout: String) throws -> TaskStartReceipt {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(TaskStartReceipt.self, from: Data(stdout.utf8))
+        } catch {
+            throw WaveLaunchError.launchFailed(
+                "lf task start returned an invalid receipt: \(error.localizedDescription)"
+            )
+        }
     }
 
     static func taskResumeCommand(lfPath: String, issue: String) -> [String] {
@@ -329,6 +382,10 @@ enum LocalWaveAgentLauncher {
     // MARK: - Process plumbing
 
     private static func runChecked(_ args: [String], cwd: String) throws {
+        _ = try runCheckedOutput(args, cwd: cwd)
+    }
+
+    private static func runCheckedOutput(_ args: [String], cwd: String) throws -> String {
         let result = run(args, cwd: cwd)
         guard let result else {
             throw WaveLaunchError.launchFailed("Failed to spawn: \(args.joined(separator: " "))")
@@ -339,6 +396,7 @@ enum LocalWaveAgentLauncher {
                 detail.isEmpty ? "Command failed (\(result.status)): \(args.joined(separator: " "))" : detail
             )
         }
+        return result.stdout
     }
 
     private static func runCommandSync(

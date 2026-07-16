@@ -142,8 +142,14 @@ public struct RegistryQuery: Sendable {
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
     /// rendering off the network; explicit and scheduled syncs refresh SQLite.
-    public func plan(wave: String, objective: String, cwd: String?) async throws -> WavePlan {
-        let stdout = try await run(["pm", "show", "--wave", wave, "--json", "--no-sync"], cwd)
+    public func plan(
+        wave: String,
+        objective: String,
+        cwd: String?,
+        sync: Bool = false
+    ) async throws -> WavePlan {
+        let freshness = sync ? "--sync" : "--no-sync"
+        let stdout = try await run(["pm", "show", "--wave", wave, "--json", freshness], cwd)
         let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
         return WavePlan(
             objective: objective,
@@ -188,6 +194,49 @@ public struct RegistryQuery: Sendable {
     public func doctor() async throws -> DoctorReport {
         let stdout = try await run(["doctor", "--json"], nil)
         return try Self.decode(DoctorReport.self, from: stdout)
+    }
+
+    /// One atomic Context Lab population. Rust owns every trace join, token
+    /// attribution, revision identity, and representative choice; the app sends
+    /// only the filter query and renders the returned snapshot.
+    public func contextLab(_ query: SessionSetQuery) async throws -> ContextLabSnapshot {
+        var args = [
+            "context", "--json",
+            "--started-after", String(query.startedAfter),
+            "--started-before", String(query.startedBefore),
+        ]
+        Self.append(query.repoPaths, flag: "--repo", to: &args)
+        Self.append(query.waves, flag: "--wave", to: &args)
+        Self.append(query.projects, flag: "--project", to: &args)
+        Self.append(query.tasks, flag: "--task", to: &args)
+        Self.append(query.flows, flag: "--flow", to: &args)
+        Self.append(query.skills, flag: "--skill", to: &args)
+        Self.append(query.providers, flag: "--provider", to: &args)
+        Self.append(query.models, flag: "--model", to: &args)
+        Self.append(query.surfaces, flag: "--surface", to: &args)
+        Self.append(query.outcomes.map(\.rawValue), flag: "--outcome", to: &args)
+        Self.append(query.captureStates.map(\.rawValue), flag: "--capture-state", to: &args)
+        if query.steeredOnly { args.append("--steered-only") }
+        if query.currentRevisionOnly { args.append("--current-revision-only") }
+        let stdout = try await run(args, nil)
+        return try Self.decode(ContextLabSnapshot.self, from: stdout)
+    }
+
+    /// Exact local artifacts for one immutable trace address. Unlike Context
+    /// Lab's aggregate query, this intentionally opens prompt and conversation
+    /// bodies and must only be called after an explicit Open trace action.
+    public func traceContent(_ address: TraceAddress) async throws -> TraceContentSnapshot {
+        let stdout = try await run([
+            "trace", address.runId, "--json", "--content",
+            "--launch", address.launchId, "--turn", address.turnId,
+        ], nil)
+        return try Self.decode(TraceContentSnapshot.self, from: stdout)
+    }
+
+    private static func append(_ values: [String], flag: String, to args: inout [String]) {
+        for value in values {
+            args.append(contentsOf: [flag, value])
+        }
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {

@@ -57,6 +57,8 @@ struct LoopflowApp: App {
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
             .onOpenURL { handleDeepLink($0) }
+            .uiTestWindowWidth()
+            .uiTestSnapshot()
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -211,5 +213,45 @@ struct LoopflowApp: App {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         portfolioService.addRepo(url)
         openWindow(id: "repo", value: url)
+    }
+}
+
+private extension View {
+    /// Pin the window to `LOOPFLOW_UI_TEST_WIDTH` when a screenshot/UI-test run
+    /// asks for a specific size; otherwise render unchanged. This is how the
+    /// narrow and wide legs of the selectable-without-clipping proof get a
+    /// deterministic width instead of the host's default.
+    @ViewBuilder
+    func uiTestWindowWidth() -> some View {
+        if let width = AppTestMode.windowWidth {
+            frame(width: width)
+        } else {
+            self
+        }
+    }
+
+    /// In a UI-test run, once the surface has settled, render the key window to
+    /// a PNG at `LOOPFLOW_UI_TEST_SNAPSHOT_PATH` and exit. `SnapshotService`
+    /// renders the view (`cacheDisplay`) rather than the screen, so this needs
+    /// no Screen Recording or Automation permission — it is the run-here leg of
+    /// the state-distinctness proof (`scripts/prove_wave_surface_states.sh`),
+    /// complementing the permissioned XCUITest.
+    @ViewBuilder
+    func uiTestSnapshot() -> some View {
+        if AppTestMode.current() != nil,
+           let path = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] {
+            let delay = AppTestMode.snapshotDelay
+            task {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                // A background-launched app has no key window, so snapshot the
+                // first realized window directly rather than `keyWindow`.
+                if let window = NSApp.windows.first(where: { $0.contentView != nil }) {
+                    _ = try? SnapshotService().snapshotWindow(window, to: path)
+                }
+                NSApp.terminate(nil)
+            }
+        } else {
+            self
+        }
     }
 }

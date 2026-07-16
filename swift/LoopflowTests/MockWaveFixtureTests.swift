@@ -10,6 +10,13 @@ import Testing
 /// exercise real data, not an empty shell.
 @Suite("Mock wave fixture")
 struct MockWaveFixtureTests {
+    @Test("live UI-test mode keeps production registry reads")
+    func liveModeUsesRegistry() {
+        #expect(AppTestMode.live.bypassesRegistry == false)
+        #expect(AppTestMode.mockWaves.bypassesRegistry)
+        #expect(AppTestMode.emptyWorkspaces.bypassesRegistry)
+    }
+
     @Test("the stable list carries one Wave per lens state, plus a child")
     func listLensStates() {
         let byName = Dictionary(uniqueKeysWithValues: MockWaveFixture.waves.map { ($0.name, $0) })

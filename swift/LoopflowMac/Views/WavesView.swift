@@ -391,7 +391,7 @@ struct WavesView: View {
     /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS.
     private func registerInitialRepoIfNeeded() async -> String? {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
-        if AppTestMode.current() != nil { return nil }
+        if AppTestMode.shouldBypassRegistry { return nil }
         let readPath = await Task.detached {
             Self.resolveLaunchRepo(initialRepoPath).path
         }.value
@@ -425,7 +425,7 @@ struct WavesView: View {
     /// (worktree included) as a single row labeled with the main-repo name.
     /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
-        if AppTestMode.current() != nil {
+        if AppTestMode.shouldBypassRegistry {
             repos = portfolioService.repos
             return
         }
@@ -472,7 +472,7 @@ struct WavesView: View {
     /// directories — off the main thread, so the list can offer them as launchable
     /// rows before they have a registry entry.
     private func refreshAuthoredWaves() async {
-        if AppTestMode.current() != nil { return }
+        if AppTestMode.shouldBypassRegistry { return }
         let paths = repos.map(\.path)
         authoredWavesByRepo = await Task.detached {
             let liveSessions = LocalWaveAgentLauncher.tmuxSessionNames()
@@ -535,7 +535,7 @@ struct WavesView: View {
             seedMockWaves()
             return
         }
-        if AppTestMode.current() != nil { return }
+        if AppTestMode.shouldBypassRegistry { return }
         ensureRepoStates()
 
         do {
@@ -545,6 +545,7 @@ struct WavesView: View {
             for state in repoStates.values {
                 state.applyConnectedWaves(waves, plans: plans)
             }
+            selectRequestedWaveIfNeeded()
         } catch {
             for state in repoStates.values {
                 state.markRefreshFailed()
@@ -647,13 +648,24 @@ struct WavesView: View {
     /// Each wave's live conversation + run motion is its own per-wave SSE,
     /// opened by the detail pane — not funnelled through a center.
     private func pollRegistry() async {
-        if AppTestMode.current() != nil { return }
+        if AppTestMode.shouldBypassRegistry { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
             if Task.isCancelled { return }
             await syncRepoStates()
             await refreshAuthoredWaves()
         }
+    }
+
+    /// A live screenshot can request one real Wave after the registry resolves.
+    /// Fixture selection stays in `seedMockWaves`; production has no requested
+    /// branch, so this is inert outside the explicit `live` harness.
+    private func selectRequestedWaveIfNeeded() {
+        guard selectedWaveId == nil,
+              let requested = AppTestMode.selectBranch,
+              let selected = allWaves.first(where: { $0.name == requested })
+        else { return }
+        selectedWaveId = waveSelectionId(selected)
     }
 }
 

@@ -39,6 +39,7 @@ struct ControlView: View {
         }
         .frame(minWidth: 660, minHeight: 540)
         .background(palette.background)
+        .accessibilityIdentifier("control-surface")
     }
 
     private var header: some View {
@@ -100,6 +101,9 @@ struct ControlView: View {
         .help(tab.available ? "" : "Run History is coming soon")
         .accessibilityLabel(tab.title)
         .accessibilityHint(tab.available ? "" : "Coming soon")
+        .accessibilityIdentifier(
+            tab == .activeSessions ? "control-active-sessions-tab" : "control-run-history-tab"
+        )
     }
 }
 

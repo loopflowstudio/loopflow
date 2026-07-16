@@ -42,6 +42,7 @@ struct WaveLensView: View {
             .shadow(color: lit ? color.opacity(0.6) : .clear, radius: lit ? 2.5 : 0)
             .accessibilityElement()
             .accessibilityLabel("Status: \(lens.reason)")
+            .accessibilityValue("\(lens.color.rawValue) lens")
             .accessibilityIdentifier(accessibilityId)
             .help(lens.reason)
     }

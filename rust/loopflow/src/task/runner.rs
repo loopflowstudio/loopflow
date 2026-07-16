@@ -112,9 +112,9 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
 
     let mut flow = resume_task_phase(&session)?;
     // Reconcile any interactive handoff the parent's prior body opened before this
-    // body runs a provider turn. A terminal outcome advances the flow past the
-    // interactive step; a still-open handoff parks the parent on a human, and this
-    // body ends without ever starting the provider.
+    // body runs a provider turn. A completed outcome advances past work the human
+    // finished, a hand-back resumes the same step, and a still-open handoff parks
+    // the parent without ever starting the provider.
     if reconcile_interactive_rendezvous_at_birth(&store, &mut session, lease, &mut flow).await? {
         return finish_parked(&store, &mut session, lease, None).await;
     }
@@ -1049,9 +1049,8 @@ async fn completed_interaction_review(
 
 /// Reconcile the parent against any interactive handoff before this body runs a
 /// provider turn. Returns `true` when the parent is parked on a human and the
-/// body must end without starting a turn. A terminal outcome — this generation's
-/// or an earlier one's — advances the flow past the interactive step so the
-/// runner continues with the next step; a failed handoff blocks the parent.
+/// body must end without starting a turn. A completed outcome advances the flow,
+/// hand-back resumes the same step, and a failed handoff blocks the parent.
 async fn reconcile_interactive_rendezvous_at_birth(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -1078,10 +1077,10 @@ async fn reconcile_interactive_rendezvous_at_birth(
     }
 }
 
-/// Resolve a terminal interactive handoff at body birth. Completion or hand-back
-/// advances the flow past the interactive step (returns `false` — proceed);
-/// failure blocks the parent for an operator (returns `true` — parked). Evidence
-/// is recorded once, on the generation that wins the wake claim (`fresh`).
+/// Resolve a terminal interactive handoff at body birth. Completion advances the
+/// flow past work the human finished; hand-back resumes the same step; failure
+/// blocks the parent for an operator. Evidence is recorded once, on the
+/// generation that wins the wake claim (`fresh`).
 async fn resume_interactive_step(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -1121,13 +1120,13 @@ async fn resume_interactive_step(
             .await?;
             Ok(true)
         }
-        InteractiveHandoffOutcome::Completed { .. }
-        | InteractiveHandoffOutcome::HandedBack { .. } => {
+        InteractiveHandoffOutcome::Completed { .. } => {
             advance_past_interactive_step(flow, session)?;
             record_task_flow_position(session, flow)?;
             store.update_task_session_for_lease(session, lease).await?;
             Ok(false)
         }
+        InteractiveHandoffOutcome::HandedBack { .. } => Ok(false),
     }
 }
 
@@ -2521,6 +2520,45 @@ mod tests {
         assert!(!super::parked_on_interactive_handoff(&store, &session)
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn handed_back_interactive_work_resumes_the_same_flow_step() {
+        let (store, mut session, lease) = conformance_session("codex").await;
+        let mut flow = resume_task_phase(&session).unwrap();
+        let (handoff, _) = store
+            .open_interactive_handoff(task_handoff_request(&session, &lease))
+            .await
+            .unwrap();
+        store
+            .finish_interactive_handoff(
+                &handoff.id,
+                &crate::interactive_handoff::InteractiveHandoffOutcome::HandedBack {
+                    summary: "Finish the remaining review fixes".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let parked = super::reconcile_interactive_rendezvous_at_birth(
+            &store,
+            &mut session,
+            &lease,
+            &mut flow,
+        )
+        .await
+        .unwrap();
+
+        assert!(!parked);
+        assert_eq!(session.phase_cursor, 0);
+        assert_eq!(session.phase_iteration, 0);
+        assert!(store
+            .get_interactive_handoff(&handoff.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .wake_claimed_at
+            .is_some());
     }
 
     #[tokio::test]

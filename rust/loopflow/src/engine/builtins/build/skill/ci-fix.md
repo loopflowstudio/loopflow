@@ -39,13 +39,22 @@ Find the wave's current PR, identify the latest failing checks on its head commi
 4. **Verify and report**
    - Summarize what failed, what was changed, and what commands were run.
    - If no failing checks remain, say so clearly.
-   - If blocked (missing secrets, flaky upstream, infra outage), give exact blocker details and the next manual action.
+   - If blocked (missing secrets, flaky upstream, infra outage), give exact
+     blocker details and the next manual action. Name the failing capability
+     (provider, github-observation, secrets) — the Task runner independently
+     detects provider outages and GitHub observation failures and transitions
+     the Task to Blocked with that capability, so report it precisely. A PR
+     whose head is still Failing after you finish (you could not repair it)
+     also blocks the Task actionably rather than silently returning to Waiting.
 
 ## Guardrails
 
 - Stay scoped to CI failures on this PR.
 - Prefer targeted fixes over broad refactors.
 - Do not ignore failing tests to get green.
+- Do not fake progress. If you cannot repair the head, say so and stop — the
+  runner blocks the Task on the unchanged failing head. Pushing a real fix
+  (the head advances) is the only signal that another iteration should run.
 
 ## Adaptation
 

@@ -1717,6 +1717,16 @@ fn next_move_for_task(
     // An open PR's next move is CI-derived while a fresh required-check reading
     // exists for the current head; otherwise it is the review/merge gate.
     if pr_phase == Some(PrPhase::Open) {
+        // A Blocked task with an open PR is not auto-resumable by ci-fix: the
+        // body already could not repair the head, or infrastructure is down.
+        // Route to the Project for a new directive or human review instead of
+        // silently re-looping ci-fix through Waiting.
+        if status == TaskSessionStatus::Blocked {
+            return NextMove {
+                owner: NextMoveOwner::Project,
+                reason: reason.to_string(),
+            };
+        }
         if let Some(ci) = ci {
             // A live ci-fix generation (Running/Starting) owns the next move:
             // the Task is actively repairing the branch, not waiting for an
@@ -2338,6 +2348,32 @@ mod tests {
             "PR #900 is open; waiting for review",
         );
         assert_eq!(green.owner, NextMoveOwner::Review);
+    }
+
+    #[test]
+    fn blocked_open_pr_next_move_is_project_not_ci() {
+        // A Blocked task with an open PR is not auto-resumable by ci-fix: the
+        // body already could not repair the head, or infrastructure is down.
+        // Route to the Project for a directive or human review so a failing
+        // ci-fix stops silently re-looping through Waiting.
+        let blocked = next_move_for_task(
+            TaskSessionStatus::Blocked,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["build"])),
+            "CI failing on pull request #900; the Task body did not repair the head",
+        );
+        assert_eq!(blocked.owner, NextMoveOwner::Project);
+        assert!(blocked.reason.contains("did not repair"));
+
+        // The auto ci-fix loop is preserved for a Waiting task: a failing PR
+        // that is not Blocked still routes to Ci for another repair attempt.
+        let waiting = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["build"])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(waiting.owner, NextMoveOwner::Ci);
     }
 
     #[test]

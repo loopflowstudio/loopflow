@@ -31,6 +31,8 @@ use crate::wave::playhead::{
 };
 use crate::wave::Wave;
 
+const TASK_SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
+
 pub async fn run_project_session(session_id: ProjectSessionId, generation: u32) -> Result<()> {
     let lease = project_write_lease_from_env().map_err(|error| anyhow!(error))?;
     if lease.generation != generation {
@@ -177,6 +179,8 @@ async fn run_project_session_inner(
     );
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut task_supervision = tokio::time::interval(TASK_SUPERVISION_INTERVAL);
+    task_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     loop {
         tokio::select! {
@@ -202,6 +206,18 @@ async fn run_project_session_inner(
                     &mut pending,
                 ).await? {
                     return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
+                }
+            }
+            _ = task_supervision.tick() => {
+                if let Err(error) = crate::ops::task::supervise_project_task_bodies(
+                    &store,
+                    &session,
+                ).await {
+                    tracing::warn!(
+                        project_session = %session.id,
+                        error = %error,
+                        "could not supervise Task progress leases"
+                    );
                 }
             }
             event = event_rx.recv() => {

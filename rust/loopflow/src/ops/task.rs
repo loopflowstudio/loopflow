@@ -5,9 +5,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child_session::{
-    task_write_lease_from_env, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration,
-    ChildRef, ChildWriteLease,
+    body_progress_age, observe, plan_body_recovery, task_write_lease_from_env, BodyEvidence,
+    BodyRecoveryPlan, ChildBodyOutcome, ChildCommandEffect, ChildCommandId, ChildCommandKind,
+    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState,
+    ChildProcessGeneration, ChildRef, ChildWriteLease, DEFAULT_STALL_AFTER,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -15,7 +16,10 @@ use crate::engine::git::{
     push_with_upstream, ref_exists, rev_parse,
 };
 use crate::engine::naming::sanitize_for_branch;
-use crate::engine::process::{start_lf_session_with_env, tmux_session_exists, tmux_session_slug};
+use crate::engine::process::{
+    start_lf_session_with_env, tmux_installed, tmux_live_sessions, tmux_session_exists,
+    tmux_session_slug,
+};
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
@@ -1760,6 +1764,234 @@ pub(crate) async fn reconcile_process_liveness(
     record_task_failure(store, session, reason, reason.to_string()).await
 }
 
+/// Let one live Project body supervise the progress leases of its Task bodies.
+///
+/// This is deliberately parent-driven: Project and Task Sessions do not grow a
+/// second watchdog process. A live Project runner calls this on its existing
+/// control tick and recovers only children whose durable progress deadline has
+/// passed on a machine that can still observe their tmux body.
+pub(crate) async fn supervise_project_task_bodies(
+    store: &SharedStore,
+    project: &crate::project_session::ProjectSession,
+) -> OpsResult<usize> {
+    if !tmux_installed() {
+        return Ok(0);
+    }
+    let live_sessions = tmux_live_sessions()
+        .await
+        .map_err(|error| task_error(format!("failed to observe Task bodies: {error}")))?;
+    let tasks = store
+        .list_task_sessions(Some(&project.wave_id))
+        .await
+        .map_err(|error| task_error(format!("failed to list supervised Tasks: {error}")))?;
+    let now = time::OffsetDateTime::now_utc();
+    let mut recovered = 0;
+    for task in tasks.into_iter().filter(|task| {
+        task.project_session_id == project.id
+            && task.status.is_process_active()
+            && task.latest_process.as_ref().is_some_and(|process| {
+                process.state == ChildLeaseState::Active
+                    && live_sessions.contains(&process.tmux_name)
+            })
+    }) {
+        let latest_event = store
+            .latest_task_event(&task.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task progress: {error}")))?;
+        let observation = observe(
+            &BodyEvidence {
+                intent: task.status.body_intent(),
+                observable: true,
+                process_alive: true,
+                progress_age: body_progress_age(
+                    latest_event.as_ref().map(|event| event.created_at),
+                    task.status_at,
+                    now,
+                ),
+                step: Some(task.lifecycle_phase.as_str().to_string()),
+                reason: task.status_reason.clone(),
+            },
+            DEFAULT_STALL_AFTER,
+        );
+        match recover_stalled_task_body(
+            store,
+            task,
+            &observation,
+            latest_event.as_ref().map(|event| event.id),
+        )
+        .await
+        {
+            Ok(true) => recovered += 1,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    project_session = %project.id,
+                    error = %error,
+                    "Task body recovery failed"
+                );
+            }
+        }
+    }
+    Ok(recovered)
+}
+
+async fn recover_stalled_task_body(
+    store: &SharedStore,
+    task: TaskSession,
+    observation: &crate::child_session::BodyObservation,
+    latest_event_id: Option<i64>,
+) -> OpsResult<bool> {
+    let commands = store
+        .list_child_commands(&ChildRef::Task(task.id.clone()))
+        .await
+        .map_err(|error| task_error(format!("failed to inspect Task commands: {error}")))?;
+    let generation = task
+        .latest_process
+        .as_ref()
+        .map(|process| process.generation)
+        .ok_or_else(|| task_error("stalled Task has no process generation"))?;
+    let plan = plan_body_recovery(observation, &commands, generation);
+    if plan == BodyRecoveryPlan::LeaveAlone {
+        return Ok(false);
+    }
+    let active_pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to inspect Task PR: {error}")))?;
+    if let Some(reason) = task.supervisor_restart_bar(active_pr.as_ref()) {
+        tracing::info!(task = %task.launch.issue.identifier, "not recovering Task body: {reason}");
+        return Ok(false);
+    }
+    let progress_age = observation.progress_age_secs.unwrap_or_default();
+    let uncertain = match &plan {
+        BodyRecoveryPlan::NeedsInput { commands } => Some(commands.clone()),
+        BodyRecoveryPlan::Restart => None,
+        BodyRecoveryPlan::LeaveAlone => unreachable!("leave-alone plan returned above"),
+    };
+    let reason = uncertain.as_ref().map_or_else(
+        || {
+            format!(
+                "body generation {generation} stalled after {progress_age}s without durable progress; recovering the same Task Session"
+            )
+        },
+        |commands| {
+            let commands = commands
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "body generation {generation} stalled after {progress_age}s during provider delivery ({commands}); delivery outcome is uncertain, inspect the transcript and resume explicitly"
+            )
+        },
+    );
+    let outcome = if uncertain.is_some() {
+        ChildBodyOutcome::Lost {
+            reason: reason.clone(),
+        }
+    } else {
+        ChildBodyOutcome::Superseded {
+            reason: reason.clone(),
+        }
+    };
+    let Some(revoked) = store
+        .revoke_task_process_if_unchanged(
+            &task.id,
+            generation,
+            task.status_at,
+            latest_event_id,
+            &outcome,
+        )
+        .await
+        .map_err(|error| task_error(format!("failed to claim stalled Task body: {error}")))?
+    else {
+        return Ok(false);
+    };
+    if let Err(error) =
+        super::child::reap_revoked_child_body(store, &ChildRef::Task(task.id.clone()), revoked)
+            .await
+    {
+        let mut current = store
+            .get_task_session(&task.id)
+            .await
+            .map_err(|store_error| task_error(store_error.to_string()))?
+            .ok_or_else(|| task_error("Task Session disappeared during recovery"))?;
+        let failure = format!(
+            "body generation {generation} lease was revoked after a stall but its process group could not be reaped: {error}; manual cleanup is required"
+        );
+        record_task_failure(store, &mut current, failure.clone(), failure).await?;
+        return Err(error);
+    }
+
+    let mut current = store
+        .get_task_session(&task.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error("Task Session disappeared during recovery"))?;
+    if uncertain.is_some() {
+        let successor_generation = generation
+            .checked_add(1)
+            .ok_or_else(|| task_error("Task process generation overflow"))?;
+        let changed = store
+            .mark_stale_child_deliveries_uncertain(
+                &ChildRef::Task(task.id.clone()),
+                successor_generation,
+            )
+            .await
+            .map_err(|error| {
+                task_error(format!("failed to preserve uncertain delivery: {error}"))
+            })?;
+        for command in changed {
+            store
+                .append_task_event(
+                    &task.id,
+                    &TaskEventKind::CommandChanged {
+                        command_id: command.id,
+                        state: ChildCommandState::Uncertain,
+                        effect: command.effect,
+                        error: command.error,
+                    },
+                )
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+    }
+    let from = current.status;
+    current.set_status(TaskSessionStatus::Waiting, reason);
+    store
+        .update_task_session(&current)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    store
+        .append_task_event(
+            &current.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Waiting,
+                reason: current.status_reason.clone(),
+            },
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    if uncertain.is_none() {
+        if let Err(error) = relaunch_inactive_process(store, &mut current).await {
+            let mut persisted = store
+                .get_task_session(&task.id)
+                .await
+                .map_err(|store_error| task_error(store_error.to_string()))?
+                .ok_or_else(|| task_error("Task Session disappeared during relaunch"))?;
+            if persisted.status == TaskSessionStatus::Waiting {
+                let failure = format!(
+                    "body generation {generation} was reaped after a stall but its successor could not start: {error}"
+                );
+                record_task_failure(store, &mut persisted, failure.clone(), failure).await?;
+            }
+            return Err(error);
+        }
+    }
+    Ok(true)
+}
+
 pub(crate) async fn reconcile_task_pr(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -3207,19 +3439,24 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::process::CommandExt;
     use std::path::Path;
     use std::process::Command;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use super::{
         _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
         diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
         parse_pr_slug, parse_workspace_slug, project_context, reconcile_process_liveness,
-        refuse_if_canonical_ahead, resolve_task_flow, resolve_upstream_base,
-        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult, TaskWorkspace,
+        recover_stalled_task_body, refuse_if_canonical_ahead, resolve_task_flow,
+        resolve_upstream_base, verify_task_pr_range_with_authority, RotateOptions,
+        TaskControlResult, TaskWorkspace,
     };
     use crate::child_session::{
-        ChildCommand, ChildCommandKind, ChildCommandSource, ChildProcessGeneration, ChildRef,
+        observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
+        ChildCommandSource, ChildCommandState, ChildLeaseState, ChildProcessGeneration, ChildRef,
     };
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
@@ -3230,8 +3467,8 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskPr, TaskPrId,
-        TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
+        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
     use loopflow_test_support::TestRepo;
@@ -3667,6 +3904,161 @@ mod tests {
             Some(crate::child_session::ChildLeaseState::Finished)
         );
         assert_eq!(persisted.status, TaskSessionStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn stalled_delivery_is_reaped_and_waits_without_replay() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, mut session, _pr) =
+            rotation_task(&repo, "jack/stalled-delivery", &base).await;
+        session.begin_generation(format!("stalled-body-{}", session.id));
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .expect("reserve stalled body");
+
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 60 & echo $!; wait")
+            .process_group(0)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn stalled process group");
+        let group = child.id();
+        let stdout = child.stdout.take().expect("capture grandchild pid");
+        let mut line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut line)
+            .expect("read grandchild pid");
+        let grandchild: u32 = line.trim().parse().expect("grandchild pid");
+        let waiter = std::thread::spawn(move || child.wait().expect("reap shell"));
+
+        let process = session.latest_process.as_mut().expect("reserved process");
+        process.pid = Some(group);
+        process.process_group_id = Some(group);
+        process.state = ChildLeaseState::Active;
+        session.set_status(TaskSessionStatus::Running, "fake provider is alive");
+        store.activate_task_process(&session, &lease).await.unwrap();
+
+        let mut command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "do the external thing".to_string(),
+            },
+        );
+        store.create_child_command(&command).await.unwrap();
+        let claimed = store
+            .claim_child_commands_for_lease(&command.target, &lease)
+            .await
+            .unwrap();
+        command = claimed.into_iter().next().expect("claimed command");
+        store
+            .mark_child_command_delivering_for_lease(
+                &command.target,
+                &lease,
+                &command.id,
+                crate::child_session::ChildCommandEffect::LiveSteer,
+            )
+            .await
+            .unwrap();
+        session = store.get_task_session(&session.id).await.unwrap().unwrap();
+
+        let observation = observe(
+            &BodyEvidence {
+                intent: BodyIntent::Active,
+                observable: true,
+                process_alive: true,
+                progress_age: Duration::from_secs(31 * 60),
+                step: Some("task_pursue".to_string()),
+                reason: "fake provider is alive".to_string(),
+            },
+            Duration::from_secs(30 * 60),
+        );
+        let latest_event_id = store
+            .latest_task_event(&session.id)
+            .await
+            .unwrap()
+            .map(|event| event.id);
+        assert!(
+            recover_stalled_task_body(&store, session.clone(), &observation, latest_event_id,)
+                .await
+                .unwrap()
+        );
+        waiter.join().unwrap();
+
+        // SAFETY: signal 0 is an existence probe and uses no pointers.
+        assert_ne!(unsafe { libc::kill(group as i32, 0) }, 0);
+        // SAFETY: signal 0 is an existence probe and uses no pointers.
+        assert_ne!(unsafe { libc::kill(grandchild as i32, 0) }, 0);
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+        assert_eq!(
+            persisted.latest_process.map(|process| process.state),
+            Some(ChildLeaseState::Finished)
+        );
+        assert!(persisted.status_reason.contains(command.id.as_str()));
+        let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(receipt.state, ChildCommandState::Uncertain);
+    }
+
+    #[tokio::test]
+    async fn progress_wins_the_race_against_stall_recovery() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, mut session, _pr) =
+            rotation_task(&repo, "jack/progress-race", &base).await;
+        session.begin_generation(format!("progress-race-{}", session.id));
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .expect("reserve body");
+        session
+            .latest_process
+            .as_mut()
+            .expect("reserved process")
+            .state = ChildLeaseState::Active;
+        session.set_status(TaskSessionStatus::Running, "provider is alive");
+        store.activate_task_process(&session, &lease).await.unwrap();
+        session = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let observed_event_id = store
+            .latest_task_event(&session.id)
+            .await
+            .unwrap()
+            .map(|event| event.id);
+
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::Progress {
+                    summary: "body advanced before revocation".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let revoked = store
+            .revoke_task_process_if_unchanged(
+                &session.id,
+                1,
+                session.status_at,
+                observed_event_id,
+                &ChildBodyOutcome::Superseded {
+                    reason: "stale observation".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(revoked.is_none());
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted.latest_process.map(|process| process.state),
+            Some(ChildLeaseState::Active),
+        );
+        assert_eq!(persisted.status, TaskSessionStatus::Running);
     }
 
     #[test]

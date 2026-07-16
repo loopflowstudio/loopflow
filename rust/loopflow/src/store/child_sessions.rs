@@ -119,6 +119,28 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn revoke_task_process_if_unchanged(
+        &self,
+        session_id: &TaskSessionId,
+        generation: u32,
+        status_at: OffsetDateTime,
+        latest_event_id: Option<i64>,
+        outcome: &ChildBodyOutcome,
+    ) -> StoreResult<Option<ChildProcessGeneration>> {
+        let session_id = session_id.clone();
+        let outcome = outcome.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.revoke_task_process_if_unchanged(
+                &session_id,
+                generation,
+                status_at,
+                latest_event_id,
+                &outcome,
+            )
+        })
+        .await
+    }
+
     pub(crate) async fn finish_revoked_task_process(
         &self,
         session_id: &TaskSessionId,
@@ -270,6 +292,17 @@ impl Store {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.latest_task_event_at(&session_id)
+        })
+        .await
+    }
+
+    pub async fn latest_task_event(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<TaskEvent>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.latest_task_event(&session_id)
         })
         .await
     }

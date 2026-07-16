@@ -60,6 +60,14 @@ pub(crate) async fn revoke_and_reap_child_body(
             .await
             .map_err(child_error)?,
     };
+    reap_revoked_child_body(store, target, revoked).await
+}
+
+pub(crate) async fn reap_revoked_child_body(
+    store: &SharedStore,
+    target: &ChildRef,
+    revoked: ChildProcessGeneration,
+) -> OpsResult<ChildProcessGeneration> {
     crate::engine::process::reap_child_process(&revoked, Duration::from_secs(2))
         .await
         .map_err(child_error)?;

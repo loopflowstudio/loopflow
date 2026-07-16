@@ -3,7 +3,11 @@
 ## Resolved during kickoff (2026-07-16)
 
 The prior draft's three open questions are all answered against the tree at
-`42cd883cd`. Kept here because each answer changed the design.
+**`7c4d4e965`** — this branch's real base. Kept here because each answer changed
+the design. Their citations (`engine/worktrees.rs:269`, `pr_tests.rs:75`,
+`runner.rs:1848`, `waves.rs:2926`, `task/mod.rs:307`) were re-checked at that
+base and all still hold; the `ops/task.rs` ones did not, and are corrected below
+and in the design's De-risking table.
 
 1. **Does `TestRepo` set up a GitHub origin remote?** — **No.** `TestRepo::new`
    points origin at a local bare temp path, so `github_repo_nwo`
@@ -53,7 +57,7 @@ The prior draft's three open questions are all answered against the tree at
    (`task/mod.rs:307`, standing in for a JSON-column migration). Excluding it
    keeps that default off the wire; storage keeps it.
 
-5. **Corrected mid-kickoff: serde `Option<T>` does not require its key.** The
+4. **Corrected mid-kickoff: serde `Option<T>` does not require its key.** The
    first draft of this design assumed a plain `Option<T>` without
    `#[serde(default)]` makes the key mandatory. Measured — it does not: serde
    gives every `Option<T>` an implicit `None`, and Swift's synthesized `Codable`
@@ -66,7 +70,7 @@ The prior draft's three open questions are all answered against the tree at
    Worth knowing repo-wide: the DTO rule's "no defaults on wire types" cannot be
    enforced by the type system for `Option` fields — only by a fixture guard.
 
-4. **Infra-blocked pins today's behavior, not the desired one.** Without W2-231:
+5. **Infra-blocked pins today's behavior, not the desired one.** Without W2-231:
    `gh` gone → PR read `Degraded`, `observe_required_checks` → `None`, and
    reconcile leaves the prior observation standing. The `Blocked` assertion is
    gated on W2-231 landing.
@@ -82,7 +86,32 @@ The prior draft's three open questions are all answered against the tree at
    owner: if the intent is that an outage suppresses the wake, that is a
    behavior change, not a test fix.
 
-2. **The "green in CI, red in a Session" gotcha is fixed — by #1003 on main, not
+2. **Nothing stops a *merged* PR from waking a ci-fix body except one line in
+   reconcile. Flagging for W2-232's owner.** Found while writing the
+   source-of-truth section; not a bug today, but a single-point defense.
+
+   `wake_warranted` (`task/mod.rs:329`) tests only `state == CiState::Failing`
+   and the dedup stamp. `arm_ci_fix_wake` is `fresh_ci().is_some_and(
+   wake_warranted)`. **Neither consults `merge_commit` or `abandoned_at`.** On a
+   merged PR the head does not move, so `fresh_ci()` would return the last
+   failing reading as fresh and `wake_warranted()` would be true.
+
+   The only thing preventing a wake on a merged PR is that
+   `reconcile_task_pr_with_authority` sets `ci_observation = None` on the
+   `merged` (`ops/task.rs:2427`) and `closed` (`:2470`) branches. That clear is
+   load-bearing with no defense in depth: a refactor that drops it — or any path
+   that arms without reconciling first — reintroduces a ci-fix body on a merged
+   PR.
+
+   Not asserted here: terminal settlement is W2-232's scope, and this proof's
+   state machine deliberately ends at green→waiting. But it is cheap to pin
+   (flip the fake's `pr.json` to `state: "merged"`, reconcile, assert
+   `ci_observation` is `None` and `arm_ci_fix_wake` is false) and the fake this
+   design specifies already has everything needed. Worth W2-232 taking, or worth
+   a guard in `wake_warranted` itself — which would be the honest fix, since the
+   invariant it encodes is "don't repair a PR that no longer exists."
+
+3. **The "green in CI, red in a Session" gotcha is fixed — by #1003 on main, not
    by me. Retire the workaround.** Worth recording precisely, because this
    Project has carried it as a known-unfixable fact of life ("don't fix the code,
    it's the environment").
@@ -90,7 +119,8 @@ The prior draft's three open questions are all answered against the tree at
    The "don't fix the code" instinct was right about *production* code and wrong
    about the cause. `tests/support/mod.rs`'s `AMBIENT_TASK_ENV` cleared
    `LF_TASK_SESSION_ID`, `LF_TASK_GENERATION`, `LF_TASK_LEASE_TOKEN` — but not
-   `LF_WAVE_ID`, which `ops/task.rs:395` reads to decide Wave control:
+   `LF_WAVE_ID`, which `resolve_child_command_source` (`ops/util.rs:63`, called
+   from `ops/task.rs:397`) reads to classify who is issuing a command:
 
    ```
    Wave 6155f18a… cannot control Task INF-123 owned by Wave 4ca22205…
@@ -123,7 +153,7 @@ The prior draft's three open questions are all answered against the tree at
      cargo test -p loopflow
    ```
 
-3. **`lf pr publish` can loop forever on a scratch-only branch — worth filing
+4. **`lf pr publish` can loop forever on a scratch-only branch — worth filing
    under Developer Efficiency.** Hit live during this kickoff (2026-07-16).
    A branch whose only authored commit touches `scratch/` classifies as
    `generated_only` → `reset_to_base`:
@@ -193,7 +223,7 @@ The prior draft's three open questions are all answered against the tree at
    `lf pr publish` — i.e. precisely the manual git surgery the KR says should
    never be necessary.
 
-3. **Two `write_gh_script` helpers already diverge** (`pr_tests.rs:13` is
+5. **Two `write_gh_script` helpers already diverge** (`pr_tests.rs:13` is
    permissive and `exit 0`s on unknown calls; `release_tests.rs:13` fails loudly),
    and this proof adds a third fake in-crate. The in-crate one cannot reuse
    either — they are per-test-binary modules. Unifying them into

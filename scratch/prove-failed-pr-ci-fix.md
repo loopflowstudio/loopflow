@@ -23,9 +23,25 @@ sibling prerequisites (W2-230 audited ledger, W2-231 infra-blocked, W2-232
 bounded settlement — all three confirmed still open) hold. This task delivers
 the behavioral proof against what is on main today.
 
-Who benefits: maintainers who need to trust that a red PR heals itself without
-duplication, without human intervention, and without losing state across
-restarts.
+### User-visible outcome
+
+Two audiences, and it's worth being honest that they differ in kind.
+
+**A consumer reading the wire** gets a real behavior change. Today, "which
+checks are red" exists on the wire only as an English sentence
+(`ci_failure_reason` → `NextMove.reason`), so the Mac app cannot show a failing
+check's name or link without parsing prose. After this Task, `PrSnapshot`
+carries `ci_observation` structurally: a consumer reads `state`, `head_sha`, and
+`failing_checks[].{name,url}` as data. That is observable in `lf wave show
+--json` and in the Swift mirror, without reading Rust.
+
+**A maintainer** gets a guarantee that currently has no enforcement anywhere: a
+red PR head wakes exactly one ci-fix body, the same PR is repaired, and a new
+head rearms until green — across restarts, duplicate deliveries, and a GitHub
+outage. Today that claim rests on three disjoint unit-test islands and one
+transition (red check → armed wake) that no test at any layer has ever driven.
+The observable change is not a passing test; it is that this specific regression
+becomes impossible to merge silently.
 
 Why now: the wake code is on main (#967) but has no integration proof. The
 longer the gap between "shipped" and "proven," the harder a regression is to
@@ -59,10 +75,10 @@ links `loopflow` as an external consumer — can reach none of them.
 | Item | Visibility | Reachable from `tests/`? |
 |---|---|---|
 | `arm_ci_fix_wake` (`task/runner.rs:1823`) | private | no |
-| `reconcile_task_pr_with_authority` (`ops/task.rs:2337`) | private | no |
-| `observe_required_checks` (`ops/task.rs:2262`) | private | no |
+| `reconcile_task_pr_with_authority` (`ops/task.rs:2320`) | private | no |
+| `observe_required_checks` (`ops/task.rs:2245`) | private | no |
 | `read_check_set` (`ops/pr.rs:526`) | private | no |
-| `reconcile_task_pr_for_lease` (`ops/task.rs:2249`) | `pub(crate)` | no |
+| `reconcile_task_pr_for_lease` (`ops/task.rs:2232`) | `pub(crate)` | no |
 | `wake_task_ci_fix` (`ops/child.rs:485`) | `pub(crate)` | no |
 | `ChildWriteLease` (`child_session.rs:138`) | `pub(crate)` | no |
 
@@ -187,6 +203,61 @@ url:  https://github.com/test/repo.git      # github_repo_nwo parses test/repo
 push OK; bare has: b8d0a8e... refs/heads/main
 ```
 
+## Source of truth
+
+One authoritative record; everything else derives from it and nothing else
+writes it.
+
+```
+GitHub (gh) ── read-only, degradable ──► reconcile_task_pr_with_authority
+                                          │  open   -> assign iff Some(reading)
+                                          │  merged -> None
+                                          │  closed -> None
+                                          ▼
+                                   TaskPr.ci_observation           AUTHORITY
+                                    (CiObservation, JSON column,
+                                     SQLite task_prs)
+                                          │
+                    ┌─────────────────────┼──────────────────────┐
+                    ▼                     ▼                      ▼
+         PrSnapshot.ci_observation   ci_failure_reason      arm_ci_fix_wake
+         (wire, typed — added here)  -> NextMove.reason     reads; writes only
+                    │                (wire, prose)          the woken stamp
+                    ▼
+         Swift CiObservationSnapshot
+```
+
+- **Authority:** `TaskPr.ci_observation` in the local SQLite registry. It is the
+  only durable record of what CI said, and the only input to `wake_warranted`.
+- **One writer, three sites, and they are not alike** — all in
+  `reconcile_task_pr_with_authority`, dispatching on the PR's GitHub state. I
+  first wrote "single writer, assigns only when `Some`"; that is true of exactly
+  one of the three branches, so state all three:
+
+  | PR state | Write | Why |
+  |---|---|---|
+  | open | `observe_required_checks(...)`, assigned **only if `Some`** (`ops/task.rs:2493`) | A degraded or failed `gh` read leaves the prior observation standing rather than overwriting it with an absence. This is what makes "no false green" a property of the authority rather than of a consumer — and it is the branch this proof drives. |
+  | `merged` | `ci_observation = None` (`:2427`) | Cleared deliberately, and it is load-bearing: a merged PR has no live CI, and a *stale failing* observation left on it would still read as fresh and wake-warranted. Same hazard class as the gh-outage finding below. |
+  | `closed` | `ci_observation = None` (`:2470`) | Same reasoning, plus `abandoned_at` is stamped. |
+
+  The terminal clears are out of this proof's scope (settlement is W2-232), but
+  they are why "the authority is append-only" would have been the wrong mental
+  model to design against.
+- **`arm_ci_fix_wake` is a reader** with one exception: it stamps
+  `woken_failure_set` on the same record. That stamp is the dedup marker, so the
+  "exactly one body" guarantee lives in the authority, not in a caller.
+- **GitHub is upstream, not authority.** It is read through `gh`, always
+  degradable, and never assumed reachable. Nothing invents a reading it did not
+  give.
+- **Both wire projections are derived and read-only.** `PrSnapshot.ci_observation`
+  (typed, added here) and `NextMove.reason` (prose, existing) are two renderings
+  of the same record — which is why the prose one is fine as a *summary* and
+  wrong as the *only* representation. Swift's mirror derives from the wire, not
+  from the store.
+
+`woken_failure_set` stops at the authority boundary: it is internal dedup state,
+excluded from the wire on purpose (decision 3).
+
 ## Wire surfacing: `CiObservation` on `PrSnapshot`
 
 The task requires "CiObservation wire fields are explicit in Rust, fixtures,
@@ -284,18 +355,47 @@ scenario up automatically once `CiObservationSnapshot` exists in
 
 ## De-risking
 
-Every finding below was verified against this tree at **`895c5cd1d`** — this
+Every finding below was verified against this tree at **`7c4d4e965`** — this
 branch's actual base — not assumed.
 
-Re-confirmed at that base after review flagged the doc citing `42cd883cd`, a
-commit main has since moved past (#1006, #1002, #999). The findings all held;
-**five line citations had drifted** and are corrected above
-(`reconcile_task_pr_with_authority` 2247 → **2337**, `observe_required_checks`
-2172 → **2262**, `reconcile_task_pr_for_lease` 2158 → **2249**, the dedup window
-2206-2212 → **2296-2302**, `pr_tests.rs` 222 → **248**). The re-check also
+**Line numbers here are a convenience, not the citation — the symbol name is.**
+Every reference pairs a symbol with a line, so when a number goes stale, `grep -n
+"fn <symbol>"` recovers it in one command. That is not a stylistic note; the
+`ops/task.rs` numbers have now drifted **twice in a single day**:
+
+| Symbol | at `42cd883cd` | at `895c5cd1d` | at `7c4d4e965` (now) |
+|---|---|---|---|
+| `reconcile_task_pr_for_lease` | 2158 | 2249 | **2232** |
+| `observe_required_checks` | 2172 | 2262 | **2245** |
+| `reconcile_task_pr_with_authority` | 2247 | 2337 | **2320** |
+| dedup carry-forward window | 2206-2212 | 2296-2302 | **2279-2285** |
+
+The first drift was caught by review flagging the doc's stale `42cd883cd`. The
+second happened *during the fix*: main advanced to #1003, which edits
+`ops/task.rs` and shifted all four by −17. Symbols unchanged throughout:
+`arm_ci_fix_wake` (`task/runner.rs:1823`), `read_check_set` (`ops/pr.rs:526`),
+`wake_warranted` (`task/mod.rs:329`).
+
+**One of those drifts was not a moved line but a deleted one**, which is exactly
+why numbers are the wrong unit. The review's own citation — "`ops/task.rs:395`
+reads `WAVE_ID_ENV`" — was true at `895c5cd1d` and is now false at *any* line:
+#1003 ("resolve ambient Wave names and UUIDs uniformly") hoisted that read into a
+shared resolver. It now lives in `resolve_child_command_source`
+(`ops/util.rs:63`), called from `ops/task.rs:397`, and that function emits the
+very error this design reproduces. `resolve_task_authority` moved 1131 → **1113**
+and still reads `LF_TASK_SESSION_ID` directly. The finding is unchanged — ambient
+ids reach production on the paths this proof drives — but a reader chasing
+`ops/task.rs:395` today lands on a closing brace and concludes the design is
+wrong.
+
+Re-verifying at the real base was not cosmetic either time. The first pass
 surfaced a substantive miss — `ops/pr.rs:1243` already asserts the
 aggregate-dropping behaviour this design had promoted to its headline test
-(decision 6). Verifying at the wrong commit is not a cosmetic error.
+(decision 6). The second surfaced the three-site write rule in
+[Source of truth](#source-of-truth): the design had claimed one writer that
+"assigns only when `Some`", which is true of one branch of three.
+
+**Re-check at implementation time, against the base you actually build on.**
 
 | Question | Finding | Impact on design |
 |----------|---------|-----------------|
@@ -304,19 +404,19 @@ aggregate-dropping behaviour this design had promoted to its headline test
 | Can an in-crate test reach `arm_ci_fix_wake`? | Yes, if the module is a **descendant of `task::runner`**. Private items are visible to descendant modules. A `#[cfg(test)] mod` in `ops/task.rs` could not. | Module placement is load-bearing: `src/task/runner/ci_fix_lifecycle_tests.rs`, declared from `runner.rs`. |
 | Are `TestRepo` / `tempfile` available in-crate? | Yes. `loopflow-test-support` is a dev-dependency of `loopflow` (`Cargo.toml:79`); `tempfile` is a **normal** dependency (`Cargo.toml:76`). | No new dependency. |
 | Is `tests/support/`'s `EnvGuard` reachable in-crate? | No — `tests/support/mod.rs` compiles into each test binary, not the lib. | The in-crate test needs its own guard. **Correction (review):** I wrote that it "does not need `EnvGuard`'s job" because the test builds its store via `open_store(tempdir)`. That was wrong, and measurably so — see the row below. The guard must do `EnvGuard`'s job, so it is a near-copy, not a smaller primitive. |
-| Does the ambient Session env reach this test? | **Yes, and it fails the test.** Reproduced, not reasoned: `cargo test --test task_github_cache_tests` inside this Session panics `Wave 6155f18a… cannot control Task INF-123 owned by Wave 4ca22205…`; the same command with the `LF_*` vars cleared passes. The ambient ids reach **production** code on the exact paths this proof drives — `ops/task.rs:395` reads `WAVE_ID_ENV`, and `resolve_task_authority` (`ops/task.rs:1131`) reads `LF_TASK_SESSION_ID`. The Task runner exports all ten; CI exports none. | The guard clears the ambient vars, and the doc no longer calls it PATH-only. The trap here is the *obvious* fix: making production code satisfy the test would be reshaping production around a test-environment artifact, in reverse. Nothing is wrong with the code. |
+| Does the ambient Session env reach this test? | **Yes, and it fails the test.** Reproduced, not reasoned: `cargo test --test task_github_cache_tests` inside this Session panicked `Wave 6155f18a… cannot control Task INF-123 owned by Wave 4ca22205…`; the same command with the `LF_*` vars cleared passed. The ambient ids reach **production** code on the exact paths this proof drives, via two reads: `resolve_child_command_source` (`ops/util.rs:63`, called from `ops/task.rs:397`) reads `WAVE_ID_ENV` to classify who is issuing a command — it emits that exact error — and `resolve_task_authority` (`ops/task.rs:1113`) reads `LF_TASK_SESSION_ID`. The Task runner exports all ten; CI exports none. | The guard clears the ambient vars, and the doc no longer calls it PATH-only. The trap here is the *obvious* fix: making production code satisfy the test would be reshaping production around a test-environment artifact, in reverse. Nothing is wrong with the code. **Since #1003 this specific failure no longer reproduces** — `EnvGuard` now clears `LF_WAVE_ID` — but the reads are still there, and an in-crate guard does not inherit `EnvGuard`'s list. |
 | Why not just clear `PATH` and let the store isolate itself? | Because `resolve_task_authority` calls `open_registry_for_authority()`, which resolves the **global** registry from `LF_CONTROL_HOME`/`LF_CONTROL_DB_PATH`. Left ambient, an in-crate test driving authority reads — and could write — the developer's live control DB. | Decisive. The guard redirects the store home to a temp dir as well. This is exactly `EnvGuard`'s job, which is why the guard converges on it. |
 | Can fake-`gh` serve a scripted fail→pass sequence? | Yes. `read_check_set` calls `gh pr checks <branch> [--required] --json name,bucket,link` and **ignores exit status** — only stdout parses. `GhCheck` fields are `#[serde(default)]` (a deliberately lenient CLI parser). | State-file fake works. |
 | Must the fake distinguish `--required`? | **Yes — though not for the reason I first wrote.** I claimed a flag-ignoring fake yields empty `failing_checks`; traced `from_checks` (`pr.rs:551`) and it doesn't: `failing_leaves` falls back to `full_failing`, then to `gate.failing_checks`, so it's never empty on a real gate failure. The real reason is fidelity: this repo's only required check is the **`tests-result` aggregate**, and the full-set read exists to drop that roll-up in favour of the broken leaves. A single-list fake never exercises that path. | The fake serves distinct required/full lists, and the proof asserts the aggregate is **dropped** (`failing_checks == [cargo-fmt, clippy]`, no `tests-result`) — the assertion that actually has teeth. |
 | Does `observe_pr_by_number` need a GitHub remote URL? | Yes. It runs `gh api repos/{owner}/{name}/pulls/{number}` and resolves nwo from `remote.origin.url`; `github_repo_nwo` only strips `git@github.com:` / `https://github.com/`. `TestRepo`'s origin is a local bare path → `Degraded`. | Reuse `point_origin_at_github`'s idiom. `pushurl` split verified as the alternative if a future test needs push too. |
 | Does the wake path spawn a process? | `wake_task_ci_fix` → `child.launch(store, LaunchIntent::CiFix)` — yes. `arm_ci_fix_wake` — no; it is pure store I/O. | The proof calls `arm_ci_fix_wake`, never `wake_task_ci_fix`. The transitions are proven without a provider. |
-| Does the dedup survive a reconcile (restart)? | Yes, and it's subtle: `observe_required_checks` (`ops/task.rs:2296-2302`) carries `prior.woken_failure_set` forward **only when** `prior.head_sha == new.head_sha` **and** `prior.woken_failure_set == Some(new.failure_set())`. Any head move or failing-set change re-arms. | Restart safety is a real assertion, not a tautology. The test drives reconcile *after* arming and asserts no re-arm — and asserts a *changed* failing set **does** re-arm. |
+| Does the dedup survive a reconcile (restart)? | Yes, and it's subtle: `observe_required_checks` (`ops/task.rs:2279-2285`) carries `prior.woken_failure_set` forward **only when** `prior.head_sha == new.head_sha` **and** `prior.woken_failure_set == Some(new.failure_set())`. Any head move or failing-set change re-arms. | Restart safety is a real assertion, not a tautology. The test drives reconcile *after* arming and asserts no re-arm — and asserts a *changed* failing set **does** re-arm. |
 | What is infra-blocked today? | `gh` absent → `observe_pr_by_number` returns `Degraded { reason: "gh CLI not found" }` and reconcile returns on the degraded branch. `observe_required_checks` returns `None` when `merge_gate_state` is `None` (gh gone / no required checks / unparseable), and **reconcile only assigns when `Some`** — a `None` read leaves the prior observation standing. | Assertable today: degraded PR read, `ci_observation` **unchanged**, no invented green, local control intact. The W2-231 `Blocked` transition is gated. |
 | Does a gh outage strand a stale wake? | Consequence of the above: with gh gone the head can't move, so the last failing reading stays fresh and *would* still warrant a wake. Defensible (it is a real, unrepaired failure) but a genuine behavioral claim. | Name it explicitly and assert it, rather than let it be discovered later. Changing it is W2-231's territory; this proof pins today's truth. |
 | Is `CiObservation` on the wire today? | Not structurally. It is rendered to prose by `ci_failure_reason` (`waves.rs:1727`) into `NextMove.reason`. `PrSnapshot` has no CI field; Swift `GithubPrSnapshot` is `{number, url}` only. | The prior draft's "internal-only" claim was wrong. The design is unchanged in substance; the rationale becomes "carry structure, not prose." |
 | Does a plain `Option<T>` (no `#[serde(default)]`) require its key? | **No — I assumed it did, and measured otherwise.** serde gives every `Option<T>` an implicit `None` default; `{"name":"a"}` decodes clean as `ci: None`. Swift's synthesized `Codable` does the same (`decodeIfPresent`). Non-`Option` fields *are* genuinely required — an absent `head_sha`/`state`/`failing_checks`/`observed_at` is a hard parse error. | Splits the guard in two. The behavioral no-default test works for `CiObservationSnapshot`'s four fields but **cannot** work for `PrSnapshot.ci_observation`. Layer 2 moves that guard to the fixture: assert the raw JSON object contains the key. |
 | Which fixtures break when the field lands? | **None break** — a fixture omitting `ci_observation` silently decodes as `None` in both languages. That is the drift, not a safety net. Populated `PrSnapshot`s: `task_attention_states.json` (1) and `roadmap_snapshot.json` (1). `wave_detail.json`'s `active_pr` is a PR **id string** — a different DTO, unaffected. | Both get explicit `"ci_observation": null`, enforced by the layer-2 presence guard rather than by the decoder; fixture count assertion 8 → 9. |
-| Is the branch behind main? | No. Base is now **`895c5cd1d`**, `0` behind, on PR 2's branch. Main moved twice during this kickoff (`42cd883cd` → `9613efbb2` → `895c5cd1d`), which is what stranded the doc's citations. | Prerequisite discharged — but re-check citations against the base at implementation time, not at design time. See `questions.md` for the `lf rebase`/`lf pr publish` trap that forced the branch rotation. |
+| Is the branch behind main? | No. Base is **`7c4d4e965`**, `0` behind, on PR 2's branch. Main moved four times during this Task (`42cd883cd` → `9613efbb2` → `895c5cd1d` → `7c4d4e965`), which is what stranded the doc's citations twice. | Prerequisite discharged — but re-check citations against the base at implementation time, not at design time. See `questions.md` for the `lf rebase`/`lf pr publish` trap that forced the branch rotation. |
 | Are the three prerequisites landed? | No — W2-230, W2-231, W2-232 all confirmed open in Linear, ranked *below* W2-229. | Prove today's behavior; gate W2-231's assertion. Do not block on siblings. |
 
 ## Alternatives considered
@@ -392,6 +492,27 @@ aggregate-dropping behaviour this design had promoted to its headline test
   - The ci-fix skill's internal behavior (reproduce → fix → push) — that's the body, not the lifecycle
   - Refactoring `tests/support/`'s `EnvGuard` or unifying the two `write_gh_script` helpers — real duplication, but touching every test file is a separate change
 
+## Operational boundary
+
+The task requires the proof to "use local deterministic fakes rather than live
+GitHub or provider traffic and run in normal CI." That is a budget, so state it
+as one — each line is a property the implementation must hold, and each is
+observable.
+
+| Budget | Limit | Enforced by |
+|---|---|---|
+| Network | **zero** requests | No real `gh`; the fake is a `sh` script that `cat`s local files. A wrong invocation exits non-zero and fails the test rather than reaching out. |
+| Provider processes | **zero** spawned | The proof calls `arm_ci_fix_wake` (pure store I/O), never `wake_task_ci_fix` → `child.launch`. |
+| External binaries | `sh` + `git` only | No `jq` (the fake pre-renders JSON via `serde_json`); `gh` is the fake. `git` comes from `TestRepo`. |
+| Wall clock | **< 5 s** for the module | Store is SQLite in a `TempDir`; every step is a function call, and the fake `gh` is a `cat`. A design target, not yet a measurement — the module does not exist. Nearest measured comparable: `task_github_cache_tests` (same fake-`gh` + store shape, 2 tests) runs **7.0 s**, but it spawns the `lf` binary per test, which this proof does not. Measure at implementation; if it exceeds 5 s, something is spawning that shouldn't. |
+| Filesystem reach | temp dirs only | The env guard redirects `LF_CONTROL_HOME`/`LF_CONTROL_DB_PATH`/`LF_HOME` at a `TempDir`. **This is a safety budget, not a speed one** — unguarded, `open_registry_for_authority()` resolves the developer's live control DB (decision 9). |
+| Concurrency | serialized | The guard holds a process-wide `Mutex`: env is process-global and the lib test binary runs tests in threads. |
+| Recovery | none needed | No external state is mutated, so there is nothing to clean up on failure; `Drop` restores env even on panic. |
+
+The one that bites if ignored is the filesystem row. A test that reaches the
+real registry would pass locally, mutate a developer's live Task state as a side
+effect, and behave differently in CI — the worst failure mode available here.
+
 ## Done when
 
 ```bash
@@ -427,5 +548,5 @@ Observable outcomes:
 
 ## Prerequisites
 
-- **Rebase onto main** — **done.** Base `895c5cd1d`, 0 behind. Getting here was not free: `lf rebase` classifies a scratch-only branch as disposable and *resets* it, which discarded the design commit and closed PR #1008. The work now rides PR #1009 on a rotated branch. Full write-up and recovery in `questions.md`.
+- **Rebase onto main** — **done.** Base `7c4d4e965` (#1003), 0 behind. Getting here was not free: `lf rebase` classifies a scratch-only branch as disposable and *resets* it, which discarded the design commit and closed PR #1008. The work now rides PR #1009 on a rotated branch. Full write-up and recovery in `questions.md`.
 - **W2-231 (infra-blocked)** — the `Blocked` assertion is gated. The proof compiles and passes without it.

@@ -85,7 +85,7 @@ public enum BodyOwner: String, Decodable, Sendable, Hashable {
 }
 
 public enum BodyControl: String, Decodable, Sendable, Hashable {
-    case steer, interrupt, stop, extend, resume, decide, abandon
+    case steer, interrupt, stop, extend, resume, decide, abandon, attach
 }
 
 public struct BodyObservation: Decodable, Sendable, Hashable {
@@ -255,8 +255,33 @@ public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
     case green, red, black, unknown
 }
 
-public enum TaskAttentionControl: String, Decodable, Sendable, Hashable {
-    case start, attach, resume, interrupt
+/// The six lifecycle actions a Task Session can take. Mirrors the Rust
+/// `TaskAction`; the server computes which are legal, clients never re-derive.
+public enum TaskAction: String, Decodable, Sendable, Hashable {
+    case recover, resume, review
+    case startNextPr = "start_next_pr"
+    case complete
+    case noAction = "no_action"
+}
+
+/// One action's legal status: the reason explains why it is legal when
+/// available, and names the blocking fact when it is not.
+public struct TaskActionStatus: Decodable, Sendable, Hashable {
+    public let action: TaskAction
+    public let available: Bool
+    public let reason: String
+}
+
+/// The complete legal-action model: all six actions in canonical order.
+/// `recommended` is always one of the available actions, or nil when no
+/// Task Session exists.
+public struct TaskActionModel: Decodable, Sendable, Hashable {
+    public let recommended: TaskAction?
+    public let actions: [TaskActionStatus]
+
+    public func status(_ action: TaskAction) -> TaskActionStatus? {
+        actions.first { $0.action == action }
+    }
 }
 
 public enum TaskProcessEvidenceState: String, Decodable, Sendable, Hashable {
@@ -299,7 +324,7 @@ public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
     public let observedAt: String
     public let evidenceAgeSeconds: Int?
     public let nextOwner: WorkNextMoveOwner
-    public let controls: [TaskAttentionControl]
+    public let actions: TaskActionModel
     public let pmCompleted: Bool
     public let sessionStatus: TaskSessionStatus?
     public let process: TaskProcessEvidence
@@ -307,7 +332,7 @@ public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
     public let activePrPhase: PrPhase?
 
     enum CodingKeys: String, CodingKey {
-        case level, reason, controls, process
+        case level, reason, actions, process
         case observedAt = "observed_at"
         case evidenceAgeSeconds = "evidence_age_secs"
         case nextOwner = "next_owner"

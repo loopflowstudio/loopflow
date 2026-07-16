@@ -101,6 +101,7 @@
                     "reason": "Task flow iteration 1, step 2/3: task_pursue",
                     "owner": "session",
                     "controls": [
+                      "attach",
                       "steer",
                       "interrupt",
                       "stop"

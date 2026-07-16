@@ -7,26 +7,43 @@ enum RoadmapTaskAction: Equatable {
     case run
     case attach
     case resume
+    case recover
+    case review
 
     var label: String {
         switch self {
         case .run: "Start"
         case .attach: "Attach"
         case .resume: "Resume"
+        case .recover: "Recover"
+        case .review: "Review"
         }
     }
 }
 
-/// Pick the one contextual Task action from Rust's legal-control projection.
+/// Pick the one contextual Task action from Rust's legal-action model. The
+/// server decides what is legal and recommends one move; this maps that
+/// recommendation onto the affordance the app can offer, and never re-derives
+/// it from status. Attach is the fallback for a live body with no lifecycle
+/// move waiting on it.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
-    if task.attention.controls.contains(.start) { return .run }
-    if task.attention.controls.contains(.attach) { return .attach }
-    if task.attention.controls.contains(.resume) { return .resume }
-    return nil
+    guard let runtime = task.runtime else {
+        return task.attention.pmCompleted ? nil : .run
+    }
+    switch task.attention.actions.recommended {
+    case .recover: return .recover
+    case .resume: return .resume
+    case .review:
+        // Review is only actionable here when there is a PR to open.
+        if task.activePr?.publication?.github != nil { return .review }
+    case .startNextPr, .complete, .noAction, .none:
+        break
+    }
+    return runtime.observation.controls.contains(.attach) ? .attach : nil
 }
 
 func roadmapTaskCanInterrupt(_ task: RoadmapTask) -> Bool {
-    task.attention.controls.contains(.interrupt)
+    task.runtime?.observation.controls.contains(.interrupt) ?? false
 }
 
 private struct RoadmapTaskSelection: Identifiable {
@@ -320,8 +337,14 @@ struct RoadmapView: View {
             workspaceSelection = selection
         case .run:
             perform(TaskControl.run, on: selection)
-        case .resume:
+        case .resume, .recover:
+            // Recovering a dead body and resuming a parked step are the same
+            // control; the label distinguishes them because the situations do.
             perform(TaskControl.resume, on: selection)
+        case .review:
+            if let github = selection.task.activePr?.publication?.github {
+                NSWorkspace.shared.open(github.url)
+            }
         }
     }
 

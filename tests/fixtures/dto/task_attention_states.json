@@ -30,6 +30,7 @@
         "reason": "implementing the projection",
         "owner": "session",
         "controls": [
+          "attach",
           "steer",
           "interrupt",
           "stop"
@@ -135,6 +136,7 @@
         "reason": "alive but no meaningful progress past the deadline",
         "owner": "loopflow",
         "controls": [
+          "attach",
           "extend",
           "interrupt",
           "stop"

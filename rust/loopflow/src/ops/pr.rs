@@ -419,12 +419,12 @@ pub(crate) fn observe_pr_by_number(repo: &Path, number: u32, branch: &str) -> Pr
 /// quota/network failure, and not something to retry or treat as degraded.
 fn is_missing_pr(stderr: &str) -> bool {
     let lower = stderr.to_ascii_lowercase();
-    lower.contains("http 404") || lower.contains("not found")
+    lower.contains("http 404")
 }
 
 /// Turn a failed `gh api` read into a concise, human-facing degraded reason. The
-/// quota case is called out by name because it is the recurring dogfood failure
-/// (a shared 5000/hr GraphQL+REST budget draining to zero).
+/// quota case is called out by name because exhausted API budgets are a
+/// recurring dogfood failure.
 fn classify_pr_read_failure(number: u32, stderr: &str) -> String {
     let lower = stderr.to_ascii_lowercase();
     if lower.contains("rate limit") || lower.contains("rate-limit") {

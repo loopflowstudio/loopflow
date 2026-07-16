@@ -12,9 +12,9 @@ use crate::child_session::{
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
-    checkout_new_branch_from, cherry_pick_range, current_branch, fetch, get_default_branch,
-    is_ancestor, is_clean, push_with_upstream, ref_exists, rev_parse, stash_including_untracked,
-    stash_pop,
+    checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
+    fetch, get_default_branch, is_ancestor, is_clean, push_with_upstream, ref_exists, rev_parse,
+    stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::{
@@ -2651,6 +2651,23 @@ fn has_pending_directive(session: &TaskSession) -> bool {
     session.current_directive_version > session.incorporated_directive_version
 }
 
+fn roll_back_failed_rotation(
+    worktree: &Path,
+    settled_branch: &str,
+    recovery_branch: &str,
+    stashed: bool,
+) -> OpsResult<()> {
+    checkout(worktree, settled_branch)
+        .map_err(|error| task_error(format!("failed to restore settled branch: {error}")))?;
+    delete_local_branch(worktree, recovery_branch)
+        .map_err(|error| task_error(format!("failed to remove recovery branch: {error}")))?;
+    if stashed {
+        stash_pop(worktree)
+            .map_err(|error| task_error(format!("failed to restore follow-up edits: {error}")))?;
+    }
+    Ok(())
+}
+
 async fn ensure_working_pr_with_authority(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -2749,25 +2766,41 @@ async fn ensure_working_pr_with_authority(
                 .as_deref()
                 == Some(branch.as_str());
             if !recovered {
+                if stashed {
+                    stash_pop(&session.worktree).map_err(|recovery_error| {
+                        task_error(format!(
+                            "failed to rotate Task worktree: {error}; restoring follow-up edits \
+                             also failed: {recovery_error}"
+                        ))
+                    })?;
+                }
                 return Err(task_error(format!(
-                    "failed to rotate Task worktree: {error}"
+                    "failed to rotate Task worktree: {error}; follow-up edits were restored"
                 )));
             }
         }
         if let Some((from, to)) = &committed_carry {
-            cherry_pick_range(&session.worktree, from, to).map_err(|error| {
-                task_error(format!(
+            if let Err(error) = cherry_pick_range(&session.worktree, from, to) {
+                roll_back_failed_rotation(&session.worktree, &settled.branch, &branch, stashed)
+                    .map_err(|recovery_error| {
+                        task_error(format!(
+                        "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
+                         automatic recovery also failed: {recovery_error}",
+                        settled.branch
+                    ))
+                    })?;
+                return Err(task_error(format!(
                     "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
-                     resolve the range on {:?} and retry",
+                     restored {:?} with its follow-up edits so the rotation can be retried",
                     settled.branch, settled.branch
-                ))
-            })?;
+                )));
+            }
         }
         if stashed {
             stash_pop(&session.worktree).map_err(|error| {
                 task_error(format!(
                     "carried the committed follow-up but could not reapply dirty edits: {error}; \
-                     recover them with `git stash pop` in {}",
+                     the recovery branch and retained stash are in {} for conflict resolution",
                     session.worktree.display()
                 ))
             })?;
@@ -4839,6 +4872,81 @@ mod tests {
         assert_eq!(subjects, vec!["follow-up two", "follow-up one"]);
         // The merged work is present exactly once (from the base), not duplicated.
         assert!(repo.path().join("merged.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn failed_committed_carry_restores_the_settled_branch_for_retry() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let settled_branch = "jack/task-pr-proof";
+        repo.create_branch(settled_branch);
+        repo.create_file("shared.txt", "merged\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let merged_tip = repo.head_sha();
+
+        // Main and the post-merge follow-up edit the same line differently, so
+        // carrying the follow-up onto current main must conflict.
+        git(repo.path(), &["checkout", "-b", "main-update", &merged_tip]);
+        repo.create_file("shared.txt", "main moved on\n");
+        repo.stage_all();
+        repo.commit("main update");
+        git(repo.path(), &["push", "origin", "main-update:main"]);
+        git(repo.path(), &["checkout", settled_branch]);
+        repo.create_file("shared.txt", "follow-up edit\n");
+        repo.stage_all();
+        repo.commit("post-merge follow-up");
+        repo.create_file("wip.txt", "dirty follow-up\n");
+
+        let (_home, store, mut session, mut settled) =
+            rotation_task(&repo, settled_branch, &base).await;
+        settled.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 918,
+                url: "https://example.com/pr/918".to_string(),
+                head_sha: Some(merged_tip),
+            }),
+        });
+        settled.merge_commit = Some("merge-918".to_string());
+        settled.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&settled, None)
+            .await
+            .expect("settle merged PR");
+
+        let error = ensure_working_pr_with_authority(
+            &store,
+            &mut session,
+            None,
+            RotateOptions {
+                carry_dirty: true,
+                slug_override: Some("retry".to_string()),
+            },
+        )
+        .await
+        .expect_err("conflicting carry must fail");
+
+        assert!(error.to_string().contains("restored"));
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            settled_branch
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("shared.txt")).expect("commit restored"),
+            "follow-up edit\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("wip.txt")).expect("dirty edit restored"),
+            "dirty follow-up\n"
+        );
+        assert_eq!(
+            git(repo.path(), &["branch", "--list", "*/task-pr-proof-retry"]),
+            ""
+        );
+        assert_eq!(git(repo.path(), &["stash", "list"]), "");
     }
 
     #[test]

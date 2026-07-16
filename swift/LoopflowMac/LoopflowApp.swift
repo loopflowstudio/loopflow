@@ -240,8 +240,9 @@ private extension View {
     func uiTestSnapshot() -> some View {
         if AppTestMode.current() != nil,
            let path = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] {
+            let delay = AppTestMode.snapshotDelay
             task {
-                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 // A background-launched app has no key window, so snapshot the
                 // first realized window directly rather than `keyWindow`.
                 if let window = NSApp.windows.first(where: { $0.contentView != nil }) {

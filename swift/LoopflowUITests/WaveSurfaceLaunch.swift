@@ -16,6 +16,7 @@ struct WaveSurfaceLaunch {
     /// selectable-without-clipping proof are deterministic.
     var width: Double?
 
+    @MainActor
     func makeApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-ui-test-mode", mode]

@@ -52,6 +52,7 @@ struct ActiveSessionsView: View {
         .sheet(item: $openTarget) { handoff in
             HandoffAttachSheet(handoff: handoff, query: query) { openTarget = nil }
         }
+        .accessibilityIdentifier("control-active-sessions")
     }
 
     private var emptyState: some View {

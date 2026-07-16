@@ -30,7 +30,32 @@ final class WaveSurfaceStateTests: XCTestCase {
                            "selected must not show the loading affordance")
             XCTAssertFalse(exists(app, id: "wave-live-status-footer"),
                            "selected must not show the error footer")
+            assertStableNavigation(app)
+            assertHalLenses(app)
+            assertPrimaryInformationHierarchy(app)
             assertEveryWaveRowHittable(app)
+        }
+    }
+
+    @MainActor
+    func testControlIsSecondaryAndOpensToActiveSessions() {
+        forEachWidth { app in
+            XCTAssertTrue(waitFor(app, id: "wave-chat-transcript"),
+                          "Chat must be the selected Wave's default surface")
+            XCTAssertFalse(exists(app, id: "control-surface"),
+                           "Control must stay behind an explicit interaction")
+
+            let button = app.descendants(matching: .any)["wave-control-button"]
+            XCTAssertTrue(button.waitForExistence(timeout: 8),
+                          "the secondary Control destination must be discoverable")
+            button.click()
+
+            XCTAssertTrue(waitFor(app, id: "control-surface"),
+                          "Control must open from the Wave header")
+            XCTAssertTrue(waitFor(app, id: "control-active-sessions"),
+                          "Control must open to Active Sessions")
+            XCTAssertTrue(exists(app, id: "control-run-history-tab"),
+                          "Run History remains visible as later disclosure")
         }
     }
 
@@ -118,6 +143,72 @@ final class WaveSurfaceStateTests: XCTestCase {
             XCTAssertTrue(row.isHittable,
                           "every Wave stays selectable without clipping: \(row.label)")
         }
+    }
+
+    @MainActor
+    private func assertStableNavigation(_ app: XCUIApplication) {
+        let dropdown = app.descendants(matching: .any)["repo-dropdown"]
+        let list = app.descendants(matching: .any)["repo-wave-list"]
+        XCTAssertTrue(dropdown.waitForExistence(timeout: 8),
+                      "repository scope must be one dropdown above the Wave list")
+        XCTAssertTrue(list.waitForExistence(timeout: 8),
+                      "the stable Wave list must remain the primary navigation")
+        XCTAssertLessThanOrEqual(dropdown.frame.maxY, list.frame.minY,
+                                 "the repository dropdown belongs above, not beside, the Wave list")
+
+        let names = waveRows(app).compactMap(Self.waveName)
+        XCTAssertEqual(names, ["feedback", "infrastructure", "cadenza", "intelligence"],
+                       "liveness must not regroup the stable outline")
+
+        let child = waveRows(app).first { Self.waveName($0) == "cadenza" }
+        XCTAssertTrue((child?.value as? String)?.contains("child wave") == true,
+                      "the child row must preserve its hierarchy affordance")
+    }
+
+    @MainActor
+    private func assertHalLenses(_ app: XCUIApplication) {
+        let expected = [
+            "infrastructure": "green lens",
+            "intelligence": "red lens",
+            "feedback": "black lens",
+            "cadenza": "green lens",
+        ]
+        let rows = waveRows(app)
+        for (name, lens) in expected {
+            guard let row = rows.first(where: { Self.waveName($0) == name }) else {
+                XCTFail("missing \(name) Wave row")
+                continue
+            }
+            XCTAssertTrue((row.value as? String)?.hasPrefix(lens) == true,
+                          "\(name) must expose its \(lens) attention signal")
+        }
+    }
+
+    @MainActor
+    private func assertPrimaryInformationHierarchy(_ app: XCUIApplication) {
+        XCTAssertTrue(exists(app, id: "wave-projects"),
+                      "Projects must follow the objective")
+        XCTAssertTrue(exists(app, id: "wave-project"),
+                      "the selected Wave must expose its Project")
+        XCTAssertTrue(exists(app, id: "project-open-tasks"),
+                      "a Project must foreground its open-task count")
+        XCTAssertTrue(exists(app, id: "project-key-result"),
+                      "a Project must foreground its KR list")
+        XCTAssertTrue(exists(app, id: "wave-task"),
+                      "Task rows must stay progressively disclosed under Projects")
+        XCTAssertTrue(exists(app, id: "wave-chat-transcript"),
+                      "Chat must remain present beside the plan")
+        XCTAssertTrue(exists(app, id: "wave-control-button"),
+                      "Control must be reachable without replacing Chat")
+    }
+
+    @MainActor
+    private static func waveName(_ row: XCUIElement) -> String? {
+        let prefix = "Wave: "
+        guard row.label.hasPrefix(prefix),
+              let end = row.label.dropFirst(prefix.count).firstIndex(of: ".")
+        else { return nil }
+        return String(row.label.dropFirst(prefix.count)[..<end])
     }
 
     @MainActor

@@ -120,6 +120,7 @@ struct WaveDetailPane: View {
             .buttonStyle(.plain)
             .help("Open Control")
             .accessibilityLabel("Open Control")
+            .accessibilityIdentifier("wave-control-button")
 
             Button {
                 onClose()
@@ -291,6 +292,7 @@ private struct WavePlanView: View {
                 }
             }
         }
+        .accessibilityIdentifier("wave-projects")
     }
 
     /// Live-status failures are operational detail, not primary hierarchy: a
@@ -427,6 +429,7 @@ private struct WaveProjectWorkView: View {
                 .stroke(isSelected ? palette.accent : Color.clear, lineWidth: 1)
         }
         .contentShape(Rectangle())
+        .accessibilityIdentifier("wave-project")
         .onTapGesture {
             selection = WaveWorkSelection(kind: .project, id: project.project.slug)
         }
@@ -468,6 +471,7 @@ private struct WaveProjectWorkView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(text)
         .accessibilityValue(holds ? "Holds" : "Open")
+        .accessibilityIdentifier("project-key-result")
     }
 }
 
@@ -514,6 +518,7 @@ private struct WaveTaskWorkView: View {
                 .stroke(isSelected ? palette.accent : Color.clear, lineWidth: 1)
         }
         .contentShape(Rectangle())
+        .accessibilityIdentifier("wave-task")
         .onTapGesture {
             selection = WaveWorkSelection(kind: .task, id: task.task.identifier)
         }

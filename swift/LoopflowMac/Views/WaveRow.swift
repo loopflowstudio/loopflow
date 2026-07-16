@@ -14,6 +14,11 @@ struct WaveRow: View {
 
     @State private var isHovering = false
 
+    private var accessibilityValue: String {
+        let hierarchy = indentLevel > 0 ? "child wave" : "top-level wave"
+        return "\(wave.lens.color.rawValue) lens; \(hierarchy)"
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             WaveLensView(lens: wave.lens)
@@ -81,6 +86,8 @@ struct WaveRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Wave: \(wave.displayName). \(wave.lens.reason)")
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(indentLevel > 0 ? "Child wave" : "Top-level wave")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

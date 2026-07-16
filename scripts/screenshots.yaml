@@ -132,3 +132,7 @@ screenshots:
     ui_test_mode: empty-workspaces
     ui_test_width: 1440
     ui_test_delay: 2
+
+  # Real Product data is deliberately not a fixture entry: run
+  # scripts/prove_product_wave_surface.sh so a missing PM snapshot fails by
+  # name instead of quietly producing a mock screenshot.

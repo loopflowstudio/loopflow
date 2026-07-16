@@ -2,7 +2,7 @@
   "live_advancing": {
     "task": {"id":"live","identifier":"W2-A1","name":"Live advancing","description":"","rank":1,"completed":false,"assignee":null},
     "reference": {"issue_url":null,"workspace":{"slug":"live","branch":"jack/live","worktree":"/src/loopflow.live"}},
-    "runtime": {"session_id":"ts_live","project_session_id":"ps_1","status":"running","reason":"implementing the projection","status_at":"2026-07-15T00:00:00Z","provider":"codex","process_alive":true},
+    "runtime": {"session_id":"ts_live","project_session_id":"ps_1","status":"running","reason":"implementing the projection","status_at":"2026-07-15T00:00:00Z","provider":"codex","process_alive":true, "observation": {"category": "working", "reason": "implementing the projection", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iterate"}},
     "next_move": {"owner":"task","reason":"implementing the projection"},
     "attention": {
       "level":"green","reason":"implementing the projection","observed_at":"2026-07-15T00:01:00Z","evidence_age_secs":60,"next_owner":"task","controls":["attach","interrupt"],"pm_completed":false,"session_status":"running",
@@ -16,7 +16,7 @@
   "live_human_wait": {
     "task": {"id":"human","identifier":"W2-A2","name":"Live human wait","description":"","rank":2,"completed":false,"assignee":null},
     "reference": {"issue_url":null,"workspace":{"slug":"human","branch":"jack/human","worktree":"/src/loopflow.human"}},
-    "runtime": {"session_id":"ts_human","project_session_id":"ps_1","status":"running","reason":"waiting for a recovery decision","status_at":"2026-07-14T23:59:00Z","provider":"codex","process_alive":true},
+    "runtime": {"session_id":"ts_human","project_session_id":"ps_1","status":"running","reason":"waiting for a recovery decision","status_at":"2026-07-14T23:59:00Z","provider":"codex","process_alive":true, "observation": {"category": "stalled", "reason": "alive but no meaningful progress past the deadline", "owner": "loopflow", "controls": ["extend", "interrupt", "stop"], "progress_age_secs": 2400, "deadline_in_secs": -600, "step": "iterate"}},
     "next_move": {"owner":"human","reason":"choose the recovery boundary"},
     "attention": {
       "level":"red","reason":"choose the recovery boundary","observed_at":"2026-07-15T00:01:00Z","evidence_age_secs":120,"next_owner":"human","controls":["attach","interrupt"],"pm_completed":false,"session_status":"running",
@@ -30,7 +30,7 @@
   "dead_dirty": {
     "task": {"id":"dirty","identifier":"W2-A3","name":"Dead dirty","description":"","rank":3,"completed":false,"assignee":null},
     "reference": {"issue_url":null,"workspace":{"slug":"dirty","branch":"jack/dirty","worktree":"/src/loopflow.dirty"}},
-    "runtime": {"session_id":"ts_dirty","project_session_id":"ps_1","status":"running","reason":"implementing","status_at":"2026-07-14T23:50:00Z","provider":"codex","process_alive":false},
+    "runtime": {"session_id":"ts_dirty","project_session_id":"ps_1","status":"running","reason":"implementing","status_at":"2026-07-14T23:50:00Z","provider":"codex","process_alive":false, "observation": {"category": "stopped", "reason": "no live body for active intent; a wake will adopt or start one", "owner": "loopflow", "controls": ["resume", "stop"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}},
     "next_move": {"owner":"task","reason":"implementing"},
     "attention": {
       "level":"red","reason":"Task body stopped with uncommitted work","observed_at":"2026-07-15T00:01:00Z","evidence_age_secs":660,"next_owner":"task","controls":["resume"],"pm_completed":false,"session_status":"running",
@@ -44,7 +44,7 @@
   "dead_authored_commits": {
     "task": {"id":"commits","identifier":"W2-A4","name":"Dead authored commits","description":"","rank":4,"completed":false,"assignee":null},
     "reference": {"issue_url":null,"workspace":{"slug":"commits","branch":"jack/commits","worktree":"/src/loopflow.commits"}},
-    "runtime": {"session_id":"ts_commits","project_session_id":"ps_1","status":"waiting","reason":"PR open for review","status_at":"2026-07-14T22:00:00Z","provider":"codex","process_alive":false},
+    "runtime": {"session_id":"ts_commits","project_session_id":"ps_1","status":"waiting","reason":"PR open for review","status_at":"2026-07-14T22:00:00Z","provider":"codex","process_alive":false, "observation": {"category": "needs_input", "reason": "PR open for review", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}},
     "next_move": {"owner":"review","reason":"checks passed; awaiting review"},
     "attention": {
       "level":"red","reason":"checks passed; awaiting review","observed_at":"2026-07-15T00:01:00Z","evidence_age_secs":7260,"next_owner":"review","controls":["resume"],"pm_completed":false,"session_status":"waiting",
@@ -72,7 +72,7 @@
   "completed": {
     "task": {"id":"completed","identifier":"W2-A6","name":"Completed","description":"","rank":6,"completed":true,"assignee":null},
     "reference": {"issue_url":null,"workspace":{"slug":"completed","branch":"jack/completed","worktree":"/src/loopflow.completed"}},
-    "runtime": {"session_id":"ts_completed","project_session_id":"ps_1","status":"completed","reason":"merged","status_at":"2026-07-14T20:00:00Z","provider":"codex","process_alive":false},
+    "runtime": {"session_id":"ts_completed","project_session_id":"ps_1","status":"completed","reason":"merged","status_at":"2026-07-14T20:00:00Z","provider":"codex","process_alive":false, "observation": {"category": "terminal", "reason": "merged", "owner": "nobody", "controls": [], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}},
     "next_move": {"owner":"project","reason":"Linear Task is complete"},
     "attention": {
       "level":"black","reason":"Linear Task is complete","observed_at":"2026-07-15T00:01:00Z","evidence_age_secs":14460,"next_owner":"project","controls":[],"pm_completed":true,"session_status":"completed",
@@ -86,7 +86,7 @@
   "stale": {
     "task": {"id":"stale","identifier":"W2-A7","name":"Stale active intent","description":"","rank":7,"completed":false,"assignee":null},
     "reference": {"issue_url":null,"workspace":{"slug":"stale","branch":"jack/stale","worktree":"/src/loopflow.stale"}},
-    "runtime": {"session_id":"ts_stale","project_session_id":"ps_1","status":"running","reason":"implementing","status_at":"2026-07-14T18:00:00Z","provider":"codex","process_alive":false},
+    "runtime": {"session_id":"ts_stale","project_session_id":"ps_1","status":"running","reason":"implementing","status_at":"2026-07-14T18:00:00Z","provider":"codex","process_alive":false, "observation": {"category": "stopped", "reason": "no live body for active intent; a wake will adopt or start one", "owner": "loopflow", "controls": ["resume", "stop"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}},
     "next_move": {"owner":"task","reason":"implementing"},
     "attention": {
       "level":"red","reason":"no live Task body; local progress requires recovery","observed_at":"2026-07-15T00:01:00Z","evidence_age_secs":21660,"next_owner":"task","controls":["resume"],"pm_completed":false,"session_status":"running",
@@ -100,7 +100,7 @@
   "unavailable": {
     "task": {"id":"unavailable","identifier":"W2-A8","name":"Unavailable evidence","description":"","rank":8,"completed":false,"assignee":null},
     "reference": {"issue_url":null,"workspace":{"slug":"unavailable","branch":"jack/unavailable","worktree":"/missing/loopflow.unavailable"}},
-    "runtime": {"session_id":"ts_unavailable","project_session_id":"ps_1","status":"running","reason":"implementing","status_at":"2026-07-14T23:00:00Z","provider":"codex","process_alive":false},
+    "runtime": {"session_id":"ts_unavailable","project_session_id":"ps_1","status":"running","reason":"implementing","status_at":"2026-07-14T23:00:00Z","provider":"codex","process_alive":false, "observation": {"category": "stopped", "reason": "no live body for active intent; a wake will adopt or start one", "owner": "loopflow", "controls": ["resume", "stop"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}},
     "next_move": {"owner":"task","reason":"implementing"},
     "attention": {
       "level":"unknown","reason":"failed to inspect Task worktree","observed_at":"2026-07-15T00:01:00Z","evidence_age_secs":3660,"next_owner":"task","controls":["resume"],"pm_completed":false,"session_status":"running",

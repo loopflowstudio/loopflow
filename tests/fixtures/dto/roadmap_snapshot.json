@@ -44,7 +44,7 @@
               "iteration": 2,
               "pending_observations": 0,
               "provider": "codex",
-              "process_alive": true
+              "process_alive": true, "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
             },
             "next_move": {"owner": "project", "reason": "supervised Tasks are active"},
             "section": "now",
@@ -74,7 +74,7 @@
                   "reason": "Task flow iteration 1, step 2/3: task_pursue",
                   "status_at": "2026-07-14T23:44:00Z",
                   "provider": "claude",
-                  "process_alive": true
+                  "process_alive": true, "observation": {"category": "working", "reason": "Task flow iteration 1, step 2/3: task_pursue", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iterate"}
                 },
                 "next_move": {"owner": "task", "reason": "Task flow iteration 1, step 2/3: task_pursue"},
                 "attention": {
@@ -118,7 +118,7 @@
                   "reason": "PR open for review",
                   "status_at": "2026-07-14T22:00:00Z",
                   "provider": "claude",
-                  "process_alive": false
+                  "process_alive": false, "observation": {"category": "needs_input", "reason": "PR open for review", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
                 },
                 "next_move": {"owner": "review", "reason": "PR open for review"},
                 "attention": {
@@ -210,7 +210,7 @@
                   "reason": "Research delivered in merged PR",
                   "status_at": "2026-07-14T21:00:00Z",
                   "provider": "claude",
-                  "process_alive": false
+                  "process_alive": false, "observation": {"category": "terminal", "reason": "Research delivered in merged PR", "owner": "nobody", "controls": [], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
                 },
                 "next_move": {"owner": "project", "reason": "Linear Task is complete"},
                 "attention": {

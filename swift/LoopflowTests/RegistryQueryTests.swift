@@ -55,13 +55,13 @@ struct RegistryQueryTests {
           "loop_state":"turning",
           "projects":[{
             "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","krs":[{"text":"Fast loops","holds":false}]},
-            "runtime":{"session_id":"ps_1","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false},
+            "runtime":{"session_id":"ps_1","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"observation":{"category":"needs_input","reason":"supervised Tasks are active","owner":"human","controls":["decide","resume","abandon"],"progress_age_secs":null,"deadline_in_secs":null,"step":"iteration 2"}},
             "directive":null,
             "next_move":{"owner":"project","reason":"supervised Tasks are active"},
             "tasks":[{
               "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
               "reference":{"issue_url":"https://linear.app/loopflow/issue/INF-123/wire-it","workspace":{"slug":"wire-it","branch":"jack/inf-123","worktree":"/task-wt"}},
-              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true},
+              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true,"observation":{"category":"working","reason":"provider turn is active","owner":"session","controls":["steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
               "attention":{"level":"green","reason":"provider turn is active","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"next_owner":"task","controls":["attach","interrupt"],"pm_completed":false,"session_status":"running","process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},

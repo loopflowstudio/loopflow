@@ -39,7 +39,7 @@
         "iteration": 2,
         "pending_observations": 0,
         "provider": "codex",
-        "process_alive": false
+        "process_alive": false, "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
       },
       "directive": {
         "version": 1,
@@ -76,7 +76,7 @@
             "reason": "waiting for review",
             "status_at": "2026-07-13T19:00:00Z",
             "provider": "codex",
-            "process_alive": false
+            "process_alive": false, "observation": {"category": "needs_input", "reason": "waiting for review", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
           },
           "directive": {
             "version": 2,

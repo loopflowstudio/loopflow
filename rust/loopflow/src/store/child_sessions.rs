@@ -263,6 +263,28 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_prs(&session_id)).await
     }
 
+    pub async fn latest_task_event_at(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<OffsetDateTime>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.latest_task_event_at(&session_id)
+        })
+        .await
+    }
+
+    pub async fn latest_project_event_at(
+        &self,
+        session_id: &ProjectSessionId,
+    ) -> StoreResult<Option<OffsetDateTime>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.latest_project_event_at(&session_id)
+        })
+        .await
+    }
+
     pub async fn get_task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
         let pr_id = pr_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_pr(&pr_id)).await

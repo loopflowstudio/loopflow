@@ -125,11 +125,13 @@ Three changes deliver this:
 ### 1. Add the `pruned` terminal state (migration + write path)
 
 New forward migration, allocated as the **next free ordinal after rebasing onto
-main** (`.018` is owned by PR #986 `session_body_provenance` and `.020` by #1010
-`task_pr_linear_linkage`; main also carries `.019_task_pr_github_observation`, so
-the next mechanical ordinal is **`.021`** → `0.11.021_capture_pruned_state.sql`).
-Allocate via `scripts/new_migration.py` post-rebase so the ordinal reflects
-main's actual high-water mark, never a hardcoded guess. SQLite bakes CHECK
+main**. Main now carries `.018_session_body_provenance` (#986),
+`.019_task_pr_github_observation`, `.020_task_pr_linear_linkage` (#1010), and
+`.021_provider_deliveries` (#1012), so the migration lands at **`.022`** →
+`0.11.022_capture_pruned_state.sql`. Allocate via `scripts/new_migration.py`
+post-rebase so the ordinal reflects main's actual high-water mark, never a
+hardcoded guess — this branch has now been re-allocated twice (`.020` → `.021` →
+`.022`) by siblings merging while the PR sat. SQLite bakes CHECK
 constraints into the table, so widen the enum with the documented rebuild (mirror
 `0.11.002_project_session_successors.sql`): create `agent_launches_next` with
 `capture_status … CHECK (capture_status IN ('capturing','complete','partial','prompt_only','pruned'))`,
@@ -235,17 +237,20 @@ tombstone a file that a correct resolver would have found. `lf_home_dir()` is
 
 ## Scope
 
-- **In scope:** `.021` migration adding `pruned` (next free ordinal post-rebase;
-  `.018`/`.019`/`.020` claimed on main by #986, `task_pr_github_observation`, and
-  #1010 `task_pr_linear_linkage`);
+- **In scope:** `.022` migration adding `pruned` (next free ordinal post-rebase;
+  `.018`–`.021` claimed on main by #986, `task_pr_github_observation`, #1010
+  `task_pr_linear_linkage`, and #1012 `provider_deliveries`);
   `finish()`/write-path unaffected but reason plumbing for tombstones; `lf runs
   reconcile [--apply] [--all] [--json]`; `check_capture` `pruned` arm + pruned
   count in detail; `trace_root()` unification with `lf_home_dir()` (already
   applied in the working patch); behavior tests; a production-shaped
   doctor+reconcile proof against a **copied** store.
-- **Sequencing:** rebased onto main after #986 and #1010 merged (2026-07-16), so
-  the migration was reallocated `.020` → `.021` mechanically against main's actual
-  high-water mark. Keep canonical main clean.
+- **Sequencing:** rebased onto main after #986, #1010, and #1012 merged
+  (2026-07-16), reallocating the migration `.020` → `.021` → `.022` mechanically
+  against main's actual high-water mark each time. #1012 took `.021` while this
+  PR sat, which is the ordinal race wave-memory warns about — re-check on every
+  rebase, and scan open PRs for the *table*, not the ordinal. Keep canonical main
+  clean.
 - **Out of scope:** building trace retention/GC (only the state + ordering
   contract it will use); rewriting or deleting the production DB by hand; changes
   to `agent_turns`/context schema; W2-236's shared classification helpers; the

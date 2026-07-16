@@ -2017,14 +2017,18 @@ pub(crate) async fn supervise_project_task_bodies(
     // separate cohort from the stall sweep below, which only ever looks at
     // bodies that are alive: the two conditions are disjoint, and folding them
     // together would make one predicate answer two different questions.
-    for mut task in mine.iter().cloned().filter(|task| {
-        task.latest_process.as_ref().is_some_and(|process| {
-            !live_sessions.contains(&process.tmux_name)
-                // A reservation inside its startup grace is a relaunch in
-                // flight, not a strand.
-                && !super::child::child_body_reservation_is_fresh(process)
+    for mut task in mine
+        .iter()
+        .filter(|task| {
+            task.latest_process.as_ref().is_some_and(|process| {
+                !live_sessions.contains(&process.tmux_name)
+                    // A reservation inside its startup grace is a relaunch in
+                    // flight, not a strand.
+                    && !super::child::child_body_reservation_is_fresh(process)
+            })
         })
-    }) {
+        .cloned()
+    {
         match recover_stranded_task_body(store, &mut task).await {
             Ok(true) => recovered += 1,
             Ok(false) => {}
@@ -4269,13 +4273,14 @@ mod tests {
 
     use super::{
         _defer_task_interactions, cached_github_observation, changes_snapshot,
-        derive_workspace_slug, diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority,
-        file_snapshot, next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
-        reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
-        refuse_dirty_between_prs, refuse_if_canonical_ahead,
-        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
-        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        count_recovery_attempts, derive_workspace_slug, diff_snapshot, ensure_working_pr,
+        ensure_working_pr_with_authority, file_snapshot, next_pr_slug, parse_pr_slug,
+        parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
+        recover_stalled_task_body, recover_stranded_task_body, refuse_dirty_between_prs,
+        refuse_if_canonical_ahead, require_task_pr_range_nonempty_with_authority,
+        resolve_task_flow, resolve_upstream_base, task_recovery_adoption,
+        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult,
+        TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -4453,7 +4458,11 @@ mod tests {
         repo: &TestRepo,
         branch: &str,
         base_commit: &str,
-        lease: Option<(crate::child_session::ChildLeaseState, TaskSessionStatus)>,
+        lease: Option<(
+            crate::child_session::ChildLeaseState,
+            TaskSessionStatus,
+            Option<ChildBodyOutcome>,
+        )>,
     ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
         let home = tempfile::tempdir().expect("task home");
         let store = Arc::new(
@@ -4462,7 +4471,7 @@ mod tests {
                 .expect("open store"),
         );
         let now = OffsetDateTime::now_utc();
-        let lease_seed = lease.map(|(state, status)| {
+        let lease_seed = lease.map(|(state, status, outcome)| {
             (
                 status,
                 ChildProcessGeneration {
@@ -4477,7 +4486,7 @@ mod tests {
                     provider_session_id: None,
                     started_at: now - time::Duration::hours(1),
                     state,
-                    outcome: None,
+                    outcome,
                     provenance: None,
                 },
             )
@@ -5064,12 +5073,15 @@ mod tests {
     /// Seed a second Task under the rotation scaffolding whose durable state is a
     /// non-active status still carrying a dead lease — the exact shape an explicit
     /// resume must reconcile before it can reserve a fresh body.
+    /// `outcome` is seeded at row creation because the lease outcome belongs to
+    /// the revoke/finish CAS path — `update_task_session` does not persist it.
     async fn dead_lease_task(
         repo: &TestRepo,
         branch: &str,
         base: &str,
         status: TaskSessionStatus,
         lease_state: crate::child_session::ChildLeaseState,
+        outcome: Option<ChildBodyOutcome>,
     ) -> (tempfile::TempDir, SharedStore, TaskSession) {
         let (home, store, base_session, _pr) = rotation_task(repo, branch, base).await;
         let now = OffsetDateTime::now_utc();
@@ -5094,7 +5106,7 @@ mod tests {
             provider_session_id: None,
             started_at: now - time::Duration::hours(1),
             state: lease_state,
-            outcome: None,
+            outcome,
             provenance: None,
         });
         let pr = TaskPr {
@@ -5123,6 +5135,126 @@ mod tests {
         (home, store, session)
     }
 
+    /// The proof: a Task whose body died comes back with nobody asking.
+    ///
+    /// The seeded lease names a tmux session no server knows, so the liveness
+    /// probe reads the body as genuinely gone — the same evidence a
+    /// `tmux kill-session` produces. The worktree stays real, so the successor
+    /// clears the same adoption preconditions an explicit resume would.
+    #[tokio::test]
+    async fn a_killed_body_under_a_live_task_recovers_with_no_human_action() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, mut session, _pr) = rotation_task_with_lease(
+            &repo,
+            "jack/w2-267-recovers",
+            &base,
+            Some((ChildLeaseState::Active, TaskSessionStatus::Running, None)),
+        )
+        .await;
+        // The body owned its PR branch when it died; put the worktree back where
+        // it was so the successor clears the same adoption preconditions an
+        // explicit resume would.
+        git(repo.path(), &["checkout", "-b", "jack/w2-267-recovers"]);
+        let generation_before = session
+            .latest_process
+            .as_ref()
+            .expect("a dead body to recover")
+            .generation;
+
+        let recovered = recover_stranded_task_body(&store, &mut session)
+            .await
+            .expect("recover a Task whose body died");
+
+        assert!(recovered, "a dead body under a live Task must be recovered");
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        // A fresh generation holds the Session: the strand is over.
+        assert_eq!(
+            persisted
+                .latest_process
+                .as_ref()
+                .expect("a successor body")
+                .generation,
+            generation_before + 1,
+        );
+        assert!(
+            persisted.status.is_process_active(),
+            "the recovered Session must claim a body again, not sit at {}",
+            persisted.status.as_str()
+        );
+        // ...and it says so durably, once, with its attempt bounded.
+        let events = store.recent_task_events(&session.id, 64).await.unwrap();
+        assert_eq!(count_recovery_attempts(&events), 1);
+        assert!(
+            events.iter().any(|event| matches!(
+                event.kind,
+                TaskEventKind::BodyRecoveryAttempted { attempt: 1, .. }
+            )),
+            "recovery must be observable, not silent"
+        );
+    }
+
+    /// The other half of the proof, and the triage's central trap: a Task that
+    /// finished *successfully* also reaps its body as `lost` (W2-171/#913,
+    /// W2-226/#965, W2-227, W2-233/#982). Recovery must not chase it.
+    ///
+    /// Two things are deliberate, and without either the test passes vacuously
+    /// while the terminal guard rots: the `lost` outcome is seeded (an absent one
+    /// would be left alone for the wrong reason), and the worktree is real and on
+    /// the PR branch (otherwise `task_recovery_adoption` refuses first and the
+    /// guard is never reached). Both were caught by mutating the guard away and
+    /// watching this test keep passing.
+    #[tokio::test]
+    async fn a_completed_task_whose_body_was_reaped_triggers_nothing() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, mut session, _pr) = rotation_task_with_lease(
+            &repo,
+            "jack/w2-267-completed",
+            &base,
+            Some((
+                ChildLeaseState::Finished,
+                TaskSessionStatus::Completed,
+                Some(ChildBodyOutcome::Lost {
+                    reason: "task process disappeared before recording a terminal outcome"
+                        .to_string(),
+                }),
+            )),
+        )
+        .await;
+        git(repo.path(), &["checkout", "-b", "jack/w2-267-completed"]);
+        let before = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert!(
+            matches!(
+                before
+                    .latest_process
+                    .as_ref()
+                    .and_then(|p| p.outcome.as_ref()),
+                Some(ChildBodyOutcome::Lost { .. })
+            ),
+            "the trap only exists when a completed Task carries a lost body"
+        );
+
+        let recovered = recover_stranded_task_body(&store, &mut session)
+            .await
+            .expect("classify a completed Task");
+
+        assert!(!recovered, "a completed Task must never be recovered");
+        let after = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(after.status, TaskSessionStatus::Completed);
+        assert_eq!(
+            after.latest_process.map(|process| process.generation),
+            before.latest_process.map(|process| process.generation),
+            "a completed Task's body must not be replaced"
+        );
+        let events = store.recent_task_events(&session.id, 64).await.unwrap();
+        assert_eq!(
+            count_recovery_attempts(&events),
+            0,
+            "a completed Task must record no recovery attempt"
+        );
+    }
+
     #[tokio::test]
     async fn resume_revokes_a_dead_legacy_lease_on_a_waiting_task() {
         // W2-135: a Waiting Task still pinned by a Legacy lease whose body vanished.
@@ -5134,6 +5266,7 @@ mod tests {
             &base,
             TaskSessionStatus::Waiting,
             crate::child_session::ChildLeaseState::Legacy,
+            None,
         )
         .await;
 
@@ -5168,6 +5301,7 @@ mod tests {
             &base,
             TaskSessionStatus::Failed,
             crate::child_session::ChildLeaseState::Active,
+            None,
         )
         .await;
 
@@ -6475,6 +6609,7 @@ mod tests {
             Some((
                 crate::child_session::ChildLeaseState::Active,
                 TaskSessionStatus::Waiting,
+                None,
             )),
         )
         .await;
@@ -6547,7 +6682,7 @@ mod tests {
             &repo,
             first_branch,
             &base,
-            Some((ChildLeaseState::Active, TaskSessionStatus::Running)),
+            Some((ChildLeaseState::Active, TaskSessionStatus::Running, None)),
         )
         .await;
         settle_pr(&store, first, "merge-supervised", None).await;

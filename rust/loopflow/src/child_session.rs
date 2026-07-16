@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 
 use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
-use crate::task::TaskSessionId;
+use crate::task::{TaskEvent, TaskEventKind, TaskSessionId};
 
 pub(crate) const PROJECT_LEASE_TOKEN_ENV: &str = "LF_PROJECT_LEASE_TOKEN";
 pub(crate) const PROJECT_GENERATION_ENV: &str = "LF_PROJECT_GENERATION";
@@ -1057,11 +1057,13 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
 #[cfg(test)]
 mod tests {
     use super::{
-        body_progress_age, observe, plan_body_recovery, unincorporated_directive_version,
-        BodyCategory, BodyControl, BodyEvidence, BodyIntent, BodyOwner, BodyRecoveryPlan,
-        ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildDirectiveId, ChildLeaseState, ChildLeaseToken,
-        ChildProcessGeneration, ChildRef, ChildWriteLease, Duration, DEFAULT_STALL_AFTER,
+        body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
+        plan_stranded_recovery, unincorporated_directive_version, BodyCategory, BodyControl,
+        BodyEvidence, BodyIntent, BodyOwner, BodyRecoveryPlan, ChildBodyOutcome, ChildCommand,
+        ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDecisionId,
+        ChildDirectiveId, ChildLeaseState, ChildLeaseToken, ChildProcessGeneration, ChildRef,
+        ChildWriteLease, Duration, StrandedPlan, TaskEvent, TaskEventKind, TaskSessionId,
+        DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
     };
 
     fn evidence(intent: BodyIntent, alive: bool, progress: Duration) -> BodyEvidence {
@@ -1527,7 +1529,7 @@ mod tests {
     fn recovery_event(id: i64, attempt: u32) -> TaskEvent {
         TaskEvent {
             id,
-            session_id: TaskSessionId::from("ts_46981e681adf4f9aaf68769a3afdeaaf"),
+            session_id: TaskSessionId::new(),
             kind: TaskEventKind::BodyRecoveryAttempted {
                 generation: 2,
                 attempt,
@@ -1540,7 +1542,7 @@ mod tests {
     fn other_event(id: i64, kind: TaskEventKind) -> TaskEvent {
         TaskEvent {
             id,
-            session_id: TaskSessionId::from("ts_46981e681adf4f9aaf68769a3afdeaaf"),
+            session_id: TaskSessionId::new(),
             kind,
             created_at: time::OffsetDateTime::UNIX_EPOCH,
         }

@@ -266,7 +266,29 @@ fencing CAS, not on there being exactly one caller.
    exhaustion is self-consistent and cannot mint dead generations.
 4. **The ci-fix wake stays untouched and distinct** (W2-230/W2-229). Its trigger is
    a failing required check on a live open PR; recovery's trigger is a dead body.
-   They share `relaunch_inactive_process` and nothing else.
+   They share `relaunch_inactive_process` as their one launch path.
+
+   **Seam with W2-232 — a recovery-launched body IS subject to ci-fix entry, and
+   that is deliberate.** W2-232 adds a `CiFix` lifecycle phase whose entry runs at
+   *body birth*, so a body this design redispatches will hit it and can be routed
+   into a bounded ci-fix turn even though it died for reasons unrelated to CI.
+
+   Recovery does not opt out, because recovery does not decide what a body *does*.
+   It answers one question — is there a body? — and the flow decides the work from
+   its durable phase cursor. Exempting recovery would mean threading launch intent
+   down into the runner so it could suppress a flow entry, which is a *new*
+   coupling between recovery and ci-fix. The seam is cheaper than the wire. (The
+   in-flight turn is not an argument either way: it is already lost when the body
+   dies — a fresh generation re-enters at the phase cursor regardless.)
+
+   **The hazard this creates is W2-232's to close, and the attempt counter does
+   not cover it.** If a ci-fix turn ever ends leaving the Session process-active
+   with no body, recovery re-fires, ci-fix entry fires again, and the two
+   oscillate. The bounded counter does *not* stop this: a ci-fix turn writes real
+   durable events, which resets the budget by design (see
+   `count_recovery_attempts`). The only thing that closes it is W2-232's turn
+   settling to a parked status — `Waiting`, which recovery never selects. Named on
+   both sides so it is a contract rather than a merge surprise.
 5. **W2-249 still owns attempt resolution.** Recovery triggers; W2-249 settles.
 6. **A dead *Project* Session still strands its Tasks. Out of scope, and filed as
    real work** — *"Recover a Task Session whose parent Project Session is dead"*
@@ -397,13 +419,30 @@ no new subprocess, no new process, no network. Bounded at 3 attempts per strand.
 - Replace `record_task_failure("…resume the same Task Session…")` at
   `ops/task.rs:1806` with a recovery verdict
 - `LaunchIntent::Recovery` + `recovery_restart_bar` (`ops/child.rs`, `task/mod.rs`)
-- Retire the `settled` gate at `runner.rs:812-820` in favour of the classifier
 - `TaskEventKind::BodyRecoveryAttempted { generation, attempt, reason }` for the
   durable attempt count and observability (internal — not a wire DTO)
-- Construct the existing, never-constructed `BodyCategory::Recovering` in
-  `observe()` while a successor is starting
 - Integration test: kill a body, assert `running` with no human action; assert a
   `completed` Task's reaped body triggers nothing
+
+**Scope corrections made during implementation** (recorded because they contradict
+earlier drafts of this doc):
+
+- **The `settled` gate at `runner.rs:812-820` is NOT retired.** The draft called it
+  a redundant second dispatcher. Reading it again: its branch calls
+  `ensure_working_pr` *first*, so it is **PR rotation** — a merged PR starting the
+  next serial PR — not recovery. Retiring it would break serial Tasks. Recovery on
+  the 5s tick makes its *gating* moot without touching it, which is what the
+  directive actually wanted.
+- **`BodyCategory::Recovering` is deferred**, not built. Constructing it means a
+  new `BodyEvidence` field and 8 construction sites across three modules — too
+  wide a blast radius for an increment that already changes the dispatch path, and
+  genuinely separable. The demo is satisfied by the durable event plus
+  `status_reason`. The dead-surface finding stands and is worth its own slice.
+- **`ChildLeaseState::Revoked` gets an explicit `Surface` arm** (added mid-build).
+  Not scope creep: `recover_stranded_task_body` calls `revoke_and_reap_child_body`,
+  whose reap can fail EPERM and leave the lease at `revoked` — so this code can
+  *mint* the state it must classify. Repair is filed as
+  `f39e37f0-5894-4f13-82b9-6649865d91ce`.
 
 **Out of scope**
 - Reaping/classifying orphaned processes (`b9843f04`) and subprocess reaping on
@@ -412,6 +451,14 @@ no new subprocess, no new process, no network. Bounded at 3 attempts per strand.
 - The ci-fix wake path (W2-230 / W2-229)
 - Recovering Tasks under a **dead Project Session** — decision 6, filed as
   `7e7be305-83fb-4689-ac7e-c1260d962924`
+- Releasing a lease stuck at `revoked` after a failed reap — recovery classifies it
+  honestly but does not repair it. Filed as
+  `f39e37f0-5894-4f13-82b9-6649865d91ce` (reaping territory, sibling of
+  `b9843f04`)
+- A `Waiting` Session parked by an **evaporated interrupt** on
+  `"resume the Session to start one"` — a strand wearing a different status, but
+  auto-resuming it would overrule an explicit human stop. Filed as
+  `dc94fd8f-b93d-4fed-acf5-bd4d88adca2a`
 - Provider handoff *automation* — recovery surfaces the handoff command; it does
   not choose a provider
 

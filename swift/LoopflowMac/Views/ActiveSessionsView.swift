@@ -462,15 +462,20 @@ private struct HandoffAttachSheet: View {
         do {
             let descriptor = try await query.attachHandoff(sessionId: handoff.sessionId)
             attach = descriptor
-            let cap = HandoffSurfaceLauncher.capability(cwd: descriptor.cwd)
+            // Consume the descriptor's Home, not a local-only assumption: a remote
+            // worktree makes local editors and plain windows unavailable.
+            let cap = HandoffSurfaceLauncher.capability(host: descriptor.host, cwd: descriptor.cwd)
             capability = cap
-            let resolved = HandoffSurfaceResolver.resolve(
+            let resolution = HandoffSurfaceResolver.resolve(
                 provider: handoff.provider,
                 home: handoff.home,
                 memory: preferences.memory,
                 capability: cap
             )
-            await present(resolved, attach: descriptor, capability: cap, userInitiated: false)
+            // A remembered surface that could not be honored names itself and why;
+            // show that reason so the fallback is never silent.
+            fallbackNotice = resolution.fallbackReason
+            await present(resolution.surface, attach: descriptor, capability: cap, userInitiated: false)
         } catch {
             self.error = error.localizedDescription
         }
@@ -478,9 +483,11 @@ private struct HandoffAttachSheet: View {
 
     /// Present the handoff in `target`. Ghostty embeds; an external target
     /// launches through the shared command. The preference advances only when a
-    /// user-initiated launch succeeds — an auto-resolved fallback never rewrites
-    /// the remembered surface, so a briefly-unavailable app returns when it comes
-    /// back. A failed launch falls back visibly to the embedded terminal.
+    /// user-initiated *attach* launch succeeds — an auto-resolved fallback never
+    /// rewrites the remembered surface (so a briefly-unavailable app returns), and
+    /// a worktree-only launch never overwrites the last valid attach preference
+    /// (opening a folder is not the surface the human attaches through). A failed
+    /// launch falls back visibly to the embedded terminal.
     private func present(
         _ target: HandoffSurface,
         attach: InteractiveHandoffAttach,
@@ -488,33 +495,46 @@ private struct HandoffAttachSheet: View {
         userInitiated: Bool
     ) async {
         error = nil
+        let reach = capability.reach(target)
+
         if target == .ghostty {
             surface = .ghostty
             externalNote = nil
-            if userInitiated {
-                preferences.record(.ghostty, provider: handoff.provider, home: handoff.home)
-                fallbackNotice = nil
-            }
+            // An explicit Ghostty choice clears a stale fallback reason; an
+            // auto-resolved fallback keeps the reason set in `start()`.
+            if userInitiated { fallbackNotice = nil }
+            recordIfEarned(target, reach: reach, userInitiated: userInitiated, launched: true)
             return
         }
 
-        let reach = capability.reach(target)
         let launched = await HandoffSurfaceLauncher.launch(target, attach: attach, reach: reach)
         if launched {
             surface = target
             externalNote = reach == .attach
                 ? "Attached in \(target.appName). Complete or hand back from there."
                 : "Opened the worktree in \(target.appName) — this does not attach the Session."
-            fallbackNotice = nil
-            if userInitiated {
-                preferences.record(target, provider: handoff.provider, home: handoff.home)
-            }
+            if userInitiated { fallbackNotice = nil }
+            recordIfEarned(target, reach: reach, userInitiated: userInitiated, launched: true)
         } else {
             // Visible fallback: embed Ghostty and leave the preference untouched.
             surface = .ghostty
             externalNote = nil
             fallbackNotice = "\(target.appName) unavailable — fell back to the embedded terminal."
         }
+    }
+
+    private func recordIfEarned(
+        _ surface: HandoffSurface,
+        reach: HandoffSurfaceReach,
+        userInitiated: Bool,
+        launched: Bool
+    ) {
+        guard handoffPreferenceShouldRecord(
+            reach: reach,
+            userInitiated: userInitiated,
+            launchSucceeded: launched
+        ) else { return }
+        preferences.record(surface, provider: handoff.provider, home: handoff.home)
     }
 }
 

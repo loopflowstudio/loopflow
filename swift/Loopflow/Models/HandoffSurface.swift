@@ -72,41 +72,59 @@ public struct HandoffSurfaceOption: Codable, Sendable, Hashable, Identifiable {
 /// launch configuration. An IDE opened at a folder does not resume the specific
 /// provider Session, so an IDE is never more than `.worktreeOnly` — it opens the
 /// worktree without ever claiming to attach.
+///
+/// The descriptor's Home matters: on a **remote** Home the worktree lives on
+/// another host, so a local editor or a plain local window cannot reach it.
+/// Ghostty and a command-bearing Warp still attach — they run the shared argv,
+/// which carries its own transport (e.g. ssh) — but local worktree-only actions
+/// become unavailable rather than opening a path that is not there.
 public struct HandoffSurfaceCapability: Sendable, Hashable {
     /// External apps installed on the current Home. Ghostty is embedded, so it is
     /// never listed here and is always available.
     public let installedApps: Set<HandoffSurface>
-    /// The worktree is a proven workspace an IDE can open.
+    /// The worktree is a proven workspace an IDE can open (only meaningful for a
+    /// local Home; a remote worktree is never locally proven).
     public let workspaceProven: Bool
     /// Warp can be handed a command-bearing launch configuration that runs the
     /// exact shared attach command.
     public let warpCommandBearing: Bool
+    /// The handoff's Home is on another host (`descriptor.host`), so the worktree
+    /// is not on this machine.
+    public let isRemoteHome: Bool
 
     public init(
         installedApps: Set<HandoffSurface>,
         workspaceProven: Bool,
-        warpCommandBearing: Bool
+        warpCommandBearing: Bool,
+        isRemoteHome: Bool
     ) {
         self.installedApps = installedApps
         self.workspaceProven = workspaceProven
         self.warpCommandBearing = warpCommandBearing
+        self.isRemoteHome = isRemoteHome
     }
 
     /// How honestly `surface` can present this handoff right now.
     public func reach(_ surface: HandoffSurface) -> HandoffSurfaceReach {
         switch surface {
         case .ghostty:
-            // Embedded and required: always the honest attach fallback.
+            // Embedded and required: runs the shared argv (which carries its own
+            // transport), so it attaches on a local or a remote Home alike.
             return .attach
         case .warp:
             guard installedApps.contains(.warp) else { return .unavailable }
-            // Attach only through a command-bearing config; a plain worktree
-            // window is the weaker action and is labeled as such.
-            return warpCommandBearing ? .attach : .worktreeOnly
+            // A command-bearing config runs the shared argv, so it attaches on any
+            // Home. A plain worktree window only reaches a *local* path, so on a
+            // remote Home it is unavailable rather than worktree-only.
+            if warpCommandBearing { return .attach }
+            return isRemoteHome ? .unavailable : .worktreeOnly
         case .vscode, .cursor:
-            guard installedApps.contains(surface), workspaceProven else { return .unavailable }
-            // No IDE launch resumes the specific provider Session, so an IDE
-            // opens the worktree without ever claiming to attach.
+            // A local editor cannot open a remote worktree, and no IDE launch
+            // resumes the specific provider Session — so an IDE is worktree-only
+            // on a local Home and unavailable on a remote one.
+            guard !isRemoteHome, installedApps.contains(surface), workspaceProven else {
+                return .unavailable
+            }
             return .worktreeOnly
         }
     }
@@ -154,26 +172,71 @@ public struct HandoffSurfaceMemory: Codable, Sendable, Hashable {
     }
 }
 
+/// The outcome of resolving Open's default surface: the chosen surface plus, when
+/// a remembered surface could not be honored, a human-readable reason naming it
+/// and why it was skipped. The view surfaces that reason so a fallback is never
+/// silent.
+public struct HandoffSurfaceResolution: Sendable, Hashable {
+    public let surface: HandoffSurface
+    public let fallbackReason: String?
+
+    public init(surface: HandoffSurface, fallbackReason: String?) {
+        self.surface = surface
+        self.fallbackReason = fallbackReason
+    }
+}
+
 /// Decides which surface Open uses by default. The decision is pure: the
 /// remembered surface for this provider on this Home, then the remembered
 /// overall surface, then the embedded Ghostty fallback. A remembered surface is
 /// honored only while it can still `.attach`, so an uninstalled app or a lost
 /// capability falls back visibly to the next candidate rather than opening a
-/// surface that would lie about reaching the Session.
+/// surface that would lie about reaching the Session — and the resolution
+/// reports *why* it fell back so the reason can be shown.
 public enum HandoffSurfaceResolver {
     public static func resolve(
         provider: String,
         home: String,
         memory: HandoffSurfaceMemory,
         capability: HandoffSurfaceCapability
-    ) -> HandoffSurface {
-        let remembered = [
-            memory.preferred(provider: provider, home: home),
-            memory.overallPreferred,
-        ]
-        for case let surface? in remembered where capability.reach(surface) == .attach {
-            return surface
+    ) -> HandoffSurfaceResolution {
+        guard let remembered = memory.preferred(provider: provider, home: home)
+            ?? memory.overallPreferred
+        else {
+            // Nothing remembered yet: Ghostty is the plain default, not a fallback.
+            return HandoffSurfaceResolution(surface: .ghostty, fallbackReason: nil)
         }
-        return .ghostty
+        if capability.reach(remembered) == .attach {
+            return HandoffSurfaceResolution(surface: remembered, fallbackReason: nil)
+        }
+        // The remembered surface can no longer attach — name it and why, then use
+        // the embedded terminal that always can.
+        let why: String
+        switch capability.reach(remembered) {
+        case .unavailable:
+            why = "\(remembered.appName) is unavailable"
+        case .worktreeOnly:
+            why = "\(remembered.appName) can no longer attach"
+        case .attach:
+            why = ""  // unreachable: handled above
+        }
+        return HandoffSurfaceResolution(
+            surface: .ghostty,
+            fallbackReason: "\(why) — using the embedded terminal."
+        )
     }
+}
+
+/// Whether a completed launch should advance the remembered preference. The rule
+/// is pure so the view cannot drift from it: record only a **user-initiated**,
+/// **successful**, **attach** launch. An auto-resolved default never rewrites
+/// memory (or a briefly-unavailable app could never return), and a worktree-only
+/// launch never overwrites the last valid *attach* preference (opening a folder
+/// is not the surface the human attaches through).
+public func handoffPreferenceShouldRecord(
+    reach: HandoffSurfaceReach,
+    userInitiated: Bool,
+    launchSucceeded: Bool
+) -> Bool {
+    userInitiated && launchSucceeded && reach == .attach
 }

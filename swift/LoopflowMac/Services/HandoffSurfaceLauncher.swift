@@ -57,18 +57,42 @@ enum HandoffSurfaceLauncher {
         Set([HandoffSurface.warp, .vscode, .cursor].filter { appURL($0) != nil })
     }
 
+    /// Whether the descriptor's Home is on another host. A local Home is this
+    /// machine (`…@local`, `localhost`, or a bare local address); anything with an
+    /// `ssh://` scheme or a real remote host is remote, so a local worktree path
+    /// cannot be assumed.
+    static func isRemoteHome(_ host: String) -> Bool {
+        let trimmed = host.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("ssh://") { return true }
+        if trimmed.hasSuffix("@local") || trimmed == "local" || trimmed == "localhost" {
+            return false
+        }
+        // `user@host` with a non-local host is remote; a bare token with no host
+        // part is treated as local.
+        if let at = trimmed.firstIndex(of: "@") {
+            let hostPart = trimmed[trimmed.index(after: at)...]
+            return !(hostPart == "local" || hostPart == "localhost")
+        }
+        return false
+    }
+
     /// Probe the machine and handoff into the pure capability the resolver reads.
-    static func capability(cwd: String) -> HandoffSurfaceCapability {
+    /// The worktree is only probed on a local Home; a remote worktree is never
+    /// locally proven.
+    static func capability(host: String, cwd: String) -> HandoffSurfaceCapability {
         let installed = installedApps()
+        let remote = isRemoteHome(host)
         var isDirectory: ObjCBool = false
-        let proven = FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory)
+        let proven = !remote
+            && FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory)
             && isDirectory.boolValue
         return HandoffSurfaceCapability(
             installedApps: installed,
             workspaceProven: proven,
             // A command-bearing Warp launch needs only that Warp is installed; the
             // launch configuration is written on demand.
-            warpCommandBearing: installed.contains(.warp)
+            warpCommandBearing: installed.contains(.warp),
+            isRemoteHome: remote
         )
     }
 
@@ -117,11 +141,29 @@ enum HandoffSurfaceLauncher {
     }
 
     /// Render a command-bearing Warp launch configuration that runs the *exact
-    /// shared attach command* in the worktree. Pure and testable: the embedded
-    /// command is the provider-session-bearing argv the store handed back, so a
-    /// Warp launch attaches the same durable Session rather than a fresh shell.
-    static func warpLaunchConfigYAML(name: String, cwd: String, argv: [String]) -> String {
-        let command = argv.map(Self.shellQuote).joined(separator: " ")
+    /// shared attach command* in the worktree, with the descriptor's environment
+    /// preserved. Pure and testable: the embedded command is the environment
+    /// prefix plus the provider-session-bearing argv the store handed back, so a
+    /// Warp launch attaches the same durable Session — with the same environment —
+    /// rather than a fresh shell. Warp launch configs carry no environment field
+    /// of their own, so the environment rides an `env KEY=VALUE …` prefix on the
+    /// command itself, exactly as the embedded terminal would inherit it.
+    static func warpLaunchConfigYAML(
+        name: String,
+        cwd: String,
+        argv: [String],
+        environment: [String: String] = [:]
+    ) -> String {
+        var tokens: [String] = []
+        if !environment.isEmpty {
+            tokens.append("env")
+            // Stable order so the rendered command is deterministic.
+            for key in environment.keys.sorted() {
+                tokens.append("\(key)=\(environment[key] ?? "")")
+            }
+        }
+        tokens.append(contentsOf: argv)
+        let command = tokens.map(Self.shellQuote).joined(separator: " ")
         return """
         ---
         name: \(name)
@@ -140,7 +182,12 @@ enum HandoffSurfaceLauncher {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".warp/launch_configurations", isDirectory: true)
         let name = warpLaunchConfigName(sessionId: attach.sessionId)
-        let yaml = warpLaunchConfigYAML(name: name, cwd: attach.cwd, argv: attach.argv)
+        let yaml = warpLaunchConfigYAML(
+            name: name,
+            cwd: attach.cwd,
+            argv: attach.argv,
+            environment: attach.environment
+        )
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let file = directory.appendingPathComponent("\(name).yaml")

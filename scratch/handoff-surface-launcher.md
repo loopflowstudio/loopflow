@@ -1,58 +1,64 @@
-# W2-177 — Honest handoff surfaces + launcher (serial PR 3)
+# W2-177 — Honest handoff surfaces + launcher (serial PR 3, #978)
 
-PR #969 (serial 2, merged `cadceca23`) landed the surface-resolution *model*, but
-it classified VS Code and Cursor as `.attach` while no launcher could resume the
-specific durable Session. Review flagged the mismatch: a folder-open does not
-attach a Session, so the label lied.
-
-This PR makes the user-visible capability match the actual launch behavior, and
-adds the launcher that consumes the model.
+PR #969 (serial 2) landed the surface-resolution model but classified VS Code and
+Cursor as `.attach` while no launcher could resume the specific durable Session.
+This PR makes the user-visible capability match the actual launch, adds the
+launcher, and — after a second review — fixes the contract holes below.
 
 ## The honesty fix
 
-Only a surface that runs the **exact shared attach command** the store hands back
-may claim `.attach`:
+Only a surface that runs the **exact shared attach command** may claim `.attach`:
 
-- **Ghostty** — embeds and runs `attach.argv`. Always the required fallback.
+- **Ghostty** — embeds and runs `attach.argv`. The required fallback.
 - **Warp** — writes a command-bearing launch configuration that runs `attach.argv`
-  in the worktree, then opens `warp://launch/<name>`. If the config can't be
-  written, the launch *fails* (visible fallback to Ghostty) rather than opening a
-  bare window and calling it "attached".
+  **with the descriptor environment preserved** (an `env KEY=VALUE …` prefix, since
+  Warp configs carry no environment field), then opens `warp://launch/<name>`. A
+  config-write failure *fails* the launch (visible Ghostty fallback) rather than
+  opening a bare window and calling it "attached".
 - **VS Code / Cursor** — no launch resumes the specific provider Session, so they
-  are **`.worktreeOnly`**: offered (when installed with a proven workspace) as
-  "… (open worktree)", never claiming to attach. Removed the dishonest
-  `providerIsClaude`/`providerSessionKnown → .attach` path and the now-unused
-  capability fields.
+  are **worktree-only**: offered (installed + proven *local* workspace) as
+  "… (open worktree)", never claiming attach. This is the truthful *unsupported-for-
+  attach* classification; the surfaces are still offered, so the task is not weakened.
 
-The picker labels each option by the reach it delivers; a worktree-only option
-never overclaims. The resolver honors a remembered surface only while it can
-still `.attach`, so a remembered IDE always falls back to Ghostty.
+## Review fixes (this round)
 
-## Launcher + preference wiring
+1. **Warp preserves the descriptor environment** — `warpLaunchConfigYAML` now takes
+   the descriptor `environment` and renders it as a sorted `env …` prefix on the
+   exact argv. Proven by `warpConfigPreservesEnvironment`.
+2. **Worktree-only never overwrites the last valid attach preference** — recording
+   is gated by the pure rule `handoffPreferenceShouldRecord(reach:userInitiated:
+   launchSucceeded:)`, which records **only** a user-initiated, successful, `.attach`
+   launch. A worktree-only IDE open, even user-initiated, leaves the remembered Warp
+   attach intact. Proven by `worktreeOnlyDoesNotOverwriteAttachPreference`.
+3. **Fallback reasons are shown** — `HandoffSurfaceResolver.resolve` returns a
+   `HandoffSurfaceResolution { surface, fallbackReason }`. An unavailable remembered
+   app → "Warp is unavailable — using the embedded terminal."; capability loss →
+   "Warp can no longer attach — …". The sheet shows it in the header. Proven by
+   `unavailableRememberedApp` / `capabilityLossFallsBack`.
+4. **Attached-but-unresolved handoffs stay red** — the census keyed redness on
+   `status == .waiting`, so an `.attached` handoff went green and stopped reddening
+   its parents. Since the census only holds *active* handoffs (waiting **or**
+   attached), all of them now redden Task → Project → Wave and name the human until
+   they reach a terminal outcome. Proven by `attachedHandoffStaysRed`.
+5. **Real launch-path tests** — the unreachable `if launchSucceeded {}` branch is
+   gone; recording, the Warp config renderer, env preservation, quote-escaping, and
+   remote-Home detection are tested directly.
+6. **Remote Home consumes `descriptor.host`** — `capability(host:cwd:)` computes
+   `isRemoteHome`; on a remote Home the worktree is not local, so IDEs and plain
+   Warp windows are `.unavailable`, while Ghostty and command-bearing Warp still
+   `.attach` (the shared argv carries its own ssh transport). The local workspace is
+   never probed for a remote Home. Proven by `remoteHomeShapesReach`,
+   `remoteHomeDetection`, `remoteHomeIsNeverLocallyProven`.
 
-- `HandoffSurfaceLauncher` — installed-app probe (`NSWorkspace`), capability
-  construction, and the per-surface launch. Pure `warpLaunchConfigYAML` renders
-  the command-bearing config (testable, no filesystem).
-- `HandoffSurfacePreferences` — persists `HandoffSurfaceMemory` to `UserDefaults`,
-  recording only after a launch succeeds.
-- `HandoffAttachSheet` — resolves the default surface, offers the honest menu,
-  embeds Ghostty or launches externally, records the preference only on a
-  *user-initiated* success (an auto-resolved fallback never rewrites memory), and
-  falls back visibly on launch failure.
+Durable descriptor/store still wins: the view creates and names nothing; every
+surface runs the argv the store returns.
 
 ## Proof
 
-Launch-level tests (`HandoffSurfaceLauncherTests`):
-- the Warp attach config embeds the **exact provider-session-bearing argv**
-  (`'claude' '--resume' 'sess_…'`), so Warp attaches the same Session, not a shell;
-- every argv token survives quoting; a quote can't break out of the command;
-- an IDE bears **no** session action — reach is `.worktreeOnly`, and no offered IDE
-  option ever advertises attach.
+`swift test --filter "HandoffSurface|ActiveSessions"` → 28/28. `swift build
+--target LoopflowMac` clean.
 
-Model tests (`HandoffSurfaceTests`) updated for the honest reach.
-`swift test --filter HandoffSurface` → 14/14 pass. `swift build --target LoopflowMac` clean.
-
-### Manual same-session trial
+### Manual same-durable-session evidence
 
 Staged through the store (throwaway `wave:` parent, cleaned up to terminal):
 
@@ -62,12 +68,20 @@ lf handoff attach <id> --json   # attach #1
 lf handoff attach <id> --json   # attach #2 (reopen)
 ```
 
-Both attaches returned the **same** `session_id` and the **same** `argv`
+Both attaches returned the **same** `session_id` and **same** `argv`
 (`['claude','--resume','sess_w2177proof']`) — reopening reaches the same durable
-Session, and the command carries the provider session id. Ghostty and Warp both
-run this identical argv, so every attach surface reaches that one Session. The IDE
-surfaces make no such claim.
+Session, and the command carries the provider session id.
 
-Full in-app UI trial (embedded Ghostty + external Warp/IDE windows on a real
-handoff) needs a display and is left to an attended run; the machine-checkable
-descriptor stability above is what a headless run can prove.
+Per-surface:
+- **Ghostty** runs that exact `argv` (embedded), so it reaches that one Session — the
+  descriptor-stability trial above is its evidence.
+- **Warp** renders the same `argv` + environment into its launch config; the exact
+  rendered command is pinned by `warpConfigCarriesTheSessionCommand` /
+  `warpConfigPreservesEnvironment`, e.g.
+  `exec: "'env' 'LF_WAVE_ID=w_42' 'TERM=xterm-256color' 'claude' '--resume' 'sess_abc123' …"`.
+- **VS Code / Cursor** open the worktree only (`NSWorkspace.open([folder], withApplicationAt:)`)
+  and never claim attach — proven by `ideBearsNoSessionAction`.
+
+The full in-app UI trial (real handoff rendered in embedded Ghostty and external
+Warp/IDE windows) needs a display and is left to an attended run; the descriptor
+stability and the exact launch commands above are what a headless run can prove.

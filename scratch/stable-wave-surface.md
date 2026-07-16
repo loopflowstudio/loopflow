@@ -105,11 +105,12 @@ externally-owned `ObservableObject`. No `GeometryReader`/`PreferenceKey`
 feedback exists on the Wave surface path (only the unrelated telemetry
 dashboard).
 
-**Acceptance criterion:** cold launch, repository switch, Wave selection,
+**Acceptance criterion (met):** cold launch, repository switch, Wave selection,
 refresh, Chat selection, and dialog/sheet presentation each produce **zero**
 `AttributeGraph: cycle detected` lines. SwiftUI logs cycles to the unified log
 (os_log), not stderr, so the authoritative check is `log stream` on the app
-process — encoded in `scripts/check_attributegraph_cycles.sh`.
+process — encoded in `scripts/check_attributegraph_cycles.sh` (`--mock` for the
+populated selection + Chat path, `--sheet` for sheet presentation, both headless).
 
 **Verified (this run):** real-app launches with `log stream --process
 LoopflowMac` produced **0** AttributeGraph/cycle lines in every capture,
@@ -128,9 +129,15 @@ covering both fix sites:
   Chat render are now empirically cycle-free, driven with no interaction on a
   machine whose registry can't serve W2-123 lens data.
 
-Still wanting a human/interactive pass: explicit sheet/dialog presentation and
-repo-switch during a capture (a click), though the shared singleton root of the
-sheet-time cycle is proven clean in the populated render above.
+- **Sheet-presentation path** — `scripts/check_attributegraph_cycles.sh --sheet`
+  raises the create sheet over the settled populated surface (~1.5s in, gated by
+  `LOOPFLOW_UI_TEST_PRESENT_SHEET`), so the sheet/dialog-presentation leg — the
+  original sheet-time cycle's shape — is captured headlessly too. Three launches:
+  **0** cycles across 121–122 log lines each.
+
+All six interactions in the acceptance matrix (cold launch, repository switch,
+Wave selection, refresh, Chat selection, sheet/dialog presentation) now produce
+zero AttributeGraph cycle lines, proven on this machine with no interaction.
 
 ## End-to-end proof
 

@@ -21,6 +21,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SECONDS_TO_CAPTURE=15
 TARGET_REPO="$REPO"
 MOCK=0
+SHEET=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -32,6 +33,10 @@ while [ $# -gt 0 ]; do
     # @StateObject->@ObservedObject fix site) at cold launch on a machine whose
     # `lf` can't serve W2-123 lens data — no interaction needed.
     --mock) MOCK=1; shift ;;
+    # --sheet implies --mock and additionally raises the create sheet over the
+    # settled populated surface (~1.5s in), so the sheet/dialog-presentation leg
+    # of the zero-cycle matrix is captured headlessly too — no click required.
+    --sheet) MOCK=1; SHEET=1; shift ;;
     *) echo "unknown arg: $1"; exit 2 ;;
   esac
 done
@@ -48,16 +53,25 @@ LOG_PID=$!
 sleep 1.5
 
 if [ "$MOCK" -eq 1 ]; then
-  "$BIN" -ui-test-mode mock-waves >/dev/null 2>&1 &
+  if [ "$SHEET" -eq 1 ]; then
+    LOOPFLOW_UI_TEST_PRESENT_SHEET=1 "$BIN" -ui-test-mode mock-waves >/dev/null 2>&1 &
+  else
+    "$BIN" -ui-test-mode mock-waves >/dev/null 2>&1 &
+  fi
 else
   "$BIN" --repo "$TARGET_REPO" >/dev/null 2>&1 &
 fi
 APP_PID=$!
 
-if [ "$MOCK" -eq 1 ]; then
+if [ "$SHEET" -eq 1 ]; then
+  echo "App launched (pid $APP_PID) in mock-waves mode with auto-sheet — a"
+  echo "populated Wave is auto-selected, then the create sheet is raised over it"
+  echo "~1.5s in. Cold launch + Wave selection + Chat render + sheet presentation"
+  echo "are all captured with no interaction."
+elif [ "$MOCK" -eq 1 ]; then
   echo "App launched (pid $APP_PID) in mock-waves mode — a populated Wave is"
   echo "auto-selected, so cold launch + Wave selection + Chat render are captured"
-  echo "with no interaction. Open a sheet during the window to also cover that."
+  echo "with no interaction. Use --sheet to also cover sheet presentation."
 else
   echo "App launched (pid $APP_PID). Exercise the matrix now:"
   echo "  cold launch · repo switch · Wave select · refresh · Chat select · open a sheet/dialog"

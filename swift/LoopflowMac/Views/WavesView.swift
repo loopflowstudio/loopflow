@@ -569,6 +569,18 @@ struct WavesView: View {
            let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
             selectedWaveId = waveSelectionId(selected)
         }
+        // Drive the sheet-presentation leg of the AttributeGraph zero-cycle
+        // matrix headlessly: once the populated detail hierarchy has settled,
+        // raise the create sheet over it — a genuine mid-session presentation,
+        // not a cold-launch-with-sheet. Gated so the plain mock render stays
+        // sheet-free. See scripts/check_attributegraph_cycles.sh --sheet.
+        if ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] != nil,
+           !isShowingCreate {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                isShowingCreate = true
+            }
+        }
     }
 
     private func buildWavePlanCache(registryWaves: [Wave]) async -> [String: WavePlan] {

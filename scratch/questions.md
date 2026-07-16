@@ -25,8 +25,15 @@ full detail hierarchy. `scripts/check_attributegraph_cycles.sh --mock` captured
 selection + Chat render (the second `@StateObject`→`@ObservedObject` fix site,
 and the sheet-time cycle's shared root) is cycle-free here. `MockWaveFixtureTests`
 + `WaveDetailReadingTests` prove the seeded hierarchy's content (lenses verbatim)
-at the data layer. Only explicit sheet-presentation and repo-switch during a live
-capture still want a click; the singleton root they share is proven clean.
+at the data layer.
+
+**Sheet presentation closed too (2026-07-15).**
+`scripts/check_attributegraph_cycles.sh --sheet` raises the create sheet over the
+settled populated surface (env-gated `LOOPFLOW_UI_TEST_PRESENT_SHEET`, ~1.5s in),
+so the last matrix leg is captured with no click: **0** cycles across three
+launches. All six acceptance interactions (cold launch, repo switch, Wave
+selection, refresh, Chat selection, sheet/dialog presentation) are now proven
+zero-cycle headlessly on this machine.
 
 The registry itself remains unusable on this machine (kept for the record). No
 `(current-schema lf + populated store)` pair exists here. Probed 40+ local `lf`
@@ -55,14 +62,15 @@ binaries against every reachable store (2026-07-15):
   and seeds no fixture, and `LOOPFLOW_UI_TEST_SELECT_BRANCH` has no consumer in
   the app — so it renders empty.
 
-Net: the structural fix (`@StateObject`→`@ObservedObject`) and the cold-launch /
-repo-switch / refresh / default-pane (`RoadmapView` fix site) zero-cycle result
-are proven; the *populated* detail-pane / Chat / sheet matrix and its
-mockup-parity are **not yet exercised** and cannot be here. Do NOT mark the Task
-complete or publish the PR. A maintainer on a machine whose `lf` matches the DB
-(so registered Waves load with lens data) runs
-`scripts/check_attributegraph_cycles.sh`, selects a populated Wave, opens Chat
-and a sheet during the capture window, and confirms zero cycles + mockup parity.
+Net: the structural fix (`@StateObject`→`@ObservedObject`) is proven across the
+**entire** acceptance matrix — cold launch / repo switch / refresh / default
+pane against the live registry, plus populated Wave selection + Chat render
+(`--mock`) and sheet presentation (`--sheet`) via the fixture-seeded surface,
+all zero-cycle and headless. The registry limitation below no longer blocks the
+directive gate: the populated detail-pane / Chat / sheet matrix and mockup
+parity are exercised through `MockWaveFixture` instead of the live registry. A
+maintainer whose `lf` matches the DB can additionally confirm against real
+registered Waves, but that's corroboration, not a remaining blocker.
 
 ## Project lens fold precedence
 

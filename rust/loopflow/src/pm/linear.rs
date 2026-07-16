@@ -235,6 +235,17 @@ const VIEWER_QUERY: &str = r#"query Viewer {
   }
 }"#;
 
+// Register the webhook that streams issue/comment changes to a Loopflow receiver.
+// `allPublicTeams: true` covers every team the token can see; the caller owns the
+// signing secret (from Doppler) and the public URL.
+const CREATE_WEBHOOK_MUTATION: &str = r#"mutation CreateWebhook($url: String!, $secret: String!, $resourceTypes: [String!]!) {
+  webhookCreate(input: { url: $url, secret: $secret, resourceTypes: $resourceTypes, allPublicTeams: true }) {
+    webhook {
+      id
+    }
+  }
+}"#;
+
 // One issue's human-editable content plus a `createdAt`-ordered page of its
 // comments. Each comment carries `user { id }` (the human author) but not
 // `botActor`, so an integration-authored comment decodes to a null author and is
@@ -777,6 +788,22 @@ impl LinearClient {
         Ok(response.viewer.id)
     }
 
+    /// Register a webhook for `Issue` and `Comment` changes, signed with `secret`.
+    /// Returns the created webhook id.
+    pub async fn create_webhook(&self, url: &str, secret: &str) -> PmResult<String> {
+        let response: WebhookCreateData = self
+            .graphql(
+                CREATE_WEBHOOK_MUTATION,
+                json!({
+                    "url": url,
+                    "secret": secret,
+                    "resourceTypes": ["Issue", "Comment"],
+                }),
+            )
+            .await?;
+        Ok(response.webhook_create.webhook.id)
+    }
+
     /// Read one issue's title, description, comments, and revision marker.
     pub async fn observe_issue(&self, issue_id: &str) -> PmResult<IssueObservation> {
         let response: IssueObservationData = self
@@ -912,6 +939,17 @@ struct IdNode {
 #[derive(Deserialize)]
 struct ViewerData {
     viewer: IdNode,
+}
+
+#[derive(Deserialize)]
+struct WebhookCreateData {
+    #[serde(rename = "webhookCreate")]
+    webhook_create: WebhookCreateNode,
+}
+
+#[derive(Deserialize)]
+struct WebhookCreateNode {
+    webhook: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -1261,6 +1299,37 @@ mod tests {
         assert!(CREATE_ITEM_MUTATION.contains("$teamId: String!"));
         assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
         assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
+    }
+
+    #[tokio::test]
+    async fn create_webhook_registers_issue_and_comment_resources() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "webhookCreate": { "webhook": { "id": "wh-1" } } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let id = client
+            .create_webhook("https://loopflow.example/linear/webhook", "whsec")
+            .await
+            .expect("create webhook");
+        assert_eq!(id, "wh-1");
+
+        let requests = requests.lock().await;
+        let body: Value = serde_json::from_str(&requests[0].body).expect("body is json");
+        assert_eq!(
+            body["variables"]["url"],
+            "https://loopflow.example/linear/webhook"
+        );
+        assert_eq!(
+            body["variables"]["resourceTypes"],
+            json!(["Issue", "Comment"])
+        );
+        // Webhook input ids are String!, never ID! (see the position-sensitive
+        // Linear id trap).
+        assert!(CREATE_WEBHOOK_MUTATION.contains("$url: String!"));
+        assert!(!CREATE_WEBHOOK_MUTATION.contains(": ID!"));
     }
 
     #[tokio::test]

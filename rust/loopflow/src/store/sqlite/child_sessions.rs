@@ -1069,14 +1069,14 @@ impl SqliteStore {
         // Each new human comment → one FIFO follow-up, guarded by the ledger.
         let mut follow_ups_created = Vec::new();
         for follow_up in &apply.follow_ups {
-            let inserted = transaction.execute(
-                "INSERT OR IGNORE INTO task_linear_ingested_comments
-                    (session_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
-                params![apply.session_id.as_str(), follow_up.comment_id, observed_at],
-            )?;
-            if inserted == 1 {
-                insert_child_command(&transaction, &follow_up.command)?;
-                follow_ups_created.push(follow_up.command.id.clone());
+            if let Some(id) = ingest_linear_comment(
+                &transaction,
+                apply.session_id.as_str(),
+                &follow_up.comment_id,
+                &follow_up.command,
+                observed_at,
+            )? {
+                follow_ups_created.push(id);
             }
         }
 
@@ -1100,6 +1100,43 @@ impl SqliteStore {
             superseded,
             follow_ups_created,
         })
+    }
+
+    /// Persist one human Linear comment as a FIFO Task follow-up, exactly once.
+    /// Webhook comments arrive one at a time (unlike the snapshot edit path), and
+    /// Linear delivers at-least-once — so the `task_linear_ingested_comments`
+    /// ledger is the guard: the follow-up command is created only on the comment
+    /// id's first insertion. Returns the created command id, or `None` for a
+    /// duplicate delivery.
+    pub fn apply_linear_comment(
+        &self,
+        session_id: &TaskSessionId,
+        comment_id: &str,
+        command: &ChildCommand,
+        observed_at: OffsetDateTime,
+    ) -> StoreResult<Option<ChildCommandId>> {
+        let observed_at = observed_at.unix_timestamp();
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let created = ingest_linear_comment(
+            &transaction,
+            session_id.as_str(),
+            comment_id,
+            command,
+            observed_at,
+        )?;
+        if created.is_some() {
+            // Best-effort freshness for status; a Session missing its seed row
+            // (legacy) simply has nothing to update.
+            transaction.execute(
+                "UPDATE task_linear_observations
+                 SET last_success_at=?2, degraded_reason=NULL, updated_at=?2
+                 WHERE session_id=?1",
+                params![session_id.as_str(), observed_at],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(created)
     }
 
     /// Record that the latest observation failed, without moving the cursor. A
@@ -2604,7 +2641,30 @@ fn insert_initial_task(conn: &Connection, session: &TaskSession, pr: &TaskPr) ->
         TASK_SESSION_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
-    insert_task_pr(conn, pr)
+    insert_task_pr(conn, pr)?;
+    seed_task_linear_observation(conn, session)
+}
+
+/// Seed the Linear observation cursor from the launch snapshot, in the Session's
+/// creation transaction. Webhooks only fire for changes *after* subscription, so
+/// there is no cursor to build lazily on a first poll — seeding here means the
+/// first issue-edit webhook diffs against the launch title/description instead of
+/// baselining (and swallowing) it. The revision seeds empty so any real Linear
+/// `updatedAt` wins the monotonic guard.
+fn seed_task_linear_observation(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO task_linear_observations (
+            session_id, last_revision, last_title, last_description,
+            last_success_at, degraded_reason, updated_at
+         ) VALUES (?1, '', ?2, ?3, ?4, NULL, ?4)",
+        params![
+            session.id.as_str(),
+            session.launch.issue.title,
+            session.launch.issue.description,
+            now_unix(),
+        ],
+    )?;
+    Ok(())
 }
 
 fn validate_task_project_session(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
@@ -2912,6 +2972,31 @@ fn map_child_directive_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildDir
         incorporated_at,
         incorporated_summary: row.get(11)?,
     })
+}
+
+/// Persist one Linear comment as a follow-up command, exactly once. The insert
+/// into `task_linear_ingested_comments` is the guard — the command is written
+/// only when the comment id is new to the ledger, so a redelivered webhook or an
+/// overlapping catch-up read cannot double-deliver. Shared by the snapshot apply
+/// loop and the single-comment webhook path.
+fn ingest_linear_comment(
+    conn: &Connection,
+    session_id: &str,
+    comment_id: &str,
+    command: &ChildCommand,
+    observed_at: i64,
+) -> StoreResult<Option<ChildCommandId>> {
+    let inserted = conn.execute(
+        "INSERT OR IGNORE INTO task_linear_ingested_comments
+            (session_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
+        params![session_id, comment_id, observed_at],
+    )?;
+    if inserted == 1 {
+        insert_child_command(conn, command)?;
+        Ok(Some(command.id.clone()))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(super) fn insert_child_command(conn: &Connection, command: &ChildCommand) -> StoreResult<()> {

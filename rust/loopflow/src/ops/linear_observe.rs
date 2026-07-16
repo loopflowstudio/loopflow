@@ -43,6 +43,19 @@ fn follow_up_text(body: &str) -> String {
     format!("New Linear comment:\n\n{body}")
 }
 
+/// Build the FIFO follow-up command for one human Linear comment. Shared by the
+/// snapshot planner and the webhook comment path so both carry the same shape,
+/// source, and text.
+pub(crate) fn linear_follow_up_command(target: ChildRef, body: &str) -> ChildCommand {
+    ChildCommand::new(
+        target,
+        ChildCommandSource::Linear,
+        ChildCommandKind::FollowUp {
+            text: follow_up_text(body),
+        },
+    )
+}
+
 /// Read one Linear observation into durable, exactly-once Task direction.
 pub async fn reconcile_linear_observation(
     store: &Store,
@@ -102,13 +115,7 @@ pub(crate) fn plan_apply(
         .filter(|comment| is_human_comment(comment, viewer_id))
         .map(|comment| LinearFollowUp {
             comment_id: comment.id.clone(),
-            command: ChildCommand::new(
-                target.clone(),
-                ChildCommandSource::Linear,
-                ChildCommandKind::FollowUp {
-                    text: follow_up_text(&comment.body),
-                },
-            ),
+            command: linear_follow_up_command(target.clone(), &comment.body),
         })
         .collect();
     LinearObservationApply {
@@ -182,10 +189,13 @@ mod tests {
             status_at: now,
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
-            resolved_flow: "task".to_string(),
-            interaction_policy: crate::engine::InteractionPolicy::Require,
-            flow_cursor: 0,
-            flow_iteration: 0,
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,

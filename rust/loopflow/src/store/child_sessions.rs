@@ -369,6 +369,20 @@ impl Store {
         .await
     }
 
+    pub async fn apply_linear_comment(
+        &self,
+        session_id: &TaskSessionId,
+        comment_id: String,
+        command: ChildCommand,
+        observed_at: OffsetDateTime,
+    ) -> StoreResult<Option<ChildCommandId>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.apply_linear_comment(&session_id, &comment_id, &command, observed_at)
+        })
+        .await
+    }
+
     pub async fn mark_task_linear_degraded(
         &self,
         session_id: &TaskSessionId,

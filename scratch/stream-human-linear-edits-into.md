@@ -3,9 +3,19 @@
 ## User-visible outcome
 
 A human edits a Linear issue (title/description) or comments on it, and the
-matching Task Session receives that direction within five seconds — no manual
-`lf pm sync`, no `lf task steer`. Live work reacts promptly; stopped work
-retains the direction and receives it exactly once on resume.
+matching Task Session receives that direction within seconds — no manual
+`lf pm sync`, no `lf task steer`. Delivery is **webhook-driven**: Linear pushes
+the change to a Loopflow receiver, so there is no polling loop and no periodic
+sweep. Live work reacts promptly; stopped work retains the direction and
+receives it exactly once on resume.
+
+> **Scope note (webhooks, superseding the polling design).** Ingestion is a
+> verified Linear webhook, not a bounded reconciliation poll. The planned
+> live-runner poll interval and wave-resident sweep are **dropped**. The durable
+> exactly-once store foundation (cursor + comment ledger + atomic apply) is
+> **preserved** — webhooks are simply the source that feeds it. A single
+> **catch-up read** (`observe_issue`) on Session start/resume recovers events
+> missed while the receiver was down; that is one bounded read, not a poll.
 
 ## Keystone finding
 
@@ -77,21 +87,21 @@ issues are never ingested.
 - `last_observed_title`, `last_observed_description` — content diff basis (an
   `updatedAt` bump with identical title+description is a metadata-only change ⇒
   ignored)
-- `last_success_at` — last successful observation (drives status freshness)
-- `degraded_reason` — `Some(text)` when the last poll failed (auth/quota/net),
-  `None` when healthy
-- `next_attempt_at` / backoff bookkeeping
+- `last_success_at` — last applied event (drives status freshness)
+- `degraded_reason` — `Some(text)` when a Linear read/catch-up failed, `None`
+  when healthy
 
-`task_linear_ingested_comments` (child, `UNIQUE(session_id, comment_id)`) — the
-comment exactly-once ledger. `INSERT OR IGNORE`; a `FollowUp` is enqueued only
-for the newly-inserted ids (rowcount), so overlap/restart/duplicate polls cannot
-double-deliver.
+`task_linear_ingested_comments` (child, `PRIMARY KEY(session_id, comment_id)`) —
+the comment exactly-once ledger. `INSERT OR IGNORE`; a `FollowUp` is created only
+for a newly-inserted id, so a redelivered webhook cannot double-deliver.
 
-**Baseline at session creation:** seed the cursor from the launch snapshot —
-`last_observed_*` = the issue at launch, `ingested_comments` = all comment ids
-that predate session creation. Pre-existing comments are baselined, not replayed;
-only comments/edits *after* the Task Session was created become surprise
-direction.
+**Baseline at session creation:** `seed_linear_observation` seeds the cursor in
+the `create_task_session` transaction — `last_title`/`last_description` = the
+launch snapshot, `last_revision` = `""` so any real Linear `updatedAt` wins the
+monotonic guard. The comment ledger is **not** pre-seeded: a webhook only fires
+for changes *after* subscription, so pre-existing comments are never delivered
+and never need baselining. (The one-shot catch-up read reconciles only
+title/description edits, so it cannot replay old comments either.)
 
 ## New source variant
 
@@ -119,36 +129,62 @@ no `updatedAt`, no comments, and no viewer identity. Add:
 Auth reuses the existing OAuth token + proactive refresh (`resolve_pm_token`);
 no new credential path.
 
-## The observer (diff → ingest)
+## Webhook ingestion
 
-`reconcile_linear_observation(store, session, linear)` — pure-ish, unit-testable:
+Linear pushes each change to a Loopflow HTTP receiver. The receiver verifies,
+maps the event onto the durable substrate, and returns `200` fast (all work is a
+few local store writes). One event → one durable write; nothing polls.
 
-1. Read the cursor. If Linear `updatedAt <= last_observed_revision` and no new
-   comments, no-op (monotonic guard drops stale/out-of-order responses).
-2. Title or description content differs from cursor ⇒ persist-only ingest one
-   replacement directive `vN+1`; CAS `last_observed_title/description`.
-3. Each comment id absent from `ingested_comments` and authored by a non-viewer
-   human ⇒ `INSERT OR IGNORE`; for newly-inserted ids, persist-only FIFO
-   `FollowUp`.
-4. Advance `last_observed_revision`, set `last_success_at`, clear
-   `degraded_reason`.
-5. On Linear failure: set `degraded_reason`, back off, **do not** advance the
-   cursor and **do not** kill the task; retry catches up on recovery.
+**Receiver** (`lf pm webhook serve`, axum): a single route
+`POST /linear/webhook`.
 
-## Who polls (owners, single-owner per session)
+1. **Verify** (`verify_linear_signature`): recompute `HMAC-SHA256(secret,
+   raw_body)` and constant-time-compare (`subtle`) to the `Linear-Signature`
+   header (hex). Reject if the body's `webhookTimestamp` is not within a
+   tolerance (60s) of now — replay defense. A failed verification is `401` and
+   writes nothing.
+2. **Parse** (`LinearWebhookEvent`): `type`, `action`, `data`, `updatedFrom`
+   (changed fields, present on updates), `actor`, `webhookTimestamp`.
+3. **Resolve target**: `get_task_session_by_issue(data.issue_id)`. No Session ⇒
+   `200`, ignore (no live target; a later `lf task run` seeds from the issue).
+4. **Filter**: skip unless `Issue`/`update` (with `title` or `description` in
+   `updatedFrom`) or `Comment`/`create`. Skip when the actor is Loopflow's own
+   Linear user (`actor.id == viewer_id`) — the feedback-loop guard. Metadata-only
+   issue updates carry neither field in `updatedFrom` ⇒ ignored.
+5. **Write through the durable substrate** (reuses the exactly-once foundation):
+   - **Issue title/description edit** → `apply_linear_observation` with the new
+     `{revision=updatedAt, title, description, comments: []}` — the same
+     monotonic-revision guard + content CAS produces one replacement directive
+     `vN+1`, or nothing if a duplicate delivery.
+   - **Human comment** → `apply_linear_comment(session_id, comment_id, command)`
+     — the same `task_linear_ingested_comments` ledger; a `FollowUp` is created
+     only on the comment id's first insertion, so Linear's at-least-once
+     redelivery cannot double-deliver.
+6. Return `200`.
 
-- **Live task runner** — a bounded interval (~3s, backoff on failure) inside the
-  existing `tokio::select!` loop. Meets the ≤5s live budget; its own poll
-  delivers what it ingests. Single owner while live.
-- **Wave-resident sweep** (`flowloop/wave.rs`, heartbeat/idle boundary) — over
-  the wave's non-terminal Task Sessions **without** a live process. Makes
-  stopped-session edits visibly pending before resume and catches up edits made
-  during downtime. Single owner because live sessions are owned by their runner.
-- **Resume catch-up** — one pass at runner startup, backstop when no resident
-  ran. Delivery correctness never depends on a resident having been up.
+**Dedup & reorder.** Linear webhooks are at-least-once and not strictly ordered.
+- *Duplicate delivery*: the comment ledger (unique `comment_id`) and the issue
+  content CAS + monotonic revision make a redelivered event a no-op.
+- *Out-of-order issue edits*: the monotonic `last_revision` guard drops an edit
+  whose `updatedAt` is older than what we already applied, so a late delivery
+  never reverts direction.
+- *Comments* are independent follow-ups; arrival order is their FIFO order, which
+  is acceptable (no cross-comment ordering contract).
 
-No hot-poll: the resident sweep runs only while non-terminal Task Sessions exist;
-the runner observer exists only while a runner is live.
+**Baseline is at Session creation, not first event.** Because a webhook only
+fires for changes *after* subscription, pre-existing comments are never
+delivered — the "replay existing comments" risk disappears. The cursor is
+**seeded when the Task Session is created** (`seed_linear_observation`, in the
+`create_task_session` transaction) from the launch snapshot's title/description
+(revision seeded empty so the first real edit always wins the monotonic guard).
+A first issue-edit webhook then diffs against the launch content and fires only
+on a real change.
+
+**Catch-up (bounded, one read — not a poll).** On Task Session start/resume the
+runner does a single `observe_issue` + `reconcile_linear_observation` to recover
+any edit whose webhook was missed while the receiver was down. Exactly-once holds
+because it flows through the same cursor/ledger. This is the *only* place the
+read capability is used, and it runs once per start, never on a timer.
 
 ## Absent & error states
 
@@ -165,9 +201,31 @@ the runner observer exists only while a runner is live.
 
 ## Operational boundary
 
-Normal edit → durable Task direction within 5s while resident. Bounded requests,
-exponential backoff to a cap on failure, one owner per session, no hot-poll when
-nothing needs observation.
+Normal edit → durable Task direction within seconds of the human's action: the
+webhook arrives push-driven and the receiver does only a handful of local store
+writes before `200`. No polling, no periodic sweep, no per-Session timer. The
+receiver is one process for the host (not per Session); it holds no lock — the
+store's cursor/ledger are the only coordination, so concurrent deliveries are
+safe.
+
+## Config & operations
+
+- **Signing secret**: `LF_LINEAR_WEBHOOK_SECRET`, sourced from Doppler
+  (`doppler run -- lf pm webhook serve`), never committed. The receiver
+  refuses to start without it.
+- **Loopflow actor**: the receiver fetches `viewer_id()` once at startup (the
+  Linear user Loopflow's OAuth token authenticates as) to filter its own events.
+- **Registration**: `lf pm webhook register --url <public-url>` issues
+  Linear's `webhookCreate` mutation (resource types `Issue`, `Comment`; the
+  returned secret is stored via Doppler). Documented as a one-time op; a human
+  can equally create it in Linear settings and set the secret.
+- **Exposure**: self-hosted default — the receiver binds a local port; a
+  human-owned reverse proxy / tunnel gives Linear a public HTTPS URL. The deploy
+  scaffolding (service unit, port, proxy note) rides the release-infra docs, not
+  this Task's code.
+- **Health**: `lf task status` surfaces `last_success_at` (last applied event)
+  and `degraded_reason`. A receiver that is down simply stops applying events;
+  the catch-up read on next Session start reconciles the gap.
 
 ## End-to-end proof
 
@@ -185,25 +243,31 @@ Against a mock Linear client (the `graphql()` funnel is already mocked in
 
 ## Affected surfaces
 
-- `pm/linear.rs` — new reads (`viewer`, `fetch_issue_observation`).
-- store migrations — `task_linear_observations`, `task_linear_ingested_comments`.
-- `store/child_sessions.rs` / `store/mod.rs` — cursor verbs; a persist-only
-  directive/command insert reusing `create_child_command_with_directive` /
-  `create_child_command` without launch.
+- `pm/linear.rs` — reads (`viewer`, `observe_issue`) + `webhookCreate` mutation.
+- store migrations — `task_linear_observations`, `task_linear_ingested_comments`
+  (shipped) + cursor seed at `create_task_session`.
+- `store/child_sessions.rs` / `store/sqlite/child_sessions.rs` — cursor/ledger
+  verbs (shipped); `apply_linear_comment`, `seed_linear_observation` (new).
 - `child_session.rs` + `swift/Loopflow/Models/ChatTurn.swift` —
-  `ChildCommandSource::Linear` / `ChildControlSource.linear` (+ DTO fixture case).
-- `ops/child.rs` / `ops/task.rs` — `reconcile_linear_observation` + persist-only
-  ingest wrappers.
-- `task/runner.rs` — live-observer interval; startup catch-up.
-- `flowloop/wave.rs` — resident sweep.
+  `ChildCommandSource::Linear` / `ChildControlSource.linear` (shipped).
+- `ops/linear_observe.rs` — `reconcile_linear_observation` (catch-up path,
+  shipped) + `ingest_linear_webhook` mapping (new).
+- **`webhook/linear.rs` (new)** — signature verification, `LinearWebhookEvent`
+  parse, the axum handler.
+- **`lf pm webhook serve|register` (new)** — the receiver command + config.
+- `task/runner.rs` — one catch-up read at start/resume (no timer).
 - `ops/task.rs` task status + Swift Active Sessions — surface
   `last_success_at` / `degraded_reason`.
+- ~~`flowloop/wave.rs` resident sweep~~ — **dropped**.
+- ~~`task/runner.rs` poll interval~~ — **dropped** (replaced by webhook push).
 
 ## Exclusions
 
 Not Wave Chat; no full comment-history mirror; no ingestion from unrelated
-issues; no redesign of provider steering semantics; no public webhook (a bounded
-local reconciliation loop meets the 5s budget).
+issues; no redesign of provider steering semantics. **No polling loop and no
+resident sweep** (dropped in the webhook re-scope). The public-URL exposure
+(reverse proxy / tunnel / TLS) and its deploy units are host-operations, carried
+by release-infra docs, not this Task's code.
 
 ## PR sequence (serial, one Task)
 
@@ -218,27 +282,30 @@ local reconciliation loop meets the 5s budget).
    (baseline, monotonic-revision guard, feedback-loop skip, versioned directive).
    Planner unit tests + an end-to-end store integration test
    (`tests/linear_observe_tests.rs`).
-3. **`linear-observe-live`** ⏭ *next* — wire the observer into the live task
-   runner's `tokio::select!` loop: fetch `viewer_id` once, `observe_issue` on a
-   ≤5s interval with backoff, call `reconcile_linear_observation`, and on failure
-   call `mark_task_linear_degraded` (never kill the task). Its own 200ms command
-   poll then delivers what it ingested (live steer / FIFO). Surface
-   `last_success_at` / `degraded_reason` in `lf task status`. Integration test:
-   live steer < 5s, FIFO follow-ups, degraded + recovery.
-4. **`linear-observe-resident`** — wave-resident sweep over resumable sessions,
-   resume catch-up backstop, Mac Active Sessions surfacing the durable state.
-   Restart-exactly-once test.
+3. **`linear-webhook`** ⏭ *this re-scope* — the webhook receiver:
+   `verify_linear_signature` (HMAC-SHA256 + `webhookTimestamp` replay guard),
+   `LinearWebhookEvent` parse, `ingest_linear_webhook` mapping onto the durable
+   substrate (`apply_linear_observation` for edits, `apply_linear_comment` for
+   comments), the axum handler + `lf pm webhook serve`, `webhookCreate`
+   registration, and `seed_linear_observation` at Session creation. Unit tests
+   (signature, parse, mapping) + an integration test that POSTs a signed body and
+   asserts one directive / one deduped follow-up / a skipped self-authored event.
+4. **`linear-webhook-ops`** — `lf task status` degraded/last-event fields, the
+   one-shot catch-up read at Session start, Mac Active Sessions surfacing, and the
+   release-infra deploy note (service unit, proxy, secret). Restart /
+   missed-event catch-up test.
 
-## Landmarks for the next slice
+## Landmarks for the webhook slice
 
-- The writer is done and drain-compatible: a persisted directive/follow-up is
-  delivered by the runner's existing **startup drain** (`runner.rs:128`) and
-  **200ms poll** (`runner.rs:188`). PR 3 only needs to *produce* observations on
-  time; delivery already works.
-- The runner loop to extend is `run_task_session_inner` (`task/runner.rs:51`);
-  add a `tokio::time::interval` arm alongside `command_poll`. Build a
-  `LinearClient` from `resolve_pm_token` (`ops/pm.rs:592`) + `viewer_id()` once
-  at startup; guard against no-PM-token by degrading, not failing.
-- Baseline currently = first observation. PR 3/4 should baseline at (or right
-  after) session creation so the "comments after creation" cutoff is exact; until
-  then a delayed first poll treats pre-poll comments as already-seen.
+- The exactly-once foundation is untouched and reused: an **issue edit** rides
+  `apply_linear_observation` with `comments: []`; a **comment** rides the new
+  `apply_linear_comment` over the same `task_linear_ingested_comments` ledger.
+- **Seed the cursor at creation** (`create_task_session` transaction) so the
+  first issue-edit webhook diffs against the launch content instead of
+  baselining (and swallowing) it. Webhooks never deliver pre-existing comments,
+  so no comment baseline is needed.
+- Linear signs `HMAC-SHA256(secret, raw_body)` → hex in `Linear-Signature`;
+  the body's `webhookTimestamp` (ms) gates replay. `updatedFrom` names the
+  changed fields — presence of `title`/`description` there *is* the
+  metadata-vs-content test.
+- Deps already vendored: `hmac`, `sha2`, `hex`, `subtle`, `axum`.

@@ -570,6 +570,15 @@ async fn build_client(
     }
 }
 
+/// A configured Linear client for a wave, for webhook serve/register. Resolves
+/// and refreshes the wave's OAuth token exactly like every other `lf pm` read.
+pub async fn linear_client(repo: &Path, wave: &str) -> OpsResult<LinearClient> {
+    let provider = resolve_provider(repo, wave)?;
+    let PmClient::Linear(client) =
+        build_client(repo, provider, resolve_team(repo, wave, provider)).await?;
+    Ok(client)
+}
+
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let provider = resolve_provider(repo, wave)?;
     let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {

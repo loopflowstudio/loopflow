@@ -1,5 +1,42 @@
 # Make trace capture references survive cleanup and interrupted runs
 
+> **Measured 2026-07-16 against a copy of the production store — this overturns
+> the premise below.** The 237 failures (was 235 on 07-15) are *not* 235 dangling
+> metadata→file references. Actual composition:
+>
+> | Count | Failure | Direction |
+> |---|---|---|
+> | **182** | orphan artifact dirs — full conversations on disk, **no launch row** | file → **no** metadata (reverse!) |
+> | 30 | turn-level missing `task_prompt` / `system_prompt` | metadata → file |
+> | 10 | `complete` launches w/ missing `conversation.jsonl` | metadata → file |
+> | 9 | `partial` rows (doctor fails these unconditionally) | classification |
+>
+> **The dominant class is the reverse of the reported bug**, and its cause is the
+> `trace_root()` divergence this doc filed as a merely "latent second bug"
+> (§4) — it is the *actual* root cause. A dev build wrote artifacts to the shared
+> `~/.lf/traces` (trace_root honored only `LF_HOME`) while writing rows to
+> `~/.lf-dev/worktrees/<id>/loopflow.db` (the store honors the dev/release
+> split). Proof: 35 of the 182 orphan dirs are still claimed by surviving dev
+> stores; the other 147 match the same shape from dev stores since deleted
+> (per-worktree dev stores are disposable). All 182 fall in a 2026-07-14 →
+> 07-15 22:37 window and stop dead — consistent with a bug that was live, not
+> with historical cleanup.
+>
+> **Every current failure is recent** (10h–46h old), so the 48h guard sweeps
+> *nothing* by default. That is the guard working, not a defect: this is ongoing
+> loss from an active bug, not historical damage needing acknowledgment. The
+> promised "fail(235) → ok(235 pruned)" demo was never achievable — the honest
+> result is below.
+>
+> **Measured outcome (copied store, `--all --apply`):** 237 → 227 (10 pruned)
+> → **44** (183 orphan artifacts removed, 40.9 MB). Idempotent on re-run. The
+> remaining 44 = 9 `partial` + 30 turn-level + ~5 asset-level; both classes are
+> outside this PR's contract (see "Remaining" at the bottom).
+>
+> The `pruned`/reconcile design still stands and is proven — it is just a
+> *smaller* lever than assumed. The load-bearing fix is §4, `trace_root()`
+> unification, which prevents the whole 182-orphan class from recurring.
+
 ## Problem
 
 `lf doctor --json` on the published v0.11.2 release reports `capture=fail: 235
@@ -238,6 +275,25 @@ tombstone a file that a correct resolver would have found. `lf_home_dir()` is
 - After `lf runs reconcile --apply`: `0 failure(s)`, `235 pruned` in the ok detail.
 - Regression sentinel: inject one fresh missing `complete` file → capture check
   reports exactly `1 failure(s)`, proving the surface stays sensitive.
+
+## Remaining after this PR (measured, not speculative)
+
+Doctor's capture check still reports **44** on a reconciled production-shaped
+store. Two distinct classes, neither belonging to this PR's tombstone contract:
+
+- **9 × `partial` (doctor fails unconditionally, `doctor.rs:231`).** A `partial`
+  capture is a *known terminal state with a reason* — the same shape as `pruned`.
+  Failing it forever means the capture check can never be green while any
+  interrupted run exists, and it makes this PR's own `capturing → partial`
+  finalization convert one failure into another. `partial` should be a warn.
+  That is shared classification — W2-236's turf per this doc's own split.
+- **30 × turn-level missing `task_prompt`/`system_prompt`.** The turn-level
+  analogue of the launch tombstone; `agent_turns` has no `pruned` concept. Needs
+  the same treatment one level down.
+
+Recommend a following serial PR (`lf pr next`) for the turn-level tombstone, and
+coordinating the `partial`-as-warn call with W2-236 rather than reaching into
+shared classification here.
 
 ## Wave alignment
 

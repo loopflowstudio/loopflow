@@ -141,6 +141,19 @@ The prior draft's three open questions are all answered against the tree at
    are authored (non-checkpoint) even if scratch-only; or have `pr publish` skip
    the disposability reset when the branch has an open PR.
 
+   **The mechanism, confirmed by accident.** Once this branch carried a one-line
+   change to `tests/support/mod.rs`, the same branch re-classified:
+
+   ```
+   class: generated_only  strategy: reset_to_base   # 1 authored commit, scratch/ only
+   class: clean_authored  strategy: direct_rebase   # + 1 line of Rust
+   ```
+
+   So the verdict keys on **which files the commits touch**, not on whether a
+   human authored them. A design doc is disposable; the same doc plus one line of
+   Rust is not. That is the whole bug in two lines, and it suggests the narrow
+   fix: authorship, not file path, should decide disposability.
+
    **It escalated on the second occurrence.** Publishing again while 1 commit
    behind reset the branch to `origin/main`, which left the *published* PR #1008
    with no commits — so `lf` abandoned it, closed it on GitHub, and detached the

@@ -68,10 +68,11 @@ public struct HandoffSurfaceOption: Codable, Sendable, Hashable, Identifiable {
 /// the decision pure and testable.
 ///
 /// Only a surface that runs the *exact shared attach command* may claim
-/// `.attach`: Ghostty embeds it, and Warp runs it through a command-bearing
-/// launch configuration. An IDE opened at a folder does not resume the specific
-/// provider Session, so an IDE is never more than `.worktreeOnly` — it opens the
-/// worktree without ever claiming to attach.
+/// `.attach`: Ghostty embeds it, Warp runs it through a command-bearing launch
+/// configuration, and an IDE opens its integrated terminal and runs the command
+/// there. An IDE can only do this when the provider is Claude and a specific
+/// provider session id is known — without those, the IDE opens the worktree
+/// without claiming to attach.
 ///
 /// The descriptor's Home matters: on a **remote** Home the worktree lives on
 /// another host, so a local editor or a plain local window cannot reach it.
@@ -91,17 +92,34 @@ public struct HandoffSurfaceCapability: Sendable, Hashable {
     /// The handoff's Home is on another host (`descriptor.host`), so the worktree
     /// is not on this machine.
     public let isRemoteHome: Bool
+    /// The handoff's provider is Claude, which can resume a specific session in
+    /// an IDE's integrated terminal. Other providers have no IDE attach path.
+    public let providerIsClaude: Bool
+    /// A specific provider session id is known, so the IDE terminal can run
+    /// `claude --resume <id>` rather than starting a fresh session.
+    public let providerSessionKnown: Bool
 
     public init(
         installedApps: Set<HandoffSurface>,
         workspaceProven: Bool,
         warpCommandBearing: Bool,
-        isRemoteHome: Bool
+        isRemoteHome: Bool,
+        providerIsClaude: Bool = false,
+        providerSessionKnown: Bool = false
     ) {
         self.installedApps = installedApps
         self.workspaceProven = workspaceProven
         self.warpCommandBearing = warpCommandBearing
         self.isRemoteHome = isRemoteHome
+        self.providerIsClaude = providerIsClaude
+        self.providerSessionKnown = providerSessionKnown
+    }
+
+    /// Whether an IDE can attach this handoff — Claude with a known session id
+    /// on a local, proven workspace. The launcher will open the IDE's integrated
+    /// terminal and run the exact shared attach command.
+    private var ideCanAttach: Bool {
+        providerIsClaude && providerSessionKnown
     }
 
     /// How honestly `surface` can present this handoff right now.
@@ -119,13 +137,14 @@ public struct HandoffSurfaceCapability: Sendable, Hashable {
             if warpCommandBearing { return .attach }
             return isRemoteHome ? .unavailable : .worktreeOnly
         case .vscode, .cursor:
-            // A local editor cannot open a remote worktree, and no IDE launch
-            // resumes the specific provider Session — so an IDE is worktree-only
-            // on a local Home and unavailable on a remote one.
+            // A local editor cannot open a remote worktree.
             guard !isRemoteHome, installedApps.contains(surface), workspaceProven else {
                 return .unavailable
             }
-            return .worktreeOnly
+            // Claude with a known session id can resume the exact durable Session
+            // in the IDE's integrated terminal. Without those, the IDE can only
+            // open the worktree — a weaker action labeled as such.
+            return ideCanAttach ? .attach : .worktreeOnly
         }
     }
 

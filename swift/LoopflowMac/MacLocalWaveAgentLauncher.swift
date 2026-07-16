@@ -435,8 +435,27 @@ enum LocalWaveAgentLauncher {
         cwd: String? = nil
     ) -> (status: Int32, stdout: String, stderr: String)? {
         let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
+        // Cold launch runs several detached registry queries together. Capturing
+        // into files avoids blocking those workers while pipe readers wait for
+        // space on the same cooperative thread pool.
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-command-\(UUID().uuidString)", isDirectory: true)
+        let stdoutURL = outputDirectory.appendingPathComponent("stdout")
+        let stderrURL = outputDirectory.appendingPathComponent("stderr")
+        do {
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: false)
+            guard FileManager.default.createFile(atPath: stdoutURL.path, contents: nil),
+                  FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
+            else { return nil }
+        } catch {
+            return nil
+        }
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+
+        guard let stdout = FileHandle(forWritingAtPath: stdoutURL.path),
+              let stderr = FileHandle(forWritingAtPath: stderrURL.path)
+        else { return nil }
+
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
         process.standardOutput = stdout
@@ -446,48 +465,27 @@ enum LocalWaveAgentLauncher {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }
 
-        let outHandle = stdout.fileHandleForReading
-        let errHandle = stderr.fileHandleForReading
-
         do {
             try process.run()
         } catch {
+            try? stdout.close()
+            try? stderr.close()
             return nil
         }
 
-        // Drain both pipes while the child is still writing. A pipe holds 64KB;
-        // waiting for exit first deadlocks the moment a command says more than
-        // that, and `lf tokens --json` says about 120KB. `lf runs`/`lf doctor`
-        // are small, which is why this only ever bit the largest reader.
-        let collector = OutputCollector()
-        let group = DispatchGroup()
-        let queue = DispatchQueue.global(qos: .userInitiated)
-        queue.async(group: group) { collector.setStdout(outHandle.readDataToEndOfFile()) }
-        queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
-
         process.waitUntilExit()
-        group.wait()
+        try? stdout.close()
+        try? stderr.close()
+
+        let outData = (try? Data(contentsOf: stdoutURL)) ?? Data()
+        let errData = (try? Data(contentsOf: stderrURL)) ?? Data()
 
         return (
             process.terminationStatus,
-            String(data: collector.stdout, encoding: .utf8) ?? "",
-            String(data: collector.stderr, encoding: .utf8) ?? ""
+            String(data: outData, encoding: .utf8) ?? "",
+            String(data: errData, encoding: .utf8) ?? ""
         )
     }
-}
-
-/// Two reader threads, one box. The pipes must be drained concurrently with the
-/// child's execution, so their results cross a thread boundary.
-private final class OutputCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var out = Data()
-    private var err = Data()
-
-    var stdout: Data { lock.withLock { out } }
-    var stderr: Data { lock.withLock { err } }
-
-    func setStdout(_ data: Data) { lock.withLock { out = data } }
-    func setStderr(_ data: Data) { lock.withLock { err = data } }
 }
 
 private final class ResolvedLfCache: @unchecked Sendable {

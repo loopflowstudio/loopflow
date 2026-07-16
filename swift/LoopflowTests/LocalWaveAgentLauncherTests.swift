@@ -120,6 +120,26 @@ struct LocalWaveAgentLauncherTests {
 
     // MARK: - Binary resolution + capability probe
 
+    @Test("concurrent capability probes all complete")
+    func concurrentCapabilityProbesComplete() async {
+        let results = await withTaskGroup(of: Bool.self, returning: [Bool].self) { group in
+            for _ in 0..<24 {
+                group.addTask {
+                    LocalWaveAgentLauncher.hasWaveCommands(lfPath: "/usr/bin/true")
+                }
+            }
+
+            var results: [Bool] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+
+        #expect(results.count == 24)
+        #expect(results.allSatisfy { $0 })
+    }
+
     @Test("candidate order: bundled, PATH hits in order, dev-tree build last")
     func candidateOrder() {
         let candidates = LocalWaveAgentLauncher.lfCandidates(

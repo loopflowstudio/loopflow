@@ -52,6 +52,7 @@ class Screenshot:
     ui_test_mode: str | None = None
     ui_test_select_branch: str | None = None
     ui_test_detail_state: str | None = None
+    ui_test_width: int | None = None
     ui_test_delay: float | None = None
 
 
@@ -82,6 +83,7 @@ def load_manifest(path: Path) -> Manifest:
                 ui_test_mode=shot.get("ui_test_mode"),
                 ui_test_select_branch=shot.get("ui_test_select_branch"),
                 ui_test_detail_state=shot.get("ui_test_detail_state"),
+                ui_test_width=shot.get("ui_test_width"),
                 ui_test_delay=shot.get("ui_test_delay"),
             )
         )
@@ -459,6 +461,8 @@ def capture_ui_test_screenshot(
         env["LOOPFLOW_UI_TEST_SELECT_BRANCH"] = shot.ui_test_select_branch
     if shot.ui_test_detail_state:
         env["LOOPFLOW_UI_TEST_DETAIL_STATE"] = shot.ui_test_detail_state
+    if shot.ui_test_width is not None:
+        env["LOOPFLOW_UI_TEST_WIDTH"] = str(shot.ui_test_width)
     if shot.ui_test_delay is not None:
         env["LOOPFLOW_UI_TEST_DELAY"] = str(shot.ui_test_delay)
 

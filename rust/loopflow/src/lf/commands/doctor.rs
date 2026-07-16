@@ -75,6 +75,7 @@ struct DoctorReport<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
+    migration_authority: String,
     build_source_identity: String,
     build_source_root: Option<String>,
     database_path: String,
@@ -132,7 +133,7 @@ fn inspect_store(path: &Path) -> StoreReport {
                     Ok(version) => latest_applied_migration = version,
                     Err(error) => migration_error = Some(error.to_string()),
                 }
-                if let Err(error) = crate::store::migrations::latest_version_sqlite(&connection) {
+                if let Err(error) = crate::store::migrations::validate_sqlite(&connection) {
                     migration_error.get_or_insert_with(|| error.to_string());
                 }
             }
@@ -141,6 +142,11 @@ fn inspect_store(path: &Path) -> StoreReport {
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
+        migration_authority: match crate::build_info::migration_authority() {
+            crate::build_info::MigrationAuthority::Published => "published",
+            crate::build_info::MigrationAuthority::ValidationOnly => "validation-only",
+        }
+        .to_string(),
         build_source_identity: crate::build_info::source_identity(),
         build_source_root: crate::build_info::source_root().map(|root| root.display().to_string()),
         database_path: path.display().to_string(),
@@ -628,8 +634,8 @@ fn day_of(ts: i64) -> Option<time::Date> {
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     let colors = Colors::default();
     println!(
-        "build: {} ({})",
-        store.build_provenance, store.build_source_identity
+        "build: {} ({}) · migrations {}",
+        store.build_provenance, store.build_source_identity, store.migration_authority
     );
     if let Some(root) = &store.build_source_root {
         println!("source: {root}");

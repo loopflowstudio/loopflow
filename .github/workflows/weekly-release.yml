@@ -10,6 +10,7 @@ on:
 
 env:
   LOOPFLOW_BUILD_PROVENANCE: release
+  LOOPFLOW_MIGRATION_AUTHORITY: published
 
 jobs:
   tag-check:

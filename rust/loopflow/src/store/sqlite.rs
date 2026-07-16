@@ -293,13 +293,26 @@ impl SqliteStore {
             "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
         )?;
 
-        if existing_database {
+        let may_apply_migrations = super::may_apply_migrations(
+            path,
+            crate::build_info::migration_authority(),
+            &super::machine_home_dir(),
+        )
+        .map_err(|error| {
+            StoreError::InvalidData(format!("resolve migration authority: {error}"))
+        })?;
+
+        if !may_apply_migrations {
+            super::migrations::validate_sqlite(&conn)?;
+        } else if existing_database {
             super::migrations::apply_sqlite_with_backup(&conn, path)?;
         } else {
             super::migrations::apply_sqlite(&conn)?;
         }
         validate_run_events_schema(&conn)?;
-        migrate_plaintext_provider_tokens(&mut conn)?;
+        if may_apply_migrations {
+            migrate_plaintext_provider_tokens(&mut conn)?;
+        }
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

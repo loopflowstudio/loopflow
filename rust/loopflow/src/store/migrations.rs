@@ -233,6 +233,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_linear_observations",
         sql: include_str!("migrations/0.11.016_task_linear_observations.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 17,
+        },
+        name: "migration_provenance",
+        sql: include_str!("migrations/0.11.017_migration_provenance.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -316,6 +325,27 @@ pub fn active_namespace() -> (u32, u32) {
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_sqlite_transaction(conn, |_| Ok(()))
+}
+
+/// Validate the schema this binary already understands without advancing it.
+/// Branch builds use this against the release-owned database: they can reuse
+/// compatible state, but an unpublished migration never becomes durable there.
+pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
+    validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
+    if !user_tables(conn)?
+        .iter()
+        .any(|table| table == "schema_migrations")
+    {
+        return Err(StoreError::InvalidData(
+            "a validation-only lf cannot initialize the release database; install a published lf"
+                .to_string(),
+        ));
+    }
+    let applied = applied_versions(conn)?;
+    pending_migrations(&applied, MIGRATIONS)?;
+    validate_applied_checksums(conn, MIGRATIONS)?;
+    validate_schema(conn, &MIGRATIONS[..applied.len()])?;
+    validate_foreign_keys(conn)
 }
 
 fn apply_sqlite_transaction(
@@ -552,14 +582,119 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 
     let applied = applied_versions(conn)?;
     for migration in pending_migrations(&applied, set)? {
+        let parent_history = migration_prefix_fingerprint(&applied_versions(conn)?, set)?;
         conn.execute_batch(migration.sql)?;
+        backfill_known_checksums(conn, set)?;
+        insert_applied_migration(conn, migration, &parent_history)?;
+    }
+
+    validate_applied_checksums(conn, set)?;
+    validate_schema(conn, set)
+}
+
+fn migration_checksum(migration: &Migration) -> String {
+    hex::encode(Sha256::digest(migration.sql.as_bytes()))
+}
+
+fn migration_prefix_fingerprint(applied: &[String], set: &[Migration]) -> StoreResult<String> {
+    let mut digest = Sha256::new();
+    digest.update((applied.len() as u64).to_be_bytes());
+    for version in applied {
+        let migration = set
+            .iter()
+            .find(|migration| migration.version() == *version)
+            .ok_or_else(incompatible)?;
+        hash_text(&mut digest, version);
+        hash_text(&mut digest, &migration_checksum(migration));
+    }
+    Ok(hex::encode(digest.finalize()))
+}
+
+fn migration_ledger_has_provenance(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    let mut statement = conn.prepare("PRAGMA table_info(schema_migrations)")?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok([
+        "checksum",
+        "parent_history",
+        "build_provenance",
+        "source_identity",
+        "source_revision",
+        "package_version",
+    ]
+    .iter()
+    .all(|required| columns.iter().any(|column| column == required)))
+}
+
+fn backfill_known_checksums(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
+    if !migration_ledger_has_provenance(conn)? {
+        return Ok(());
+    }
+    for migration in set {
+        conn.execute(
+            "UPDATE schema_migrations SET checksum = ?1
+             WHERE version = ?2 AND checksum IS NULL",
+            (migration_checksum(migration), migration.version()),
+        )?;
+    }
+    Ok(())
+}
+
+fn insert_applied_migration(
+    conn: &rusqlite::Connection,
+    migration: &Migration,
+    parent_history: &str,
+) -> StoreResult<()> {
+    if migration_ledger_has_provenance(conn)? {
+        conn.execute(
+            "INSERT INTO schema_migrations (
+                version, applied_at, checksum, parent_history, build_provenance,
+                source_identity, source_revision, package_version
+             ) VALUES (?1, unixepoch(), ?2, ?3, ?4, ?5, ?6, ?7)",
+            (
+                migration.version(),
+                migration_checksum(migration),
+                parent_history,
+                crate::build_info::provenance().as_str(),
+                crate::build_info::source_identity(),
+                crate::build_info::source_revision(),
+                env!("CARGO_PKG_VERSION"),
+            ),
+        )?;
+    } else {
         conn.execute(
             "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, unixepoch())",
             [migration.version()],
         )?;
     }
+    Ok(())
+}
 
-    validate_schema(conn, set)
+fn validate_applied_checksums(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
+    if !migration_ledger_has_provenance(conn)? {
+        return Ok(());
+    }
+    let mut statement = conn.prepare(
+        "SELECT version, checksum FROM schema_migrations
+         WHERE checksum IS NOT NULL ORDER BY applied_at, rowid",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (version, checksum) = row?;
+        let migration = set
+            .iter()
+            .find(|migration| migration.version() == version)
+            .ok_or_else(incompatible)?;
+        if checksum != migration_checksum(migration) {
+            return Err(StoreError::InvalidData(format!(
+                "database migration {version} checksum does not match this lf build"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Canonicalize a ledger whose migration names are exactly a known leading
@@ -815,6 +950,12 @@ pub fn validate_set(set: &[Migration]) -> Result<(), String> {
 /// and foreign-key drift.
 fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
     let expected = rusqlite::Connection::open_in_memory()?;
+    expected.execute_batch(
+        "CREATE TABLE schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at INTEGER NOT NULL
+        );",
+    )?;
     for migration in set {
         expected.execute_batch(migration.sql)?;
     }
@@ -969,8 +1110,8 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, product_schema, validate_set, Migration,
-        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, product_schema, validate_set, validate_sqlite,
+        Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
     use crate::task::TaskEventKind;
 
@@ -1131,7 +1272,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.016_task_linear_observations"
+            latest_known_version()
         );
         assert!(product_schema(&conn)
             .unwrap()
@@ -1159,9 +1300,70 @@ mod tests {
                 "0.11.013_task_review_state".to_string(),
                 "0.11.014_task_lifecycle".to_string(),
                 "0.11.015_interaction_reviews".to_string(),
-                "0.11.016_task_linear_observations".to_string()
+                "0.11.016_task_linear_observations".to_string(),
+                "0.11.017_migration_provenance".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn validation_only_open_does_not_apply_an_unpublished_tail() {
+        let conn = open();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+
+        validate_sqlite(&conn).unwrap();
+
+        assert_eq!(
+            latest_applied_version_sqlite(&conn).unwrap().as_deref(),
+            Some("0.11.016_task_linear_observations")
+        );
+        assert!(!columns(&conn, "schema_migrations")
+            .iter()
+            .any(|column| column == "checksum"));
+    }
+
+    #[test]
+    fn provenance_migration_records_checksums_and_the_applying_build() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+
+        let old_checksum: Option<String> = conn
+            .query_row(
+                "SELECT checksum FROM schema_migrations WHERE version = '0.10.001_initial'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let applied_by: (String, String, String, String) = conn
+            .query_row(
+                "SELECT build_provenance, source_identity, source_revision, package_version
+                 FROM schema_migrations WHERE version = '0.11.017_migration_provenance'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+
+        assert!(old_checksum.is_some());
+        assert_eq!(applied_by.0, crate::build_info::provenance().as_str());
+        assert_eq!(applied_by.1, crate::build_info::source_identity());
+        assert_eq!(applied_by.2, crate::build_info::source_revision());
+        assert_eq!(applied_by.3, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn validation_rejects_a_recorded_checksum_mismatch() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+        conn.execute(
+            "UPDATE schema_migrations SET checksum = 'wrong'
+             WHERE version = '0.10.001_initial'",
+            [],
+        )
+        .unwrap();
+
+        let error = validate_sqlite(&conn).unwrap_err();
+
+        assert!(error.to_string().contains("checksum does not match"));
     }
 
     #[test]
@@ -1181,7 +1383,7 @@ mod tests {
             assert_eq!(
                 latest_version_sqlite(&conn)
                     .unwrap_or_else(|error| panic!("divergent prefix {count}: {error}")),
-                "0.11.016_task_linear_observations"
+                latest_known_version()
             );
             assert_eq!(
                 conn.query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
@@ -1753,7 +1955,7 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.016_task_linear_observations"
+            latest_known_version()
         );
     }
 
@@ -1777,7 +1979,7 @@ mod tests {
         );
         assert_eq!(
             latest_version_sqlite(&conn).unwrap(),
-            "0.11.016_task_linear_observations"
+            latest_known_version()
         );
     }
 

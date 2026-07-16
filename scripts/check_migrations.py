@@ -3,8 +3,8 @@
 
 Fails when a migration is malformed, namespaced ahead of the package version,
 collides with another id, is not registered in Rust (or is registered under a
-different id or name), or — the rule that matters — when a migration that already
-shipped has been edited, renamed, or deleted.
+different id or name), diverges from current main, or — the rule that matters —
+when a migration that already shipped has been edited, renamed, or deleted.
 
 A shipped migration is immutable: databases in the wild have already run it, so
 changing it changes their history, not their schema. Repair a shipped schema with
@@ -17,6 +17,7 @@ Stdlib only, so `lf release` can run it directly without a Python environment.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -161,6 +162,68 @@ def _shipped_migrations(tag: str) -> dict[str, bytes]:
     return shipped
 
 
+def _migrations_at_ref(ref: str) -> dict[tuple[int, int, int], tuple[str, bytes]]:
+    exists = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", ref],
+        cwd=REPO_ROOT,
+        capture_output=True,
+    )
+    if exists.returncode != 0:
+        return {}
+    listed = subprocess.run(
+        [
+            "git",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            ref,
+            "--",
+            str(MIGRATIONS_DIR.relative_to(REPO_ROOT)),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    migrations = {}
+    for relative in listed.stdout.splitlines():
+        name = Path(relative).name
+        match = MIGRATION_NAME.match(name)
+        if not match:
+            continue
+        major, minor, ordinal, _ = match.groups()
+        content = subprocess.run(
+            ["git", "show", f"{ref}:{relative}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
+        migrations[(int(major), int(minor), int(ordinal))] = (name, content)
+    return migrations
+
+
+def _check_current_main(local: dict[tuple[int, int, int], str]) -> None:
+    """Main is already durable history even before its next release tag."""
+    canonical = _migrations_at_ref("origin/main")
+    if not canonical:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            _fail("origin/main is unavailable in CI; the integration-history check cannot run")
+        print("origin/main unavailable — skipping the integration-history check")
+        return
+    for key, (canonical_name, canonical_content) in canonical.items():
+        local_name = local.get(key)
+        if local_name is None:
+            _fail(f"{canonical_name} exists on origin/main but is missing from this branch")
+        if local_name != canonical_name:
+            identity = f"{key[0]}.{key[1]}.{key[2]:03d}"
+            _fail(
+                f"{local_name} collides with {canonical_name} on origin/main at {identity}; "
+                "rebase and allocate a new migration"
+            )
+        if (MIGRATIONS_DIR / local_name).read_bytes() != canonical_content:
+            _fail(f"{local_name} differs from origin/main and is already durable history")
+
+
 def _fail(message: str) -> None:
     print(f"migration check failed: {message}", file=sys.stderr)
     raise SystemExit(1)
@@ -196,6 +259,7 @@ def main() -> None:
         _fail("no migrations found")
 
     _check_registry(ids)
+    _check_current_main(ids)
 
     # Deterministic order across namespaces is the numeric tuple, never the string:
     # `0.10.001` sorts before `0.9.001` lexically.

@@ -16,8 +16,10 @@ use std::fs;
 use std::process::{Command, Stdio};
 
 use loopflow::ops::{create_or_update_pr, land, submit, LandOptions, NullProgress, PrOptions};
+use loopflow::task::{AfterMerge, GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
+use time::OffsetDateTime;
 
 fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
     LandOptions {
@@ -605,5 +607,74 @@ fn serial_rotation_heals_stale_base_and_lands_the_continuation() {
     assert!(
         range_commits.contains("serial rotation commit"),
         "the Task's own commit must be in the range, got:\n{range_commits}"
+    );
+}
+
+/// The core hole W2-254 closes: an existing PR (already has a GitHub number)
+/// that is reset or rebased empty must refuse before any `gh pr` mutation. The
+/// old `task_pr_has_changes` guard ran only when `pr.github().is_none()`; once
+/// a PR had a number, an empty update sailed through to `gh pr edit`/`ready`/
+/// `merge`. The shared verifier is unconditional, so `submit` on an empty
+/// branch refuses before any `gh` call.
+#[test]
+fn submit_refuses_an_empty_range_before_any_gh_call() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+
+    let log_path = home.path().join("gh.log");
+    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+
+    let branch = "jack/empty-range";
+    repo.create_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    // Simulate a previously-published PR so the old guard's
+    // `pr.github().is_none()` condition is false — the exact case it skipped.
+    let runtime = tokio::runtime::Runtime::new().expect("update PR runtime");
+    runtime.block_on(async {
+        let mut pr = task
+            .store
+            .active_task_pr(&task.session.id)
+            .await
+            .expect("read active PR")
+            .expect("active PR exists");
+        pr.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 925,
+                url: "https://example.com/pr/925".to_string(),
+                head_sha: None,
+            }),
+        });
+        pr.updated_at = OffsetDateTime::now_utc();
+        task.store
+            .update_task_pr(&pr)
+            .await
+            .expect("set github number");
+    });
+
+    let err = submit(
+        repo.path(),
+        &land_options(true, "empty range"),
+        &NullProgress,
+    )
+    .expect_err("empty range must refuse");
+    assert!(
+        err.to_string().contains("empty"),
+        "expected empty-range refusal, got: {err}"
+    );
+
+    // No GitHub side effect happened before the refusal.
+    let log = fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        !log.contains("pr create") && !log.contains("pr edit") && !log.contains("pr ready"),
+        "no gh PR mutation may be issued for an empty range, got log:\n{log}"
     );
 }

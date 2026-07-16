@@ -125,9 +125,9 @@ pub fn create_or_update_pr(
     }
 
     // The rebase advanced the fork point. Re-run the proof to heal the recorded
-    // base forward, so `lf task changes` and the GitHub range describe the same
-    // commits before publication state is written.
-    crate::ops::task::verify_task_pr_range(repo)?;
+    // base forward and refuse an empty range, so `lf task changes` and the
+    // GitHub range describe the same non-empty commits before any `gh pr` call.
+    crate::ops::task::require_task_pr_range_nonempty(repo)?;
 
     let copy = resolve_pr_copy(repo, options, progress)?;
     let title = copy.title.trim();

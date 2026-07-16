@@ -1182,11 +1182,6 @@ pub(crate) fn request_task_pr_publication(
                 session.launch.issue.identifier, pr.branch
             )));
         }
-        if pr.github().is_none() && !task_pr_has_changes(repo)? {
-            return Err(task_error(
-                "Task PR has no changes to publish; complete the Task directly if the work is done",
-            ));
-        }
         let now = time::OffsetDateTime::now_utc();
         pr.publication = Some(PrPublication {
             requested_at: pr
@@ -1252,17 +1247,21 @@ fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()>
     Ok(())
 }
 
-/// Prove the active Task PR's range contains only Task-authored work before any
-/// GitHub side effect. A worktree that is provably not a Task worktree is an
-/// explicit no-op — plain, non-Task PRs are unaffected. A Task worktree whose
-/// registry is missing, inaccessible, or schema-incompatible is refused with an
-/// actionable authority error before any push, so it never degrades to generic
-/// PR behavior.
+/// Prove the active Task PR's ancestry is uncontaminated before the first push.
+/// A worktree that is provably not a Task worktree is an explicit no-op — plain,
+/// non-Task PRs are unaffected. A Task worktree whose registry is missing,
+/// inaccessible, or schema-incompatible is refused with an actionable authority
+/// error before any push, so it never degrades to generic PR behavior.
 ///
-/// Let `B` = recorded `base_commit`, `O` = `origin/<default>` tip (or local
-/// `<default>` when the repo has no remote), `H` = `HEAD`, and
-/// `M = merge-base(O, H)`. The parity invariant is `M == B`, which guarantees
-/// GitHub's range (`M..H`) equals the recorded range (`B..H`) equals
+/// This is the **ancestry-only** gate: it runs before
+/// `commit_workflow`/`prepare_land` push, where work may still be uncommitted,
+/// so it cannot judge emptiness. Use [`require_task_pr_range_nonempty`] after
+/// the publication path commits, before any `gh pr` side effect.
+///
+/// Let `B` = recorded `base_commit`, `O` = upstream tip (`origin/<default>` for
+/// a root PR, or the live parent's branch tip for a stacked child), `H` = HEAD,
+/// and `M = merge-base(O, H)`. The parity invariant is `M == B`, which
+/// guarantees GitHub's range (`M..H`) equals the recorded range (`B..H`) equals
 /// `lf task changes`:
 /// - `M == B` — parity holds; publish.
 /// - `M` ancestor of `B` — the recorded base itself carries commits absent from
@@ -1273,10 +1272,6 @@ fn refuse_if_canonical_ahead(repo: &Path, default_branch: &str) -> OpsResult<()>
 ///   truthful, then publish the minimal `M..H` range.
 /// - divergent — ambiguous ancestry; refuse, naming the commits and files on
 ///   both sides (`M..B` and `B..M`) plus the safe rebase.
-///
-/// Empty-range and dirty-worktree checks stay with `request_task_pr_publication`,
-/// which runs after the publication path commits pending work; this gate proves
-/// committed ancestry only, so it can run before the first push.
 pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
@@ -1290,6 +1285,70 @@ pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
         };
         verify_task_pr_range_with_authority(&store, &session, lease.as_ref(), &repo).await
     })
+}
+
+/// Prove the active Task PR's range is **authoritative and non-empty** before
+/// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
+/// proof (healing a stale base), then refuses when the tree at HEAD matches the
+/// recorded base — an empty PR that must not reach GitHub. Unconditional: an
+/// already-open PR reset or rebased empty is refused just like a first
+/// publication. A worktree that is provably not a Task worktree is an explicit
+/// no-op; a Task worktree whose registry is unusable is refused with an
+/// actionable authority error rather than degrading to generic PR behavior.
+pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        require_task_pr_range_nonempty_with_authority(&store, &session, lease.as_ref(), &repo).await
+    })
+}
+
+/// Resolve the upstream a Task PR's ancestry should be measured against. A root
+/// PR measures against `origin/<default>` (or local `<default>` without a
+/// remote). A stacked child with a live parent measures against the parent's
+/// branch tip — so the parent's own commits are expected ancestry, not foreign
+/// contamination, and the child's range is `fork_point..HEAD` against the
+/// durable parent boundary. A child whose parent merged (or was abandoned) has
+/// been collapsed onto `<default>` by [`record_stack_rebase`]; it measures
+/// against `origin/<default>` like a root PR.
+async fn resolve_verifier_upstream(
+    store: &SharedStore,
+    pr: &TaskPr,
+    repo: &Path,
+    default_branch: &str,
+) -> OpsResult<(String, String)> {
+    if let Some(parent_id) = pr.parent_pr_id.as_ref() {
+        let parent = store
+            .get_task_pr(parent_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read stack parent: {error}")))?
+            .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
+        let parent_live = parent.merge_commit.is_none() && parent.abandoned_at.is_none();
+        if parent_live {
+            let base_ref = if has_remote(repo)? {
+                fetch(repo, "origin", &parent.branch).map_err(|error| {
+                    task_error(format!("failed to fetch parent branch: {error}"))
+                })?;
+                format!("origin/{}", parent.branch)
+            } else {
+                format!("refs/heads/{}", parent.branch)
+            };
+            let tip = rev_parse(repo, &base_ref).map_err(|error| {
+                task_error(format!(
+                    "failed to resolve parent branch {base_ref}: {error}"
+                ))
+            })?;
+            return Ok((base_ref, tip));
+        }
+    }
+    resolve_upstream_base(repo, default_branch)
 }
 
 /// Core parity proof. Takes the store + session explicitly so it can be
@@ -1320,7 +1379,7 @@ async fn verify_task_pr_range_with_authority(
     }
 
     let default_branch = get_default_branch(repo)?;
-    let (base_ref, upstream) = resolve_upstream_base(repo, &default_branch)?;
+    let (base_ref, upstream) = resolve_verifier_upstream(store, &pr, repo, &default_branch).await?;
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
     let base = pr.base_commit.clone();
@@ -1391,6 +1450,56 @@ async fn verify_task_pr_range_with_authority(
         short(&base),
         short(&base),
     )))
+}
+
+/// Core authoritative non-empty proof. Runs the ancestry parity check (which
+/// heals a stale base in place), then re-reads the PR and refuses when the tree
+/// at HEAD matches the healed recorded base — an empty range that must not
+/// reach `gh pr create/edit/ready/merge`. The emptiness check uses the
+/// **recorded** `base_commit`, not a recomputed merge-base, so it stays
+/// authoritative even when the upstream has advanced.
+async fn require_task_pr_range_nonempty_with_authority(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: Option<&ChildWriteLease>,
+    repo: &Path,
+) -> OpsResult<()> {
+    verify_task_pr_range_with_authority(store, session, lease, repo).await?;
+    let pr = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .ok_or_else(|| {
+            task_error(format!(
+                "Task {} has no active PR",
+                session.launch.issue.identifier
+            ))
+        })?;
+    let base = &pr.base_commit;
+    let identifier = &session.launch.issue.identifier;
+    let short = base.chars().take(12).collect::<String>();
+    let head = rev_parse(repo, "HEAD")
+        .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
+    if head == *base {
+        return Err(task_error(format!(
+            "Task {identifier} PR range is empty: HEAD is the recorded base {short}, so the PR has \
+             no commits to publish. Commit the Task's work, or complete the Task directly if the \
+             work is done. Refused before any GitHub side effect."
+        )));
+    }
+    let range = format!("{base}..HEAD");
+    let status = Command::new("git")
+        .args(["diff", "--quiet", &range])
+        .current_dir(repo)
+        .status()?;
+    if status.success() {
+        return Err(task_error(format!(
+            "Task {identifier} PR range is empty: the tree at HEAD matches the recorded base \
+             {short}, so the PR has no changes to publish. Commit the Task's work, or complete the \
+             Task directly if the work is done. Refused before any GitHub side effect."
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn attach_task_github_pr(
@@ -1474,25 +1583,6 @@ pub(crate) fn attach_task_github_pr(
         }
         Ok(true)
     })
-}
-
-fn task_pr_has_changes(repo: &Path) -> OpsResult<bool> {
-    if !is_clean(repo)? {
-        return Err(task_error(
-            "Task worktree still has uncommitted changes; commit them before publishing the PR",
-        ));
-    }
-    let default_branch = get_default_branch(repo)?;
-    let base = format!("origin/{default_branch}...HEAD");
-    let status = Command::new("git")
-        .args(["diff", "--quiet", &base])
-        .current_dir(repo)
-        .status()?;
-    match status.code() {
-        Some(0) => Ok(false),
-        Some(1) => Ok(true),
-        _ => Err(task_error(format!("failed to compare Task PR with {base}"))),
-    }
 }
 
 pub(crate) fn abandon_task_pr(
@@ -3978,9 +4068,9 @@ mod tests {
         ensure_working_pr_with_authority, file_snapshot, next_pr_slug, parse_pr_slug,
         parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
         recover_stalled_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
-        resolve_task_flow, resolve_upstream_base, task_recovery_adoption,
-        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult,
-        TaskRecoveryAdoption, TaskWorkspace,
+        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
+        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
+        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -4321,6 +4411,396 @@ mod tests {
         pr.merge_commit = Some(merge.to_string());
         pr.updated_at = OffsetDateTime::now_utc();
         store.settle_task_pr(&pr, None).await.expect("settle PR");
+    }
+
+    /// Create a parent Task with a published (not merged) PR, then a child Task
+    /// stacked on the parent's tip. The parent's branch is pushed so
+    /// `resolve_verifier_upstream` can fetch `origin/<parent_branch>`. The child
+    /// claims `repo.path()` (the verifier resolves by worktree); the parent is
+    /// moved to a dummy path so both sessions coexist under the `worktree`
+    /// UNIQUE constraint.
+    async fn stacked_rotation_task(
+        repo: &TestRepo,
+        parent_branch: &str,
+        child_branch: &str,
+        parent_base: &str,
+    ) -> (
+        tempfile::TempDir,
+        SharedStore,
+        TaskSession,
+        TaskPr,
+        TaskSession,
+        TaskPr,
+    ) {
+        // Parent: create the branch, commit work, push, then register.
+        repo.create_branch(parent_branch);
+        repo.create_file("parent.txt", "parent work\n");
+        repo.stage_all();
+        repo.commit("parent commit");
+        repo.push_new_branch(parent_branch);
+        let parent_tip = repo.head_sha();
+
+        let (home, store, mut parent_session, mut parent_pr) =
+            rotation_task(repo, parent_branch, parent_base).await;
+
+        // Publish the parent PR (not merged) so the child's `parent_pr_id` is live.
+        parent_pr.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 900,
+                url: "https://example.com/pr/900".to_string(),
+                head_sha: None,
+            }),
+        });
+        parent_pr.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&parent_pr)
+            .await
+            .expect("publish parent PR");
+
+        // Move the parent off repo.path() so the child can claim it.
+        parent_session.worktree = std::path::PathBuf::from("/dummy/parent-worktree");
+        store
+            .update_task_session(&parent_session)
+            .await
+            .expect("reparent parent worktree");
+
+        // Child: cut from the parent's tip, claim the repo worktree.
+        repo.checkout("main");
+        git(repo.path(), &["branch", child_branch, &parent_tip]);
+        repo.checkout(child_branch);
+
+        let now = OffsetDateTime::now_utc();
+        let child_session = TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+                    identifier: "INF-STACK".to_string(),
+                    title: "Stacked child".to_string(),
+                    description: "Stacked on the parent.".to_string(),
+                },
+                project: parent_session.launch.project.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: parent_session.wave_id.clone(),
+            project_session_id: parent_session.project_session_id.clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Waiting,
+            status_reason: "stacked child".to_string(),
+            status_at: now,
+            worktree: repo.path().to_path_buf(),
+            workspace_slug: "stacked-child".to_string(),
+            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: crate::task::Observation::NotRequired,
+        };
+        let child_pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: child_session.id.clone(),
+            sequence: 1,
+            slug: "stacked-child".to_string(),
+            branch: child_branch.to_string(),
+            base_commit: parent_tip,
+            parent_pr_id: Some(parent_pr.id.clone()),
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store
+            .create_task_session(&child_session, &child_pr)
+            .await
+            .expect("create child Task");
+        (
+            home,
+            store,
+            parent_session,
+            parent_pr,
+            child_session,
+            child_pr,
+        )
+    }
+
+    #[tokio::test]
+    async fn nonempty_refuses_when_head_is_the_recorded_base() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+
+        let branch = "jack/empty-head";
+        repo.create_branch(branch);
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
+
+        let err =
+            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
+                .await
+                .expect_err("HEAD == base must refuse as empty");
+        assert!(
+            err.to_string().contains("empty"),
+            "expected empty-range refusal, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn nonempty_refuses_a_range_with_no_tree_change() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+
+        let branch = "jack/no-tree-change";
+        repo.create_branch(branch);
+        repo.create_file("ephemeral.txt", "gone\n");
+        repo.stage_all();
+        repo.commit("add ephemeral");
+        git(repo.path(), &["rm", "ephemeral.txt"]);
+        repo.commit("remove ephemeral");
+
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
+
+        let err =
+            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
+                .await
+                .expect_err("zero net tree change must refuse as empty");
+        assert!(
+            err.to_string().contains("empty"),
+            "expected empty-range refusal for zero tree change, got: {err}"
+        );
+    }
+
+    /// The core hole W2-254 closes: the old `task_pr_has_changes` guard skipped
+    /// emptiness when `pr.github().is_some()`. The shared verifier is
+    /// unconditional — an existing PR with an empty range is refused.
+    #[tokio::test]
+    async fn nonempty_refuses_even_when_the_pr_already_has_a_github_number() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+
+        let branch = "jack/empty-existing";
+        repo.create_branch(branch);
+        let (_home, store, session, mut pr) = rotation_task(&repo, branch, &base).await;
+
+        pr.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 925,
+                url: "https://example.com/pr/925".to_string(),
+                head_sha: None,
+            }),
+        });
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&pr).await.expect("set github number");
+
+        let err =
+            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
+                .await
+                .expect_err("an existing PR with an empty range must refuse");
+        assert!(
+            err.to_string().contains("empty"),
+            "expected empty-range refusal despite github number, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn nonempty_passes_for_a_real_range() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+
+        let branch = "jack/real-range";
+        repo.create_branch(branch);
+        repo.create_file("task.txt", "real work\n");
+        repo.stage_all();
+        repo.commit("real task commit");
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
+
+        require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
+            .await
+            .expect("a real range must pass the non-empty check");
+    }
+
+    #[tokio::test]
+    async fn stacked_child_measures_from_live_parent_tip() {
+        let repo = TestRepo::new();
+        let origin_tip = repo.head_sha();
+
+        let (_home, store, _, _, child_session, _) =
+            stacked_rotation_task(&repo, "jack/stack-parent", "jack/stack-child", &origin_tip)
+                .await;
+
+        repo.create_file("child.txt", "child work\n");
+        repo.stage_all();
+        repo.commit("child commit");
+
+        require_task_pr_range_nonempty_with_authority(&store, &child_session, None, repo.path())
+            .await
+            .expect("stacked child with own work passes against the parent tip");
+    }
+
+    #[tokio::test]
+    async fn stacked_child_refuses_when_empty_against_live_parent() {
+        let repo = TestRepo::new();
+        let origin_tip = repo.head_sha();
+
+        let (_home, store, _, _, child_session, _) = stacked_rotation_task(
+            &repo,
+            "jack/stack-parent-empty",
+            "jack/stack-child-empty",
+            &origin_tip,
+        )
+        .await;
+
+        let err = require_task_pr_range_nonempty_with_authority(
+            &store,
+            &child_session,
+            None,
+            repo.path(),
+        )
+        .await
+        .expect_err("empty stacked child must refuse against the parent tip");
+        assert!(
+            err.to_string().contains("empty"),
+            "expected empty-range refusal for stacked child, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stacked_child_measures_from_origin_after_parent_collapsed() {
+        let repo = TestRepo::new();
+        let origin_tip = repo.head_sha();
+
+        let (_home, store, _, mut parent_pr, child_session, mut child_pr) = stacked_rotation_task(
+            &repo,
+            "jack/collapse-parent",
+            "jack/collapse-child",
+            &origin_tip,
+        )
+        .await;
+
+        repo.create_file("child.txt", "child work\n");
+        repo.stage_all();
+        repo.commit("child commit");
+
+        // Parent merged: land the parent's work on origin/main.
+        repo.checkout("main");
+        repo.create_file("parent.txt", "parent work\n");
+        repo.stage_all();
+        repo.commit("merge parent into main");
+        repo.push();
+        let main_tip = repo.head_sha();
+
+        // Collapse the child onto origin/main (replay only base..HEAD).
+        repo.checkout("jack/collapse-child");
+        git(
+            repo.path(),
+            &[
+                "rebase",
+                "--onto",
+                "origin/main",
+                &parent_pr.base_commit,
+                "jack/collapse-child",
+            ],
+        );
+
+        parent_pr.merge_commit = Some("merge-sha".to_string());
+        parent_pr.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&parent_pr)
+            .await
+            .expect("mark parent merged");
+
+        // `base_commit` is part of `update_task_pr`'s optimistic identity, so
+        // healing it forward needs the dedicated `heal_task_pr_base` write.
+        child_pr.base_commit = main_tip;
+        child_pr.updated_at = OffsetDateTime::now_utc();
+        store
+            .heal_task_pr_base(&child_pr)
+            .await
+            .expect("heal child base to main");
+
+        require_task_pr_range_nonempty_with_authority(&store, &child_session, None, repo.path())
+            .await
+            .expect("collapsed child with own work passes against origin/main");
+    }
+
+    #[tokio::test]
+    async fn stacked_child_refuses_when_empty_after_parent_collapsed() {
+        let repo = TestRepo::new();
+        let origin_tip = repo.head_sha();
+
+        let (_home, store, _, mut parent_pr, child_session, mut child_pr) = stacked_rotation_task(
+            &repo,
+            "jack/collapse-parent-empty",
+            "jack/collapse-child-empty",
+            &origin_tip,
+        )
+        .await;
+
+        // Parent merged: land the parent's work on origin/main.
+        repo.checkout("main");
+        repo.create_file("parent.txt", "parent work\n");
+        repo.stage_all();
+        repo.commit("merge parent into main");
+        repo.push();
+        let main_tip = repo.head_sha();
+
+        // Collapse the child onto origin/main — no own work to replay.
+        repo.checkout("jack/collapse-child-empty");
+        git(
+            repo.path(),
+            &[
+                "rebase",
+                "--onto",
+                "origin/main",
+                &parent_pr.base_commit,
+                "jack/collapse-child-empty",
+            ],
+        );
+
+        parent_pr.merge_commit = Some("merge-sha".to_string());
+        parent_pr.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&parent_pr)
+            .await
+            .expect("mark parent merged");
+
+        child_pr.base_commit = main_tip;
+        child_pr.updated_at = OffsetDateTime::now_utc();
+        store
+            .heal_task_pr_base(&child_pr)
+            .await
+            .expect("heal child base to main");
+
+        let err = require_task_pr_range_nonempty_with_authority(
+            &store,
+            &child_session,
+            None,
+            repo.path(),
+        )
+        .await
+        .expect_err("empty collapsed child must refuse against origin/main");
+        assert!(
+            err.to_string().contains("empty"),
+            "expected empty-range refusal for collapsed child, got: {err}"
+        );
     }
 
     #[test]

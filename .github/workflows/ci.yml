@@ -150,6 +150,16 @@ jobs:
           key: loopflow-dd-${{ runner.os }}-${{ hashFiles('swift/Package.resolved', 'swift/project.yml') }}
           restore-keys: |
             loopflow-dd-${{ runner.os }}-
+      - name: Clear stale precompiled module cache
+        # Runner image SDK updates bump the shims' module.modulemap mtime
+        # without touching Package.resolved/project.yml, so even an exact
+        # cache-key hit can restore .pcm files built against the old SDK and
+        # fail "file has been modified since the module file was built".
+        # ModuleCache.noindex only holds precompiled modules (cheap to rebuild
+        # from the current SDK); the object-file cache it sits next to stays
+        # valid, so this keeps the expensive part of the cache.
+        run: rm -rf DerivedData/ModuleCache.noindex
+        working-directory: swift
       - name: Build Loopflow for testing (compile check)
         # The hosted test *run* is redundant: swift-test runs these same suites
         # un-hosted. This job's only unique signal is that the Loopflow app

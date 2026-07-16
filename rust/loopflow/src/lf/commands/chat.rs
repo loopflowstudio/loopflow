@@ -46,7 +46,7 @@ use serde::{Deserialize, Serialize};
 use crate::chat::turns::ChatTurn;
 use crate::engine::wave_context::{
     read_endpoint_pointer, resolve_ambient_channel, resolve_managed_wave_name, wave_origin,
-    AmbientChannelRef,
+    AmbientChannelRef, WaveResolveError,
 };
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
@@ -428,11 +428,18 @@ pub(crate) async fn resolve_target(
 
     let (target_row, target_name): (Option<Wave>, String) = if let Some(name) = &args.wave {
         let head = family_head(name).to_string();
-        let row = match store {
-            Some(store) => store.get_wave_by_name(&head).await?,
-            None => None,
-        };
-        (row, head)
+        let store = store.ok_or_else(|| {
+            anyhow!(
+                "{}",
+                WaveResolveError::Registry("no wave registry on this machine".to_string())
+            )
+        })?;
+        let row = store
+            .get_wave_by_name(&head)
+            .await
+            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
+            .ok_or_else(|| anyhow!("{}", WaveResolveError::UnknownExplicit(head.clone())))?;
+        (Some(row), head)
     } else if args.parent {
         let store = store.ok_or_else(|| {
             anyhow!(

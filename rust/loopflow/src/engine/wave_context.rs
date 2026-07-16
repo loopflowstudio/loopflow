@@ -161,10 +161,13 @@ pub fn resolve_run_wave_name() -> Option<String> {
 }
 
 /// Resolve a top-level `--wave` to the durable Wave row used by prompt,
-/// journal, and child-process attribution.
+/// journal, and child-process attribution. Surfaces the same
+/// [`WaveResolveError`] classification as the shared resolver: an empty name is
+/// [`WaveResolveError::EmptyExplicit`], an unknown name is
+/// [`WaveResolveError::UnknownExplicit`].
 pub fn resolve_explicit_wave(name: &str) -> anyhow::Result<Wave> {
     let name = crate::ops::util::normalize_wave_name(name)
-        .ok_or_else(|| anyhow::anyhow!("--wave requires a non-empty wave name"))?;
+        .ok_or_else(|| anyhow::anyhow!("{}", WaveResolveError::EmptyExplicit))?;
     let lookup_name = name.clone();
     let lookup = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -183,13 +186,13 @@ pub fn resolve_explicit_wave(name: &str) -> anyhow::Result<Wave> {
     })
     .join()
     .map_err(|_| anyhow::anyhow!("failed to resolve explicit wave '{name}'"))??;
-    lookup.ok_or_else(|| anyhow::anyhow!("wave '{name}' not found"))
+    lookup.ok_or_else(|| anyhow::anyhow!("{}", WaveResolveError::UnknownExplicit(name)))
 }
 
-/// Why an ambient Wave could not be resolved. The three cases a caller must be
-/// able to tell apart: no context to resolve from, a context that named a Wave
-/// this machine's registry has never seen (stale), and an explicit `--wave`
-/// naming an unknown Wave.
+/// Why an ambient Wave could not be resolved. The cases a caller must be able
+/// to tell apart: no context to resolve from, a context that named a Wave this
+/// machine's registry has never seen (stale), an explicit `--wave` that was
+/// empty, and an explicit `--wave` naming a Wave the registry has no row for.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum WaveResolveError {
     /// No `--wave` and no `LF_WAVE_ID`: nothing to resolve from.
@@ -204,6 +207,12 @@ pub enum WaveResolveError {
     StaleIdentity(String),
     /// `--wave` was given but empty/whitespace after normalization.
     #[error("--wave requires a non-empty wave name")]
+    EmptyExplicit,
+    /// `--wave` named a wave this machine's registry has no row for.
+    #[error(
+        "wave '{0}' is not registered on this machine; \
+         run `lf ls` to list known waves, or pass --wave <known-name>"
+    )]
     UnknownExplicit(String),
     /// The registry read itself failed (I/O, not a miss).
     #[error("failed to read wave registry: {0}")]
@@ -213,13 +222,18 @@ pub enum WaveResolveError {
 /// THE resolver for the ambient Wave's durable name. One rule, shared by every
 /// consumer that acts on "the wave I am inside":
 ///
-/// 1. explicit `--wave` always wins — normalized and returned as a name (no
-///    registry membership required; PM and file surfaces key off the name).
+/// 1. explicit `--wave` always wins — normalized and validated against the
+///    registry. An unknown name is [`WaveResolveError::UnknownExplicit`]; an
+///    empty one is [`WaveResolveError::EmptyExplicit`]. No store →
+///    [`WaveResolveError::Registry`] (a machine with no registry has no valid
+///    wave names). Creation flows that accept unregistered names bypass this
+///    resolver.
 /// 2. else `LF_WAVE_ID` as a durable registry **UUID** → mapped to its Wave's
 ///    name through the store. A UUID the registry has no row for is
 ///    [`WaveResolveError::StaleIdentity`], never silently re-read as a name.
 /// 3. else `LF_WAVE_ID` as a hand-set **name** (intentional fallback) → used
-///    directly.
+///    directly (no membership check — PM keys files by name, status reports
+///    no row).
 /// 4. else [`WaveResolveError::NoContext`].
 ///
 /// The env is only a pointer used to find the durable Wave; identity is the
@@ -230,8 +244,16 @@ pub async fn resolve_managed_wave_name(
     env_wave_id: Option<&str>,
 ) -> Result<String, WaveResolveError> {
     if let Some(raw) = explicit {
-        return crate::ops::util::normalize_wave_name(raw)
-            .ok_or_else(|| WaveResolveError::UnknownExplicit(raw.to_string()));
+        let name =
+            crate::ops::util::normalize_wave_name(raw).ok_or(WaveResolveError::EmptyExplicit)?;
+        let store = store.ok_or_else(|| {
+            WaveResolveError::Registry("no wave registry on this machine".to_string())
+        })?;
+        return match store.get_wave_by_name(&name).await {
+            Ok(Some(_)) => Ok(name),
+            Ok(None) => Err(WaveResolveError::UnknownExplicit(name)),
+            Err(error) => Err(WaveResolveError::Registry(error.to_string())),
+        };
     }
     let raw = env_wave_id
         .map(str::trim)
@@ -251,14 +273,31 @@ pub async fn resolve_managed_wave_name(
 }
 
 /// [`resolve_managed_wave_name`] for sync, store-free call sites (`lf pm …`).
-/// Reads `LF_WAVE_ID` from the env. The explicit and hand-set-name arms touch
-/// no store; only a UUID needs one, opened on a scratch thread (the
-/// [`resolve_explicit_wave`] / [`wave_name_for_id`] idiom — context assembly is
-/// sync and sometimes already inside a runtime).
+/// Reads `LF_WAVE_ID` from the env. The explicit arm validates against the
+/// registry (opening a store on a scratch thread — the same idiom as the UUID
+/// arm); the hand-set-name arm touches no store. Context assembly is sync and
+/// sometimes already inside a runtime.
 pub fn resolve_managed_wave_name_sync(explicit: Option<&str>) -> Result<String, WaveResolveError> {
     if let Some(raw) = explicit {
-        return crate::ops::util::normalize_wave_name(raw)
-            .ok_or_else(|| WaveResolveError::UnknownExplicit(raw.to_string()));
+        let name =
+            crate::ops::util::normalize_wave_name(raw).ok_or(WaveResolveError::EmptyExplicit)?;
+        let name = name.to_string();
+        return std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("current-thread runtime always builds");
+            runtime.block_on(async move {
+                let store = crate::store::open_existing_store().await;
+                resolve_managed_wave_name(store.as_ref(), Some(&name), None).await
+            })
+        })
+        .join()
+        .unwrap_or_else(|_| {
+            Err(WaveResolveError::Registry(
+                "resolver thread panicked".to_string(),
+            ))
+        });
     }
     let env_wave_id = std::env::var(WAVE_ID_ENV).ok();
     let raw = env_wave_id

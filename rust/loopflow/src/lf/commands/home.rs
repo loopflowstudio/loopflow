@@ -16,7 +16,7 @@ use std::path::Path;
 use anyhow::anyhow;
 
 use crate::engine::wave_config::{default_local_home, read_wave_home};
-use crate::engine::wave_context::resolve_run_wave_name;
+use crate::engine::wave_context::{resolve_managed_wave_name_sync, resolve_run_wave_name};
 use crate::engine::wave_home::{
     HomeActionDto, HomeRuntimeDto, HomeState, WaveHome, HOME_ROUTED_ENV, WAVE_HOME_ENV,
 };
@@ -31,14 +31,19 @@ pub fn run(cmd: &HomeCommand, repo: &Path) -> anyhow::Result<()> {
     }
 }
 
+/// Resolve a wave name for a creation flow (`lf home start`). An explicit name
+/// is normalized but NOT validated against the registry — the wave may not be
+/// registered yet (`start_home` launches `lf wave <name>`, which registers the
+/// row on first run). Ambient falls back to `LF_WAVE_ID`. Read-only consumers
+/// (`probe_cmd`) use the shared validating resolver instead.
 fn resolve_wave_name(wave: Option<&str>) -> anyhow::Result<String> {
-    wave.map(str::to_string)
+    wave.and_then(crate::ops::util::normalize_wave_name)
         .or_else(resolve_run_wave_name)
         .ok_or_else(|| anyhow!("no wave given and none in context; pass a wave name"))
 }
 
 fn probe_cmd(wave: Option<&str>, json: bool, repo: &Path) -> anyhow::Result<()> {
-    let name = resolve_wave_name(wave)?;
+    let name = resolve_managed_wave_name_sync(wave).map_err(|err| anyhow!("{err}"))?;
     let home = read_wave_home(repo, &name);
     let rt = tokio::runtime::Runtime::new()?;
     let runtime = rt.block_on(crate::ops::home::probe_home(&name, &home, repo));

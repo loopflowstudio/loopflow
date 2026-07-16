@@ -10,7 +10,7 @@ mod support;
 
 use loopflow::child_session::{ChildCommandKind, ChildCommandState, ChildRef};
 use loopflow::ops::task::task_status;
-use loopflow::task::{TaskPr, TaskPrId, TaskSessionStatus};
+use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
 use loopflow::webhook::{ingest_event, WebhookEvent, WebhookOutcome};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard, RegisteredTask};
@@ -192,6 +192,20 @@ fn task_status_falls_back_to_terminal_history_when_no_successor_is_live() {
 
     let task = register_task(home.path(), repo.path(), branch, &base);
     let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let mut settled = task.pr.clone();
+    settled.publication = Some(PrPublication {
+        requested_at: OffsetDateTime::now_utc(),
+        after_merge: AfterMerge::CompleteTask,
+        next_slug: None,
+        github: Some(GithubPr {
+            number: 900,
+            url: "https://example.com/pr/900".to_string(),
+            head_sha: None,
+        }),
+    });
+    settled.merge_commit = Some("merge-terminal-history".to_string());
+    rt.block_on(task.store.settle_task_pr(&settled, None))
+        .expect("settle PR");
     let mut completed = task.session.clone();
     completed.set_status(TaskSessionStatus::Completed, "PR merged");
     rt.block_on(task.store.update_task_session(&completed))

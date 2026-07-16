@@ -879,10 +879,27 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskReviewCommand {
+    /// Send the human reviewer's next FIFO message to the existing Task session
+    Message {
+        review_id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Reply to the reviewer without replacing the current Task direction
     Reply {
         review_id: String,
         message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Finish a human review with an explicit disposition and evidence
+    Complete {
+        review_id: String,
+        #[arg(long, value_parser = ["approved", "changes-requested"])]
+        disposition: String,
+        #[arg(long)]
+        outcome: String,
         #[arg(long)]
         json: bool,
     },
@@ -2092,6 +2109,56 @@ mod tests {
                     }
                 }
             }) if review_id == "ir_review" && message == "The empty state is now visible"
+        ));
+
+        let human_message = Cli::try_parse_from([
+            "lf",
+            "task",
+            "review",
+            "message",
+            "ir_review",
+            "Show me the empty state",
+        ])
+        .expect("parse human review message");
+        assert!(matches!(
+            human_message.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Review {
+                    command: TaskReviewCommand::Message {
+                        review_id,
+                        message,
+                        ..
+                    }
+                }
+            }) if review_id == "ir_review" && message == "Show me the empty state"
+        ));
+
+        let human_complete = Cli::try_parse_from([
+            "lf",
+            "task",
+            "review",
+            "complete",
+            "ir_review",
+            "--disposition",
+            "approved",
+            "--outcome",
+            "The empty state is proven",
+        ])
+        .expect("parse human review completion");
+        assert!(matches!(
+            human_complete.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Review {
+                    command: TaskReviewCommand::Complete {
+                        review_id,
+                        disposition,
+                        outcome,
+                        ..
+                    }
+                }
+            }) if review_id == "ir_review"
+                && disposition == "approved"
+                && outcome == "The empty state is proven"
         ));
     }
 

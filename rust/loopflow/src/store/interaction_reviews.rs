@@ -1,4 +1,4 @@
-use crate::child_session::{ChildCommand, ChildWriteLease};
+use crate::child_session::{ChildCommand, ChildCommandSource, ChildWriteLease};
 use crate::id::WaveId;
 use crate::interaction_review::{
     InteractionReview, InteractionReviewDisposition, InteractionReviewId,
@@ -82,6 +82,35 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn activate_human_interaction_review(
+        &self,
+        session: &TaskSession,
+        review_id: &InteractionReviewId,
+        lease: &ChildWriteLease,
+    ) -> StoreResult<InteractionReview> {
+        let session = session.clone();
+        let review_id = review_id.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.activate_human_interaction_review(&session, &review_id, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn send_human_interaction_review_message(
+        &self,
+        review_id: &InteractionReviewId,
+        source: ChildCommandSource,
+        text: &str,
+    ) -> StoreResult<ChildCommand> {
+        let review_id = review_id.clone();
+        let text = text.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.send_human_interaction_review_message(&review_id, source, &text)
+        })
+        .await
+    }
+
     pub(crate) async fn reply_to_interaction_review(
         &self,
         review_id: &InteractionReviewId,
@@ -119,6 +148,20 @@ impl Store {
                 disposition,
                 &outcome,
             )
+        })
+        .await
+    }
+
+    pub(crate) async fn complete_human_interaction_review(
+        &self,
+        review_id: &InteractionReviewId,
+        disposition: InteractionReviewDisposition,
+        outcome: &str,
+    ) -> StoreResult<(InteractionReview, bool)> {
+        let review_id = review_id.clone();
+        let outcome = outcome.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_human_interaction_review(&review_id, disposition, &outcome)
         })
         .await
     }

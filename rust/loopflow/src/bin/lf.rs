@@ -1136,6 +1136,19 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         TaskCommand::Review { command } => match command {
+            TaskReviewCommand::Message {
+                review_id,
+                message,
+                json,
+            } => {
+                let review = loopflow::ops::task::task_review_message(review_id, message.clone())?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&review)?);
+                } else {
+                    println!("{} → human message queued", review.id);
+                }
+                Ok(())
+            }
             TaskReviewCommand::Reply {
                 review_id,
                 message,
@@ -1146,6 +1159,24 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     println!("{}", serde_json::to_string_pretty(&review)?);
                 } else {
                     println!("{} → reply recorded", review.id);
+                }
+                Ok(())
+            }
+            TaskReviewCommand::Complete {
+                review_id,
+                disposition,
+                outcome,
+                json,
+            } => {
+                let review = loopflow::ops::task::task_review_complete(
+                    review_id,
+                    disposition,
+                    outcome.clone(),
+                )?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&review)?);
+                } else {
+                    println!("{} → {}", review.id, review.status.as_str());
                 }
                 Ok(())
             }

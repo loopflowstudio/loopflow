@@ -15,8 +15,8 @@ use crate::child_control::{
 };
 use crate::child_session::{
     task_write_lease_from_env, unincorporated_directive_version, BoundaryResult, ChildBodyOutcome,
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
-    ChildDirective, ChildLeaseState, ChildRef, ChildWriteLease,
+    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
+    ChildCommandState, ChildDirective, ChildLeaseState, ChildRef, ChildWriteLease,
 };
 use crate::engine::InteractionPolicy;
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
@@ -40,6 +40,12 @@ use crate::wave::Wave;
 struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     review: Option<InteractionReview>,
+}
+
+#[derive(Debug)]
+struct StartedTaskStep {
+    review: Option<InteractionReviewId>,
+    provider_turn_active: bool,
 }
 
 pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Result<()> {
@@ -164,12 +170,30 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     {
         return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
     }
+    let mut review_start = None;
     let mut review_recovery = None;
     let mut interaction_review = if let Some(review) = prepared.review.take() {
         open_interaction_review_body(&store, &session, lease, &mut flow, &review).await?;
-        match review.status {
-            InteractionReviewStatus::Requested => {}
-            InteractionReviewStatus::Active => {
+        match (review.status, &review.reviewer) {
+            (InteractionReviewStatus::Requested, InteractionReviewer::Human) => {
+                store
+                    .activate_human_interaction_review(&session, &review.id, lease)
+                    .await?;
+                review_start = Some(PendingInput::system(prepared.turn.input.clone()));
+            }
+            (InteractionReviewStatus::Requested, _) => {}
+            (InteractionReviewStatus::Active, InteractionReviewer::Human) => {
+                review_start = Some(PendingInput::system(format!(
+                    "Resume human interaction review {} after a Task process restart. Continue \
+the `{}` exercise in this existing provider transcript. Human messages arrive as FIFO follow-ups; \
+answer them here and record each answer with `lf task review reply {} \"<answer and evidence>\"`. \
+The human finishes the checkpoint with `lf task review complete {0} --disposition \
+approved|changes-requested --outcome \"<findings and evidence>\"`. The complete Task and skill \
+context follows so recovery does not depend on the interrupted turn having reached the provider.\n\n{}",
+                    review.id, review.step, review.id, prepared.turn.input
+                )));
+            }
+            (InteractionReviewStatus::Active, _) => {
                 review_recovery = Some(PendingInput::system(format!(
                     "Resume interaction review {} after a Task process restart. Inspect the \
 existing provider transcript for the latest reviewer question, then answer it with \
@@ -177,7 +201,7 @@ existing provider transcript for the latest reviewer question, then answer it wi
                     review.id, review.id
                 )));
             }
-            InteractionReviewStatus::Completed => {
+            (InteractionReviewStatus::Completed, _) => {
                 let disposition = review.disposition.ok_or_else(|| {
                     anyhow!(
                         "completed interaction review {} has no disposition",
@@ -200,6 +224,9 @@ The durable reviewer outcome is:\n{}",
     } else {
         None
     };
+    if let Some(review_start) = review_start {
+        pending.push_front(review_start);
+    }
     if pending.is_empty() {
         pending.extend(review_recovery);
     }
@@ -230,7 +257,7 @@ The durable reviewer outcome is:\n{}",
         }
     });
     println!(
-        "task {}> attached; /status, /interrupt [message], /detach, or type an instruction",
+        "task {}> attached; /status, /interrupt [message], /detach, or type a message/instruction",
         session.launch.issue.identifier
     );
     let mut command_poll = tokio::time::interval(Duration::from_millis(200));
@@ -341,6 +368,43 @@ The durable reviewer outcome is:\n{}",
                         } else {
                             None
                         };
+                        if completed_review.is_some() {
+                            // Completion and its final FollowUp commit atomically. Claim after
+                            // observing completion so that message cannot leak into the next phase.
+                            let commands = claim_commands(
+                                &store,
+                                &session,
+                                lease,
+                                &mut seen_commands,
+                            ).await?;
+                            if let Some(stop) = absorb_commands(
+                                &store,
+                                &session,
+                                lease,
+                                commands,
+                                harness.as_mut(),
+                                false,
+                                &mut pending,
+                            ).await? {
+                                return finish_command_stop(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    harness.as_mut(),
+                                    stop,
+                                ).await;
+                            }
+                            if apply_next_pending(
+                                &store,
+                                &session,
+                                lease,
+                                harness.as_mut(),
+                                &mut pending,
+                            ).await? {
+                                provider_turn_active = true;
+                                continue 'runner;
+                            }
+                        }
                         let review_body_completed = completed_review.is_some();
                         let mut flow_iteration_completed = if flow_turn_active {
                             finish_task_flow_turn(&mut flow, status)?
@@ -377,11 +441,18 @@ The durable reviewer outcome is:\n{}",
                             if flow_iteration_completed
                                 && session.lifecycle_phase == TaskLifecyclePhase::Kickoff
                             {
+                                let reason = if matches!(
+                                    completed_review
+                                        .as_ref()
+                                        .map(|(disposition, _)| disposition),
+                                    Some(InteractionReviewDisposition::ChangesRequested)
+                                ) {
+                                    "Task kickoff requested changes; iteration is starting"
+                                } else {
+                                    "Task kickoff approved; autonomous iteration is starting"
+                                };
                                 session.enter_iterate()?;
-                                session.set_status(
-                                    TaskSessionStatus::Running,
-                                    "Task kickoff approved; autonomous iteration is starting",
-                                );
+                                session.set_status(TaskSessionStatus::Running, reason);
                                 store.update_task_session_for_lease(&session, lease).await?;
                                 flow = resume_task_phase(&session)?;
                                 flow_iteration_completed = false;
@@ -402,7 +473,7 @@ The durable reviewer outcome is:\n{}",
                                     "Task gate requested changes; returning to iteration",
                                 );
                                 store.update_task_session_for_lease(&session, lease).await?;
-                                interaction_review = start_resumed_task_phase(
+                                let started = start_resumed_task_phase(
                                     &store,
                                     &mut session,
                                     lease,
@@ -411,8 +482,9 @@ The durable reviewer outcome is:\n{}",
                                     wave.name(),
                                 )
                                 .await?;
+                                interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
-                                provider_turn_active = flow_turn_active;
+                                provider_turn_active = started.provider_turn_active;
                                 last_text.clear();
                                 continue 'runner;
                             }
@@ -454,7 +526,7 @@ The durable reviewer outcome is:\n{}",
                                         "Task gate requested changes; returning to iteration",
                                     );
                                     store.update_task_session_for_lease(&session, lease).await?;
-                                    interaction_review = start_resumed_task_phase(
+                                    let started = start_resumed_task_phase(
                                         &store,
                                         &mut session,
                                         lease,
@@ -463,8 +535,9 @@ The durable reviewer outcome is:\n{}",
                                         wave.name(),
                                     )
                                     .await?;
+                                    interaction_review = started.review;
                                     flow_turn_active = interaction_review.is_none();
-                                    provider_turn_active = flow_turn_active;
+                                    provider_turn_active = started.provider_turn_active;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -481,7 +554,7 @@ The durable reviewer outcome is:\n{}",
                                     &flow,
                                 )
                                 .await?;
-                                interaction_review = start_prepared_task_step(
+                                let started = start_prepared_task_step(
                                     &store,
                                     &mut session,
                                     lease,
@@ -490,8 +563,9 @@ The durable reviewer outcome is:\n{}",
                                     prepared,
                                 )
                                 .await?;
+                                interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
-                                provider_turn_active = flow_turn_active;
+                                provider_turn_active = started.provider_turn_active;
                                 continue 'runner;
                             }
                             let summary = progress_summary(&last_text);
@@ -562,7 +636,7 @@ The durable reviewer outcome is:\n{}",
                                     &flow,
                                 )
                                 .await?;
-                                interaction_review = start_prepared_task_step(
+                                let started = start_prepared_task_step(
                                     &store,
                                     &mut session,
                                     lease,
@@ -571,8 +645,9 @@ The durable reviewer outcome is:\n{}",
                                     prepared,
                                 )
                                 .await?;
+                                interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
-                                provider_turn_active = flow_turn_active;
+                                provider_turn_active = started.provider_turn_active;
                                 last_text.clear();
                                 continue 'runner;
                             } else if let Some(pr) = observed_pr
@@ -603,7 +678,7 @@ The durable reviewer outcome is:\n{}",
                                         &flow,
                                     )
                                     .await?;
-                                    interaction_review = start_prepared_task_step(
+                                    let started = start_prepared_task_step(
                                         &store,
                                         &mut session,
                                         lease,
@@ -612,8 +687,9 @@ The durable reviewer outcome is:\n{}",
                                         prepared,
                                     )
                                     .await?;
+                                    interaction_review = started.review;
                                     flow_turn_active = interaction_review.is_none();
-                                    provider_turn_active = flow_turn_active;
+                                    provider_turn_active = started.provider_turn_active;
                                     last_text.clear();
                                     continue 'runner;
                                 }
@@ -638,7 +714,7 @@ The durable reviewer outcome is:\n{}",
                                 );
                                 gate_fingerprint = Some(task_gate_fingerprint(&session)?);
                                 store.update_task_session_for_lease(&session, lease).await?;
-                                interaction_review = start_resumed_task_phase(
+                                let started = start_resumed_task_phase(
                                     &store,
                                     &mut session,
                                     lease,
@@ -647,8 +723,9 @@ The durable reviewer outcome is:\n{}",
                                     wave.name(),
                                 )
                                 .await?;
+                                interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
-                                provider_turn_active = flow_turn_active;
+                                provider_turn_active = started.provider_turn_active;
                                 last_text.clear();
                                 continue 'runner;
                             }
@@ -740,7 +817,7 @@ The durable reviewer outcome is:\n{}",
                                     &flow,
                                 )
                                 .await?;
-                                interaction_review = start_prepared_task_step(
+                                let started = start_prepared_task_step(
                                     &store,
                                     &mut session,
                                     lease,
@@ -749,8 +826,9 @@ The durable reviewer outcome is:\n{}",
                                     prepared,
                                 )
                                 .await?;
+                                interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
-                                provider_turn_active = flow_turn_active;
+                                provider_turn_active = started.provider_turn_active;
                                 continue 'runner;
                             }
                         }
@@ -834,10 +912,37 @@ async fn prepare_task_flow_step(
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
     let skill = crate::engine::load_skill(&step.step, Path::new(&session.worktree))?;
-    let review = if skill.interactive.unwrap_or(false)
-        && session.phase_plan().interaction_policy == InteractionPolicy::Defer
-    {
+    let review = if skill.interactive.unwrap_or(false) {
         let id = InteractionReviewId::new();
+        let policy = session.phase_plan().interaction_policy;
+        let (reviewer, prompt, reviewer_name) = match policy {
+            InteractionPolicy::Require => {
+                let protocol = human_interaction_review_protocol(&id, &step.step);
+                (
+                    InteractionReviewer::Human,
+                    format!(
+                        "{protocol}\n\n{}",
+                        skill
+                            .content
+                            .as_deref()
+                            .unwrap_or("Follow the named skill.")
+                    ),
+                    "Human",
+                )
+            }
+            InteractionPolicy::Defer => (
+                InteractionReviewer::Project(session.project_session_id.clone()),
+                interaction_review_prompt(
+                    &id,
+                    &step.step,
+                    skill
+                        .content
+                        .as_deref()
+                        .unwrap_or("Follow the named skill."),
+                ),
+                "Project",
+            ),
+        };
         let request = InteractionReview {
             id: id.clone(),
             wave_id: session.wave_id.clone(),
@@ -849,22 +954,15 @@ async fn prepare_task_flow_step(
             step: step.step.clone(),
             step_index: step.index,
             phase_iteration: step.iteration,
-            policy: InteractionPolicy::Defer,
-            reviewer: InteractionReviewer::Project(session.project_session_id.clone()),
+            policy,
+            reviewer,
             status: InteractionReviewStatus::Requested,
             reason: session
                 .gate_proposal
                 .as_ref()
                 .map(|proposal| proposal.reason.clone())
                 .unwrap_or_else(|| session.status_reason.clone()),
-            prompt: interaction_review_prompt(
-                &id,
-                &step.step,
-                skill
-                    .content
-                    .as_deref()
-                    .unwrap_or("Follow the named skill."),
-            ),
+            prompt,
             evidence: InteractionReviewEvidence {
                 worktree: session.worktree.clone(),
                 branch: pr.branch.clone(),
@@ -887,8 +985,14 @@ async fn prepare_task_flow_step(
             .open_interaction_review(session, &request, lease)
             .await?
             .0;
+        if review.reviewer == InteractionReviewer::Human {
+            prepared.input.push_str("\n\n");
+            prepared
+                .input
+                .push_str(&human_interaction_review_protocol(&review.id, &step.step));
+        }
         session.status_reason = format!(
-            "Task {} cycle {}, interactive step {} is {} in Project review {}",
+            "Task {} cycle {}, interactive step {} is {} in {reviewer_name} review {}",
             session.lifecycle_phase.as_str(),
             session.lifecycle_cycle(),
             step.step,
@@ -904,6 +1008,18 @@ async fn prepare_task_flow_step(
         turn: prepared,
         review,
     })
+}
+
+fn human_interaction_review_protocol(review_id: &InteractionReviewId, skill: &str) -> String {
+    format!(
+        "Conduct the interactive `{skill}` exercise with the human in this existing Task provider \
+session. Ask bounded questions and wait for their FIFO follow-up messages. Respond in this \
+transcript, then record each answer with `lf task review reply {review_id} \
+\"<answer and evidence>\"`. Do not approve yourself. The human finishes the checkpoint with \
+`lf task review complete {review_id} --disposition approved|changes-requested --outcome \
+\"<findings and evidence>\"`. Approval lets the lifecycle advance; requested changes return \
+the same Task to Iterate."
+    )
 }
 
 fn interaction_review_prompt(
@@ -987,13 +1103,37 @@ async fn start_prepared_task_step(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     mut prepared: PreparedTaskStep,
-) -> Result<Option<InteractionReviewId>> {
+) -> Result<StartedTaskStep> {
     if let Some(review) = prepared.review.take() {
         open_interaction_review_body(store, session, lease, flow, &review).await?;
-        Ok(Some(review.id))
+        let provider_turn_active = if review.reviewer == InteractionReviewer::Human {
+            store
+                .activate_human_interaction_review(session, &review.id, lease)
+                .await?;
+            apply_input(
+                store,
+                session,
+                lease,
+                harness,
+                &prepared.turn.input,
+                None,
+                None,
+            )
+            .await?;
+            true
+        } else {
+            false
+        };
+        Ok(StartedTaskStep {
+            review: Some(review.id),
+            provider_turn_active,
+        })
     } else {
         start_task_flow_turn(store, session, lease, harness, flow, prepared.turn).await?;
-        Ok(None)
+        Ok(StartedTaskStep {
+            review: None,
+            provider_turn_active: true,
+        })
     }
 }
 
@@ -1004,7 +1144,7 @@ async fn start_resumed_task_phase(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     wave_name: &str,
-) -> Result<Option<InteractionReviewId>> {
+) -> Result<StartedTaskStep> {
     *flow = resume_task_phase(session)?;
     let prepared = prepare_task_flow_step(store, session, lease, wave_name, flow).await?;
     start_prepared_task_step(store, session, lease, harness, flow, prepared).await
@@ -1057,6 +1197,15 @@ async fn reconcile_interactive_rendezvous_at_birth(
     lease: &ChildWriteLease,
     flow: &mut Playhead,
 ) -> Result<bool> {
+    let review_owns_current_step = store
+        .interaction_review_at(
+            &session.id,
+            session.phase_epoch,
+            session.phase_iteration,
+            session.phase_cursor,
+        )
+        .await?
+        .is_some();
     let parent = InteractiveHandoffParent::Task(session.id.clone());
     match interactive_rendezvous::resolve(store, &parent, lease.generation).await? {
         Rendezvous::None => Ok(false),
@@ -1072,15 +1221,25 @@ async fn reconcile_interactive_rendezvous_at_birth(
             Ok(true)
         }
         Rendezvous::Resume { outcome, fresh } => {
-            resume_interactive_step(store, session, lease, flow, outcome, fresh).await
+            resume_interactive_step(
+                store,
+                session,
+                lease,
+                flow,
+                outcome,
+                fresh,
+                review_owns_current_step,
+            )
+            .await
         }
     }
 }
 
 /// Resolve a terminal interactive handoff at body birth. Completion advances the
-/// flow past work the human finished; hand-back resumes the same step; failure
-/// blocks the parent for an operator. Evidence is recorded once, on the
-/// generation that wins the wake claim (`fresh`).
+/// flow past work the human finished unless an InteractionReview owns the same
+/// step; a handoff can wake that review but cannot decide it. Hand-back resumes
+/// the same step, and failure blocks the parent for an operator. Evidence is
+/// recorded once, on the generation that wins the wake claim (`fresh`).
 async fn resume_interactive_step(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -1088,6 +1247,7 @@ async fn resume_interactive_step(
     flow: &mut Playhead,
     outcome: InteractiveHandoffOutcome,
     fresh: bool,
+    review_owns_current_step: bool,
 ) -> Result<bool> {
     if fresh {
         let detail = match &outcome {
@@ -1120,13 +1280,14 @@ async fn resume_interactive_step(
             .await?;
             Ok(true)
         }
-        InteractiveHandoffOutcome::Completed { .. } => {
+        InteractiveHandoffOutcome::Completed { .. } if !review_owns_current_step => {
             advance_past_interactive_step(flow, session)?;
             record_task_flow_position(session, flow)?;
             store.update_task_session_for_lease(session, lease).await?;
             Ok(false)
         }
-        InteractiveHandoffOutcome::HandedBack { .. } => Ok(false),
+        InteractiveHandoffOutcome::Completed { .. }
+        | InteractiveHandoffOutcome::HandedBack { .. } => Ok(false),
     }
 }
 
@@ -1281,6 +1442,29 @@ async fn handle_attachment(
             .status();
         return Ok(());
     }
+    if !line.starts_with("/interrupt") {
+        let review = store
+            .interaction_review_at(
+                &session.id,
+                session.phase_epoch,
+                session.phase_iteration,
+                session.phase_cursor,
+            )
+            .await?;
+        if let Some(review) = review.filter(|review| {
+            review.reviewer == InteractionReviewer::Human && !review.status.is_terminal()
+        }) {
+            let command = store
+                .send_human_interaction_review_message(
+                    &review.id,
+                    ChildCommandSource::Attachment,
+                    line,
+                )
+                .await?;
+            println!("queued {} for human review {}", command.id, review.id);
+            return Ok(());
+        }
+    }
     let kind = if let Some(message) = line.strip_prefix("/interrupt") {
         let message = message.trim();
         ChildCommandKind::Interrupt {
@@ -1293,7 +1477,7 @@ async fn handle_attachment(
     };
     let command = ChildCommand::new(
         ChildRef::Task(session.id.clone()),
-        crate::child_session::ChildCommandSource::Attachment,
+        ChildCommandSource::Attachment,
         kind,
     );
     let replacement = match &command.kind {
@@ -1688,8 +1872,9 @@ mod tests {
 
     use super::{
         absorb_commands, apply_input, apply_next_pending, handle_attachment,
-        interaction_review_prompt, prepare_task_flow_step, progress_summary, resume_task_phase,
-        task_seed, CommandStop,
+        human_interaction_review_protocol, interaction_review_prompt, prepare_task_flow_step,
+        progress_summary, resume_task_phase, start_prepared_task_step, task_seed, CommandStop,
+        PreparedTaskStep,
     };
     use crate::child_session::{
         ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
@@ -1710,6 +1895,7 @@ mod tests {
         PmWritebackState, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
         TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
+    use crate::wave::playhead::Playhead;
     use crate::wave::Wave;
 
     struct ScriptedHarness {
@@ -1880,26 +2066,16 @@ mod tests {
         (store, session, lease)
     }
 
-    #[test]
-    fn progress_summary_bounds_wave_visible_text() {
-        let summary = progress_summary(&"x".repeat(2_500));
-        assert_eq!(summary.chars().count(), 2_000);
-        assert!(summary.ends_with('…'));
-    }
-
-    #[test]
-    fn deferred_review_prompt_assigns_the_skill_and_two_way_protocol() {
-        let review_id = InteractionReviewId::new();
-        let prompt = interaction_review_prompt(&review_id, "demo", "Prove each Done When.");
-
-        assert!(prompt.contains("interactive `demo` exercise"));
-        assert!(prompt.contains(&format!("lf project review message {review_id}")));
-        assert!(prompt.contains(&format!("lf project review complete {review_id}")));
-        assert!(prompt.contains("Prove each Done When."));
-    }
-
-    #[tokio::test]
-    async fn headless_interactive_step_opens_parent_review_with_current_evidence() {
+    async fn prepared_gate_review(
+        lifecycle: TaskLifecyclePlan,
+    ) -> (
+        tempfile::TempDir,
+        SharedStore,
+        TaskSession,
+        ChildWriteLease,
+        Playhead,
+        PreparedTaskStep,
+    ) {
         let repo = tempfile::tempdir().unwrap();
         for args in [
             ["init", "-b", "main"].as_slice(),
@@ -1948,7 +2124,7 @@ mod tests {
             .unwrap();
         session.current_directive_version = 1;
         session.worktree = repo.path().to_path_buf();
-        session.lifecycle = TaskLifecyclePlan::headless("task");
+        session.lifecycle = lifecycle;
         session.lifecycle_phase = TaskLifecyclePhase::Gate;
         session.phase_epoch = 3;
         session.gate_cycle = 1;
@@ -1961,10 +2137,46 @@ mod tests {
             .await
             .unwrap();
         let flow = resume_task_phase(&session).unwrap();
-
         let prepared = prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow)
             .await
             .unwrap();
+        (repo, store, session, lease, flow, prepared)
+    }
+
+    #[test]
+    fn progress_summary_bounds_wave_visible_text() {
+        let summary = progress_summary(&"x".repeat(2_500));
+        assert_eq!(summary.chars().count(), 2_000);
+        assert!(summary.ends_with('…'));
+    }
+
+    #[test]
+    fn deferred_review_prompt_assigns_the_skill_and_two_way_protocol() {
+        let review_id = InteractionReviewId::new();
+        let prompt = interaction_review_prompt(&review_id, "demo", "Prove each Done When.");
+
+        assert!(prompt.contains("interactive `demo` exercise"));
+        assert!(prompt.contains(&format!("lf project review message {review_id}")));
+        assert!(prompt.contains(&format!("lf project review complete {review_id}")));
+        assert!(prompt.contains("Prove each Done When."));
+    }
+
+    #[test]
+    fn human_review_prompt_keeps_the_decision_with_the_human() {
+        let review_id = InteractionReviewId::new();
+        let prompt = human_interaction_review_protocol(&review_id, "demo");
+
+        assert!(prompt.contains("existing Task provider session"));
+        assert!(prompt.contains("FIFO follow-up messages"));
+        assert!(prompt.contains(&format!("lf task review reply {review_id}")));
+        assert!(prompt.contains(&format!("lf task review complete {review_id}")));
+        assert!(prompt.contains("requested changes return"));
+    }
+
+    #[tokio::test]
+    async fn headless_interactive_step_opens_parent_review_with_current_evidence() {
+        let (repo, store, session, _lease, _flow, prepared) =
+            prepared_gate_review(TaskLifecyclePlan::headless("task")).await;
         let review = prepared.review.expect("demo is deferred to the Project");
 
         assert_eq!(review.phase, TaskLifecyclePhase::Gate);
@@ -1993,6 +2205,92 @@ mod tests {
                 .unwrap()
                 .id,
             review.id
+        );
+    }
+
+    #[tokio::test]
+    async fn standard_interactive_step_starts_human_review_in_existing_provider_session() {
+        let (_repo, store, mut session, lease, mut flow, prepared) =
+            prepared_gate_review(TaskLifecyclePlan::standard("task")).await;
+        let review = prepared.review.clone().expect("demo requires human review");
+        let replayed = prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow)
+            .await
+            .unwrap();
+        assert_eq!(
+            replayed.review.as_ref().map(|review| &review.id),
+            Some(&review.id)
+        );
+        assert!(replayed.turn.input.contains(review.id.as_str()));
+        let mut harness = ScriptedHarness::new(true);
+
+        let started = start_prepared_task_step(
+            &store,
+            &mut session,
+            &lease,
+            &mut harness,
+            &mut flow,
+            replayed,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            review.reviewer,
+            crate::interaction_review::InteractionReviewer::Human
+        );
+        assert_eq!(review.policy, crate::engine::InteractionPolicy::Require);
+        assert_eq!(started.review, Some(review.id.clone()));
+        assert!(started.provider_turn_active);
+        assert_eq!(harness.sent.len(), 1);
+        assert!(harness.sent[0].contains(review.id.as_str()));
+        assert!(harness.sent[0].contains("lf task review complete"));
+        assert!(flow.active.is_some());
+        assert_eq!(
+            store
+                .get_interaction_review(&review.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            crate::interaction_review::InteractionReviewStatus::Active
+        );
+        assert!(session.status_reason.contains("Human review"));
+    }
+
+    #[tokio::test]
+    async fn attached_human_review_input_is_fifo_followup_not_steer() {
+        let (_repo, store, session, lease, _flow, prepared) =
+            prepared_gate_review(TaskLifecyclePlan::standard("task")).await;
+        let review = prepared.review.expect("demo requires human review");
+
+        handle_attachment(
+            &store,
+            &session,
+            &lease,
+            "Show the login path from the product.".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let commands = store
+            .list_child_commands(&ChildRef::Task(session.id.clone()))
+            .await
+            .unwrap();
+        let message = commands.last().expect("attached review message is durable");
+        assert_eq!(message.source, ChildCommandSource::Attachment);
+        assert!(matches!(
+            &message.kind,
+            ChildCommandKind::FollowUp { text }
+                if text.contains(review.id.as_str()) && text.contains("Show the login path")
+        ));
+        assert_eq!(
+            store
+                .get_task_session(&session.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .current_directive_version,
+            1
         );
     }
 
@@ -2552,6 +2850,59 @@ mod tests {
         assert!(!parked);
         assert_eq!(session.phase_cursor, 0);
         assert_eq!(session.phase_iteration, 0);
+        assert!(store
+            .get_interactive_handoff(&handoff.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .wake_claimed_at
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn completed_handoff_cannot_advance_past_interaction_review() {
+        let (_repo, store, mut session, lease, mut flow, prepared) =
+            prepared_gate_review(TaskLifecyclePlan::standard("task")).await;
+        let review = prepared.review.expect("demo requires human review");
+        let (handoff, _) = store
+            .open_interactive_handoff(task_handoff_request(&session, &lease))
+            .await
+            .unwrap();
+        store
+            .finish_interactive_handoff(
+                &handoff.id,
+                &crate::interactive_handoff::InteractiveHandoffOutcome::Completed {
+                    summary: "human finished the login".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let parked = super::reconcile_interactive_rendezvous_at_birth(
+            &store,
+            &mut session,
+            &lease,
+            &mut flow,
+        )
+        .await
+        .unwrap();
+
+        assert!(!parked);
+        assert_eq!(session.phase_cursor, review.step_index);
+        assert_eq!(session.phase_iteration, review.phase_iteration);
+        assert_eq!(
+            store
+                .interaction_review_at(
+                    &session.id,
+                    session.phase_epoch,
+                    session.phase_iteration,
+                    session.phase_cursor,
+                )
+                .await
+                .unwrap()
+                .map(|current| current.id),
+            Some(review.id)
+        );
         assert!(store
             .get_interactive_handoff(&handoff.id)
             .await

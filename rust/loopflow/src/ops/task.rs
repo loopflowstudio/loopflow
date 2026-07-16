@@ -21,7 +21,9 @@ use crate::engine::worktrees::{
 };
 use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use crate::id::WaveId;
-use crate::interaction_review::{InteractionReview, InteractionReviewId};
+use crate::interaction_review::{
+    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
+};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
@@ -2987,6 +2989,62 @@ pub fn task_review_reply(review_id: &str, text: String) -> OpsResult<Interaction
             .await
             .map_err(|error| task_error(error.to_string()))?
             .ok_or_else(|| task_error(format!("interaction review {review_id} disappeared")))
+    })
+}
+
+fn _require_human_review_authority() -> OpsResult<()> {
+    for variable in [
+        "LF_TASK_SESSION_ID",
+        "LF_PROJECT_SESSION_ID",
+        "LF_RUN_ID",
+        "LF_PROCESS_ID",
+    ] {
+        if std::env::var_os(variable).is_some() {
+            return Err(task_error(
+                "human review commands cannot run inside a Task, Project, or Wave agent session",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn task_review_message(review_id: &str, text: String) -> OpsResult<InteractionReview> {
+    _require_human_review_authority()?;
+    let review_id = InteractionReviewId::parse(review_id)
+        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
+    block_on_task(async move {
+        let store = task_store().await?;
+        store
+            .send_human_interaction_review_message(&review_id, ChildCommandSource::Human, &text)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        store
+            .get_interaction_review(&review_id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error(format!("interaction review {review_id} disappeared")))
+    })
+}
+
+pub fn task_review_complete(
+    review_id: &str,
+    disposition: &str,
+    outcome: String,
+) -> OpsResult<InteractionReview> {
+    _require_human_review_authority()?;
+    let review_id = InteractionReviewId::parse(review_id)
+        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
+    let disposition = disposition
+        .replace('-', "_")
+        .parse::<InteractionReviewDisposition>()
+        .map_err(|error| task_error(error.to_string()))?;
+    block_on_task(async move {
+        let store = task_store().await?;
+        store
+            .complete_human_interaction_review(&review_id, disposition, &outcome)
+            .await
+            .map_err(|error| task_error(error.to_string()))
+            .map(|(review, _)| review)
     })
 }
 

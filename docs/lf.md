@@ -152,6 +152,9 @@ lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-125 --headless                       # Project reviews every interactive step
 lf task run DES-124 --stack-on DES-123
+lf task status DES-123                               # review id appears in the status reason
+lf task review message ir_... "Show the real sign-in path"
+lf task review complete ir_... --disposition approved --outcome "Done When proof holds"
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123 --message "take the smaller approach"
 lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
@@ -174,6 +177,19 @@ Its provider process and transcript are a replaceable body generation: plain
 Session, directive, worktree, and PR chain while selecting another provider.
 The Session remains resumable through serial PRs, review, and explicit
 completion.
+Every Task runs `kickoff → iterate N → gate`. Standard Tasks conduct interactive
+kickoff and gate steps with the human in the existing provider transcript, while
+the owning Project conducts interactive iteration steps. `--headless` assigns
+all three phases to the Project without skipping their skills. Approval exits a
+Gate; `changes-requested` sends the same Task back to Iterate.
+
+`lf task attach` is the live attended-review prototype. Bare attached input and
+`lf task review message` become FIFO follow-ups, so the provider answers in the
+same session rather than losing a one-shot batch process. `/interrupt` remains
+an explicit interruption. The human closes the durable checkpoint with
+`lf task review complete`; the worker records its replies with
+`lf task review reply`.
+
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
@@ -222,7 +238,8 @@ list to one parent.
 This contract carries presentation instructions, not a terminal stream. tmux
 or the vendor owns terminal bytes. The handoff references the parent's existing
 body generation; it does not create a second process lease or generic Session
-catalog.
+catalog. It can present a human interaction review, but the review remains the
+only record that can approve the Task or return it to Iterate.
 
 ## Speaking to Waves
 

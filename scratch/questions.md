@@ -82,29 +82,40 @@ The prior draft's three open questions are all answered against the tree at
    owner: if the intent is that an outage suppresses the wake, that is a
    behavior change, not a test fix.
 
-2. **`cargo test` was red inside a Task Session because `EnvGuard`'s clear-list
-   was one var short — fixed here (1 line).** Not a question; a resolved finding,
-   recorded because this Project has been treating it as a known-unfixable
-   gotcha ("green in CI, red in a Session; don't fix the code").
+2. **The "green in CI, red in a Session" gotcha is fixed — by #1003 on main, not
+   by me. Retire the workaround.** Worth recording precisely, because this
+   Project has carried it as a known-unfixable fact of life ("don't fix the code,
+   it's the environment").
 
    The "don't fix the code" instinct was right about *production* code and wrong
    about the cause. `tests/support/mod.rs`'s `AMBIENT_TASK_ENV` cleared
    `LF_TASK_SESSION_ID`, `LF_TASK_GENERATION`, `LF_TASK_LEASE_TOKEN` — but not
-   `LF_WAVE_ID`, which `ops/task.rs:395` reads to decide Wave control. So
-   `EnvGuard` was already doing this job and simply missed a var:
+   `LF_WAVE_ID`, which `ops/task.rs:395` reads to decide Wave control:
 
    ```
    Wave 6155f18a… cannot control Task INF-123 owned by Wave 4ca22205…
         ^ ambient LF_WAVE_ID from my Session      ^ the test's own temp Wave
    ```
 
-   Adding `"LF_WAVE_ID"` to that array turns both long-red tests green *inside a
-   live Session with every ambient var still set*. Verified: all 11 support-using
-   suites (85 tests) pass in-Session, and in CI the vars are unset so clearing
-   them is a no-op — zero CI risk. `handoff_tests.rs:22` had already patched the
-   same leak ad hoc with `.env_remove("LF_WAVE_ID")` on its subprocess.
+   `EnvGuard` was already doing this job and simply missed a var. I reproduced
+   the failure, fixed it by adding `LF_WAVE_ID`, and verified all 11
+   support-using suites (85 tests) green in-Session — then a rebase revealed
+   **#1003 had already landed the same fix on main**, with `LF_PROJECT_SESSION_ID`
+   too (5 vars), while this kickoff was running. My commit was redundant and the
+   rebase dropped it. Main's version is a superset; keep it.
 
-   To reproduce CI exactly (still useful for the vars `EnvGuard` doesn't own):
+   Two things follow. First, the workaround is obsolete: `cargo test -p loopflow`
+   is green inside a Session on current main, so stop reaching for the `env -u`
+   incantation and stop treating those two tests as expected-red. Second, this is
+   the staleness trap from the review, live: the fix landed in the very commit
+   this branch was one behind. I was fixing a bug that main had already fixed,
+   and only noticed because the rebase dropped my patch.
+
+   (#1003 left a spliced doc comment on that constant — `…store. Every EnvGuard`
+   dangling into the next sentence. Repaired here, since it is the comment that
+   explains the whole trap.)
+
+   The `env -u` form, if a future var escapes `EnvGuard`'s list:
 
    ```bash
    env -u LF_WAVE_ID -u LF_TASK_SESSION_ID -u LF_TASK_GENERATION -u LF_TASK_LEASE_TOKEN \

@@ -372,7 +372,7 @@ aggregate-dropping behaviour this design had promoted to its headline test
 
    That is `tests/support/mod.rs`'s `EnvGuard` almost exactly, including its `env_lock()` mutex and its temp-bin-dir fake-executable writer. It cannot be reused: `tests/support/mod.rs` compiles into each *integration test binary*, and this proof is in-crate. A `#[cfg(test)]` module in `src/` cannot see it, and a lib test binary is a separate process from every `tests/` binary, so even the mutex would not be shared. **The duplication is forced by Rust's test architecture, not chosen** — and CLAUDE.md's "keep one implementation" is about production code, while its testing section explicitly sanctions test-only modules. Say so in the module's header comment so the next reader doesn't try to DRY the two together.
 
-   Precedent for the necessity, found in-tree: `handoff_tests.rs:22` already does `.env_remove("LF_WAVE_ID")` by hand on its subprocess. The leak is known and patched ad hoc.
+   Precedent for the necessity, and for the exact var list: `EnvGuard`'s own `AMBIENT_TASK_ENV` now clears five (`LF_TASK_SESSION_ID`, `LF_TASK_GENERATION`, `LF_TASK_LEASE_TOKEN`, `LF_WAVE_ID`, `LF_PROJECT_SESSION_ID`) — `LF_WAVE_ID` and `LF_PROJECT_SESSION_ID` added by #1003 *during this kickoff*, which is why `cargo test` is now green inside a Session (see `questions.md`). `handoff_tests.rs:22` independently does `.env_remove("LF_WAVE_ID")` on its subprocess. Copy that list rather than re-deriving it, and re-check it at implementation time — it grew twice this month.
 
 ## Scope
 

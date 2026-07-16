@@ -203,12 +203,14 @@ Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for spec
 Gemini is supported for direct `lf` commands. Wave, Project, and Task Sessions
 require `claude`, `codex`, or `opencode`.
 
-OpenCode passes model strings through to its own provider system:
+OpenCode model strings use `provider/model` form. Bare `opencode` resolves to
+the Loopflow-owned `opencode/glm-5.2` default, which Loopflow sends explicitly
+so OpenCode config cannot silently fall back to a lower-capability model:
 
 ```yaml
-agent: opencode                          # use opencode's default model
-agent: opencode:anthropic/claude-sonnet  # explicit model
-agent: opencode:openai/gpt-4o            # any provider opencode supports
+agent: opencode                          # Loopflow default: opencode/glm-5.2
+agent: opencode:opencode/glm-5.2         # same default, explicit
+agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
 
 ### Supported Harnesses

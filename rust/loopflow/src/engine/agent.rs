@@ -2138,6 +2138,19 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn build_model_command_uses_loopflow_default_for_bare_opencode() {
+        let launch = AgentConfig {
+            agent: Some("opencode".to_string()),
+            ..default_launch()
+        };
+        let process = auto_process();
+        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
+        assert_eq!(cmd.first(), Some(&"opencode".to_string()));
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"opencode/glm-5.2".to_string()));
+    }
+
+    #[test]
     fn build_model_command_falls_back_to_claude_for_unknown_model() {
         let unknown_model = "gpt-5.1-codex-high";
         let launch = AgentConfig {

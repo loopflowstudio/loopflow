@@ -7943,6 +7943,9 @@ mod tests {
                 observed_at: now,
                 woken_failure_set: None,
             }),
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
             created_at: now,
             updated_at: now,
         }

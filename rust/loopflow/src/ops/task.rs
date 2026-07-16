@@ -12,8 +12,9 @@ use crate::child_session::{
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
-    checkout_new_branch_from, current_branch, fetch, get_default_branch, is_clean,
-    push_with_upstream, ref_exists, rev_parse,
+    checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
+    fetch, get_default_branch, is_ancestor, is_clean, push_with_upstream, ref_exists, rev_parse,
+    stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::{
@@ -34,8 +35,9 @@ use crate::session_context::{
 };
 use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::task::{
-    AfterMerge, CiCheck, CiObservation, CiState, GithubPr, PmWritebackOperation, PmWritebackState,
-    PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionStatus,
+    AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
+    GithubPr, Observation, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
+    TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionStatus,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -70,10 +72,12 @@ pub struct TaskControlResult {
     pub accepted_at: Option<time::OffsetDateTime>,
     pub incorporated_at: Option<time::OffsetDateTime>,
     pub error: Option<String>,
+    pub observation: Observation,
 }
 
 fn task_control_result(
     issue_id: String,
+    observation: Observation,
     result: super::child::ChildControlResult,
 ) -> TaskControlResult {
     TaskControlResult {
@@ -88,6 +92,7 @@ fn task_control_result(
         accepted_at: result.accepted_at,
         incorporated_at: result.incorporated_at,
         error: result.error,
+        observation,
     }
 }
 
@@ -142,6 +147,10 @@ pub struct TaskSessionSnapshot {
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
+    /// Freshness of the PR state against GitHub as of this read. `Degraded`
+    /// means a bounded remote read failed and the PR fields are cached, not
+    /// freshly confirmed.
+    pub observation: Observation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -269,12 +278,22 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
             .await
             .map_err(|error| task_error(error.to_string()))?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-        let live =
-            crate::ops::pr::current_or_merged_pr_for_branch(&session.worktree, &parent.branch)?;
-        let merged = parent.merge_commit.is_some()
-            || live.as_ref().is_some_and(|info| info.state == "merged");
-        let closed = parent.abandoned_at.is_some()
-            || live.as_ref().is_some_and(|info| info.state == "closed");
+        let mut parent_session = store
+            .get_task_session(&parent.task_session_id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error("stack parent Task Session is missing"))?;
+        // Reuse the parent's persisted PR number and observation cache. Stack
+        // resolution used to enumerate every PR on the branch independently,
+        // bypassing both the Task cache and outage-tolerant reconcile.
+        reconcile_task_pr(&store, &mut parent_session).await?;
+        let parent = store
+            .get_task_pr(&parent_id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error(format!("stack parent {parent_id} disappeared")))?;
+        let merged = parent.merge_commit.is_some();
+        let closed = parent.abandoned_at.is_some();
         if closed && !merged {
             return Err(task_error(format!(
                 "stack parent {} closed without merging; re-place the child deliberately",
@@ -667,6 +686,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::NotRequired,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
@@ -680,6 +700,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
+            github_observation: None,
             created_at: now,
             updated_at: now,
         };
@@ -2097,6 +2118,35 @@ fn observe_required_checks(
     Some(observation)
 }
 
+// Local control commands often arrive in a burst (`status`, then `follow-up`,
+// then another `status`). One minute keeps merge/CI state responsive while
+// bounding those bursts to one GitHub read. A failed read opens a longer circuit:
+// a quota or outage should not be hammered by every short-lived `lf` process.
+const PR_OBSERVATION_TTL: time::Duration = time::Duration::seconds(60);
+const PR_OBSERVATION_DEGRADED_BACKOFF: time::Duration = time::Duration::minutes(5);
+
+fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<Observation> {
+    let observation = pr.github_observation.as_ref()?;
+    let retry_at = observation.checked_at
+        + match observation.result {
+            GithubObservationResult::Fresh => PR_OBSERVATION_TTL,
+            GithubObservationResult::Degraded { .. } => PR_OBSERVATION_DEGRADED_BACKOFF,
+        };
+    if retry_at <= now {
+        return None;
+    }
+    Some(match &observation.result {
+        GithubObservationResult::Fresh => Observation::Cached {
+            observed_at: observation.checked_at,
+        },
+        GithubObservationResult::Degraded { reason } => Observation::Degraded {
+            reason: reason.clone(),
+            cached_as_of: pr.updated_at,
+            retry_at,
+        },
+    })
+}
+
 async fn reconcile_task_pr_with_authority(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -2109,11 +2159,68 @@ async fn reconcile_task_pr_with_authority(
     else {
         return Ok(None);
     };
-    let Some(github_pr) =
-        crate::ops::pr::current_or_merged_pr_for_branch(&session.worktree, &pr.branch)?
-    else {
+    // GitHub is a reconciliation input, not the Task's store of record. Read the
+    // one persisted PR by number (a single bounded REST call, never `gh pr
+    // list`); an unpublished working PR has no number and is not read remotely.
+    // Recent attempts are reused across processes. A quota/network/GitHub failure
+    // opens a durable circuit and keeps the cached row rather than erroring the
+    // control command that triggered reconcile.
+    let Some(number) = pr.github().map(|github| github.number) else {
+        session.observation = Observation::NotRequired;
         return Ok(Some(pr));
     };
+    let now = time::OffsetDateTime::now_utc();
+    if let Some(observation) = cached_github_observation(&pr, now) {
+        session.observation = observation;
+        return Ok(Some(pr));
+    }
+    let previous = pr.clone();
+    let github_pr =
+        match crate::ops::pr::observe_pr_by_number(&session.worktree, number, &pr.branch) {
+            crate::ops::pr::PrObservation::Fresh(info) => {
+                pr.github_observation = Some(GithubObservation {
+                    checked_at: now,
+                    result: GithubObservationResult::Fresh,
+                });
+                session.observation = Observation::Fresh { observed_at: now };
+                info
+            }
+            crate::ops::pr::PrObservation::NotFound => {
+                // The PR ref was deleted remotely; a merge (if any) is already
+                // persisted. Cache the successful absence briefly and keep the
+                // settled/working state.
+                pr.github_observation = Some(GithubObservation {
+                    checked_at: now,
+                    result: GithubObservationResult::Fresh,
+                });
+                pr.updated_at = now;
+                update_task_pr_with_authority(store, &pr, lease)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+                session.observation = Observation::Fresh { observed_at: now };
+                return Ok(Some(pr));
+            }
+            crate::ops::pr::PrObservation::Degraded { reason } => {
+                let retry_at = now + PR_OBSERVATION_DEGRADED_BACKOFF;
+                pr.github_observation = Some(GithubObservation {
+                    checked_at: now,
+                    result: GithubObservationResult::Degraded {
+                        reason: reason.clone(),
+                    },
+                });
+                // `updated_at` remains the time of the cached PR data, not the
+                // failed attempt. Only the observation metadata changes.
+                update_task_pr_with_authority(store, &pr, lease)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+                session.observation = Observation::Degraded {
+                    reason,
+                    cached_as_of: pr.updated_at,
+                    retry_at,
+                };
+                return Ok(Some(pr));
+            }
+        };
     let number = u32::try_from(github_pr.number).map_err(|_| {
         task_error(format!(
             "pull request #{} exceeds supported range",
@@ -2121,11 +2228,11 @@ async fn reconcile_task_pr_with_authority(
         ))
     })?;
     let url = github_pr.url.clone();
-    let previous = pr.clone();
     let previous_phase = previous.phase();
     let previous_github = previous.github().cloned();
     let previous_session_status = session.status;
-    let now = time::OffsetDateTime::now_utc();
+    let previous_status_reason = session.status_reason.clone();
+    let previous_pm_writeback = session.pm_writeback.clone();
     let publication = pr.publication.get_or_insert(PrPublication {
         requested_at: now,
         after_merge: AfterMerge::Review,
@@ -2148,11 +2255,15 @@ async fn reconcile_task_pr_with_authority(
             })?;
             pr.merge_commit = Some(merge_commit.clone());
             pr.ci_observation = None;
-            if pr
+            // Record the merge, but withhold completion while an accepted
+            // directive is unincorporated — an auto-merge armed by `lf pr land`
+            // must not silently erase direction accepted after it was armed.
+            let completes = pr
                 .publication
                 .as_ref()
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-            {
+                && !has_pending_directive(session);
+            if completes {
                 session.set_status(
                     TaskSessionStatus::Completed,
                     format!(
@@ -2162,13 +2273,19 @@ async fn reconcile_task_pr_with_authority(
                 );
                 reconcile_pm_writeback(store, session, Some(&url)).await;
             } else if !session.status.is_process_active() {
-                session.set_status(
-                    TaskSessionStatus::Waiting,
+                let reason = if has_pending_directive(session) {
+                    format!(
+                        "pull request #{} merged, but directive v{} is not yet incorporated; \
+                         acknowledge it or re-steer before completing",
+                        github_pr.number, session.current_directive_version
+                    )
+                } else {
                     format!(
                         "pull request #{} merged; another PR may follow",
                         github_pr.number
-                    ),
-                );
+                    )
+                };
+                session.set_status(TaskSessionStatus::Waiting, reason);
             }
             Some(TaskEventKind::PrMerged {
                 pr_id: pr.id.clone(),
@@ -2196,13 +2313,15 @@ async fn reconcile_task_pr_with_authority(
                     format!("pull request #{} is open for review", github_pr.number),
                 );
             }
-            pr.ci_observation = observe_required_checks(
+            if let Some(ci_observation) = observe_required_checks(
                 &session.worktree,
                 &pr.branch,
                 github_pr.head_sha.as_deref(),
                 pr.ci_observation.as_ref(),
                 now,
-            );
+            ) {
+                pr.ci_observation = Some(ci_observation);
+            }
             Some(TaskEventKind::PrOpened {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
@@ -2239,7 +2358,8 @@ async fn reconcile_task_pr_with_authority(
     }
     if !session_saved_with_pr
         && (session.status != previous_session_status
-            || session.pm_writeback != PmWritebackState::Current)
+            || session.status_reason != previous_status_reason
+            || session.pm_writeback != previous_pm_writeback)
     {
         update_task_session_with_authority(store, session, lease)
             .await
@@ -2496,6 +2616,58 @@ impl RotateOptions {
     }
 }
 
+/// The commit range of follow-up work committed on the settled branch *after*
+/// its PR merged, or `None` when there is nothing to carry. The merged branch
+/// tip is `head_sha` — recorded by reconcile from GitHub's `headRefOid`; commits
+/// reachable from the branch but not from `head_sha` are the post-merge
+/// follow-up. Returns `None` when no tip was recorded, the branch has no commits
+/// beyond it, or the recorded tip is not an ancestor of the branch (a rewrite,
+/// or the object is absent locally) — an ambiguous cut skips the carry rather
+/// than misapplying already-merged work.
+fn committed_follow_up_range(
+    worktree: &Path,
+    settled: &TaskPr,
+) -> OpsResult<Option<(String, String)>> {
+    let Some(head_sha) = settled.github().and_then(|github| github.head_sha.clone()) else {
+        return Ok(None);
+    };
+    let tip = rev_parse(worktree, &settled.branch)
+        .map_err(|error| task_error(format!("failed to resolve settled branch tip: {error}")))?;
+    if tip == head_sha {
+        return Ok(None);
+    }
+    let ancestor = is_ancestor(worktree, &head_sha, &settled.branch)
+        .map_err(|error| task_error(format!("failed to check follow-up ancestry: {error}")))?;
+    if !ancestor {
+        return Ok(None);
+    }
+    Ok(Some((head_sha, settled.branch.clone())))
+}
+
+/// A directive was accepted (its version advanced) but the body has not yet
+/// acknowledged it. Completion — manual or an armed auto-merge — must not fire
+/// while this holds, or the accepted direction is silently erased.
+fn has_pending_directive(session: &TaskSession) -> bool {
+    session.current_directive_version > session.incorporated_directive_version
+}
+
+fn roll_back_failed_rotation(
+    worktree: &Path,
+    settled_branch: &str,
+    recovery_branch: &str,
+    stashed: bool,
+) -> OpsResult<()> {
+    checkout(worktree, settled_branch)
+        .map_err(|error| task_error(format!("failed to restore settled branch: {error}")))?;
+    delete_local_branch(worktree, recovery_branch)
+        .map_err(|error| task_error(format!("failed to remove recovery branch: {error}")))?;
+    if stashed {
+        stash_pop(worktree)
+            .map_err(|error| task_error(format!("failed to restore follow-up edits: {error}")))?;
+    }
+    Ok(())
+}
+
 async fn ensure_working_pr_with_authority(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -2550,6 +2722,11 @@ async fn ensure_working_pr_with_authority(
             session.worktree.display()
         )));
     }
+    // The merged branch tip GitHub recorded (`head_sha`) is the cut between
+    // already-merged work and the follow-up the worker committed on top after the
+    // merge. Rotation carries that committed range forward — plus any dirty edits
+    // — so no work is dropped when moving onto the next serial branch.
+    let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
     let current = current_branch(&session.worktree)
         .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
         .ok_or_else(|| task_error("Task worktree is detached"))?;
@@ -2576,6 +2753,11 @@ async fn ensure_working_pr_with_authority(
                 "next PR branch {branch:?} already exists; retry the settling command with a clearer --next name"
             )));
         }
+        // Stash dirty edits so the new branch starts clean: `checkout -b` then
+        // carries nothing, the committed range cherry-picks onto a clean index,
+        // and the stash pop reapplies the dirty edits on top.
+        let stashed = stash_including_untracked(&session.worktree)
+            .map_err(|error| task_error(format!("failed to stash follow-up edits: {error}")))?;
         if let Err(error) = checkout_new_branch_from(&session.worktree, &branch, &base_ref) {
             let recovered = current_branch(&session.worktree)
                 .map_err(|read_error| {
@@ -2584,10 +2766,44 @@ async fn ensure_working_pr_with_authority(
                 .as_deref()
                 == Some(branch.as_str());
             if !recovered {
+                if stashed {
+                    stash_pop(&session.worktree).map_err(|recovery_error| {
+                        task_error(format!(
+                            "failed to rotate Task worktree: {error}; restoring follow-up edits \
+                             also failed: {recovery_error}"
+                        ))
+                    })?;
+                }
                 return Err(task_error(format!(
-                    "failed to rotate Task worktree: {error}"
+                    "failed to rotate Task worktree: {error}; follow-up edits were restored"
                 )));
             }
+        }
+        if let Some((from, to)) = &committed_carry {
+            if let Err(error) = cherry_pick_range(&session.worktree, from, to) {
+                roll_back_failed_rotation(&session.worktree, &settled.branch, &branch, stashed)
+                    .map_err(|recovery_error| {
+                        task_error(format!(
+                        "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
+                         automatic recovery also failed: {recovery_error}",
+                        settled.branch
+                    ))
+                    })?;
+                return Err(task_error(format!(
+                    "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
+                     restored {:?} with its follow-up edits so the rotation can be retried",
+                    settled.branch, settled.branch
+                )));
+            }
+        }
+        if stashed {
+            stash_pop(&session.worktree).map_err(|error| {
+                task_error(format!(
+                    "carried the committed follow-up but could not reapply dirty edits: {error}; \
+                     the recovery branch and retained stash are in {} for conflict resolution",
+                    session.worktree.display()
+                ))
+            })?;
         }
     }
     push_with_upstream(&session.worktree, "origin", &branch)
@@ -2606,6 +2822,7 @@ async fn ensure_working_pr_with_authority(
         merge_commit: None,
         abandoned_at: None,
         ci_observation: None,
+        github_observation: None,
         created_at: now,
         updated_at: now,
     };
@@ -2925,6 +3142,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             latest_event,
             created_at: session.created_at,
             updated_at: session.updated_at,
+            observation: session.observation,
         })
     })
 }
@@ -3181,6 +3399,7 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
         reconcile_task_pr(&store, &mut session).await?;
         reconcile_process_liveness(&store, &mut session).await?;
         let issue_id = session.launch.issue.identifier.clone();
+        let observation = session.observation.clone();
         let source = command_source(&session)?;
         let result = super::child::queue_command(
             &store,
@@ -3189,7 +3408,7 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
             kind,
         )
         .await?;
-        Ok(task_control_result(issue_id, result))
+        Ok(task_control_result(issue_id, observation, result))
     })
 }
 
@@ -3240,6 +3459,7 @@ pub(crate) async fn resume_task_async(
     refuse_dirty_between_prs(&store, &session).await?;
     reconcile_process_liveness(&store, &mut session).await?;
     let issue_id = session.launch.issue.identifier.clone();
+    let observation = session.observation.clone();
     let source = command_source(&session)?;
     let result = super::child::resume_session(
         &store,
@@ -3250,7 +3470,7 @@ pub(crate) async fn resume_task_async(
         reason,
     )
     .await?;
-    Ok(task_control_result(issue_id, result))
+    Ok(task_control_result(issue_id, observation, result))
 }
 
 pub fn task_receipt(
@@ -3282,7 +3502,11 @@ pub fn task_receipt(
             .ok_or_else(|| task_error(format!("Task Session {session_id} disappeared")))?;
         let result = super::child::control_result(&store, &command, command.clone()).await?;
         Ok(TaskReceiptRead {
-            receipt: task_control_result(session.launch.issue.identifier, result),
+            receipt: task_control_result(
+                session.launch.issue.identifier,
+                Observation::NotRequired,
+                result,
+            ),
             timed_out,
         })
     })
@@ -3639,13 +3863,14 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        _defer_task_interactions, changes_snapshot, command_source_for_wave, derive_workspace_slug,
-        diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
-        next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
-        reconcile_process_liveness, recover_stalled_task_body, refuse_dirty_between_prs,
-        refuse_if_canonical_ahead, resolve_task_flow, resolve_upstream_base,
-        task_recovery_adoption, verify_task_pr_range_with_authority, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        _defer_task_interactions, cached_github_observation, changes_snapshot,
+        command_source_for_wave, derive_workspace_slug, diff_snapshot, ensure_working_pr,
+        ensure_working_pr_with_authority, file_snapshot, next_pr_slug, parse_pr_slug,
+        parse_workspace_slug, project_context, reconcile_process_liveness, reconcile_task_pr,
+        recover_stalled_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
+        resolve_task_flow, resolve_upstream_base, task_recovery_adoption,
+        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult,
+        TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -3660,8 +3885,9 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
-        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
+        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession,
+        TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
     use loopflow_test_support::TestRepo;
@@ -3751,6 +3977,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::NotRequired,
         };
 
         // LF_CONTROL_BIN names a real, existing binary (the historical pin);
@@ -3939,6 +4166,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::NotRequired,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
@@ -3954,6 +4182,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             ci_observation: None,
+            github_observation: None,
         };
         store.create_wave(&wave).await.expect("create wave");
         store
@@ -4081,6 +4310,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             ci_observation: None,
+            github_observation: None,
         };
         store
             .create_task_session(&session, &pr)
@@ -4446,6 +4676,279 @@ mod tests {
         assert_eq!(prs[0].phase(), PrPhase::Merged);
     }
 
+    #[tokio::test]
+    async fn reconcile_degrades_and_preserves_cache_when_the_github_read_fails() {
+        // A published PR whose remote can't be read (TestRepo's origin is a local
+        // bare repo, not GitHub, so the read cannot resolve) must not error
+        // reconcile: the cached row stands and freshness degrades. This is what
+        // keeps follow-up/steer/status usable during a quota or network outage —
+        // each funnels through reconcile, which previously `?`-failed on the read.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        repo.create_file("first.txt", "first PR\n");
+        repo.stage_all();
+        repo.commit("first PR");
+        let (_home, store, mut session, mut pr) = rotation_task(&repo, branch, &base).await;
+        pr.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 914,
+                url: "https://example.com/pr/914".to_string(),
+                head_sha: None,
+            }),
+        });
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.update_task_pr(&pr).await.expect("publish PR");
+
+        let observed = reconcile_task_pr(&store, &mut session)
+            .await
+            .expect("reconcile does not error on a failed GitHub read")
+            .expect("the cached PR is preserved");
+
+        // Cache stands: still Open, no merge fabricated from a failed read.
+        assert_eq!(observed.phase(), PrPhase::Open);
+        assert_eq!(observed.merge_commit, None);
+        match &session.observation {
+            Observation::Degraded { reason, .. } => assert!(!reason.is_empty()),
+            other => panic!("a failed GitHub read must degrade freshness, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reconcile_skips_the_remote_read_for_an_unpublished_working_pr() {
+        // A working PR has no persisted number; reconcile must neither enumerate
+        // nor read remotely. Proof: a read here WOULD fail (no GitHub origin), yet
+        // freshness says no read was required.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        let (_home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
+        assert!(pr.github().is_none(), "fixture PR is unpublished");
+
+        let observed = reconcile_task_pr(&store, &mut session)
+            .await
+            .expect("reconcile succeeds")
+            .expect("working PR preserved");
+
+        assert_eq!(observed.phase(), PrPhase::Working);
+        assert_eq!(session.observation, Observation::NotRequired);
+    }
+
+    #[test]
+    fn github_observation_cache_expires_fresh_reads_before_degraded_circuits() {
+        let now = OffsetDateTime::now_utc();
+        let mut pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "cache-proof".to_string(),
+            branch: "jack/cache-proof".to_string(),
+            base_commit: "base".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: Some(GithubObservation {
+                checked_at: now - time::Duration::seconds(59),
+                result: GithubObservationResult::Fresh,
+            }),
+            created_at: now,
+            updated_at: now - time::Duration::hours(1),
+        };
+        assert!(matches!(
+            cached_github_observation(&pr, now),
+            Some(Observation::Cached { .. })
+        ));
+        pr.github_observation.as_mut().unwrap().checked_at = now - time::Duration::seconds(60);
+        assert_eq!(cached_github_observation(&pr, now), None);
+
+        pr.github_observation = Some(GithubObservation {
+            checked_at: now - time::Duration::minutes(4),
+            result: GithubObservationResult::Degraded {
+                reason: "rate limit exhausted".to_string(),
+            },
+        });
+        assert!(matches!(
+            cached_github_observation(&pr, now),
+            Some(Observation::Degraded { .. })
+        ));
+        pr.github_observation.as_mut().unwrap().checked_at = now - time::Duration::minutes(5);
+        assert_eq!(cached_github_observation(&pr, now), None);
+    }
+
+    #[tokio::test]
+    async fn rotate_carries_committed_follow_up_and_dirty_edits_after_an_out_of_band_merge() {
+        // W2-166 shape: PR merged out of band, then the worker committed *unique*
+        // follow-up work on the settled branch plus left a dirty edit. Rotating to
+        // the next serial PR must carry BOTH the committed range and the dirty
+        // edit — and never re-apply the already-merged work.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let settled_branch = "jack/task-pr-proof";
+        repo.create_branch(settled_branch);
+        repo.create_file("merged.txt", "merged work\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let merged_tip = repo.head_sha();
+        // The merge landed on main (simulated by advancing origin/main to the tip
+        // GitHub merged), so the rotated branch bases on main which already
+        // carries the merged work.
+        git(repo.path(), &["push", "origin", "jack/task-pr-proof:main"]);
+
+        // Post-merge follow-up: two committed commits, then an uncommitted edit.
+        repo.create_file("follow1.txt", "follow-up one\n");
+        repo.stage_all();
+        repo.commit("follow-up one");
+        repo.create_file("follow2.txt", "follow-up two\n");
+        repo.stage_all();
+        repo.commit("follow-up two");
+        repo.create_file("wip.txt", "uncommitted work\n");
+
+        let (_home, store, mut session, mut settled) =
+            rotation_task(&repo, settled_branch, &base).await;
+        settled.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: Some("keep-going".to_string()),
+            github: Some(GithubPr {
+                number: 907,
+                url: "https://example.com/pr/907".to_string(),
+                // The merged branch tip — the cut between merged work and follow-up.
+                head_sha: Some(merged_tip.clone()),
+            }),
+        });
+        settled.merge_commit = Some("merge-907".to_string());
+        settled.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&settled, None)
+            .await
+            .expect("settle merged PR");
+
+        let next = ensure_working_pr_with_authority(
+            &store,
+            &mut session,
+            None,
+            RotateOptions {
+                carry_dirty: true,
+                slug_override: Some("keep-going".to_string()),
+            },
+        )
+        .await
+        .expect("rotate forward")
+        .expect("working PR");
+
+        assert_eq!(next.sequence, 2);
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            next.branch
+        );
+        // Committed follow-up carried forward.
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("follow1.txt")).expect("follow1 carried"),
+            "follow-up one\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("follow2.txt")).expect("follow2 carried"),
+            "follow-up two\n"
+        );
+        // Dirty edit carried forward, still uncommitted.
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("wip.txt")).expect("dirty edit carried"),
+            "uncommitted work\n"
+        );
+        // The already-merged work lives in the base, not re-applied as a commit:
+        // exactly the two follow-up commits sit beyond origin/main.
+        let beyond = git(
+            repo.path(),
+            &["log", "origin/main..HEAD", "--oneline", "--format=%s"],
+        );
+        let subjects: Vec<&str> = beyond.lines().collect();
+        assert_eq!(subjects, vec!["follow-up two", "follow-up one"]);
+        // The merged work is present exactly once (from the base), not duplicated.
+        assert!(repo.path().join("merged.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn failed_committed_carry_restores_the_settled_branch_for_retry() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let settled_branch = "jack/task-pr-proof";
+        repo.create_branch(settled_branch);
+        repo.create_file("shared.txt", "merged\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let merged_tip = repo.head_sha();
+
+        // Main and the post-merge follow-up edit the same line differently, so
+        // carrying the follow-up onto current main must conflict.
+        git(repo.path(), &["checkout", "-b", "main-update", &merged_tip]);
+        repo.create_file("shared.txt", "main moved on\n");
+        repo.stage_all();
+        repo.commit("main update");
+        git(repo.path(), &["push", "origin", "main-update:main"]);
+        git(repo.path(), &["checkout", settled_branch]);
+        repo.create_file("shared.txt", "follow-up edit\n");
+        repo.stage_all();
+        repo.commit("post-merge follow-up");
+        repo.create_file("wip.txt", "dirty follow-up\n");
+
+        let (_home, store, mut session, mut settled) =
+            rotation_task(&repo, settled_branch, &base).await;
+        settled.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 918,
+                url: "https://example.com/pr/918".to_string(),
+                head_sha: Some(merged_tip),
+            }),
+        });
+        settled.merge_commit = Some("merge-918".to_string());
+        settled.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&settled, None)
+            .await
+            .expect("settle merged PR");
+
+        let error = ensure_working_pr_with_authority(
+            &store,
+            &mut session,
+            None,
+            RotateOptions {
+                carry_dirty: true,
+                slug_override: Some("retry".to_string()),
+            },
+        )
+        .await
+        .expect_err("conflicting carry must fail");
+
+        assert!(error.to_string().contains("restored"));
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            settled_branch
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("shared.txt")).expect("commit restored"),
+            "follow-up edit\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("wip.txt")).expect("dirty edit restored"),
+            "dirty follow-up\n"
+        );
+        assert_eq!(
+            git(repo.path(), &["branch", "--list", "*/task-pr-proof-retry"]),
+            ""
+        );
+        assert_eq!(git(repo.path(), &["stash", "list"]), "");
+    }
+
     #[test]
     fn foreign_wave_cannot_be_reclassified_as_a_human_command() {
         let wave_id = crate::id::WaveId::new();
@@ -4477,6 +4980,7 @@ mod tests {
             accepted_at: None,
             incorporated_at: None,
             error: None,
+            observation: Observation::NotRequired,
         };
 
         assert_eq!(
@@ -4493,6 +4997,7 @@ mod tests {
                 "accepted_at": null,
                 "incorporated_at": null,
                 "error": null,
+                "observation": {"freshness": "not_required"},
             })
         );
     }
@@ -5036,6 +5541,7 @@ mod tests {
             abandon_intent: None,
             created_at: now,
             updated_at: now,
+            observation: crate::task::Observation::NotRequired,
         };
 
         let mut pr = TaskPr {
@@ -5050,6 +5556,7 @@ mod tests {
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
+            github_observation: None,
             created_at: now,
             updated_at: now,
         };

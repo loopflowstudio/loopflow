@@ -224,6 +224,26 @@ pub fn register_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
+    register_task_with_process(home, worktree, branch, base_commit, false)
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
+pub fn register_active_task(
+    home: &Path,
+    worktree: &Path,
+    branch: &str,
+    base_commit: &str,
+) -> RegisteredTask {
+    register_task_with_process(home, worktree, branch, base_commit, true)
+}
+
+fn register_task_with_process(
+    home: &Path,
+    worktree: &Path,
+    branch: &str,
+    base_commit: &str,
+    active: bool,
+) -> RegisteredTask {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
         .block_on(open_store(&StorageConfig::sqlite(home.join("loopflow.db"))))
@@ -291,8 +311,16 @@ pub fn register_task(
         project_session_id: project.id.clone(),
         current_directive_version: 0,
         incorporated_directive_version: 0,
-        status: TaskSessionStatus::Waiting,
-        status_reason: "test Task is waiting".to_string(),
+        status: if active {
+            TaskSessionStatus::Running
+        } else {
+            TaskSessionStatus::Waiting
+        },
+        status_reason: if active {
+            "test Task is running".to_string()
+        } else {
+            "test Task is waiting".to_string()
+        },
         status_at: now,
         worktree: worktree.to_path_buf(),
         workspace_slug: "task-pr-proof".to_string(),
@@ -306,10 +334,23 @@ pub fn register_task(
         agent: "codex".to_string(),
         provider: "codex".to_string(),
         provider_session_id: None,
-        latest_process: None,
+        latest_process: active.then_some(ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "task-github-cache".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("task-github-cache".to_string()),
+            started_at: now,
+            state: loopflow::child_session::ChildLeaseState::Legacy,
+            outcome: None,
+            provenance: None,
+        }),
         abandon_intent: None,
         created_at: now,
         updated_at: now,
+        observation: loopflow::task::Observation::NotRequired,
     };
     let pr = TaskPr {
         id: TaskPrId::new(),
@@ -325,6 +366,7 @@ pub fn register_task(
         created_at: now,
         updated_at: now,
         ci_observation: None,
+        github_observation: None,
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");

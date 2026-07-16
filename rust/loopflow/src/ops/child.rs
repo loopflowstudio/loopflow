@@ -1044,6 +1044,7 @@ mod tests {
             agent: "claude".to_string(),
             provider: "claude".to_string(),
             provider_session_id: active.then(|| "thread-task".to_string()),
+            observation: crate::task::Observation::NotRequired,
             latest_process: active.then_some(ChildProcessGeneration {
                 generation: 1,
                 pid: None,
@@ -1076,6 +1077,7 @@ mod tests {
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
+            github_observation: None,
             created_at: task.created_at,
             updated_at: task.updated_at,
         }

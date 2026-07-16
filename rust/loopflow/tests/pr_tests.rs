@@ -57,8 +57,8 @@ fn gh_merged_pr_script() -> &'static str {
 if [ "$1" = "--version" ]; then
   exit 0
 fi
-if [ "$1 $2" = "pr list" ]; then
-  echo '[{"url":"https://example.com/pr/912","state":"MERGED","isDraft":false,"number":912,"mergeCommit":{"oid":"merge-912"}}]'
+if [ "$1" = "api" ]; then
+  echo '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"head-912"}}'
   exit 0
 fi
 exit 0
@@ -70,6 +70,20 @@ fn push_branch(repo: &TestRepo, name: &str) {
         .args(["push", "-u", "origin", name])
         .current_dir(repo.path())
         .status();
+}
+
+fn point_origin_at_github(repo: &TestRepo) {
+    let status = Command::new("git")
+        .current_dir(repo.path())
+        .args([
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/loopflowstudio/loopflow.git",
+        ])
+        .status()
+        .expect("set GitHub origin");
+    assert!(status.success());
 }
 
 #[test]
@@ -213,12 +227,34 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
+    point_origin_at_github(&repo);
     let task = register_task(home.path(), repo.path(), branch, &base);
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        after_merge: AfterMerge::Review,
+        next_slug: None,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("mark PR as published");
 
     let session = task_status("INF-123").expect("reconcile Task PR");
     assert_ne!(session.status, loopflow::task::TaskSessionStatus::Completed);
+    assert!(
+        matches!(
+            session.observation,
+            loopflow::task::Observation::Fresh { .. }
+        ),
+        "manual merge reconciliation should use the bounded REST observation: {session:?}"
+    );
 
-    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let prs = runtime
         .block_on(task.store.task_prs(&task.session.id))
         .expect("read Task PRs");
@@ -227,6 +263,14 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     let publication = prs[0].publication.as_ref().expect("adopted publication");
     assert_eq!(publication.after_merge, AfterMerge::Review);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
+    let stored_session = runtime
+        .block_on(task.store.get_task_session(&task.session.id))
+        .expect("read reconciled Task")
+        .expect("reconciled Task");
+    assert_eq!(
+        stored_session.status_reason,
+        "pull request #912 merged; another PR may follow"
+    );
 }
 
 #[test]
@@ -237,6 +281,7 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
+    point_origin_at_github(&repo);
     let task = register_task(home.path(), repo.path(), branch, &base);
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
@@ -255,6 +300,13 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .expect("mark PR as completing");
 
     let session = task_status("INF-123").expect("reconcile completing PR");
+    assert!(
+        matches!(
+            session.observation,
+            loopflow::task::Observation::Fresh { .. }
+        ),
+        "completion should use the bounded REST observation: {session:?}"
+    );
     assert_eq!(session.status, TaskSessionStatus::Completed);
     let stored_session = runtime
         .block_on(task.store.get_task_session(&task.session.id))
@@ -265,6 +317,52 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .block_on(task.store.task_prs(&task.session.id))
         .expect("read completing PR");
     assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].phase(), PrPhase::Merged);
+}
+
+#[test]
+fn observed_merge_waits_for_an_unincorporated_directive_before_completion() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+
+    let mut stored_session = task.session.clone();
+    stored_session.current_directive_version = 2;
+    stored_session.incorporated_directive_version = 1;
+    runtime
+        .block_on(task.store.update_task_session(&stored_session))
+        .expect("record pending direction");
+
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        after_merge: AfterMerge::CompleteTask,
+        next_slug: None,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: None,
+        }),
+    });
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("mark PR as completing");
+
+    let session = task_status("INF-123").expect("reconcile merge with pending direction");
+    assert_eq!(session.status, TaskSessionStatus::Waiting);
+    assert_eq!(session.current_directive_version, 2);
+    assert_eq!(session.incorporated_directive_version, 1);
+    assert!(session.status_reason.contains("directive v2"));
+
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.session.id))
+        .expect("read merged PR");
     assert_eq!(prs[0].phase(), PrPhase::Merged);
 }
 

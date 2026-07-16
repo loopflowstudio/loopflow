@@ -807,6 +807,7 @@ mod tests {
             merge_commit: merge.map(str::to_string),
             abandoned_at: None,
             ci_observation: None,
+            github_observation: None,
             created_at: now,
             updated_at: now,
         }

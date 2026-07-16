@@ -720,4 +720,23 @@ mod tests {
         );
         assert!(payload.get("model").is_none());
     }
+
+    #[test]
+    fn build_turn_payload_uses_loopflow_default_for_bare_opencode() {
+        let payload = build_turn_payload(
+            "hello",
+            &AgentConfig {
+                agent: Some("opencode".to_string()),
+                ..Default::default()
+            },
+            false,
+        );
+        assert_eq!(
+            payload.get("model"),
+            Some(&json!({
+                "providerID": "opencode",
+                "modelID": "glm-5.2"
+            }))
+        );
+    }
 }

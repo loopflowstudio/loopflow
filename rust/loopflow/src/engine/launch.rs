@@ -193,12 +193,10 @@ fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
         return Ok(());
     }
 
-    let Some(variant) = variant else {
-        return Err(CoreError::ExecutionFailed(
-            "unsupported OpenCode model selection: use 'opencode:<provider>/<model>' and choose either 'opencode/*' (non-claude/non-codex) or 'moonshotai/kimi*'".to_string(),
-        ));
-    };
-
+    // `parse_agent` resolves bare `opencode` to the Loopflow-owned
+    // `opencode/glm-5.2` default, so a variant is always present for OpenCode.
+    // Validate explicit selections against the supported set.
+    let variant = variant.expect("parse_agent resolves a default model for the opencode harness");
     if is_supported_opencode_model_variant(&variant) {
         return Ok(());
     }
@@ -611,10 +609,10 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_rejects_bare_opencode_model() {
+    fn prepare_launch_prompt_accepts_bare_opencode_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let err = prepare_launch_prompt(
+        let prepared = prepare_launch_prompt(
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
@@ -623,10 +621,11 @@ Test skill body.
                 ..LaunchPromptInput::default()
             },
         )
-        .expect_err("bare OpenCode model should fail");
+        .expect("bare OpenCode should resolve to the Loopflow-owned default");
 
-        assert!(err
-            .to_string()
-            .contains("unsupported OpenCode model selection"));
+        // The bare agent string is preserved; `parse_agent` resolves the
+        // `opencode/glm-5.2` default at consumption time so explicit selections
+        // still win.
+        assert_eq!(prepared.config.agent.as_deref(), Some("opencode"));
     }
 }

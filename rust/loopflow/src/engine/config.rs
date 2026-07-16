@@ -259,7 +259,8 @@ impl Default for Config {
 /// - claude -> opus (Claude Opus 4.5)
 /// - gemini -> 2.5-pro (Gemini 2.5 Pro)
 /// - codex -> None (let Codex CLI pick its default)
-/// - opencode -> None (let OpenCode use its own config)
+/// - opencode -> opencode/glm-5.2 (Loopflow-owned default, sent explicitly so
+///   OpenCode config cannot silently fall back to a lower-capability model)
 pub fn parse_agent(agent: &str) -> (String, Option<String>) {
     if let Some((harness, model)) = agent.split_once(':') {
         return (harness.to_string(), Some(model.to_string()));
@@ -269,6 +270,7 @@ pub fn parse_agent(agent: &str) -> (String, Option<String>) {
     let default_model = match harness.as_str() {
         "claude" => Some("opus".to_string()),
         "gemini" => Some("2.5-pro".to_string()),
+        "opencode" => Some("opencode/glm-5.2".to_string()),
         _ => None,
     };
     (harness, default_model)
@@ -409,10 +411,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_agent_opencode_no_default() {
+    fn parse_agent_opencode_default() {
         let (harness, model) = parse_agent("opencode");
         assert_eq!(harness, "opencode");
-        assert_eq!(model, None);
+        assert_eq!(model, Some("opencode/glm-5.2".to_string()));
     }
 
     #[test]

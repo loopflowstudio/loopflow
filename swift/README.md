@@ -33,11 +33,15 @@ or unstarted, and unknown means the required evidence could not be read.
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
 
-Open **Go → Context Lab** to filter a local session set, compare its aggregate
-context flame and prompt-ordered session lanes, inspect exact trace evidence,
-and launch a fresh refinement session in an existing Intelligence Task
-worktree. Project and Task facets appear only for durably attributed launches;
-historical gaps stay unattributed. Selecting a segment never opens prompt bodies;
+Select a Wave, then open **Context Lab** from its header. Compare that Wave's
+aggregate initial-prompt flame and prompt-ordered agent-session lanes, or rank
+current instruction sources by captured agent-session impressions. Select a skill or
+`LOOPFLOW.md` to read main's current file beside exact trace evidence. Choose a
+Refinement Project once per multi-Project Wave, then **Refine in task-worker**
+creates a Task and opens its running agent. The Project destination does not
+filter the Wave evidence. Repo and Wave stay fixed for the window; saved views
+store only filters inside that scope. Historical attribution gaps stay unattributed.
+Selecting a segment never opens prompt bodies;
 **Open trace** is the explicit boundary. Saved views retain only the query and visualization mode.
 The research-state filters can require observed steering or a launch containing
 a current resolvable file-backed instruction revision. Revision comparisons stay unavailable until

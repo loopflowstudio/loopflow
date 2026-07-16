@@ -6,22 +6,60 @@ import Testing
 
 @Suite("Context Lab")
 struct ContextLabTests {
-    @Test("Context Lab menu routes open the current repo over 30 days")
-    func initialContextLabRouteIsExplicit() {
-        let route = ContextLabRoute.initial(repoPath: "/src/loopflow", now: 3_000_000)
+    @Test("Wave routes bind Context Lab to one repo and Wave over 30 days")
+    func waveContextLabRouteIsExplicit() {
+        let route = ContextLabRoute.wave(
+            repoPath: "/src/loopflow",
+            wave: "product",
+            now: 3_000_000
+        )
 
         #expect(route.query.repoPaths == ["/src/loopflow"])
+        #expect(route.query.waves == ["product"])
         #expect(route.query.startedAfter == 408_000)
         #expect(route.query.startedBefore == 3_000_000)
         #expect(route.selectedNodeId == "session-set")
         #expect(route.focusNodeId == "session-set")
         #expect(route.mode == .aggregate)
+        #expect(route.isWaveScoped)
+
+        var unscopedQuery = route.query
+        unscopedQuery.waves = []
+        #expect(!ContextLabRoute(
+            query: unscopedQuery,
+            selectedNodeId: route.selectedNodeId,
+            focusNodeId: route.focusNodeId,
+            mode: route.mode
+        ).isWaveScoped)
     }
 
     @Test("Saved visualization modes use semantic values")
     func contextLabModesPersistIndependentlyFromLabels() {
-        #expect(ContextLabMode.allCases.map(\.rawValue) == ["aggregate", "lanes", "table"])
-        #expect(ContextLabMode.allCases.map(\.title) == ["Aggregate flame", "Session lanes", "Table"])
+        #expect(ContextLabMode.allCases.map(\.rawValue) == ["aggregate", "lanes", "sources"])
+        #expect(ContextLabMode.allCases.map(\.title) == ["Initial prompts", "Agent sessions", "Sources"])
+    }
+
+    @Test("Source refinement stays inside the selected canonical repo")
+    func sourceRefinementUsesTheCanonicalRepoBoundary() {
+        let query = ContextLabRoute.wave(
+            repoPath: "/src/loopflow",
+            wave: "product",
+            now: 3_000_000
+        ).query
+
+        #expect(contextSourceBelongsToSelectedRepo(
+            "/src/loopflow/rust/loopflow/src/engine/builtins/build/skill/refine.md",
+            query: query
+        ))
+        #expect(!contextSourceBelongsToSelectedRepo("/src/loopflow-other/refine.md", query: query))
+        #expect(contextSourceBelongsToRepo(
+            #filePath,
+            repoPath: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+        ))
     }
 
     @Test("Selected-source sorting uses share rather than raw token load")
@@ -168,64 +206,65 @@ struct ContextLabTests {
         #expect(decoded.initialSection == .terminal)
     }
 
-    @Test("Refinement rechecks an idle Task Session and its worktree")
-    func refinementTaskChoiceMustRemainCurrent() throws {
-        let testFile = URL(fileURLWithPath: #filePath)
-        let fixture = testFile
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
-        let roadmap = try JSONDecoder().decode(
-            RoadmapSnapshot.self,
-            from: Data(contentsOf: fixture)
-        )
-        let query = SessionSetQuery(
-            repoPaths: ["/src/loopflow"],
-            startedAfter: 10,
-            startedBefore: 20,
-            waves: [],
-            projects: [],
-            tasks: [],
-            flows: [],
-            skills: [],
-            providers: [],
-            models: [],
-            surfaces: [],
-            outcomes: [],
-            captureStates: [],
-            steeredOnly: false,
-            currentRevisionOnly: false
-        )
+    @Test("Refinement uses the Wave's sole Project or its remembered Task destination")
+    func refinementResolvesOneOwningProject() throws {
+        let context = WaveProject(id: "context", title: "Context")
+        let architecture = WaveProject(id: "architecture", title: "Architecture")
 
-        let choices = refinementTaskChoices(in: roadmap, query: query)
-        let choice = try #require(choices.first)
-
-        #expect(choices.map(\.id) == ["W2-131"])
-        #expect(refinementWorkspaceIsCurrent(choice, current: choice))
-        let moved = RefinementTaskChoice(
-            waveId: "wave-2",
-            waveName: choice.waveName,
-            repoPath: choice.repoPath,
-            task: choice.task
-        )
-        #expect(!refinementWorkspaceIsCurrent(choice, current: moved))
+        #expect(try contextRefinementProject([context], projectId: nil).id == "context")
+        #expect(try contextRefinementProject(
+            [context, architecture],
+            projectId: "architecture"
+        ).id == "architecture")
+        #expect(throws: ContextRefinementError.self) {
+            _ = try contextRefinementProject([context, architecture], projectId: nil)
+        }
+        #expect(throws: ContextRefinementError.self) {
+            _ = try contextRefinementProject([context], projectId: "removed")
+        }
     }
 
-    @Test("Task refinement maps the canonical repo file into the Task worktree")
-    func taskSourceMapsIntoWorktree() throws {
-        let path = try taskSourcePath(
+    @Test("Task refinement carries main's source identity into the worker directive")
+    func refinementDirectiveNamesTheSourceAndRevision() throws {
+        let path = try contextRefinementSourcePath(
             sourcePath: "/src/loopflow/rust/loopflow/src/engine/builtins/LOOPFLOW.md",
-            repoPath: "/src/loopflow",
-            worktree: "/src/loopflow.intelligence.context"
+            repoPath: "/src/loopflow"
         )
-
-        #expect(path == "/src/loopflow.intelligence.context/rust/loopflow/src/engine/builtins/LOOPFLOW.md")
+        #expect(path == "rust/loopflow/src/engine/builtins/LOOPFLOW.md")
+        #expect(contextRefinementTaskTitle(
+            label: "LOOPFLOW.md",
+            contentSha256: "5e41e69b01234567"
+        ) == "Refine LOOPFLOW.md 5e41e69b")
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/context_lab_snapshot.json")
+        let snapshot = try JSONDecoder().decode(
+            ContextLabSnapshot.self,
+            from: Data(contentsOf: fixture)
+        )
+        let evidence = try #require(snapshot.evidence.first)
+        let directive = try contextRefinementDirective(
+            label: "LOOPFLOW.md",
+            sourcePath: path,
+            sourceSha256: "raw-source-hash",
+            seed: RefinementSeed(
+                query: snapshot.query,
+                selectedNodeId: evidence.nodeId,
+                sourcePath: path,
+                startingContentSha256: evidence.contentSha256,
+                measurements: evidence.measurements,
+                evidence: evidence.representatives.map(\.address)
+            )
+        )
+        #expect(directive.hasPrefix("Refine text for LOOPFLOW.md."))
+        #expect(directive.contains("`rust/loopflow/src/engine/builtins/LOOPFLOW.md`"))
+        #expect(directive.contains("raw-source-hash"))
         #expect(throws: ContextRefinementError.self) {
-            _ = try taskSourcePath(
+            _ = try contextRefinementSourcePath(
                 sourcePath: "/tmp/unrelated.md",
-                repoPath: "/src/loopflow",
-                worktree: "/src/loopflow.intelligence.context"
+                repoPath: "/src/loopflow"
             )
         }
     }

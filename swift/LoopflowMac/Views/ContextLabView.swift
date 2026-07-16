@@ -3,21 +3,23 @@ import Loopflow
 import SwiftUI
 
 enum ContextLabMode: String, Codable, CaseIterable, Identifiable, Hashable {
-    case aggregate, lanes, table
+    case aggregate, lanes, sources
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .aggregate: "Aggregate flame"
-        case .lanes: "Session lanes"
-        case .table: "Table"
+        case .aggregate: "Initial prompts"
+        case .lanes: "Agent sessions"
+        case .sources: "Sources"
         }
     }
 }
 
 private enum ContextLaneSort: String, CaseIterable, Identifiable {
-    case context = "Total context"
+    case context = "Initial prompt"
+    case lifetimeInput = "Lifetime input"
+    case windowPressure = "Peak window"
     case selectedShare = "Selected-source share"
     case outcome = "Outcome"
     case steering = "Steering"
@@ -27,9 +29,8 @@ private enum ContextLaneSort: String, CaseIterable, Identifiable {
 }
 
 private enum ContextNodeSort: String, CaseIterable, Identifiable {
-    case tokens = "Tokens"
-    case sessions = "Sessions"
-    case turns = "Turns"
+    case impressions = "Impressions"
+    case recent = "Recently seen"
     case label = "Name"
 
     var id: String { rawValue }
@@ -40,12 +41,9 @@ private struct ContextLabSavedView: Codable, Hashable {
     let mode: ContextLabMode
 
     var name: String {
-        let repo = query.repoPaths.first
-            .flatMap { URL(fileURLWithPath: $0).lastPathComponent }
-            ?? "All repos"
         let days = max(1, (query.startedBefore - query.startedAfter) / (24 * 60 * 60))
         let end = Date(timeIntervalSince1970: TimeInterval(query.startedBefore))
-        return "\(repo) · \(days)d · \(end.formatted(date: .abbreviated, time: .omitted))"
+        return "\(days)d · \(end.formatted(date: .abbreviated, time: .omitted))"
     }
 }
 
@@ -63,14 +61,24 @@ struct ContextLabRoute: Codable, Hashable {
     let focusNodeId: String
     let mode: ContextLabMode
 
-    static func initial(repoPath: String?, now: Int64 = Int64(Date().timeIntervalSince1970)) -> Self {
-        let resolvedRepoPath = repoPath.map(WaveOrigin.resolve)
+    var isWaveScoped: Bool {
+        query.repoPaths.count == 1
+            && !(query.repoPaths.first ?? "").isEmpty
+            && query.waves.count == 1
+            && !(query.waves.first ?? "").isEmpty
+    }
+
+    static func wave(
+        repoPath: String,
+        wave: String,
+        now: Int64 = Int64(Date().timeIntervalSince1970)
+    ) -> Self {
         return Self(
             query: SessionSetQuery(
-                repoPaths: resolvedRepoPath.map { [$0] } ?? [],
+                repoPaths: [WaveOrigin.resolve(repoPath)],
                 startedAfter: now - 30 * 24 * 60 * 60,
                 startedBefore: now,
-                waves: [],
+                waves: [wave],
                 projects: [],
                 tasks: [],
                 flows: [],
@@ -92,6 +100,7 @@ struct ContextLabRoute: Codable, Hashable {
 
 struct ContextLabView: View {
     private let defaultQuery: SessionSetQuery
+    private let savedViewsKey: String
 
     @Environment(\.palette) private var palette
     @Environment(\.openWindow) private var openWindow
@@ -102,27 +111,41 @@ struct ContextLabView: View {
     @State private var focusNodeId = "session-set"
     @State private var mode = ContextLabMode.aggregate
     @State private var laneSort = ContextLaneSort.context
-    @State private var nodeSort = ContextNodeSort.tokens
-    @State private var repoDraft: String
+    @State private var nodeSort = ContextNodeSort.impressions
+    @State private var sourceSearch = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var traceRequest: TraceAddress?
-    @State private var refinementEvidence: SourceEvidence?
+    @State private var isLaunchingRefinement = false
+    @State private var refinementErrorMessage: String?
+    @State private var refinementProjects: [WaveProject] = []
+    @State private var refinementProjectId: String?
+    @State private var isLoadingRefinementProjects = false
+    @State private var refinementProjectLoadError: String?
     @State private var savedViews: [ContextLabSavedView]
 
-    init(initialRepoPath: String?, route: ContextLabRoute? = nil) {
-        let defaultQuery = ContextLabRoute.initial(repoPath: initialRepoPath).query
+    init(route: ContextLabRoute) {
+        let repoPath = route.query.repoPaths.first ?? ""
+        let wave = route.query.waves.first ?? ""
+        let defaultQuery = ContextLabRoute.wave(
+            repoPath: repoPath,
+            wave: wave,
+            now: route.query.startedBefore
+        ).query
+        let savedViewsKey = Self.savedViewsKey(repoPath: repoPath, wave: wave)
         self.defaultQuery = defaultQuery
-        var initialQuery = route?.query ?? defaultQuery
+        self.savedViewsKey = savedViewsKey
+        var initialQuery = route.query
         initialQuery.repoPaths = initialQuery.repoPaths.map(WaveOrigin.resolve)
+        initialQuery.repoPaths = defaultQuery.repoPaths
+        initialQuery.waves = defaultQuery.waves
+        initialQuery.projects = []
+        initialQuery.tasks = []
         _query = State(initialValue: initialQuery)
-        _repoDraft = State(initialValue: initialQuery.repoPaths.first ?? "")
-        if let route {
-            _selectedNodeId = State(initialValue: route.selectedNodeId)
-            _focusNodeId = State(initialValue: route.focusNodeId)
-            _mode = State(initialValue: route.mode)
-        }
-        _savedViews = State(initialValue: Self.loadSavedViews())
+        _selectedNodeId = State(initialValue: route.selectedNodeId)
+        _focusNodeId = State(initialValue: route.focusNodeId)
+        _mode = State(initialValue: route.mode)
+        _savedViews = State(initialValue: Self.loadSavedViews(key: savedViewsKey))
     }
 
     private var windowDays: Int {
@@ -136,6 +159,10 @@ struct ContextLabView: View {
         )
     }
 
+    private var refinementProjectScope: String {
+        "\(query.repoPaths.first ?? "")\u{0}\(query.waves.first ?? "")"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -143,34 +170,22 @@ struct ContextLabView: View {
             HSplitView {
                 filterRail
                     .frame(minWidth: 190, idealWidth: 220, maxWidth: 260)
+                    .frame(maxHeight: .infinity)
                 center
                     .frame(minWidth: 600, maxWidth: .infinity)
+                    .frame(maxHeight: .infinity)
                 evidenceRail
                     .frame(minWidth: 270, idealWidth: 310, maxWidth: 360)
+                    .frame(maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(palette.background)
+        .task(id: refinementProjectScope) { await loadRefinementProjects() }
         .task(id: query) { await refresh() }
         .sheet(item: $traceRequest) { address in
             TraceEvidenceView(address: address)
                 .frame(minWidth: 760, minHeight: 620)
-        }
-        .sheet(item: $refinementEvidence) { evidence in
-            RefinementTaskSheet(
-                query: snapshot?.query ?? query,
-                evidence: evidence,
-                backlink: ContextLabRoute(
-                    query: snapshot?.query ?? query,
-                    selectedNodeId: evidence.nodeId,
-                    focusNodeId: focusNodeId,
-                    mode: mode
-                ),
-                onLaunch: { route in
-                    refinementEvidence = nil
-                    openWindow(id: "task-workspace", value: route)
-                }
-            )
-            .frame(minWidth: 560, minHeight: 440)
         }
     }
 
@@ -181,7 +196,7 @@ struct ContextLabView: View {
                     Text("Context Lab")
                         .font(Typography.heroTitle(26))
                         .foregroundStyle(palette.text)
-                    Text("What text shaped this session set")
+                    Text("\(query.waves[0]) · what text shaped these sessions")
                         .font(Typography.caption())
                         .foregroundStyle(palette.textSecondary)
                 }
@@ -215,41 +230,54 @@ struct ContextLabView: View {
         let totals = snapshot.totals
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Spacing.lg) {
-                ContextStat(label: "Sessions", value: totals.sessions.formatted())
-                ContextStat(label: "Launches", value: totals.launches.formatted())
+                ContextStat(label: "Runs", value: totals.runs.formatted())
+                ContextStat(label: "Agent sessions", value: totals.agentSessions.formatted())
                 ContextStat(
-                    label: "Assembled turns",
-                    value: "\(snapshot.coverage.assembledTurns.formatted()) / \(totals.turns.formatted())"
+                    label: "Turns",
+                    value: totals.turns.formatted(),
+                    denominator: "\(totals.steeringTurns) steering"
                 )
                 ContextStat(
-                    label: "Context tokens",
-                    value: optionalTokens(totals.contextTokens),
-                    denominator: "\(snapshot.coverage.assembledTurns) measured turns"
+                    label: "Initial prompts",
+                    value: optionalTokens(totals.initialPromptTokens),
+                    denominator: "\(totals.initialPromptAgentSessions) / \(totals.agentSessions) captured"
                 )
-                ContextStat(label: "Median / p95", value: "\(optionalTokens(totals.medianContextTokens)) / \(optionalTokens(totals.p95ContextTokens))")
+                ContextStat(
+                    label: "Initial p50 / p95",
+                    value: "\(optionalTokens(totals.medianInitialPromptTokens)) / \(optionalTokens(totals.p95InitialPromptTokens))"
+                )
                 ContextStat(
                     label: "Instruction share",
-                    value: share(totals.instructionTokens, of: totals.contextTokens),
-                    denominator: "attributed / supplied"
+                    value: share(totals.instructionTokens, of: totals.initialPromptTokens),
+                    denominator: "of initial prompts"
                 )
                 ContextStat(
-                    label: "Cost",
-                    value: totals.costUsd?.formatted(.currency(code: "USD")) ?? "Missing",
-                    denominator: "\(totals.costTurns) measured turns"
+                    label: "Lifetime input",
+                    value: optionalTokens(totals.lifetimeInputTokens),
+                    denominator: "\(totals.lifetimeInputAgentSessions) / \(totals.agentSessions) measured"
+                )
+                ContextStat(
+                    label: "Lifetime p50 / p95",
+                    value: "\(optionalTokens(totals.medianLifetimeInputTokens)) / \(optionalTokens(totals.p95LifetimeInputTokens))"
+                )
+                ContextStat(
+                    label: "Peak window p50 / p95",
+                    value: "\(optionalPercent(totals.medianPeakContextPercent)) / \(optionalPercent(totals.p95PeakContextPercent))",
+                    denominator: "\(totals.peakContextAgentSessions) / \(totals.agentSessions) measured"
                 )
                 ContextStat(
                     label: "Outcomes",
                     value: "\(totals.completedLaunches) done · \(totals.failedLaunches) failed",
-                    denominator: "\(totals.launches) launches"
+                    denominator: "\(totals.runningLaunches) running · \(totals.interruptedLaunches) interrupted"
                 )
                 ContextStat(
                     label: "Steering",
                     value: "\(totals.steeringTurns) turns",
-                    denominator: "\(totals.steeredLaunches) launches"
+                    denominator: "across \(totals.steeredLaunches) agent sessions"
                 )
                 ContextStat(
                     label: "Capture",
-                    value: "\(snapshot.coverage.completeLaunches) / \(totals.launches) complete",
+                    value: "\(snapshot.coverage.completeLaunches) / \(totals.agentSessions) complete",
                     denominator: "prompts \(snapshot.coverage.promptArtifactsAvailable) / \(totals.turns)"
                 )
             }
@@ -259,19 +287,16 @@ struct ContextLabView: View {
     private var filterRail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.lg) {
-                railTitle("Session set")
+                railTitle("Wave")
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Repo").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                    TextField("All local repos", text: $repoDraft)
-                        .textFieldStyle(.roundedBorder)
+                    Text(query.waves[0])
+                        .font(Typography.sectionTitle(15))
+                        .foregroundStyle(palette.text)
+                    Text(URL(fileURLWithPath: query.repoPaths[0]).lastPathComponent)
                         .font(Typography.code(10))
-                        .onSubmit { applyRepoDraft() }
-                    if repoDraft != (query.repoPaths.first ?? "") {
-                        Button("Apply repo") { applyRepoDraft() }
-                        .buttonStyle(.borderless)
-                        .font(Typography.caption(10))
-                    }
+                        .foregroundStyle(palette.textSecondary)
                 }
+                railTitle("Session set")
                 Picker("Window", selection: windowDaysBinding) {
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
@@ -279,9 +304,6 @@ struct ContextLabView: View {
                 }
                 .pickerStyle(.menu)
 
-                facetPicker("Wave", query: \.waves, values: facets(\.wave))
-                facetPicker("Project", query: \.projects, values: facets(\.project))
-                facetPicker("Task", query: \.tasks, values: facets(\.task))
                 facetPicker("Flow", query: \.flows, values: facets(\.flow))
                 facetPicker("Skill", query: \.skills, values: facets(\.skill))
                 facetPicker("Provider", query: \.providers, values: facets { $0.provider })
@@ -352,31 +374,39 @@ struct ContextLabView: View {
         VStack(spacing: 0) {
             centerToolbar
             Divider()
-            if let errorMessage {
-                ContentUnavailableView(
-                    "Context unavailable",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(errorMessage)
-                )
-            } else if let snapshot {
-                switch mode {
-                case .aggregate:
-                    aggregate(snapshot)
-                case .lanes:
-                    lanes(snapshot)
-                case .table:
-                    nodeTable(snapshot)
+            Group {
+                if let errorMessage {
+                    ContentUnavailableView(
+                        "Context unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage)
+                    )
+                } else if let snapshot {
+                    switch mode {
+                    case .aggregate:
+                        aggregate(snapshot)
+                    case .lanes:
+                        lanes(snapshot)
+                    case .sources:
+                        sources(snapshot)
+                    }
+                } else {
+                    ProgressView()
                 }
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
     }
 
     private var centerToolbar: some View {
         HStack(spacing: Spacing.md) {
-            if let snapshot {
+            if mode == .sources {
+                Text("Instruction sources")
+                    .font(Typography.body(12).weight(.semibold))
+                    .foregroundStyle(palette.text)
+            } else if let snapshot {
                 breadcrumb(snapshot.aggregateRoot)
             }
             Spacer()
@@ -386,7 +416,7 @@ struct ContextLabView: View {
                 }
                 .labelsHidden()
                 .frame(width: 190)
-            } else if mode == .table {
+            } else if mode == .sources {
                 Picker("Sort", selection: $nodeSort) {
                     ForEach(ContextNodeSort.allCases) { Text($0.rawValue).tag($0) }
                 }
@@ -396,6 +426,7 @@ struct ContextLabView: View {
             Picker("Mode", selection: $mode) {
                 ForEach(ContextLabMode.allCases) { Text($0.title).tag($0) }
             }
+            .labelsHidden()
             .pickerStyle(.segmented)
             .frame(width: 360)
         }
@@ -407,7 +438,7 @@ struct ContextLabView: View {
         let focus = findNode(focusNodeId, in: snapshot.aggregateRoot) ?? snapshot.aggregateRoot
         let coverage = snapshot.totals.turns == 0
             ? 0.25
-            : 0.35 + 0.65 * Double(snapshot.coverage.assembledTurns) / Double(snapshot.totals.turns)
+            : 0.35 + 0.65 * Double(snapshot.coverage.attributedTurns) / Double(snapshot.totals.turns)
         return ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 HStack {
@@ -415,7 +446,7 @@ struct ContextLabView: View {
                         Text(focus.label)
                             .font(Typography.sectionTitle(20))
                             .foregroundStyle(palette.text)
-                        Text("Width is supplied tokens · opacity is session-set capture coverage")
+                        Text("Width is initial-prompt tokens · opacity is capture coverage")
                             .font(Typography.caption(11))
                             .foregroundStyle(palette.textSecondary)
                     }
@@ -466,53 +497,88 @@ struct ContextLabView: View {
         }
     }
 
-    private func nodeTable(_ snapshot: ContextLabSnapshot) -> some View {
-        let focus = findNode(focusNodeId, in: snapshot.aggregateRoot) ?? snapshot.aggregateRoot
-        return ScrollView {
+    private func sources(_ snapshot: ContextLabSnapshot) -> some View {
+        HSplitView {
+            sourceRanking(snapshot)
+                .frame(minWidth: 300, idealWidth: 340, maxWidth: 400)
+            if let source = selectedInstructionSource(in: snapshot) {
+                ContextSourceDocumentView(source: source)
+                    .id(source.id)
+                    .frame(minWidth: 320, maxWidth: .infinity)
+            } else {
+                ContentUnavailableView(
+                    "Select a source",
+                    systemImage: "doc.text.magnifyingglass",
+                    description: Text("Open main's current file beside its impression evidence.")
+                )
+                .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func sourceRanking(_ snapshot: ContextLabSnapshot) -> some View {
+        ScrollView {
             LazyVStack(spacing: 0) {
-                HStack {
-                    Text("Source / revision").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Tokens").frame(width: 90, alignment: .trailing)
-                    Text("Sessions").frame(width: 70, alignment: .trailing)
-                    Text("Turns").frame(width: 60, alignment: .trailing)
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("One impression is one agent session whose initial prompt contains the source.")
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                    TextField("Find a source", text: $sourceSearch)
+                        .textFieldStyle(.roundedBorder)
                 }
-                .font(Typography.caption(10))
+                .padding(Spacing.md)
+                HStack {
+                    Text("Source").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Impressions").frame(width: 72, alignment: .trailing)
+                    Text("Reach").frame(width: 46, alignment: .trailing)
+                }
+                .font(Typography.caption(9))
                 .foregroundStyle(palette.textSecondary)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.sm)
-                ForEach(sortedNodes([focus] + descendants(of: focus))) { node in
+                ForEach(sortedSources(snapshot)) { source in
+                    let current = currentEvidence(for: source, in: snapshot)
+                    let accessibilityLabel = source.impressions.map {
+                        "\(source.label), \($0) impressions"
+                    } ?? "\(source.label), impressions not captured"
                     Button {
-                        selectedNodeId = node.id
+                        selectedNodeId = source.currentRevisionNodeId ?? source.id
                     } label: {
-                        HStack {
-                            HStack(spacing: Spacing.sm) {
-                                Circle().fill(contextColor(node.kind)).frame(width: 7, height: 7)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(node.label).lineLimit(1)
-                                    Text(node.sourcePath ?? displayKind(node.kind))
-                                        .font(Typography.code(9))
-                                        .foregroundStyle(palette.textSecondary)
-                                        .lineLimit(1)
-                                }
+                        HStack(spacing: Spacing.sm) {
+                            Circle().fill(contextColor(source.kind)).frame(width: 7, height: 7)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(source.label).lineLimit(1)
+                                Text(source.sourcePath)
+                                    .font(Typography.code(8))
+                                    .foregroundStyle(palette.textSecondary)
+                                    .lineLimit(1)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(node.attributedTokens.formatted()).frame(width: 90, alignment: .trailing)
-                            Text(node.sessionCount.formatted()).frame(width: 70, alignment: .trailing)
-                            Text(node.turnCount.formatted()).frame(width: 60, alignment: .trailing)
+                            Text(source.impressions?.formatted() ?? "—")
+                                .frame(width: 72, alignment: .trailing)
+                            Text(source.impressions.map {
+                                percent($0, of: snapshot.coverage.sourceObservableAgentSessions)
+                            } ?? "—")
+                                .frame(width: 46, alignment: .trailing)
                         }
-                        .font(Typography.body(11))
+                        .font(Typography.body(10))
                         .foregroundStyle(palette.text)
                         .padding(.horizontal, Spacing.md)
                         .padding(.vertical, Spacing.sm)
-                        .background(node.id == selectedNodeId ? palette.surfaceMuted : Color.clear)
+                        .background(
+                            source.id == selectedNodeId || current?.nodeId == selectedNodeId
+                                ? palette.surfaceMuted : Color.clear
+                        )
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("\(node.label), \(node.attributedTokens) tokens, \(node.sessionCount) sessions")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text(accessibilityLabel))
+                    .accessibilityHint(Text("Open main's current file and its revision evidence"))
                     Divider()
                 }
             }
-            .padding(Spacing.xl)
         }
+        .background(palette.surface)
     }
 
     private var evidenceRail: some View {
@@ -578,7 +644,8 @@ struct ContextLabView: View {
             }
 
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                evidenceMetric("Exposure", "\(evidence.measurements.exposedSessions) / \(snapshot.totals.sessions) sessions")
+                evidenceMetric("Runs", "\(evidence.measurements.exposedSessions) / \(snapshot.totals.runs)")
+                evidenceMetric("Impressions", "\(evidence.measurements.exposedLaunches) agent sessions")
                 evidenceMetric("Turns", evidence.measurements.exposedTurns.formatted())
                 evidenceMetric("Attributed", "\(evidence.measurements.attributedTokens.formatted()) tokens")
                 evidenceMetric("Median / p95", "\(optionalTokens(evidence.measurements.medianTokensPerExposedTurn)) / \(optionalTokens(evidence.measurements.p95TokensPerExposedTurn))")
@@ -602,37 +669,54 @@ struct ContextLabView: View {
                     .foregroundStyle(Color.statusWarning)
             }
 
+            refinementProjectDestination
+
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 railTitle("Representative sessions")
-                ForEach(Array(evidence.representatives.enumerated()), id: \.offset) { _, trace in
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        HStack {
-                            Text(displayRole(trace.role))
-                                .font(Typography.caption(10).weight(.semibold))
-                            Spacer()
-                            Text(shortHash(trace.address.runId))
-                                .font(Typography.code(9))
+                if evidence.representatives.isEmpty {
+                    Text("No agent session has observed this revision in the selected population.")
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                } else {
+                    ForEach(Array(evidence.representatives.enumerated()), id: \.offset) { _, trace in
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            HStack {
+                                Text(displayRole(trace.role))
+                                    .font(Typography.caption(10).weight(.semibold))
+                                Spacer()
+                                Text(shortHash(trace.address.runId))
+                                    .font(Typography.code(9))
+                            }
+                            Text("\(trace.outcome.rawValue) · \(optionalTokens(trace.suppliedContextTokens)) context · \(trace.selectedSourceTokens) selected")
+                                .font(Typography.caption(9))
+                                .foregroundStyle(palette.textSecondary)
+                            HStack {
+                                captureBadge("Prompt", available: trace.promptArtifactAvailable)
+                                captureBadge("Conversation", available: trace.conversationAvailable)
+                                Spacer()
+                                Button("Open trace") { traceRequest = trace.address }
+                                    .buttonStyle(.borderless)
+                            }
                         }
-                        Text("\(trace.outcome.rawValue) · \(optionalTokens(trace.suppliedContextTokens)) context · \(trace.selectedSourceTokens) selected")
-                            .font(Typography.caption(9))
-                            .foregroundStyle(palette.textSecondary)
-                        HStack {
-                            captureBadge("Prompt", available: trace.promptArtifactAvailable)
-                            captureBadge("Conversation", available: trace.conversationAvailable)
-                            Spacer()
-                            Button("Open trace") { traceRequest = trace.address }
-                                .buttonStyle(.borderless)
-                        }
+                        .padding(Spacing.sm)
+                        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.md))
                     }
-                    .padding(Spacing.sm)
-                    .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.md))
                 }
             }
 
-            Button("Refine source…") { refinementEvidence = evidence }
+            if let refinementErrorMessage {
+                Label(refinementErrorMessage, systemImage: "exclamationmark.triangle")
+                    .font(Typography.caption(10))
+                    .foregroundStyle(Color.statusError)
+                    .textSelection(.enabled)
+            }
+
+            Button(isLaunchingRefinement ? "Starting task-worker…" : "Refine in task-worker") {
+                Task { await launchRefinement(evidence, snapshot: snapshot) }
+            }
                 .buttonStyle(DarkButtonStyle())
-                .disabled(!canRefine(evidence, in: snapshot.query))
-                .opacity(canRefine(evidence, in: snapshot.query) ? 1 : 0.4)
+                .disabled(!canRefine(evidence, in: snapshot.query) || isLaunchingRefinement)
+                .opacity(canRefine(evidence, in: snapshot.query) && !isLaunchingRefinement ? 1 : 0.4)
                 .help(refinementHelp(evidence, in: snapshot.query))
         }
     }
@@ -749,7 +833,8 @@ struct ContextLabView: View {
                     }
                     Spacer()
                     evidenceMetric("Tokens", node.attributedTokens.formatted())
-                    evidenceMetric("Sessions", node.sessionCount.formatted())
+                    evidenceMetric("Runs", node.runCount.formatted())
+                    evidenceMetric("Impressions", node.agentSessionCount.formatted())
                     evidenceMetric("Turns", node.turnCount.formatted())
                 }
                 .padding(Spacing.md)
@@ -765,14 +850,18 @@ struct ContextLabView: View {
         let coverage = snapshot.coverage
         return VStack(alignment: .leading, spacing: Spacing.sm) {
             railTitle("Coverage")
-            evidenceMetric("Assembled", "\(coverage.assembledTurns) / \(snapshot.totals.turns) turns")
+            evidenceMetric("Attributable", "\(coverage.attributedTurns) / \(snapshot.totals.turns) turns")
             evidenceMetric("Provider total", coverage.providerTotalOnlyTurns.formatted())
             evidenceMetric("Unknown", coverage.unknownTurns.formatted())
             evidenceMetric(
                 "Attribution",
-                "\(snapshot.aggregateRoot.attributedTokens) / \(optionalTokens(snapshot.totals.contextTokens)) tokens"
+                "\(snapshot.aggregateRoot.attributedTokens) / \(optionalTokens(snapshot.totals.initialPromptTokens)) tokens"
             )
-            evidenceMetric("Conversations", "\(coverage.conversationsAvailable) / \(snapshot.totals.launches)")
+            evidenceMetric(
+                "Source evidence",
+                "\(coverage.sourceObservableAgentSessions) / \(snapshot.totals.agentSessions) agent sessions"
+            )
+            evidenceMetric("Conversations", "\(coverage.conversationsAvailable) / \(snapshot.totals.agentSessions)")
         }
     }
 
@@ -857,29 +946,137 @@ struct ContextLabView: View {
 
     private func canRefine(_ evidence: SourceEvidence, in query: SessionSetQuery) -> Bool {
         guard evidence.isEditable,
-              let sourcePath = evidence.sourcePath?.normalizedFilePath,
-              query.repoPaths.count == 1,
-              let repoPath = query.repoPaths.first?.normalizedFilePath
+              let sourcePath = evidence.sourcePath,
+              query.waves.count == 1,
+              refinementProjectId != nil
         else { return false }
-        return sourcePath == repoPath || sourcePath.hasPrefix(repoPath + "/")
+        return contextSourceBelongsToSelectedRepo(sourcePath, query: query)
     }
 
     private func refinementHelp(_ evidence: SourceEvidence, in query: SessionSetQuery) -> String {
         guard evidence.isEditable, let sourcePath = evidence.sourcePath else {
             return editabilityReason(evidence)
         }
+        guard query.waves.count == 1 else {
+            return "Choose one Wave before starting refinement work."
+        }
+        guard refinementProjectId != nil else {
+            return refinementProjects.isEmpty
+                ? "This Wave needs a Project before it can own a refinement Task."
+                : "Choose the Project that should own refinement Tasks for this Wave."
+        }
         guard query.repoPaths.count == 1, let repoPath = query.repoPaths.first else {
             return "Narrow the session set to one repo before refining this source."
         }
-        let source = sourcePath.normalizedFilePath
-        let repo = repoPath.normalizedFilePath
-        guard source == repo || source.hasPrefix(repo + "/") else {
+        guard contextSourceBelongsToRepo(sourcePath, repoPath: repoPath) else {
             return "This source is outside the selected repo and cannot be changed in its Task worktree."
         }
-        return "Launch a fresh trace-linked refinement in a Task worktree"
+        return "Create a trace-linked Task in \(query.waves[0]) and open its running agent"
+    }
+
+    @MainActor
+    private func launchRefinement(
+        _ evidence: SourceEvidence,
+        snapshot: ContextLabSnapshot
+    ) async {
+        guard let wave = snapshot.query.waves.first,
+              snapshot.query.waves.count == 1,
+              let repoPath = snapshot.query.repoPaths.first,
+              snapshot.query.repoPaths.count == 1,
+              let refinementProjectId
+        else { return }
+        isLaunchingRefinement = true
+        refinementErrorMessage = nil
+        defer { isLaunchingRefinement = false }
+
+        do {
+            let refreshed = try await RegistryQueryLocal.shared.contextLab(snapshot.query)
+            guard let currentEvidence = refreshed.evidence.first(where: {
+                $0.nodeId == evidence.nodeId
+            }),
+            currentEvidence.isEditable,
+            currentEvidence.contentSha256 == evidence.contentSha256,
+            let sourcePath = currentEvidence.sourcePath,
+            let sourceSha256 = currentEvidence.currentSourceSha256,
+            sourceFileHash(path: sourcePath) == sourceSha256
+            else {
+                throw ContextRefinementError(
+                    "Main's source changed. Refresh Context Lab and select the current revision."
+                )
+            }
+
+            let plan = try await RegistryQueryLocal.shared.plan(
+                wave: wave,
+                objective: "",
+                cwd: repoPath,
+                sync: true
+            )
+            let project = try contextRefinementProject(
+                plan.projects,
+                projectId: refinementProjectId
+            )
+            let relativePath = try contextRefinementSourcePath(
+                sourcePath: sourcePath,
+                repoPath: repoPath
+            )
+            let title = contextRefinementTaskTitle(
+                label: currentEvidence.label,
+                contentSha256: currentEvidence.contentSha256
+            )
+            let seed = RefinementSeed(
+                query: snapshot.query,
+                selectedNodeId: currentEvidence.nodeId,
+                sourcePath: relativePath,
+                startingContentSha256: currentEvidence.contentSha256,
+                measurements: currentEvidence.measurements,
+                evidence: currentEvidence.representatives.map(\.address)
+            )
+            let directive = try contextRefinementDirective(
+                label: currentEvidence.label,
+                sourcePath: relativePath,
+                sourceSha256: sourceSha256,
+                seed: seed
+            )
+            guard sourceFileHash(path: sourcePath) == sourceSha256 else {
+                throw ContextRefinementError(
+                    "Main's source changed while resolving the Task destination. Refresh Context Lab and retry."
+                )
+            }
+
+            let receipt = try await Task.detached(priority: .userInitiated) {
+                try LocalWaveAgentLauncher.startTask(
+                    repoPath: repoPath,
+                    title: title,
+                    project: project.id,
+                    directive: directive
+                )
+            }.value
+            guard receipt.wave == wave, receipt.project == project.id else {
+                throw ContextRefinementError(
+                    "The created Task receipt did not match \(wave) / \(project.id). Open the Wave work map before retrying."
+                )
+            }
+            openWindow(id: "task-workspace", value: TaskWorkspaceRoute(
+                wave: wave,
+                issue: receipt.issueIdentifier,
+                repoPath: repoPath,
+                initialSection: .agent,
+                context: ContextLabRoute(
+                    query: snapshot.query,
+                    selectedNodeId: currentEvidence.nodeId,
+                    focusNodeId: focusNodeId,
+                    mode: .sources
+                )
+            ))
+        } catch {
+            refinementErrorMessage = error.localizedDescription
+        }
     }
 
     private func selectedEvidence(in snapshot: ContextLabSnapshot) -> [SourceEvidence] {
+        if let direct = snapshot.evidence.first(where: { $0.nodeId == selectedNodeId }) {
+            return [direct]
+        }
         guard let node = findNode(selectedNodeId, in: snapshot.aggregateRoot),
               node.level == .source || node.level == .revision
         else { return [] }
@@ -892,6 +1089,10 @@ struct ContextLabView: View {
             switch laneSort {
             case .context:
                 return sessionTokens(left) > sessionTokens(right)
+            case .lifetimeInput:
+                return (left.lifetimeInputTokens ?? 0) > (right.lifetimeInputTokens ?? 0)
+            case .windowPressure:
+                return (left.peakContextPercent ?? 0) > (right.peakContextPercent ?? 0)
             case .selectedShare:
                 let leftSelected = selectedTokens(left, ids: selectedIds)
                 let rightSelected = selectedTokens(right, ids: selectedIds)
@@ -915,18 +1116,64 @@ struct ContextLabView: View {
         }
     }
 
-    private func sortedNodes(_ nodes: [ContextFlameNode]) -> [ContextFlameNode] {
-        nodes.sorted { left, right in
+    private func sortedSources(_ snapshot: ContextLabSnapshot) -> [InstructionSourceSummary] {
+        snapshot.sources
+            .filter { source in
+                sourceSearch.isEmpty
+                    || source.label.localizedCaseInsensitiveContains(sourceSearch)
+                    || source.sourcePath.localizedCaseInsensitiveContains(sourceSearch)
+            }
+            .sorted { left, right in
             switch nodeSort {
-            case .tokens: left.attributedTokens > right.attributedTokens
-            case .sessions: left.sessionCount > right.sessionCount
-            case .turns: left.turnCount > right.turnCount
-            case .label: left.label.localizedStandardCompare(right.label) == .orderedAscending
+            case .impressions:
+                switch (left.impressions, right.impressions) {
+                case let (.some(leftValue), .some(rightValue)) where leftValue != rightValue:
+                    return leftValue > rightValue
+                case (.some, .none):
+                    return true
+                case (.none, .some):
+                    return false
+                default:
+                    break
+                }
+                return left.label.localizedStandardCompare(right.label) == .orderedAscending
+            case .recent:
+                return (left.lastSeen ?? .min) > (right.lastSeen ?? .min)
+            case .label:
+                return left.label.localizedStandardCompare(right.label) == .orderedAscending
             }
         }
     }
 
+    private func sourceLastSeen(_ source: InstructionSourceSummary) -> String {
+        guard let timestamp = source.lastSeen else { return "Never" }
+        return Date(timeIntervalSince1970: TimeInterval(timestamp))
+            .formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func currentEvidence(
+        for source: InstructionSourceSummary,
+        in snapshot: ContextLabSnapshot
+    ) -> SourceEvidence? {
+        guard let nodeId = source.currentRevisionNodeId else { return nil }
+        return snapshot.evidence.first { $0.nodeId == nodeId }
+    }
+
+    private func selectedInstructionSource(
+        in snapshot: ContextLabSnapshot
+    ) -> InstructionSourceSummary? {
+        snapshot.sources.first { source in
+            source.id == selectedNodeId || source.currentRevisionNodeId == selectedNodeId
+        }
+    }
+
     private func refresh() async {
+        guard query.waves.count == 1 else {
+            snapshot = nil
+            errorMessage = nil
+            isLoading = false
+            return
+        }
         isLoading = true
         defer {
             if !Task.isCancelled { isLoading = false }
@@ -936,7 +1183,8 @@ struct ContextLabView: View {
             try Task.checkCancellation()
             snapshot = next
             errorMessage = nil
-            if findNode(selectedNodeId, in: next.aggregateRoot) == nil {
+            if findNode(selectedNodeId, in: next.aggregateRoot) == nil
+                && !next.evidence.contains(where: { $0.nodeId == selectedNodeId }) {
                 selectedNodeId = "session-set"
             }
             if findNode(focusNodeId, in: next.aggregateRoot) == nil {
@@ -950,17 +1198,102 @@ struct ContextLabView: View {
         }
     }
 
-    private func applyRepoDraft() {
-        let path = repoDraft.trimmingCharacters(in: .whitespaces)
-        repoDraft = path
-        query.repoPaths = path.isEmpty ? [] : [WaveOrigin.resolve(path)]
+    @MainActor
+    private func loadRefinementProjects() async {
+        refinementProjects = []
+        refinementProjectId = nil
+        refinementProjectLoadError = nil
+        guard query.waves.count == 1,
+              let wave = query.waves.first,
+              query.repoPaths.count == 1,
+              let repoPath = query.repoPaths.first
+        else { return }
+
+        isLoadingRefinementProjects = true
+        defer {
+            if !Task.isCancelled { isLoadingRefinementProjects = false }
+        }
+        do {
+            let plan = try await RegistryQueryLocal.shared.plan(
+                wave: wave,
+                objective: "",
+                cwd: repoPath
+            )
+            try Task.checkCancellation()
+            refinementProjects = plan.projects.sorted {
+                $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+            if refinementProjects.count == 1 {
+                refinementProjectId = refinementProjects[0].id
+            } else if let stored = UserDefaults.standard.string(
+                forKey: refinementProjectPreferenceKey(wave: wave, repoPath: repoPath)
+            ), refinementProjects.contains(where: { $0.id == stored }) {
+                refinementProjectId = stored
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            refinementProjectLoadError = error.localizedDescription
+        }
+    }
+
+    @ViewBuilder
+    private var refinementProjectDestination: some View {
+        if isLoadingRefinementProjects {
+            HStack(spacing: Spacing.sm) {
+                ProgressView().controlSize(.small)
+                Text("Loading Task destination…")
+            }
+            .font(Typography.caption(10))
+            .foregroundStyle(palette.textSecondary)
+        } else if let refinementProjectLoadError {
+            Label(refinementProjectLoadError, systemImage: "exclamationmark.triangle")
+                .font(Typography.caption(10))
+                .foregroundStyle(Color.statusError)
+        } else if refinementProjects.count > 1 {
+            Picker("Refinement Project", selection: refinementProjectBinding) {
+                Text("Choose Project").tag(String?.none)
+                ForEach(refinementProjects) { project in
+                    Text(project.title).tag(Optional(project.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .help("Remembered for refinement Tasks in this Wave; does not filter Context Lab evidence")
+        } else if let project = refinementProjects.first {
+            evidenceMetric("Refinement Project", project.title)
+        } else if query.waves.count == 1 {
+            Label("This Wave has no Project to own a refinement Task.", systemImage: "tray")
+                .font(Typography.caption(10))
+                .foregroundStyle(Color.statusWarning)
+        }
+    }
+
+    private var refinementProjectBinding: Binding<String?> {
+        Binding(
+            get: { refinementProjectId },
+            set: { projectId in
+                refinementProjectId = projectId
+                guard let projectId,
+                      let wave = query.waves.first,
+                      let repoPath = query.repoPaths.first
+                else { return }
+                UserDefaults.standard.set(
+                    projectId,
+                    forKey: refinementProjectPreferenceKey(wave: wave, repoPath: repoPath)
+                )
+            }
+        )
+    }
+
+    private func refinementProjectPreferenceKey(wave: String, repoPath: String) -> String {
+        "contextLabRefinementProject:\(repoPath.normalizedFilePath):\(wave)"
     }
 
     private func clearFilters() {
         query = defaultQuery
         query.startedBefore = Int64(Date().timeIntervalSince1970)
         query.startedAfter = query.startedBefore - 30 * 24 * 60 * 60
-        repoDraft = defaultQuery.repoPaths.first ?? ""
     }
 
     private func saveCurrentView() {
@@ -971,8 +1304,12 @@ struct ContextLabView: View {
     }
 
     private func apply(_ saved: ContextLabSavedView) {
-        query = saved.query
-        repoDraft = query.repoPaths.first ?? ""
+        var savedQuery = saved.query
+        savedQuery.repoPaths = defaultQuery.repoPaths
+        savedQuery.waves = defaultQuery.waves
+        savedQuery.projects = []
+        savedQuery.tasks = []
+        query = savedQuery
         mode = saved.mode
     }
 
@@ -983,15 +1320,19 @@ struct ContextLabView: View {
 
     private func persistSavedViews() {
         guard let data = try? JSONEncoder().encode(savedViews) else { return }
-        UserDefaults.standard.set(data, forKey: "contextLabSavedViews")
+        UserDefaults.standard.set(data, forKey: savedViewsKey)
     }
 
-    private static func loadSavedViews() -> [ContextLabSavedView] {
-        guard let data = UserDefaults.standard.data(forKey: "contextLabSavedViews"),
+    private static func loadSavedViews(key: String) -> [ContextLabSavedView] {
+        guard let data = UserDefaults.standard.data(forKey: key),
               let views = try? JSONDecoder().decode([ContextLabSavedView].self, from: data)
         else { return [] }
         var seen = Set<ContextLabSavedView>()
         return views.filter { seen.insert($0).inserted }
+    }
+
+    private static func savedViewsKey(repoPath: String, wave: String) -> String {
+        "contextLabSavedViews:\(repoPath.normalizedFilePath):\(wave)"
     }
 
     private var filtersAreEmpty: Bool {
@@ -999,6 +1340,85 @@ struct ContextLabView: View {
         filters.startedAfter = defaultQuery.startedAfter
         filters.startedBefore = defaultQuery.startedBefore
         return windowDays == 30 && filters == defaultQuery
+    }
+}
+
+func contextSourceBelongsToSelectedRepo(_ sourcePath: String, query: SessionSetQuery) -> Bool {
+    guard query.repoPaths.count == 1, let selectedRepo = query.repoPaths.first else { return false }
+    return contextSourceBelongsToRepo(sourcePath, repoPath: selectedRepo)
+}
+
+func contextSourceBelongsToRepo(_ sourcePath: String, repoPath: String) -> Bool {
+    let source = sourcePath.normalizedFilePath
+    let normalizedRepo = repoPath.normalizedFilePath
+    let repo = normalizedRepo.count > 1 && normalizedRepo.hasSuffix("/")
+        ? String(normalizedRepo.dropLast())
+        : normalizedRepo
+    return source == repo || source.hasPrefix(repo + "/")
+}
+
+private struct ContextSourceDocumentView: View {
+    let source: InstructionSourceSummary
+
+    @Environment(\.palette) private var palette
+    @State private var content: String?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(source.label)
+                    .font(Typography.sectionTitle(19))
+                    .foregroundStyle(palette.text)
+                Text(source.sourcePath)
+                    .font(Typography.code(9))
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                Text("Main's current file")
+                    .font(Typography.caption(9).weight(.semibold))
+                    .foregroundStyle(palette.accent)
+            }
+            .padding(Spacing.lg)
+            Divider()
+            if let content {
+                GeometryReader { proxy in
+                    ScrollView([.horizontal, .vertical]) {
+                        Text(content)
+                            .font(Typography.code(10))
+                            .foregroundStyle(palette.text)
+                            .textSelection(.enabled)
+                            .padding(Spacing.lg)
+                            .frame(
+                                minWidth: proxy.size.width,
+                                minHeight: proxy.size.height,
+                                alignment: .topLeading
+                            )
+                    }
+                }
+            } else if let errorMessage {
+                ContentUnavailableView(
+                    "Source unavailable",
+                    systemImage: "doc.questionmark",
+                    description: Text(errorMessage)
+                )
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(palette.background)
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            content = try await Task.detached(priority: .userInitiated) {
+                try String(contentsOfFile: source.sourcePath, encoding: .utf8)
+            }.value
+            errorMessage = nil
+        } catch {
+            content = nil
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
@@ -1120,6 +1540,12 @@ private struct SessionLaneView: View {
                     .foregroundStyle(palette.textSecondary)
                 Spacer()
                 Text("\(session.provider)\(session.model.map { ":\($0)" } ?? "")")
+                    .font(Typography.code(9))
+                    .foregroundStyle(palette.textSecondary)
+                Text("life \(optionalTokens(session.lifetimeInputTokens))")
+                    .font(Typography.code(9))
+                    .foregroundStyle(palette.textSecondary)
+                Text("peak \(optionalPercent(session.peakContextPercent))")
                     .font(Typography.code(9))
                     .foregroundStyle(palette.textSecondary)
                 Text(session.outcome.rawValue)
@@ -1258,6 +1684,10 @@ private func contextColor(_ kind: ContextAssetKind?) -> Color {
 
 private func optionalTokens(_ value: UInt64?) -> String {
     value?.formatted() ?? "Missing"
+}
+
+private func optionalPercent(_ value: Double?) -> String {
+    value.map { "\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "Missing"
 }
 
 private func share(_ numerator: UInt64?, of denominator: UInt64?) -> String {

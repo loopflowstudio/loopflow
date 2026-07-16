@@ -777,6 +777,9 @@ pub struct AgentTurnRow {
     pub task_tokens: i64,
     pub supplied_context_tokens: i64,
     pub provider_input_tokens: Option<i64>,
+    pub provider_total_input_tokens: Option<i64>,
+    pub peak_input_tokens: Option<i64>,
+    pub context_window_tokens: Option<i64>,
     pub provider_output_tokens: Option<i64>,
     pub reasoning_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
@@ -1035,6 +1038,9 @@ impl TraceCapture {
             task_tokens,
             supplied_context_tokens: system_tokens + task_tokens,
             provider_input_tokens: None,
+            provider_total_input_tokens: None,
+            peak_input_tokens: None,
+            context_window_tokens: None,
             provider_output_tokens: None,
             reasoning_tokens: None,
             cache_read_tokens: None,
@@ -1137,6 +1143,9 @@ impl TraceCapture {
             task_tokens,
             supplied_context_tokens: task_tokens,
             provider_input_tokens: None,
+            provider_total_input_tokens: None,
+            peak_input_tokens: None,
+            context_window_tokens: None,
             provider_output_tokens: None,
             reasoning_tokens: None,
             cache_read_tokens: None,
@@ -1187,6 +1196,11 @@ impl TraceCapture {
     fn apply_usage_to_turn(&mut self) {
         if self.usage_observed {
             self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
+            self.turn.provider_total_input_tokens =
+                self.usage.total_input_tokens.map(|value| value as i64);
+            self.turn.peak_input_tokens = self.usage.peak_input_tokens.map(|value| value as i64);
+            self.turn.context_window_tokens =
+                self.usage.context_window_tokens.map(|value| value as i64);
             self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
             self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
             self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
@@ -1248,6 +1262,8 @@ impl TraceCapture {
                 self.usage.cache_read_tokens = Some(
                     self.usage.cache_read_tokens.unwrap_or(0) + cache_read_tokens.unwrap_or(0),
                 );
+                self.usage.total_input_tokens =
+                    Some(self.usage.input_tokens + self.usage.cache_read_tokens.unwrap_or(0));
                 RecordedConversationPayload::Usage {
                     usage: self.usage.clone(),
                 }

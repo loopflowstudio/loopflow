@@ -37,6 +37,7 @@ pub struct ContextLabSnapshot {
     pub totals: SessionSetTotals,
     pub aggregate_root: ContextFlameNode,
     pub sessions: Vec<SessionLane>,
+    pub sources: Vec<InstructionSourceSummary>,
     pub evidence: Vec<SourceEvidence>,
 }
 
@@ -46,24 +47,31 @@ pub struct ContextCoverageDto {
     pub partial_launches: u64,
     pub prompt_only_launches: u64,
     pub capturing_launches: u64,
-    pub assembled_turns: u64,
+    pub attributed_turns: u64,
     pub provider_total_only_turns: u64,
     pub unknown_turns: u64,
     pub prompt_artifacts_available: u64,
     pub conversations_available: u64,
+    pub source_observable_agent_sessions: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionSetTotals {
-    pub sessions: u64,
-    pub launches: u64,
+    pub runs: u64,
+    pub agent_sessions: u64,
     pub turns: u64,
-    pub context_tokens: Option<u64>,
-    pub median_context_tokens: Option<u64>,
-    pub p95_context_tokens: Option<u64>,
+    pub initial_prompt_tokens: Option<u64>,
+    pub initial_prompt_agent_sessions: u64,
+    pub median_initial_prompt_tokens: Option<u64>,
+    pub p95_initial_prompt_tokens: Option<u64>,
     pub instruction_tokens: Option<u64>,
-    pub cost_usd: Option<f64>,
-    pub cost_turns: u64,
+    pub lifetime_input_tokens: Option<u64>,
+    pub lifetime_input_agent_sessions: u64,
+    pub median_lifetime_input_tokens: Option<u64>,
+    pub p95_lifetime_input_tokens: Option<u64>,
+    pub median_peak_context_percent: Option<f64>,
+    pub p95_peak_context_percent: Option<f64>,
+    pub peak_context_agent_sessions: u64,
     pub completed_launches: u64,
     pub failed_launches: u64,
     pub interrupted_launches: u64,
@@ -91,7 +99,8 @@ pub struct ContextFlameNode {
     pub source_path: Option<String>,
     pub content_sha256: Option<String>,
     pub attributed_tokens: u64,
-    pub session_count: u64,
+    pub run_count: u64,
+    pub agent_session_count: u64,
     pub turn_count: u64,
     pub children: Vec<ContextFlameNode>,
 }
@@ -103,6 +112,8 @@ pub struct SessionLane {
     pub started_at: i64,
     pub outcome: String,
     pub steering_turns: Option<u64>,
+    pub lifetime_input_tokens: Option<u64>,
+    pub peak_context_percent: Option<f64>,
     pub provider: String,
     pub model: Option<String>,
     pub surface: String,
@@ -128,6 +139,18 @@ pub struct ContextLaneAsset {
     pub kind: ContextAssetKind,
     pub label: String,
     pub attributed_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstructionSourceSummary {
+    pub id: String,
+    pub label: String,
+    pub kind: ContextAssetKind,
+    pub source_path: String,
+    pub impressions: Option<u64>,
+    pub observed_revisions: u64,
+    pub last_seen: Option<i64>,
+    pub current_revision_node_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -319,15 +342,17 @@ pub fn aggregate(
 ) -> ContextLabSnapshot {
     let (mut launches, turns, assets) = filter_research_state(&query, launches, turns, assets);
     launches.sort_by_key(|launch| (launch.started_at, launch.id.clone()));
-    let assembled_turns = turns
+    let initial_prompt_turns = turns
         .iter()
-        .filter(|turn| turn.context_coverage == "assembled")
+        .filter(|turn| turn.input_op == "initial" && turn.context_coverage == "assembled")
         .map(|turn| turn.id.as_str())
         .collect::<HashSet<_>>();
-    let assets = assets
+    let mut assets = assets
         .into_iter()
-        .filter(|row| assembled_turns.contains(row.turn_id.as_str()))
+        .filter(|row| initial_prompt_turns.contains(row.turn_id.as_str()))
         .collect::<Vec<_>>();
+    let catalog_sources = discover_instruction_sources(&query);
+    attach_catalog_source_paths(&mut assets, &catalog_sources);
     let launch_by_id = launches
         .iter()
         .map(|launch| (launch.id.as_str(), launch))
@@ -338,18 +363,26 @@ pub fn aggregate(
         .collect::<HashMap<_, _>>();
     let assets_by_turn = group_assets(&assets);
     let revisions = build_revisions(&assets, &launch_by_id, &turn_by_id, &turns);
+    let usage_by_launch = build_agent_session_usage(&launches, &turns);
+    let initial_turns = turns
+        .iter()
+        .filter(|turn| initial_prompt_turns.contains(turn.id.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
 
-    let sessions = build_session_lanes(&launches, &turns, &assets_by_turn);
-    let coverage = build_coverage(&launches, &turns);
-    let totals = build_totals(&launches, &turns, &assets);
-    let aggregate_root = build_flame(&launches, &turns, &revisions);
-    let evidence = build_evidence(revisions);
+    let sessions = build_session_lanes(&launches, &turns, &assets_by_turn, &usage_by_launch);
+    let coverage = build_coverage(&launches, &turns, &assets);
+    let totals = build_totals(&launches, &turns, &assets, &usage_by_launch);
+    let aggregate_root = build_flame(&launches, &initial_turns, &revisions);
+    let mut evidence = build_evidence(revisions);
+    let sources = build_instruction_sources(&catalog_sources, &aggregate_root, &mut evidence);
     ContextLabSnapshot {
         query,
         coverage,
         totals,
         aggregate_root,
         sessions,
+        sources,
         evidence,
     }
 }
@@ -450,13 +483,34 @@ fn group_assets(assets: &[ContextAssetRow]) -> HashMap<&str, Vec<&ContextAssetRo
     grouped
 }
 
-fn build_coverage(launches: &[AgentLaunchRow], turns: &[AgentTurnRow]) -> ContextCoverageDto {
+fn build_coverage(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+    assets: &[ContextAssetRow],
+) -> ContextCoverageDto {
+    let launch_by_turn = turns
+        .iter()
+        .map(|turn| (turn.id.as_str(), turn.launch_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    let source_observable_agent_sessions = assets
+        .iter()
+        .filter(|row| {
+            is_catalog_instruction_kind(row.asset.kind)
+                && (row.asset.source_path.is_some()
+                    || matches!(
+                        row.asset.kind,
+                        ContextAssetKind::SkillInstructions | ContextAssetKind::SurfaceInstructions
+                    ))
+        })
+        .filter_map(|row| launch_by_turn.get(row.turn_id.as_str()).copied())
+        .collect::<HashSet<_>>()
+        .len() as u64;
     ContextCoverageDto {
         complete_launches: count_launches(launches, "complete"),
         partial_launches: count_launches(launches, "partial"),
         prompt_only_launches: count_launches(launches, "prompt_only"),
         capturing_launches: count_launches(launches, "capturing"),
-        assembled_turns: count_turn_coverage(turns, "assembled"),
+        attributed_turns: count_turn_coverage(turns, "assembled"),
         provider_total_only_turns: count_turn_coverage(turns, "provider_total_only"),
         unknown_turns: count_turn_coverage(turns, "unknown"),
         prompt_artifacts_available: turns
@@ -467,6 +521,76 @@ fn build_coverage(launches: &[AgentLaunchRow], turns: &[AgentTurnRow]) -> Contex
             .iter()
             .filter(|launch| artifact_available(&launch.conversation_path))
             .count() as u64,
+        source_observable_agent_sessions,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct AgentSessionUsage {
+    lifetime_input_tokens: Option<u64>,
+    peak_context_percent: Option<f64>,
+}
+
+fn build_agent_session_usage(
+    launches: &[AgentLaunchRow],
+    turns: &[AgentTurnRow],
+) -> HashMap<String, AgentSessionUsage> {
+    let mut turns_by_launch: HashMap<&str, Vec<&AgentTurnRow>> = HashMap::new();
+    for turn in turns {
+        turns_by_launch
+            .entry(turn.launch_id.as_str())
+            .or_default()
+            .push(turn);
+    }
+    launches
+        .iter()
+        .map(|launch| {
+            let launch_turns = turns_by_launch
+                .remove(launch.id.as_str())
+                .unwrap_or_default();
+            let input_values = launch_turns
+                .iter()
+                .filter_map(|turn| normalized_total_input(launch, turn))
+                .collect::<Vec<_>>();
+            let lifetime_input_tokens = if input_values.is_empty() {
+                None
+            } else if launch.provider == "codex" {
+                input_values.into_iter().max()
+            } else {
+                Some(input_values.into_iter().sum())
+            };
+            let peak_context_percent = launch_turns
+                .iter()
+                .filter_map(|turn| {
+                    let input = turn.peak_input_tokens.filter(|value| *value >= 0)? as f64;
+                    let window = turn.context_window_tokens.filter(|value| *value > 0)? as f64;
+                    Some(100.0 * input / window)
+                })
+                .max_by(f64::total_cmp);
+            (
+                launch.id.clone(),
+                AgentSessionUsage {
+                    lifetime_input_tokens,
+                    peak_context_percent,
+                },
+            )
+        })
+        .collect()
+}
+
+fn normalized_total_input(launch: &AgentLaunchRow, turn: &AgentTurnRow) -> Option<u64> {
+    if let Some(value) = turn.provider_total_input_tokens {
+        return Some(nonnegative(value));
+    }
+    let input = nonnegative(turn.provider_input_tokens?);
+    if launch.provider == "codex" {
+        Some(input)
+    } else {
+        Some(
+            input
+                + turn.cache_read_tokens.map_or(0, nonnegative)
+                + turn.cache_write_tokens.map_or(0, nonnegative),
+        )
     }
 }
 
@@ -474,17 +598,30 @@ fn build_totals(
     launches: &[AgentLaunchRow],
     turns: &[AgentTurnRow],
     assets: &[ContextAssetRow],
+    usage_by_launch: &HashMap<String, AgentSessionUsage>,
 ) -> SessionSetTotals {
-    let mut context_values = turns
+    let mut initial_prompt_values = turns
         .iter()
-        .filter(|turn| turn.context_coverage == "assembled")
+        .filter(|turn| turn.input_op == "initial" && turn.context_coverage == "assembled")
         .map(|turn| nonnegative(turn.supplied_context_tokens))
         .collect::<Vec<_>>();
-    context_values.sort_unstable();
-    let cost_values = turns
+    initial_prompt_values.sort_unstable();
+    let initial_prompt_agent_sessions = turns
         .iter()
-        .filter_map(|turn| turn.cost_usd)
+        .filter(|turn| turn.input_op == "initial" && turn.context_coverage == "assembled")
+        .map(|turn| turn.launch_id.as_str())
+        .collect::<HashSet<_>>()
+        .len() as u64;
+    let mut lifetime_input_values = usage_by_launch
+        .values()
+        .filter_map(|usage| usage.lifetime_input_tokens)
         .collect::<Vec<_>>();
+    lifetime_input_values.sort_unstable();
+    let mut peak_context_values = usage_by_launch
+        .values()
+        .filter_map(|usage| usage.peak_context_percent)
+        .collect::<Vec<_>>();
+    peak_context_values.sort_by(f64::total_cmp);
     let steered_launches = turns
         .iter()
         .filter(|turn| turn.input_op == "steer")
@@ -500,24 +637,32 @@ fn build_totals(
         .iter()
         .map(|row| row.asset.attributed_tokens)
         .sum::<u64>();
-    let context_tokens = (!context_values.is_empty()).then(|| context_values.iter().sum());
-    let instruction_tokens = context_tokens.and_then(|context_tokens| {
-        (attributed_tokens > 0 || context_tokens == 0).then_some(instruction_tokens)
+    let initial_prompt_tokens =
+        (!initial_prompt_values.is_empty()).then(|| initial_prompt_values.iter().sum());
+    let instruction_tokens = initial_prompt_tokens.and_then(|initial_prompt_tokens| {
+        (attributed_tokens > 0 || initial_prompt_tokens == 0).then_some(instruction_tokens)
     });
     SessionSetTotals {
-        sessions: launches
+        runs: launches
             .iter()
             .map(|launch| launch.run_id.as_str())
             .collect::<HashSet<_>>()
             .len() as u64,
-        launches: launches.len() as u64,
+        agent_sessions: launches.len() as u64,
         turns: turns.len() as u64,
-        context_tokens,
-        median_context_tokens: percentile(&context_values, 50),
-        p95_context_tokens: percentile(&context_values, 95),
+        initial_prompt_tokens,
+        initial_prompt_agent_sessions,
+        median_initial_prompt_tokens: percentile(&initial_prompt_values, 50),
+        p95_initial_prompt_tokens: percentile(&initial_prompt_values, 95),
         instruction_tokens,
-        cost_usd: (!cost_values.is_empty()).then(|| cost_values.iter().sum()),
-        cost_turns: cost_values.len() as u64,
+        lifetime_input_tokens: (!lifetime_input_values.is_empty())
+            .then(|| lifetime_input_values.iter().sum()),
+        lifetime_input_agent_sessions: lifetime_input_values.len() as u64,
+        median_lifetime_input_tokens: percentile(&lifetime_input_values, 50),
+        p95_lifetime_input_tokens: percentile(&lifetime_input_values, 95),
+        median_peak_context_percent: percentile_f64(&peak_context_values, 50),
+        p95_peak_context_percent: percentile_f64(&peak_context_values, 95),
+        peak_context_agent_sessions: peak_context_values.len() as u64,
         completed_launches: count_outcomes(launches, "completed"),
         failed_launches: count_outcomes(launches, "failed"),
         interrupted_launches: count_outcomes(launches, "interrupted"),
@@ -531,6 +676,7 @@ fn build_session_lanes(
     launches: &[AgentLaunchRow],
     turns: &[AgentTurnRow],
     assets_by_turn: &HashMap<&str, Vec<&ContextAssetRow>>,
+    usage_by_launch: &HashMap<String, AgentSessionUsage>,
 ) -> Vec<SessionLane> {
     let mut turns_by_launch: HashMap<&str, Vec<&AgentTurnRow>> = HashMap::new();
     for turn in turns {
@@ -550,12 +696,15 @@ fn build_session_lanes(
                 .iter()
                 .filter(|turn| turn.input_op == "steer")
                 .count() as u64;
+            let usage = usage_by_launch.get(&launch.id).copied().unwrap_or_default();
             SessionLane {
                 id: launch.id.clone(),
                 run_id: launch.run_id.clone(),
                 started_at: launch.started_at,
                 outcome: launch.outcome.clone(),
                 steering_turns: Some(steering_turns),
+                lifetime_input_tokens: usage.lifetime_input_tokens,
+                peak_context_percent: usage.peak_context_percent,
                 provider: launch.provider.clone(),
                 model: launch.model.clone(),
                 surface: launch.surface.clone(),
@@ -569,7 +718,8 @@ fn build_session_lanes(
                     .map(|turn| TurnLane {
                         id: turn.id.clone(),
                         ordinal: nonnegative(turn.ordinal),
-                        supplied_context_tokens: (turn.context_coverage == "assembled")
+                        supplied_context_tokens: (turn.input_op == "initial"
+                            && turn.context_coverage == "assembled")
                             .then(|| nonnegative(turn.supplied_context_tokens)),
                         assets: assets_by_turn
                             .get(turn.id.as_str())
@@ -597,14 +747,16 @@ fn lane_asset(launch: &AgentLaunchRow, row: &ContextAssetRow) -> ContextLaneAsse
 #[derive(Debug, Clone, Default)]
 struct FlameAccumulator {
     attributed_tokens: u64,
-    sessions: BTreeSet<String>,
+    runs: BTreeSet<String>,
+    agent_sessions: BTreeSet<String>,
     turns: BTreeSet<String>,
 }
 
 impl FlameAccumulator {
-    fn add(&mut self, run_id: &str, turn_id: &str, attributed_tokens: u64) {
+    fn add(&mut self, run_id: &str, launch_id: &str, turn_id: &str, attributed_tokens: u64) {
         self.attributed_tokens += attributed_tokens;
-        self.sessions.insert(run_id.to_string());
+        self.runs.insert(run_id.to_string());
+        self.agent_sessions.insert(launch_id.to_string());
         self.turns.insert(turn_id.to_string());
     }
 }
@@ -683,9 +835,12 @@ fn build_revisions(
                 content_sha256: row.asset.content_sha256.clone(),
             })
             .or_insert_with(RevisionAccumulator::default);
-        revision
-            .flame
-            .add(&launch.run_id, &turn.id, row.asset.attributed_tokens);
+        revision.flame.add(
+            &launch.run_id,
+            &launch.id,
+            &turn.id,
+            row.asset.attributed_tokens,
+        );
         revision
             .precedence_layers
             .insert(row.asset.included_by.clone());
@@ -760,7 +915,7 @@ fn build_flame(
         let children = built_children.into_iter().map(|(node, _)| node).collect();
         let node = node_from_accumulator(
             FlameNodeDescriptor {
-                id: stable_id(&format!("source\0{}\0{canonical_key}", kind.as_str())),
+                id: source_node_id(kind, &canonical_key),
                 level: ContextFlameLevel::Source,
                 kind: Some(kind),
                 label,
@@ -797,8 +952,10 @@ fn build_flame(
         attributed_tokens: kind_nodes.iter().map(|node| node.attributed_tokens).sum(),
         ..FlameAccumulator::default()
     };
-    root_accumulator.sessions = launches
+    root_accumulator.agent_sessions = turns.iter().map(|turn| turn.launch_id.clone()).collect();
+    root_accumulator.runs = launches
         .iter()
+        .filter(|launch| root_accumulator.agent_sessions.contains(&launch.id))
         .map(|launch| launch.run_id.clone())
         .collect();
     root_accumulator.turns = turns.iter().map(|turn| turn.id.clone()).collect();
@@ -807,7 +964,7 @@ fn build_flame(
             id: "session-set".to_string(),
             level: ContextFlameLevel::SessionSet,
             kind: None,
-            label: "Session set".to_string(),
+            label: "Initial prompts".to_string(),
             source_path: None,
             content_sha256: None,
         },
@@ -829,7 +986,8 @@ fn node_from_accumulator(
         source_path: descriptor.source_path,
         content_sha256: descriptor.content_sha256,
         attributed_tokens: accumulator.attributed_tokens,
-        session_count: accumulator.sessions.len() as u64,
+        run_count: accumulator.runs.len() as u64,
+        agent_session_count: accumulator.agent_sessions.len() as u64,
         turn_count: accumulator.turns.len() as u64,
         children,
     }
@@ -841,7 +999,10 @@ fn merge_accumulators<'a>(
     let mut accumulator = FlameAccumulator::default();
     for child in accumulators {
         accumulator.attributed_tokens += child.attributed_tokens;
-        accumulator.sessions.extend(child.sessions.iter().cloned());
+        accumulator.runs.extend(child.runs.iter().cloned());
+        accumulator
+            .agent_sessions
+            .extend(child.agent_sessions.iter().cloned());
         accumulator.turns.extend(child.turns.iter().cloned());
     }
     accumulator
@@ -899,7 +1060,7 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                 current_source_sha256: current_source_hashes.map(|hashes| hashes.source),
                 precedence_layers: revision.precedence_layers.into_iter().collect(),
                 measurements: SourceMeasurements {
-                    exposed_sessions: revision.flame.sessions.len() as u64,
+                    exposed_sessions: revision.flame.runs.len() as u64,
                     exposed_launches: launch_candidates.len() as u64,
                     exposed_turns: candidates.len() as u64,
                     attributed_tokens: revision.flame.attributed_tokens,
@@ -949,6 +1110,399 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
             .then_with(|| left.label.cmp(&right.label))
     });
     evidence
+}
+
+#[derive(Debug, Clone)]
+struct InstructionSourceDraft {
+    id: String,
+    label: String,
+    kind: ContextAssetKind,
+    source_path: String,
+    impressions: Option<u64>,
+    observed_revision_hashes: BTreeSet<String>,
+    last_seen: Option<i64>,
+    current_revision_node_id: Option<String>,
+    observed_revision_node_ids: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CatalogInstructionSource {
+    label: String,
+    kind: ContextAssetKind,
+    source_path: String,
+}
+
+fn build_instruction_sources(
+    catalog_sources: &[CatalogInstructionSource],
+    aggregate_root: &ContextFlameNode,
+    evidence: &mut Vec<SourceEvidence>,
+) -> Vec<InstructionSourceSummary> {
+    let mut drafts = BTreeMap::new();
+    let mut observed_sources = Vec::new();
+    collect_observed_instruction_sources(aggregate_root, &mut observed_sources);
+
+    for node in observed_sources {
+        let Some(kind) = node.kind else {
+            continue;
+        };
+        let Some(source_path) = node.source_path.clone() else {
+            continue;
+        };
+        let observed_revision_node_ids = node
+            .children
+            .iter()
+            .map(|child| child.id.clone())
+            .collect::<BTreeSet<_>>();
+        let observed_revision_hashes = node
+            .children
+            .iter()
+            .filter_map(|child| child.content_sha256.clone())
+            .collect::<BTreeSet<_>>();
+        drafts.insert(
+            (kind, source_path.clone()),
+            InstructionSourceDraft {
+                id: node.id.clone(),
+                label: node.label.clone(),
+                kind,
+                source_path,
+                impressions: Some(node.agent_session_count),
+                observed_revision_hashes,
+                last_seen: last_seen_for_revisions(&observed_revision_node_ids, evidence),
+                current_revision_node_id: None,
+                observed_revision_node_ids,
+            },
+        );
+    }
+
+    for source in catalog_sources {
+        drafts
+            .entry((source.kind, source.source_path.clone()))
+            .and_modify(|draft| draft.label = source.label.clone())
+            .or_insert_with(|| InstructionSourceDraft {
+                id: source_node_id(source.kind, &source.source_path),
+                label: source.label.clone(),
+                kind: source.kind,
+                source_path: source.source_path.clone(),
+                impressions: (!matches!(source.kind, ContextAssetKind::RepoInstructions))
+                    .then_some(0),
+                observed_revision_hashes: BTreeSet::new(),
+                last_seen: None,
+                current_revision_node_id: None,
+                observed_revision_node_ids: BTreeSet::new(),
+            });
+    }
+
+    for draft in drafts.values_mut() {
+        let Some(hashes) = hash_current_source(draft.kind, &draft.source_path) else {
+            continue;
+        };
+        let current = evidence
+            .iter()
+            .find(|item| {
+                item.kind == draft.kind
+                    && item.content_sha256 == hashes.effective
+                    && (item.source_path.as_deref() == Some(draft.source_path.as_str())
+                        || draft.observed_revision_node_ids.contains(&item.node_id))
+            })
+            .cloned();
+        if let Some(mut current) = current {
+            if current.source_path.as_deref() == Some(draft.source_path.as_str()) {
+                draft.current_revision_node_id = Some(current.node_id);
+                continue;
+            }
+            let node_id = revision_node_id(draft.kind, &draft.source_path, &hashes.effective);
+            current.node_id = node_id.clone();
+            current.label = draft.label.clone();
+            current.source_path = Some(draft.source_path.clone());
+            current.current_content_sha256 = Some(hashes.effective);
+            current.current_source_sha256 = Some(hashes.source);
+            evidence.push(current);
+            draft.current_revision_node_id = Some(node_id);
+            continue;
+        }
+
+        let node_id = revision_node_id(draft.kind, &draft.source_path, &hashes.effective);
+        evidence.push(SourceEvidence {
+            node_id: node_id.clone(),
+            label: draft.label.clone(),
+            kind: draft.kind,
+            source_path: Some(draft.source_path.clone()),
+            content_sha256: hashes.effective.clone(),
+            current_content_sha256: Some(hashes.effective),
+            current_source_sha256: Some(hashes.source),
+            precedence_layers: vec!["current file (not observed in this session set)".to_string()],
+            measurements: empty_source_measurements(),
+            representatives: Vec::new(),
+        });
+        draft.current_revision_node_id = Some(node_id);
+    }
+
+    let mut sources = drafts
+        .into_values()
+        .map(|draft| InstructionSourceSummary {
+            id: draft.id,
+            label: draft.label,
+            kind: draft.kind,
+            source_path: draft.source_path,
+            impressions: draft.impressions,
+            observed_revisions: draft.observed_revision_hashes.len() as u64,
+            last_seen: draft.last_seen,
+            current_revision_node_id: draft.current_revision_node_id,
+        })
+        .collect::<Vec<_>>();
+    sources.sort_by(|left, right| {
+        right
+            .impressions
+            .cmp(&left.impressions)
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    sources
+}
+
+fn empty_source_measurements() -> SourceMeasurements {
+    SourceMeasurements {
+        exposed_sessions: 0,
+        exposed_launches: 0,
+        exposed_turns: 0,
+        attributed_tokens: 0,
+        median_tokens_per_exposed_turn: None,
+        p95_tokens_per_exposed_turn: None,
+        first_seen: None,
+        last_seen: None,
+        completed_launches: 0,
+        failed_launches: 0,
+        steering_turns: Some(0),
+        complete_capture_launches: 0,
+        provider_models: Vec::new(),
+    }
+}
+
+fn collect_observed_instruction_sources<'a>(
+    node: &'a ContextFlameNode,
+    sources: &mut Vec<&'a ContextFlameNode>,
+) {
+    if node.level == ContextFlameLevel::Source && node.kind.is_some_and(is_catalog_instruction_kind)
+    {
+        sources.push(node);
+    }
+    for child in &node.children {
+        collect_observed_instruction_sources(child, sources);
+    }
+}
+
+fn last_seen_for_revisions(
+    revision_ids: &BTreeSet<String>,
+    evidence: &[SourceEvidence],
+) -> Option<i64> {
+    evidence
+        .iter()
+        .filter(|item| revision_ids.contains(&item.node_id))
+        .filter_map(|item| item.measurements.last_seen)
+        .max()
+}
+
+fn instruction_labels_match(kind: ContextAssetKind, observed: &str, catalog: &str) -> bool {
+    let normalize = |label: &str| {
+        label
+            .trim_end_matches(".md")
+            .trim_end_matches(" instructions")
+            .to_ascii_lowercase()
+    };
+    if kind == ContextAssetKind::SurfaceInstructions {
+        return normalize(observed).trim_end_matches(" surface")
+            == normalize(catalog).trim_end_matches(" surface");
+    }
+    normalize(observed) == normalize(catalog)
+}
+
+fn attach_catalog_source_paths(
+    assets: &mut [ContextAssetRow],
+    catalog_sources: &[CatalogInstructionSource],
+) {
+    for row in assets.iter_mut().filter(|row| {
+        row.asset.source_path.is_none() && is_catalog_instruction_kind(row.asset.kind)
+    }) {
+        let mut matches = catalog_sources.iter().filter(|source| {
+            source.kind == row.asset.kind
+                && instruction_labels_match(row.asset.kind, &row.asset.label, &source.label)
+        });
+        let Some(source) = matches.next() else {
+            continue;
+        };
+        if matches.next().is_none() {
+            row.asset.source_path = Some(source.source_path.clone());
+        }
+    }
+}
+
+fn discover_instruction_sources(query: &SessionSetQuery) -> Vec<CatalogInstructionSource> {
+    let mut sources = BTreeMap::new();
+    for repo_path in &query.repo_paths {
+        let repo =
+            fs::canonicalize(repo_path).unwrap_or_else(|_| normalize_path(Path::new(repo_path)));
+        for name in ["AGENTS.md", "CLAUDE.md"] {
+            add_catalog_source(
+                &mut sources,
+                ContextAssetKind::RepoInstructions,
+                name.to_string(),
+                repo.join(name),
+            );
+        }
+
+        let builtins = repo.join("rust/loopflow/src/engine/builtins");
+        add_catalog_source(
+            &mut sources,
+            ContextAssetKind::OperatingInstructions,
+            "LOOPFLOW.md".to_string(),
+            builtins.join("LOOPFLOW.md"),
+        );
+        add_markdown_catalog(
+            &mut sources,
+            ContextAssetKind::SurfaceInstructions,
+            &builtins.join("surfaces"),
+            false,
+            |relative| format!("{} surface", relative.trim_end_matches(".md")),
+        );
+
+        // Keep one effective in-repo file for each skill name. Repo agent skills
+        // are fallback-only, builtins shadow those, and repo loopflow skills win.
+        let mut effective_skills = BTreeMap::new();
+        overlay_skill_sources(
+            &mut effective_skills,
+            collect_markdown_catalog(
+                ContextAssetKind::SkillInstructions,
+                &repo.join(".agents/skills"),
+                true,
+                |relative| {
+                    Path::new(relative)
+                        .parent()
+                        .map(|path| path.to_string_lossy().to_string())
+                        .filter(|label| !label.is_empty())
+                        .unwrap_or_else(|| "SKILL".to_string())
+                },
+            ),
+        );
+        if let Ok(categories) = fs::read_dir(&builtins) {
+            for category in categories.flatten() {
+                let category_name = category.file_name().to_string_lossy().to_string();
+                let skill_root = category.path().join("skill");
+                overlay_skill_sources(
+                    &mut effective_skills,
+                    collect_markdown_catalog(
+                        ContextAssetKind::SkillInstructions,
+                        &skill_root,
+                        false,
+                        |relative| {
+                            let name = relative.trim_end_matches(".md");
+                            if category_name == "gstack" {
+                                format!("gstack/{name}")
+                            } else {
+                                name.to_string()
+                            }
+                        },
+                    ),
+                );
+            }
+        }
+
+        for root in [repo.join(".claude/commands"), repo.join(".lf/skills")] {
+            overlay_skill_sources(
+                &mut effective_skills,
+                collect_markdown_catalog(
+                    ContextAssetKind::SkillInstructions,
+                    &root,
+                    false,
+                    |relative| relative.trim_end_matches(".md").to_string(),
+                ),
+            );
+        }
+        for source in effective_skills.into_values() {
+            sources.insert((source.kind, source.source_path.clone()), source);
+        }
+    }
+    sources.into_values().collect()
+}
+
+fn collect_markdown_catalog(
+    kind: ContextAssetKind,
+    root: &Path,
+    skill_manifests_only: bool,
+    label: impl Fn(&str) -> String,
+) -> Vec<CatalogInstructionSource> {
+    let mut sources = BTreeMap::new();
+    add_markdown_catalog(&mut sources, kind, root, skill_manifests_only, label);
+    sources.into_values().collect()
+}
+
+fn overlay_skill_sources(
+    effective: &mut BTreeMap<String, CatalogInstructionSource>,
+    sources: Vec<CatalogInstructionSource>,
+) {
+    for source in sources {
+        effective.insert(source.label.clone(), source);
+    }
+}
+
+fn add_markdown_catalog(
+    sources: &mut BTreeMap<(ContextAssetKind, String), CatalogInstructionSource>,
+    kind: ContextAssetKind,
+    root: &Path,
+    skill_manifests_only: bool,
+    label: impl Fn(&str) -> String,
+) {
+    for path in markdown_files(root) {
+        if skill_manifests_only && path.file_name().is_none_or(|name| name != "SKILL.md") {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        add_catalog_source(sources, kind, label(&relative.to_string_lossy()), path);
+    }
+}
+
+fn markdown_files(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            paths.extend(markdown_files(&path));
+        } else if file_type.is_file() && path.extension().is_some_and(|extension| extension == "md")
+        {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    paths
+}
+
+fn add_catalog_source(
+    sources: &mut BTreeMap<(ContextAssetKind, String), CatalogInstructionSource>,
+    kind: ContextAssetKind,
+    label: String,
+    path: PathBuf,
+) {
+    if !path.is_file() {
+        return;
+    }
+    let source_path = fs::canonicalize(&path)
+        .unwrap_or_else(|_| normalize_path(&path))
+        .to_string_lossy()
+        .to_string();
+    sources.insert(
+        (kind, source_path.clone()),
+        CatalogInstructionSource {
+            label,
+            kind,
+            source_path,
+        },
+    );
 }
 
 fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<RepresentativeTrace> {
@@ -1092,6 +1646,10 @@ fn revision_node_id(kind: ContextAssetKind, canonical_key: &str, content_sha256:
     ))
 }
 
+fn source_node_id(kind: ContextAssetKind, canonical_key: &str) -> String {
+    stable_id(&format!("source\0{}\0{canonical_key}", kind.as_str()))
+}
+
 fn stable_id(value: &str) -> String {
     format!("context-{}", hex::encode(Sha256::digest(value.as_bytes())))
 }
@@ -1171,6 +1729,17 @@ fn is_instruction_kind(kind: ContextAssetKind) -> bool {
     )
 }
 
+fn is_catalog_instruction_kind(kind: ContextAssetKind) -> bool {
+    matches!(
+        kind,
+        ContextAssetKind::OperatingInstructions
+            | ContextAssetKind::SurfaceInstructions
+            | ContextAssetKind::ProviderInstructions
+            | ContextAssetKind::RepoInstructions
+            | ContextAssetKind::SkillInstructions
+    )
+}
+
 fn kind_label(kind: &str) -> String {
     if kind == ContextAssetKind::Assembly.as_str() {
         return "Unattributed".to_string();
@@ -1195,22 +1764,37 @@ fn percentile(sorted: &[u64], percent: usize) -> Option<u64> {
     Some(sorted[rank - 1])
 }
 
+fn percentile_f64(sorted: &[f64], percent: usize) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let rank = (sorted.len() * percent).div_ceil(100).max(1);
+    Some(sorted[rank - 1])
+}
+
 fn print_human(snapshot: &ContextLabSnapshot) {
-    if snapshot.totals.launches == 0 {
-        println!("No captured agent context in the selected session set.");
+    if snapshot.totals.agent_sessions == 0 {
+        println!("No captured agent context in the selected population.");
         return;
     }
     let totals = &snapshot.totals;
     println!(
-        "SESSION SET  {} sessions  {} launches  {} turns",
-        totals.sessions, totals.launches, totals.turns
+        "POPULATION   {} runs  {} agent sessions  {} turns",
+        totals.runs, totals.agent_sessions, totals.turns
     );
     println!(
-        "CONTEXT      {} tokens / {} assembled turns  median {}  p95 {}",
-        display_optional(totals.context_tokens),
-        snapshot.coverage.assembled_turns,
-        display_optional(totals.median_context_tokens),
-        display_optional(totals.p95_context_tokens),
+        "INITIAL      {} tokens / {} agent sessions  median {}  p95 {}",
+        display_optional(totals.initial_prompt_tokens),
+        totals.initial_prompt_agent_sessions,
+        display_optional(totals.median_initial_prompt_tokens),
+        display_optional(totals.p95_initial_prompt_tokens),
+    );
+    println!(
+        "LIFETIME     {} input tokens / {} agent sessions  peak window median {}  p95 {}",
+        display_optional(totals.lifetime_input_tokens),
+        totals.lifetime_input_agent_sessions,
+        display_percent(totals.median_peak_context_percent),
+        display_percent(totals.p95_peak_context_percent),
     );
     println!(
         "CAPTURE      {} complete  {} partial  {} prompt-only  prompts {}/{}  conversations {}/{}",
@@ -1220,19 +1804,23 @@ fn print_human(snapshot: &ContextLabSnapshot) {
         snapshot.coverage.prompt_artifacts_available,
         totals.turns,
         snapshot.coverage.conversations_available,
-        totals.launches,
+        totals.agent_sessions,
     );
     println!("\nCONTEXT FLAME");
     for node in &snapshot.aggregate_root.children {
         println!(
-            "  {:<24} {:>10} tokens  {:>5} sessions  {:>5} turns",
-            node.label, node.attributed_tokens, node.session_count, node.turn_count
+            "  {:<24} {:>10} tokens  {:>5} impressions  {:>5} turns",
+            node.label, node.attributed_tokens, node.agent_session_count, node.turn_count
         );
     }
 }
 
 fn display_optional(value: Option<u64>) -> String {
     value.map_or_else(|| "missing".to_string(), |value| value.to_string())
+}
+
+fn display_percent(value: Option<f64>) -> String {
+    value.map_or_else(|| "missing".to_string(), |value| format!("{value:.1}%"))
 }
 
 #[cfg(test)]
@@ -1280,10 +1868,8 @@ mod tests {
 
         let snapshot = aggregate(query, launches, turns, assets);
 
-        assert_eq!(snapshot.totals.context_tokens, Some(100));
-        assert_eq!(snapshot.coverage.assembled_turns, 1);
-        assert_eq!(snapshot.totals.cost_usd, Some(0.25));
-        assert_eq!(snapshot.totals.cost_turns, 1);
+        assert_eq!(snapshot.totals.initial_prompt_tokens, Some(100));
+        assert_eq!(snapshot.coverage.attributed_turns, 1);
         assert_eq!(snapshot.coverage.unknown_turns, 1);
         assert_eq!(snapshot.aggregate_root.attributed_tokens, 100);
         assert_eq!(
@@ -1370,7 +1956,8 @@ mod tests {
         assert_eq!(kind.children.len(), 1);
         assert_eq!(kind.children[0].children.len(), 2);
         assert_eq!(kind.children[0].attributed_tokens, 150);
-        assert_eq!(kind.children[0].session_count, 2);
+        assert_eq!(kind.children[0].run_count, 2);
+        assert_eq!(kind.children[0].agent_session_count, 2);
         assert_eq!(kind.children[0].turn_count, 2);
         assert_ne!(
             kind.children[0].children[0].id,
@@ -1461,8 +2048,8 @@ mod tests {
 
         let snapshot = aggregate(selection, launches, turns, Vec::new());
 
-        assert_eq!(snapshot.totals.sessions, 1);
-        assert_eq!(snapshot.totals.launches, 1);
+        assert_eq!(snapshot.totals.runs, 1);
+        assert_eq!(snapshot.totals.agent_sessions, 1);
         assert_eq!(snapshot.totals.turns, 1);
         assert_eq!(snapshot.totals.steered_launches, 1);
         assert_eq!(snapshot.sessions[0].id, "launch-steered");
@@ -1553,10 +2140,10 @@ mod tests {
             assets,
         );
 
-        assert_eq!(snapshot.totals.launches, 1);
+        assert_eq!(snapshot.totals.agent_sessions, 1);
         assert_eq!(snapshot.totals.turns, 2);
         assert_eq!(snapshot.sessions[0].id, "launch-current");
-        assert_eq!(snapshot.aggregate_root.attributed_tokens, 25);
+        assert_eq!(snapshot.aggregate_root.attributed_tokens, 20);
         assert!(snapshot
             .evidence
             .iter()
@@ -1564,7 +2151,7 @@ mod tests {
         assert!(snapshot
             .evidence
             .iter()
-            .any(|evidence| evidence.content_sha256 == "historical-hash"));
+            .all(|evidence| evidence.content_sha256 != "historical-hash"));
     }
 
     #[test]
@@ -1710,6 +2297,270 @@ mod tests {
     }
 
     #[test]
+    fn lifetime_input_and_peak_pressure_are_agent_session_metrics() {
+        let mut codex_initial = turn("codex-1", "launch-codex", 1, "assembled", 10, None);
+        codex_initial.provider_total_input_tokens = Some(100);
+        codex_initial.peak_input_tokens = Some(50);
+        codex_initial.context_window_tokens = Some(100);
+        let mut codex_steer = turn("codex-2", "launch-codex", 2, "provider_total_only", 1, None);
+        codex_steer.provider_total_input_tokens = Some(300);
+        codex_steer.peak_input_tokens = Some(80);
+        codex_steer.context_window_tokens = Some(100);
+
+        let mut claude_initial = turn("claude-1", "launch-claude", 1, "assembled", 20, None);
+        claude_initial.provider_total_input_tokens = Some(100);
+        claude_initial.peak_input_tokens = Some(50);
+        claude_initial.context_window_tokens = Some(200);
+        let mut claude_steer = turn(
+            "claude-2",
+            "launch-claude",
+            2,
+            "provider_total_only",
+            1,
+            None,
+        );
+        claude_steer.provider_total_input_tokens = Some(200);
+        claude_steer.peak_input_tokens = Some(90);
+        claude_steer.context_window_tokens = Some(200);
+
+        let mut claude = launch("launch-claude", "run-b", "completed", "complete", 200);
+        claude.provider = "claude".to_string();
+        let snapshot = aggregate(
+            query(),
+            vec![
+                launch("launch-codex", "run-a", "completed", "complete", 100),
+                claude,
+            ],
+            vec![codex_initial, codex_steer, claude_initial, claude_steer],
+            Vec::new(),
+        );
+
+        assert_eq!(snapshot.totals.initial_prompt_tokens, Some(30));
+        assert_eq!(snapshot.totals.initial_prompt_agent_sessions, 2);
+        assert_eq!(snapshot.totals.lifetime_input_tokens, Some(600));
+        assert_eq!(snapshot.totals.median_lifetime_input_tokens, Some(300));
+        assert_eq!(snapshot.totals.p95_lifetime_input_tokens, Some(300));
+        assert_eq!(snapshot.totals.median_peak_context_percent, Some(45.0));
+        assert_eq!(snapshot.totals.p95_peak_context_percent, Some(80.0));
+        assert_eq!(snapshot.totals.peak_context_agent_sessions, 2);
+    }
+
+    #[test]
+    fn source_impressions_count_each_agent_session_once() {
+        let launch = launch("launch-a", "run-a", "completed", "complete", 100);
+        let turn = turn("turn-a", "launch-a", 1, "assembled", 20, None);
+        let assets = vec![
+            asset(
+                "turn-a",
+                0,
+                ContextAssetKind::SkillInstructions,
+                "refine",
+                Some("refine.md"),
+                "hash",
+                10,
+            ),
+            asset(
+                "turn-a",
+                1,
+                ContextAssetKind::SkillInstructions,
+                "refine",
+                Some("refine.md"),
+                "hash",
+                10,
+            ),
+        ];
+
+        let snapshot = aggregate(query(), vec![launch], vec![turn], assets);
+        let source = &snapshot.aggregate_root.children[0].children[0];
+
+        assert_eq!(source.attributed_tokens, 20);
+        assert_eq!(source.agent_session_count, 1);
+        assert_eq!(source.run_count, 1);
+        assert_eq!(snapshot.coverage.source_observable_agent_sessions, 1);
+    }
+
+    #[test]
+    fn source_catalog_keeps_unseen_skills_editable_at_zero_impressions() {
+        let directory = tempfile::tempdir().unwrap();
+        let skills = directory.path().join(".lf/skills");
+        fs::create_dir_all(&skills).unwrap();
+        let seen_path = skills.join("seen.md");
+        let unseen_path = skills.join("unseen.md");
+        fs::write(&seen_path, "Seen instructions\n").unwrap();
+        fs::write(&unseen_path, "Unseen instructions\n").unwrap();
+
+        let repo = directory.path().canonicalize().unwrap();
+        let mut selection = query();
+        selection.repo_paths = vec![repo.to_string_lossy().to_string()];
+        let mut agent_session = launch("launch-a", "run-a", "completed", "complete", 100);
+        agent_session.repo = repo.to_string_lossy().to_string();
+        agent_session.worktree = agent_session.repo.clone();
+        let seen_hash = hash_current_source(
+            ContextAssetKind::SkillInstructions,
+            seen_path.to_str().unwrap(),
+        )
+        .unwrap()
+        .effective;
+
+        let snapshot = aggregate(
+            selection,
+            vec![agent_session],
+            vec![turn("turn-a", "launch-a", 1, "assembled", 20, None)],
+            vec![asset(
+                "turn-a",
+                0,
+                ContextAssetKind::SkillInstructions,
+                "seen",
+                Some(".lf/skills/seen.md"),
+                &seen_hash,
+                20,
+            )],
+        );
+
+        assert_eq!(snapshot.sources.len(), 2);
+        let seen = snapshot
+            .sources
+            .iter()
+            .find(|source| source.label == "seen")
+            .unwrap();
+        assert_eq!(seen.impressions, Some(1));
+        assert_eq!(seen.observed_revisions, 1);
+        let unseen = snapshot
+            .sources
+            .iter()
+            .find(|source| source.label == "unseen")
+            .unwrap();
+        assert_eq!(unseen.impressions, Some(0));
+        assert_eq!(unseen.observed_revisions, 0);
+        let current_node_id = unseen.current_revision_node_id.as_ref().unwrap();
+        let current = snapshot
+            .evidence
+            .iter()
+            .find(|item| &item.node_id == current_node_id)
+            .unwrap();
+        assert_eq!(
+            current.current_content_sha256.as_deref(),
+            Some(current.content_sha256.as_str())
+        );
+        assert_eq!(current.measurements.exposed_launches, 0);
+        assert!(current.representatives.is_empty());
+    }
+
+    #[test]
+    fn source_catalog_excludes_shadowed_skill_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let builtin = directory
+            .path()
+            .join("rust/loopflow/src/engine/builtins/build/skill/compress.md");
+        let local = directory.path().join(".lf/skills/compress.md");
+        fs::create_dir_all(builtin.parent().unwrap()).unwrap();
+        fs::create_dir_all(local.parent().unwrap()).unwrap();
+        fs::write(&builtin, "Builtin instructions\n").unwrap();
+        fs::write(&local, "Local instructions\n").unwrap();
+
+        let mut selection = query();
+        selection.repo_paths = vec![directory.path().to_string_lossy().to_string()];
+        let snapshot = aggregate(selection, Vec::new(), Vec::new(), Vec::new());
+
+        assert_eq!(snapshot.sources.len(), 1);
+        assert_eq!(snapshot.sources[0].label, "compress");
+        assert_eq!(
+            snapshot.sources[0].source_path,
+            local.canonicalize().unwrap().to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn source_catalog_does_not_report_uncaptured_repo_instructions_as_zero() {
+        let directory = tempfile::tempdir().unwrap();
+        let agents = directory.path().join("AGENTS.md");
+        fs::write(&agents, "Repository instructions\n").unwrap();
+
+        let mut selection = query();
+        selection.repo_paths = vec![directory.path().to_string_lossy().to_string()];
+        let snapshot = aggregate(selection, Vec::new(), Vec::new(), Vec::new());
+
+        assert_eq!(snapshot.sources.len(), 1);
+        assert_eq!(snapshot.sources[0].label, "AGENTS.md");
+        assert_eq!(snapshot.sources[0].impressions, None);
+    }
+
+    #[test]
+    fn source_catalog_joins_builtin_impressions_by_logical_skill_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let builtin = directory
+            .path()
+            .join("rust/loopflow/src/engine/builtins/build/skill/assess.md");
+        fs::create_dir_all(builtin.parent().unwrap()).unwrap();
+        fs::write(&builtin, "Assess instructions\n").unwrap();
+        let current_hash = hash_current_source(
+            ContextAssetKind::SkillInstructions,
+            builtin.to_str().unwrap(),
+        )
+        .unwrap()
+        .effective;
+
+        let repo = directory.path().canonicalize().unwrap();
+        let mut selection = query();
+        selection.repo_paths = vec![repo.to_string_lossy().to_string()];
+        let mut first_agent_session = launch("launch-a", "run-a", "completed", "complete", 100);
+        first_agent_session.repo = repo.to_string_lossy().to_string();
+        first_agent_session.worktree = first_agent_session.repo.clone();
+        let mut second_agent_session = launch("launch-b", "run-b", "completed", "complete", 101);
+        second_agent_session.repo = repo.to_string_lossy().to_string();
+        second_agent_session.worktree = second_agent_session.repo.clone();
+        let snapshot = aggregate(
+            selection,
+            vec![first_agent_session, second_agent_session],
+            vec![
+                turn("turn-a", "launch-a", 1, "assembled", 20, None),
+                turn("turn-b", "launch-b", 1, "assembled", 20, None),
+            ],
+            vec![
+                asset(
+                    "turn-a",
+                    0,
+                    ContextAssetKind::SkillInstructions,
+                    "assess",
+                    None,
+                    &current_hash,
+                    20,
+                ),
+                asset(
+                    "turn-b",
+                    0,
+                    ContextAssetKind::SkillInstructions,
+                    "assess",
+                    builtin.to_str(),
+                    &current_hash,
+                    20,
+                ),
+            ],
+        );
+
+        assert_eq!(snapshot.sources.len(), 1);
+        let source = &snapshot.sources[0];
+        assert_eq!(source.label, "assess");
+        assert_eq!(source.impressions, Some(2));
+        assert_eq!(source.observed_revisions, 1);
+        assert_eq!(snapshot.coverage.source_observable_agent_sessions, 2);
+        let current = snapshot
+            .evidence
+            .iter()
+            .find(|item| Some(&item.node_id) == source.current_revision_node_id.as_ref())
+            .unwrap();
+        assert_eq!(
+            current.source_path.as_deref(),
+            builtin.canonicalize().unwrap().to_str()
+        );
+        assert_eq!(current.measurements.exposed_launches, 2);
+        assert_eq!(
+            current.current_content_sha256.as_deref(),
+            Some(current.content_sha256.as_str())
+        );
+    }
+
+    #[test]
     fn canonical_sources_collapse_task_worktrees_into_the_main_repo() {
         let mut launch = launch("launch-a", "run-a", "completed", "complete", 100);
         launch.repo = "/src/loopflow".to_string();
@@ -1764,10 +2615,16 @@ mod tests {
         ));
         let snapshot: ContextLabSnapshot = serde_json::from_str(fixture).unwrap();
 
-        assert_eq!(snapshot.totals.sessions, 1);
+        assert_eq!(snapshot.totals.runs, 1);
         assert!(snapshot.query.steered_only);
         assert!(snapshot.query.current_revision_only);
         assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
+        assert_eq!(snapshot.sources[0].impressions, Some(1));
+        assert_eq!(snapshot.sources[1].impressions, None);
+        assert_eq!(
+            snapshot.sources[0].current_revision_node_id.as_deref(),
+            Some("context-revision")
+        );
         assert_eq!(
             snapshot.evidence[0].representatives[0].address.turn_id,
             "turn-1"
@@ -1876,6 +2733,9 @@ mod tests {
             task_tokens: tokens,
             supplied_context_tokens: tokens,
             provider_input_tokens: None,
+            provider_total_input_tokens: None,
+            peak_input_tokens: None,
+            context_window_tokens: None,
             provider_output_tokens: None,
             reasoning_tokens: None,
             cache_read_tokens: None,

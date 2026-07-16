@@ -372,6 +372,24 @@ struct RegistryQueryTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
+    @Test("Task handoff refreshes the Wave plan before launch")
+    func planCanSyncProjects() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["pm", "show", "--wave", "goals", "--json", "--sync"])
+            #expect(cwd == "/tmp/repo")
+            return """
+            {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[],"items":[]}
+            """
+        }
+
+        _ = try await query.plan(
+            wave: "goals",
+            objective: "",
+            cwd: "/tmp/repo",
+            sync: true
+        )
+    }
+
     @Test("a failed lf query surfaces as an error")
     func failedQueryThrows() async {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("lf exploded") }

@@ -105,6 +105,16 @@ pub struct SuggestedActionPayload {
 pub struct TurnUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Provider-normalized input processed across the reported agent turn or
+    /// session snapshot. Cached input is included exactly once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_input_tokens: Option<u64>,
+    /// Largest single provider request observed in this usage interval.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_input_tokens: Option<u64>,
+    /// Model context window corresponding to `peak_input_tokens`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -210,6 +220,9 @@ mod tests {
         let usage = TurnUsage {
             input_tokens: 123,
             output_tokens: 45,
+            total_input_tokens: Some(149),
+            peak_input_tokens: Some(80),
+            context_window_tokens: Some(200),
             reasoning_tokens: Some(12),
             cache_read_tokens: Some(17),
             cache_write_tokens: Some(9),

@@ -88,10 +88,11 @@ public struct ContextLabSnapshot: Decodable, Sendable {
     public let totals: SessionSetTotals
     public let aggregateRoot: ContextFlameNode
     public let sessions: [SessionLane]
+    public let sources: [InstructionSourceSummary]
     public let evidence: [SourceEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case query, coverage, totals, sessions, evidence
+        case query, coverage, totals, sessions, sources, evidence
         case aggregateRoot = "aggregate_root"
     }
 }
@@ -101,35 +102,43 @@ public struct ContextCoverageSnapshot: Decodable, Sendable {
     public let partialLaunches: UInt64
     public let promptOnlyLaunches: UInt64
     public let capturingLaunches: UInt64
-    public let assembledTurns: UInt64
+    public let attributedTurns: UInt64
     public let providerTotalOnlyTurns: UInt64
     public let unknownTurns: UInt64
     public let promptArtifactsAvailable: UInt64
     public let conversationsAvailable: UInt64
+    public let sourceObservableAgentSessions: UInt64
 
     enum CodingKeys: String, CodingKey {
         case completeLaunches = "complete_launches"
         case partialLaunches = "partial_launches"
         case promptOnlyLaunches = "prompt_only_launches"
         case capturingLaunches = "capturing_launches"
-        case assembledTurns = "assembled_turns"
+        case attributedTurns = "attributed_turns"
         case providerTotalOnlyTurns = "provider_total_only_turns"
         case unknownTurns = "unknown_turns"
         case promptArtifactsAvailable = "prompt_artifacts_available"
         case conversationsAvailable = "conversations_available"
+        case sourceObservableAgentSessions = "source_observable_agent_sessions"
     }
 }
 
 public struct SessionSetTotals: Decodable, Sendable {
-    public let sessions: UInt64
-    public let launches: UInt64
+    public let runs: UInt64
+    public let agentSessions: UInt64
     public let turns: UInt64
-    public let contextTokens: UInt64?
-    public let medianContextTokens: UInt64?
-    public let p95ContextTokens: UInt64?
+    public let initialPromptTokens: UInt64?
+    public let initialPromptAgentSessions: UInt64
+    public let medianInitialPromptTokens: UInt64?
+    public let p95InitialPromptTokens: UInt64?
     public let instructionTokens: UInt64?
-    public let costUsd: Double?
-    public let costTurns: UInt64
+    public let lifetimeInputTokens: UInt64?
+    public let lifetimeInputAgentSessions: UInt64
+    public let medianLifetimeInputTokens: UInt64?
+    public let p95LifetimeInputTokens: UInt64?
+    public let medianPeakContextPercent: Double?
+    public let p95PeakContextPercent: Double?
+    public let peakContextAgentSessions: UInt64
     public let completedLaunches: UInt64
     public let failedLaunches: UInt64
     public let interruptedLaunches: UInt64
@@ -138,13 +147,20 @@ public struct SessionSetTotals: Decodable, Sendable {
     public let steeredLaunches: UInt64
 
     enum CodingKeys: String, CodingKey {
-        case sessions, launches, turns
-        case contextTokens = "context_tokens"
-        case medianContextTokens = "median_context_tokens"
-        case p95ContextTokens = "p95_context_tokens"
+        case runs, turns
+        case agentSessions = "agent_sessions"
+        case initialPromptTokens = "initial_prompt_tokens"
+        case initialPromptAgentSessions = "initial_prompt_agent_sessions"
+        case medianInitialPromptTokens = "median_initial_prompt_tokens"
+        case p95InitialPromptTokens = "p95_initial_prompt_tokens"
         case instructionTokens = "instruction_tokens"
-        case costUsd = "cost_usd"
-        case costTurns = "cost_turns"
+        case lifetimeInputTokens = "lifetime_input_tokens"
+        case lifetimeInputAgentSessions = "lifetime_input_agent_sessions"
+        case medianLifetimeInputTokens = "median_lifetime_input_tokens"
+        case p95LifetimeInputTokens = "p95_lifetime_input_tokens"
+        case medianPeakContextPercent = "median_peak_context_percent"
+        case p95PeakContextPercent = "p95_peak_context_percent"
+        case peakContextAgentSessions = "peak_context_agent_sessions"
         case completedLaunches = "completed_launches"
         case failedLaunches = "failed_launches"
         case interruptedLaunches = "interrupted_launches"
@@ -167,7 +183,8 @@ public struct ContextFlameNode: Decodable, Identifiable, Sendable {
     public let sourcePath: String?
     public let contentSha256: String?
     public let attributedTokens: UInt64
-    public let sessionCount: UInt64
+    public let runCount: UInt64
+    public let agentSessionCount: UInt64
     public let turnCount: UInt64
     public let children: [ContextFlameNode]
 
@@ -176,7 +193,8 @@ public struct ContextFlameNode: Decodable, Identifiable, Sendable {
         case sourcePath = "source_path"
         case contentSha256 = "content_sha256"
         case attributedTokens = "attributed_tokens"
-        case sessionCount = "session_count"
+        case runCount = "run_count"
+        case agentSessionCount = "agent_session_count"
         case turnCount = "turn_count"
     }
 }
@@ -187,6 +205,8 @@ public struct SessionLane: Decodable, Identifiable, Sendable {
     public let startedAt: Int64
     public let outcome: SessionOutcome
     public let steeringTurns: UInt64?
+    public let lifetimeInputTokens: UInt64?
+    public let peakContextPercent: Double?
     public let provider: String
     public let model: String?
     public let surface: String
@@ -202,6 +222,8 @@ public struct SessionLane: Decodable, Identifiable, Sendable {
         case runId = "run_id"
         case startedAt = "started_at"
         case steeringTurns = "steering_turns"
+        case lifetimeInputTokens = "lifetime_input_tokens"
+        case peakContextPercent = "peak_context_percent"
     }
 }
 
@@ -227,6 +249,25 @@ public struct ContextLaneAsset: Decodable, Sendable {
         case kind, label
         case nodeId = "node_id"
         case attributedTokens = "attributed_tokens"
+    }
+}
+
+public struct InstructionSourceSummary: Decodable, Identifiable, Sendable {
+    public let id: String
+    public let label: String
+    public let kind: ContextAssetKind
+    public let sourcePath: String
+    public let impressions: UInt64?
+    public let observedRevisions: UInt64
+    public let lastSeen: Int64?
+    public let currentRevisionNodeId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, kind, impressions
+        case sourcePath = "source_path"
+        case observedRevisions = "observed_revisions"
+        case lastSeen = "last_seen"
+        case currentRevisionNodeId = "current_revision_node_id"
     }
 }
 

@@ -6,6 +6,25 @@
 
 > “More like research, iterate, edit, write?”
 
+> “Cost is probably not the right way to frame this. % of a max is the ‘real’
+> way to think about it.”
+
+> “We also need to differentiate between tracking tokens in the initial prompt
+> vs total tokens sent per session. In a sense the latter is more important, but
+> the former is just easier to reason about independently.”
+
+> “There’s another view that needs to be paired with this one: the view for
+> editing skills. We don’t care about tokens per se, we care about impressions.
+> We want to sort skills (and other docs like LOOPFLOW.md) by how often agents
+> see them. This is where we want to open the refine session with an agent.”
+
+> “When I click on headless surface or wave pursue the main thing I should see
+> is main's copy of that file. Click button and you end up in an interactive
+> refine session with a task-worker pursuing ‘refine text for X’.”
+
+> “Context Lab can be scoped entirely to a Wave for now so that we know which
+> wave to launch the task against.”
+
 ## What to build
 
 Add **Context Lab** to the Loopflow Mac app: a native research workspace that
@@ -13,9 +32,11 @@ turns a selected set of local Loopflow sessions into comparable statistics,
 aggregate and per-session context flames, exact trace evidence, and a one-click
 handoff into a fresh LLM refinement session for the selected source text.
 
-The session set is the primary object. Instructions emerge as expensive,
-frequent, duplicated, or outcome-correlated slices of real sessions; they are
-not the rows of a separate admin catalog.
+The selected run population is the primary object. Each run can launch several
+agent sessions, and each agent session can contain several turns. Instructions
+emerge as expensive, frequent, duplicated, or outcome-correlated slices of
+initial prompts. The paired Sources worklist projects that evidence onto the
+current editable instruction catalog.
 
 ## Product loop
 
@@ -39,11 +60,12 @@ keeps evidence and intervention separate.
 
 ### 1. Define the session set
 
-Open **Context Lab** from the Mac app. A persistent filter rail defines the
-population:
+Select a Wave in the Mac app and open **Context Lab** from its header. The Wave
+and repo remain fixed while a persistent filter rail defines the rest of that
+Wave's population:
 
-- repo and time window;
-- wave, project/task when attributed, flow, and skill;
+- time window;
+- flow and skill;
 - provider/model and surface;
 - completed, failed, steered, or incomplete capture;
 - current instruction revision or all revisions.
@@ -52,19 +74,34 @@ The default is the current repo over 30 days. A saved research view stores only
 the filter query and selected visualization mode, never copied traces or prompt
 bodies.
 
-The header reports sessions, launches, assembled turns, context tokens, median
-and p95 context per turn, instruction share, cost, outcomes, steering, and
-capture coverage. Every denominator is visible. Missing token or conversation
-capture stays missing rather than becoming zero.
+The header reports runs, agent sessions, turns, initial-prompt load, lifetime
+provider input, peak context-window pressure, instruction share, outcomes,
+steering, and capture coverage. Every denominator is visible. Missing token,
+provider usage, model-window, or conversation capture stays missing rather than
+becoming zero.
+
+These are three different token measurements:
+
+- **Initial prompt load** is the exact system and task text Loopflow supplied at
+  agent-session launch. It is locally tokenized and attributable to sources.
+- **Lifetime input** is the provider-reported input processed across an agent
+  session. Cached input counts because the model consumed it; provider-specific
+  cache reporting must not double-count it.
+- **Peak window pressure** is the largest provider request in an agent session
+  divided by that request's reported model context window. A cumulative session
+  total is never divided by a per-request window.
+
+Cost remains Telemetry's concern. Context Lab asks what occupied the model's
+attention and how close a request came to its working limit.
 
 ### 2. See where context went
 
-The center canvas has two linked modes over the same selected population.
+The center canvas has three linked modes over the same selected population.
 
-**Aggregate flame** is an icicle rooted at the session set:
+**Aggregate flame** is an icicle rooted at the selected initial prompts:
 
 ```text
-session set → context kind → canonical source → content revision
+initial prompts → context kind → canonical source → content revision
 ```
 
 Width is attributed supplied tokens. Color identifies context kind. Opacity
@@ -74,15 +111,47 @@ observation dates and distribution metrics; the flame does not duplicate them.
 Within a kind, nodes sort by supplied-token load so the largest research targets
 stay stable.
 
-**Session lanes** render one horizontal prompt flame per launch or turn. Lanes
-share a token scale; prompt assets retain assembled order. Sorting by total
-context, outcome, steering, time, or selected-source share exposes outliers
-without collapsing them into an average.
+**Agent-session lanes** render one horizontal initial-prompt flame per launch.
+Lanes share a token scale; prompt assets retain assembled order. Each lane also
+shows lifetime input and peak window pressure when the provider reported them.
+Sorting by initial prompt, lifetime input, window pressure, outcome, steering,
+time, or selected-source share exposes outliers without collapsing them into an
+average.
 
 Selecting a flame segment cross-filters the stats, session lanes, and evidence
 rail. Zooming from `skill` to `implement` to one content hash never loses the
 session-set filters. Keyboard navigation and a sortable table expose the same
 nodes for accessibility; the table is not a second product model.
+
+### 2b. Rank instruction sources by impressions
+
+The paired **Sources** mode is an editing worklist rather than a token chart. It
+contains one row per effective, in-repo file-backed instruction source,
+including skills, `LOOPFLOW.md`, and repository instruction files. Current
+sources remain visible at zero impressions. Provider-native instruction files
+whose visibility was not captured remain visible as unavailable, never zero.
+Shadowed skill files are excluded:
+editing a file agents cannot currently receive does not belong in this view.
+
+An impression is one distinct agent session whose captured initial prompt
+contains the source at least once. Repeated renderings in the same prompt count
+once. Observed reach divides impressions by agent sessions with source-level
+instruction evidence, not by all captured prompts, all turns, or outer Loopflow
+runs. This keeps older unattributed capture from looking like proof that agents
+did not see a source.
+
+Sources sort by impressions by default and can also sort by recency or name.
+Reach uses one denominator for the whole population, so sorting it would merely
+repeat the impression order. Each row shows source kind, canonical path, impressions, reach, observed
+revision count, last observation, and whether the current file revision has
+evidence. Token counts stay out of this mode.
+
+Selecting a source chooses its current revision and puts main's current file
+contents in the center of the workspace; the ranked source list and evidence
+remain secondary. It also exposes **Refine in task-worker**. A current revision with zero impressions gets an
+explicit empty evidence population rather than fabricated observations.
+Historical-only sources remain visible but cannot silently seed a refinement
+from stale content.
 
 ### 3. Move from aggregate pressure to exact evidence
 
@@ -101,12 +170,15 @@ selected.
 
 ### 4. Jump into refinement
 
-**Refine source…** is available only when the selected node resolves to one
-canonical, editable source revision. It opens a sheet to choose an existing
-Intelligence Task or explicitly create one. External Task creation remains a
-human-confirmed side effect.
+**Refine in task-worker** is available only when the selected node resolves to
+one canonical, editable source revision and Context Lab is scoped to one Wave.
+The click is the explicit confirmation to create the work. A Wave with one
+Project routes there automatically. A Wave with several Projects asks for one
+**Refinement Project** once and remembers it without changing the evidence
+population. Context Lab refreshes that Wave plan, then creates and starts a new
+Task whose directive begins `Refine text for X`.
 
-The app then opens that Task workspace and launches a fresh LLM session with a
+The app opens that Task workspace directly on its running Agent view with a
 structured seed:
 
 - session-set query and aggregate measurements;
@@ -141,17 +213,18 @@ This is a dense research instrument, not a scroll of telemetry cards.
 
 ```text
 ┌ Filters ──────┬ Session-set stats + aggregate flame / session lanes ─┬ Evidence ─────┐
-│ repo / window │ breadcrumb · scale · sort · coverage                  │ source/revision│
-│ wave / skill  │                                                       │ distributions  │
+│ wave / window │ breadcrumb · scale · sort · coverage                  │ source/revision│
+│ flow / skill  │                                                       │ distributions  │
 │ model/outcome │ selected population stays visible                    │ session examples│
 │ saved views   │                                                       │ Open / Refine   │
 └───────────────┴───────────────────────────────────────────────────────┴────────────────┘
 ```
 
-Context Lab is a new Intelligence window/surface beside Telemetry. Telemetry
-continues to answer machine health, spend, and codebase size. Context Lab
-answers what text shaped a selected body of sessions and provides the route to
-change it.
+Context Lab is progressive disclosure from the stable Wave surface. Wave
+purpose, Projects, and Chat remain the default; the Wave header opens a wider
+evidence workspace already bound to that Wave. Telemetry continues to answer
+machine health, spend, and codebase size. Context Lab answers what text shaped
+that Wave's selected sessions and provides the route to change it.
 
 ## Data structures
 
@@ -178,6 +251,7 @@ struct ContextLabSnapshot: Decodable, Sendable {
     let totals: SessionSetTotals
     let aggregateRoot: ContextFlameNode
     let sessions: [SessionLane]
+    let sources: [InstructionSourceSummary]
     let evidence: [SourceEvidence]
 }
 
@@ -245,8 +319,9 @@ Wire DTOs have no defaults. Rust and Swift fixtures move together.
 
 ## Project shape
 
-This is a measured project inside the existing Intelligence wave, not a single
-CLI task and not a new wave.
+Context Lab itself is product auditability work. Each refinement it launches
+belongs to the Wave being studied and to that Wave's remembered Refinement
+Project.
 
 ### KRs
 
@@ -265,21 +340,24 @@ CLI task and not a new wave.
 1. Replace the public instruction-reader prototype with a session-set aggregate
    query under the existing context reader. Add Rust/Swift fixtures and prove
    totals, flame widths, revision identity, trace addresses, and missing data.
-2. Build the read-only Context Lab window: filters, stats, aggregate flame,
-   session lanes, table parity, and evidence rail over real local sessions.
+2. Open the read-only Context Lab window from a Wave: fixed Wave/repo scope,
+   filters, stats, aggregate flame, session lanes, Sources worklist, and
+   evidence rail over real sessions.
 3. Add explicit exact-trace opening and Context Lab deep links/backlinks.
-4. Add Task selection and fresh refinement-session launch with a structured
-   seed, then return to the existing Task diff/terminal experience.
+4. Add direct Task creation and fresh refinement-session launch with a
+   structured seed, then return to the existing Task workspace.
 5. Add saved research views and revision comparison after natural evidence
    exists for at least two revisions.
 
 ## The demo
 
-In the installed Mac app, select the Loopflow repo over 30 days, open the
-aggregate flame, and select `LOOPFLOW.md`. Sort session lanes by selected-source
-share, open the heaviest complete trace, then click **Refine source…**. Choose a
-real Intelligence Task; a fresh LLM session opens in its Task worktree already
-grounded in the selected hash, measurements, and trace addresses. The agent
+In the installed Mac app, select the Loopflow repo, choose the `product` Wave,
+open **Context Lab** from its header, open **Sources**, and select
+`headless surface`. Main's current `headless.md` fills the center beside its
+impression evidence. Choose a Refinement Project if this is the Wave's first
+handoff, then click **Refine in task-worker**. A fresh Task and LLM session open
+in its worktree already grounded in the selected hash, measurements, and trace
+addresses. The agent
 edits the canonical file, and the app shows the real Task diff with a backlink
 to the unchanged research view. Run an ordinary Loopflow session from that
 worktree and see the new content hash appear as a separate flame node.
@@ -293,12 +371,13 @@ checkpoint.
 
 ### Research truth
 
-- A clean app launch loads a real 30-day session set and reports session,
-  launch, turn, token, cost, outcome, steering, and capture denominators that
+- A clean app launch loads a real 30-day session set and reports run,
+  agent-session, turn, initial-prompt, lifetime-input, peak-window, outcome,
+  steering, and capture denominators that
   reconcile with the existing local ledger readers.
 - Aggregate flame child widths sum to their parent after documented tokenizer
   rounding. Session lanes preserve prompt order and share one visible token
-  scale. Table and flame selection are identical and keyboard accessible.
+  scale. Source rows and flame nodes share exact revision selection.
 - Filters update every stat, flame, lane, and representative session as one
   atomic snapshot. Cancellation prevents a slow prior query from replacing a
   newer selection.
@@ -314,10 +393,11 @@ checkpoint.
 
 ### Refinement truth
 
-- **Refine source…** cannot proceed without one editable canonical source,
-  unchanged starting hash, and a human-selected Task. A stale hash or stale
-  worktree stops with a repair path before an agent edits anything.
-- The new LLM session runs in that Task worktree, can retrieve the selected
+- **Refine in task-worker** cannot proceed without one Wave, one owning Project,
+  one editable canonical source, and an unchanged starting hash. A stale source
+  or changed Wave plan stops with a repair path before an agent edits anything.
+- The click creates and starts a new Task. Its LLM session runs in that Task
+  worktree and can retrieve the selected
   immutable traces, and receives the exact query, measurements, source path,
   starting hash, and evidence addresses. The historical session is never
   resumed or mutated.

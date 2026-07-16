@@ -142,8 +142,14 @@ public struct RegistryQuery: Sendable {
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
     /// rendering off the network; explicit and scheduled syncs refresh SQLite.
-    public func plan(wave: String, objective: String, cwd: String?) async throws -> WavePlan {
-        let stdout = try await run(["pm", "show", "--wave", wave, "--json", "--no-sync"], cwd)
+    public func plan(
+        wave: String,
+        objective: String,
+        cwd: String?,
+        sync: Bool = false
+    ) async throws -> WavePlan {
+        let freshness = sync ? "--sync" : "--no-sync"
+        let stdout = try await run(["pm", "show", "--wave", wave, "--json", freshness], cwd)
         let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
         return WavePlan(
             objective: objective,

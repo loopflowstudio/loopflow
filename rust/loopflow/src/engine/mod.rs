@@ -44,8 +44,8 @@ pub use execution::{
 pub use flow::{
     available_flow_names, expand_flow, find_skill_source_path, load_direction, load_flow,
     load_goal, load_skill, next_action, next_action_with_policy, render_goal, ConcreteOp,
-    ConcreteSkill, ConcreteStep, ConcreteXor, Direction, Flow, FlowAction, Goal,
-    GoalRenderContext, InteractionPolicy, Op, Skill, Step, XorDef, XorPath,
+    ConcreteSkill, ConcreteStep, ConcreteXor, Direction, Flow, FlowAction, Goal, GoalRenderContext,
+    InteractionPolicy, Op, Skill, Step, XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

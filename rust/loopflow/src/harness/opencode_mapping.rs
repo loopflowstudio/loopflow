@@ -137,21 +137,25 @@ fn complete_turn(
 }
 
 fn map_turn_usage(properties: &Value) -> Option<TurnUsage> {
-    properties.get("usage").map(|usage| TurnUsage {
-        input_tokens: usage
+    properties.get("usage").map(|usage| {
+        let input_tokens = usage
             .pointer("/input_tokens")
             .and_then(Value::as_u64)
-            .unwrap_or(0),
-        output_tokens: usage
-            .pointer("/output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        model: properties
-            .get("model")
-            .and_then(Value::as_str)
-            .map(ToString::to_string),
-        cost_usd: usage.get("cost").and_then(Value::as_f64),
-        ..TurnUsage::default()
+            .unwrap_or(0);
+        TurnUsage {
+            input_tokens,
+            output_tokens: usage
+                .pointer("/output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            total_input_tokens: Some(input_tokens),
+            model: properties
+                .get("model")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            cost_usd: usage.get("cost").and_then(Value::as_f64),
+            ..TurnUsage::default()
+        }
     })
 }
 

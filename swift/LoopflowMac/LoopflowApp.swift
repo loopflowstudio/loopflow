@@ -91,14 +91,6 @@ struct LoopflowApp: App {
                 }
                 .keyboardShortcut("1", modifiers: .command)
 
-                Button("Context Lab") {
-                    openWindow(
-                        id: "context-lab",
-                        value: ContextLabRoute.initial(repoPath: portfolioService.repos.first?.path)
-                    )
-                }
-                .keyboardShortcut("2", modifiers: .command)
-
                 if !portfolioService.repos.isEmpty {
                     Menu("Move to Repo") {
                         ForEach(portfolioService.repos) { repo in
@@ -146,14 +138,24 @@ struct LoopflowApp: App {
         .defaultSize(width: 1180, height: 860)
 
         WindowGroup("Context Lab", id: "context-lab", for: ContextLabRoute.self) { $route in
-            ContextLabView(
-                initialRepoPath: portfolioService.repos.first?.path,
-                route: route
-            )
+            if let route, route.isWaveScoped {
+                ContextLabView(route: route)
+                .frame(minWidth: 1120, minHeight: 680)
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(theme.preferredScheme)
                 .environment(\.palette, theme.palette)
+            } else {
+                ContentUnavailableView(
+                    "Open Context Lab from a Wave",
+                    systemImage: "water.waves",
+                    description: Text("Select a Wave, then open Context Lab from its header.")
+                )
+                .frame(minWidth: 720, minHeight: 480)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+            }
         }
+        .windowResizability(.contentMinSize)
         .defaultSize(width: 1420, height: 900)
 
         WindowGroup("Task workspace", id: "task-workspace", for: TaskWorkspaceRoute.self) { $route in

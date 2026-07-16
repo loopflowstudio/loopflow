@@ -19,6 +19,9 @@ pub(super) struct ReaderState {
     /// Vendor session id from the turn's `system` event; the harness drains
     /// it for `--resume` and persistence.
     provider_session_id: Option<String>,
+    /// Largest effective input observed for each model in this turn. Assistant
+    /// events repeat usage snapshots, so retaining maxima also deduplicates them.
+    peak_input_by_model: HashMap<String, u64>,
 }
 
 #[derive(Debug, Default)]
@@ -97,6 +100,54 @@ impl ReaderState {
 
     pub(super) fn take_provider_session_id(&mut self) -> Option<String> {
         self.provider_session_id.take()
+    }
+
+    fn observe_assistant_pressure(&mut self, value: &Value) {
+        let Some(message) = value.get("message") else {
+            return;
+        };
+        let Some(model) = message.get("model").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(usage) = message.get("usage") else {
+            return;
+        };
+        let input = [
+            "input_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        ]
+        .into_iter()
+        .filter_map(|key| usage.get(key).and_then(Value::as_u64))
+        .sum();
+        self.peak_input_by_model
+            .entry(model.to_string())
+            .and_modify(|peak| *peak = (*peak).max(input))
+            .or_insert(input);
+    }
+
+    fn take_peak_pressure(&mut self, event: &Value) -> Option<(u64, u64)> {
+        let peaks = std::mem::take(&mut self.peak_input_by_model);
+        let model_usage = event.get("modelUsage")?.as_object()?;
+        let mut peak: Option<(u64, u64)> = None;
+        for (model, input) in peaks {
+            let Some(window) = model_usage
+                .get(&model)
+                .and_then(|usage| usage.get("contextWindow"))
+                .and_then(Value::as_u64)
+                .filter(|window| *window > 0)
+            else {
+                continue;
+            };
+            let is_higher = peak.is_none_or(|(current_input, current_window)| {
+                u128::from(input) * u128::from(current_window)
+                    > u128::from(current_input) * u128::from(window)
+            });
+            if is_higher {
+                peak = Some((input, window));
+            }
+        }
+        peak
     }
 }
 
@@ -280,7 +331,7 @@ pub(super) fn process_line(
 
         "result" => {
             flush_text_delta_parser(events, state, turn_id);
-            let usage = map_turn_usage(event);
+            let usage = map_turn_usage(event, state);
             let status = if event
                 .get("is_error")
                 .and_then(Value::as_bool)
@@ -304,6 +355,7 @@ pub(super) fn process_line(
         // Claude emits "assistant" events with full message content.
         // These contain tool_use blocks and text blocks.
         "assistant" => {
+            state.observe_assistant_pressure(event);
             process_assistant_message(event, turn_id, events, state);
         }
 
@@ -318,25 +370,36 @@ pub(super) fn process_line(
     false
 }
 
-fn map_turn_usage(event: &Value) -> TurnUsage {
+fn map_turn_usage(event: &Value, state: &mut ReaderState) -> TurnUsage {
+    let input_tokens = event
+        .pointer("/usage/input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_read_tokens = event
+        .pointer("/usage/cache_read_input_tokens")
+        .and_then(Value::as_u64);
+    let cache_write_tokens = event
+        .pointer("/usage/cache_creation_input_tokens")
+        .and_then(Value::as_u64);
+    let (peak_input_tokens, context_window_tokens) = state
+        .take_peak_pressure(event)
+        .map_or((None, None), |(input, window)| (Some(input), Some(window)));
     TurnUsage {
-        input_tokens: event
-            .pointer("/usage/input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+        input_tokens,
         output_tokens: event
             .pointer("/usage/output_tokens")
             .and_then(Value::as_u64)
             .unwrap_or(0),
+        total_input_tokens: Some(
+            input_tokens + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0),
+        ),
+        peak_input_tokens,
+        context_window_tokens,
         reasoning_tokens: event
             .pointer("/usage/reasoning_tokens")
             .and_then(Value::as_u64),
-        cache_read_tokens: event
-            .pointer("/usage/cache_read_input_tokens")
-            .and_then(Value::as_u64),
-        cache_write_tokens: event
-            .pointer("/usage/cache_creation_input_tokens")
-            .and_then(Value::as_u64),
+        cache_read_tokens,
+        cache_write_tokens,
         model: event
             .get("model")
             .and_then(Value::as_str)
@@ -836,6 +899,7 @@ mod tests {
             ConversationEvent::TurnUsage { turn_id, usage } => {
                 assert_eq!(turn_id, "turn_42");
                 assert_eq!(usage.input_tokens, 321);
+                assert_eq!(usage.total_input_tokens, Some(337));
                 assert_eq!(usage.output_tokens, 123);
                 assert_eq!(usage.reasoning_tokens, Some(9));
                 assert_eq!(usage.cache_read_tokens, Some(11));
@@ -845,6 +909,25 @@ mod tests {
             }
             other => panic!("expected TurnUsage, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn result_pairs_peak_assistant_input_with_its_model_window() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut state = ReaderState::default();
+        let assistant = r#"{"type":"assistant","message":{"model":"claude-sonnet-4","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":49,"cache_creation_input_tokens":0}}}"#;
+        let result = r#"{"type":"result","is_error":false,"usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":98,"cache_creation_input_tokens":4},"modelUsage":{"claude-sonnet-4":{"contextWindow":200}}}"#;
+
+        assert!(!process_line(assistant, "turn_42", &tx, &mut state));
+        assert!(process_line(result, "turn_42", &tx, &mut state));
+        let _completed = rx.try_recv().expect("completion event");
+        let usage_event = rx.try_recv().expect("usage event");
+        let ConversationEvent::TurnUsage { usage, .. } = usage_event else {
+            panic!("expected usage event");
+        };
+        assert_eq!(usage.total_input_tokens, Some(104));
+        assert_eq!(usage.peak_input_tokens, Some(50));
+        assert_eq!(usage.context_window_tokens, Some(200));
     }
 
     #[test]

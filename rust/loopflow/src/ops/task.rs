@@ -1799,7 +1799,7 @@ fn observe_required_checks(
     now: time::OffsetDateTime,
 ) -> Option<CiObservation> {
     let head_sha = head_sha?.to_string();
-    let checks = crate::ops::pr::required_check_state(worktree, branch)?;
+    let checks = crate::ops::pr::merge_gate_state(worktree, branch)?;
     let state = if checks.failing {
         CiState::Failing
     } else if checks.pending {
@@ -1810,8 +1810,10 @@ fn observe_required_checks(
     let mut observation = CiObservation {
         head_sha,
         state,
+        // Seed with the actionable leaf failures, never the required aggregate:
+        // a ci-fix turn needs the broken job, not the roll-up.
         failing_checks: checks
-            .failing_checks
+            .failing_leaves
             .into_iter()
             .map(|check| CiCheck {
                 name: check.name,

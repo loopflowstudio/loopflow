@@ -407,37 +407,101 @@ fn reconcile_rank(pr: &GhPr) -> u8 {
 
 /// Read the required-check state for `branch`'s open PR from GitHub.
 ///
-/// Uses `gh pr checks --required --json` — the authoritative view of the
-/// branch-protection checks that gate the merge. `gh pr checks` exits non-zero
+/// Read the merge-gate state for `branch`'s head. `gh pr checks` exits non-zero
 /// while checks are pending or failing, so the exit status is ignored: what
 /// matters is whether stdout parses. Returns `None` when gh is unavailable, the
 /// PR has no required checks configured, or the output cannot be read — CI state
 /// is simply unknown, never a hard error on the reconcile path.
-pub(crate) fn required_check_state(repo: &Path, branch: &str) -> Option<RequiredChecks> {
+///
+/// Branch protection frequently requires only an aggregate roll-up check (e.g.
+/// `tests-result`) whose own job link points at the aggregation step, not the
+/// leaf job that actually failed. So the gate state (failing/pending/passing) is
+/// read from `--required` — the authoritative merge gate — while the failing
+/// checks handed to a ci-fix turn are the actionable *leaves* read from the full
+/// check set. Seeding a ci-fix turn with the aggregate gives the skill nothing
+/// to act on; seeding the leaves points it at the broken job.
+pub(crate) fn merge_gate_state(repo: &Path, branch: &str) -> Option<MergeGateReading> {
     if !gh_available() {
         return None;
     }
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("checks")
-        .arg(branch)
-        .arg("--required")
+    // Empty stdout with a failure exit means "no required checks" (or an error we
+    // treat as unknown), not "all green" — distinguish by whether JSON parses.
+    let required = read_check_set(repo, branch, true)?;
+    if required.is_empty() {
+        return None;
+    }
+    let full = read_check_set(repo, branch, false).unwrap_or_default();
+    Some(MergeGateReading::from_checks(required, full))
+}
+
+fn read_check_set(repo: &Path, branch: &str, required: bool) -> Option<Vec<GhCheck>> {
+    let mut command = Command::new("gh");
+    command.arg("pr").arg("checks").arg(branch);
+    if required {
+        command.arg("--required");
+    }
+    let output = command
         .arg("--json")
         .arg("name,bucket,link")
         .current_dir(repo)
         .output()
         .ok()?;
-    // Empty stdout with a failure exit means "no required checks" (or an error we
-    // treat as unknown), not "all green" — distinguish by whether JSON parses.
-    let checks: Vec<GhCheck> = serde_json::from_slice(&output.stdout).ok()?;
-    if checks.is_empty() {
-        return None;
-    }
-    Some(RequiredChecks::from_checks(checks))
+    serde_json::from_slice(&output.stdout).ok()
 }
 
-/// The classified required-check reading for one head: overall state plus the
-/// checks that are not passing, named for the `ci-fix` skill.
+/// The merge-gate reading for one head: whether the required checks block the
+/// merge, plus the actionable *leaf* checks to seed a ci-fix turn with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeGateReading {
+    pub failing: bool,
+    pub pending: bool,
+    pub failing_leaves: Vec<GhFailingCheck>,
+}
+
+impl MergeGateReading {
+    fn from_checks(required: Vec<GhCheck>, full: Vec<GhCheck>) -> Self {
+        let gate = RequiredChecks::from_checks(required);
+        let required_names: std::collections::HashSet<&str> = gate
+            .failing_checks
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        let full_failing: Vec<GhFailingCheck> = full
+            .into_iter()
+            .filter(|c| matches!(c.bucket.as_str(), "fail" | "cancel"))
+            .map(|c| GhFailingCheck {
+                name: c.name,
+                url: c.link.filter(|link| !link.is_empty()),
+            })
+            .collect();
+        // Drop the required aggregates when at least one non-required leaf also
+        // failed — the aggregate's link is the roll-up, not the broken job. When
+        // the only failures *are* the required checks, they are genuine leaves
+        // (a repo that requires a leaf directly); keep them so the seed is never
+        // empty on a real gate failure. When the full read gave nothing, fall
+        // back to the required failing checks.
+        let leaves: Vec<GhFailingCheck> = full_failing
+            .iter()
+            .filter(|c| !required_names.contains(c.name.as_str()))
+            .cloned()
+            .collect();
+        let failing_leaves = if !leaves.is_empty() {
+            leaves
+        } else if !full_failing.is_empty() {
+            full_failing
+        } else {
+            gate.failing_checks.clone()
+        };
+        Self {
+            failing: gate.failing,
+            pending: gate.pending,
+            failing_leaves,
+        }
+    }
+}
+
+/// The classified required-check reading for one head: overall gate state plus
+/// the required checks that are not passing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequiredChecks {
     pub failing: bool,
@@ -975,8 +1039,8 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhCheck, GhPr, PrCopy,
-        RequiredChecks,
+        parse_generated_pr_copy, pr_number_from_url, select_reconcile_pr, GhCheck, GhPr,
+        MergeGateReading, PrCopy, RequiredChecks,
     };
 
     fn gh_pr(number: u64, state: &str, is_draft: bool) -> GhPr {
@@ -1066,6 +1130,69 @@ mod tests {
             RequiredChecks::from_checks(vec![check("build", "pass"), check("lint", "skipping")]);
         assert!(!checks.failing);
         assert!(!checks.pending);
+    }
+
+    #[test]
+    fn merge_gate_seeds_actionable_leaves_not_the_required_aggregate() {
+        // Branch protection requires only the `tests-result` roll-up; the real
+        // failure is the `rust-test` leaf. The gate is failing, and the ci-fix
+        // seed names the leaf with the leaf's own job link — never the aggregate.
+        let required = vec![check("tests-result", "fail")];
+        let full = vec![
+            check("tests-result", "fail"),
+            check("rust-test", "fail"),
+            check("python-test", "pass"),
+        ];
+        let reading = MergeGateReading::from_checks(required, full);
+        assert!(reading.failing);
+        let names: Vec<&str> = reading
+            .failing_leaves
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["rust-test"]);
+        assert!(
+            !names.contains(&"tests-result"),
+            "the aggregate never seeds a ci-fix turn"
+        );
+        assert_eq!(
+            reading.failing_leaves[0].url.as_deref(),
+            Some("https://ci/rust-test"),
+            "the seed carries the leaf's own job link, not the roll-up's"
+        );
+    }
+
+    #[test]
+    fn merge_gate_keeps_a_required_leaf_when_it_is_the_only_failure() {
+        // A repo that requires the leaf directly (no aggregate): the required
+        // check *is* the actionable leaf, so it stays in the seed.
+        let required = vec![check("rust-test", "fail")];
+        let full = vec![check("rust-test", "fail"), check("lint", "pass")];
+        let reading = MergeGateReading::from_checks(required, full);
+        assert!(reading.failing);
+        let names: Vec<&str> = reading
+            .failing_leaves
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["rust-test"]);
+    }
+
+    #[test]
+    fn merge_gate_falls_back_to_required_when_the_full_read_is_empty() {
+        // gh gave no full check set (only the `--required` read succeeded): the
+        // seed degrades to the required failing checks rather than emptying out.
+        let required = vec![check("tests-result", "fail")];
+        let reading = MergeGateReading::from_checks(required, vec![]);
+        assert!(reading.failing);
+        assert_eq!(
+            reading
+                .failing_leaves
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["tests-result"]
+        );
     }
 
     #[test]

@@ -146,4 +146,21 @@ wake.
     pre-existing `ci_fix_seed` and `ci_fix_restart_bar` tests cover slices 1–2c.
   - **Pre-existing fix:** `task/runner.rs` test `TaskPr` initializer was missing
     `parent_pr_id` (surfaced by the rebase); fixed.
+- **Slice 4 shipped** (reconcile of #967): the wake now seeds **actionable leaf
+  checks**, never the required aggregate. Verified against live CI: this repo's
+  *only* required check is the `tests-result` roll-up, so PR1's `gh pr checks
+  --required` read carried only `tests-result` — an aggregate whose job link
+  points at the aggregation step, not the broken job. The design assumed
+  `--required` returned leaves ("aggregate and leaves are separate entries");
+  live CI proved the opposite. Fix: `ops/pr.rs::merge_gate_state` reads
+  `--required` for the *gate* state (failing/pending/passing — the merge gate is
+  still authoritative) and the full check set for the *leaves*; `failing_leaves`
+  drops the required aggregates when a non-required leaf also failed, keeps a
+  required check that is itself the only failing leaf, and degrades to the
+  required checks if the full read is empty. `observe_required_checks` seeds
+  `CiObservation.failing_checks` from the leaves. This makes the design's
+  done-when true by construction (leaf names, never `tests-result`) and tightens
+  the `(head, failure_set)` dedup key onto the real failing jobs. Tested
+  (`merge_gate_seeds_actionable_leaves_not_the_required_aggregate` +
+  required-leaf + empty-full-read fallbacks).
 </content>

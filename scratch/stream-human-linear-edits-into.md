@@ -207,20 +207,38 @@ local reconciliation loop meets the 5s budget).
 
 ## PR sequence (serial, one Task)
 
-1. **`linear-read`** *(this PR)* — Linear read capability (`viewer_id`,
-   `observe_issue` → `IssueObservation`/`IssueComment`) and the
+1. **`linear-read`** ✅ *(commit a983f8e63)* — Linear read capability
+   (`viewer_id`, `observe_issue` → `IssueObservation`/`IssueComment`) and the
    `ChildCommandSource::Linear` provenance variant across both wire mirrors
    (Rust + Swift). Unit-tested against the mock GraphQL server; the variant's
-   wire shape is pinned. Pure capability + foundation — no wiring yet, nothing
-   observes.
-2. **`linear-observe-store`** — the two cursor tables + store verbs, the
-   persist-only ingest path (reuses `create_child_command_with_directive` /
-   `create_child_command`, never launches), `reconcile_linear_observation` with
-   exactly-once + feedback-loop skip + baseline, unit tests. The writer half;
-   persisted rows are already drained by the existing runner startup path.
-3. **`linear-observe-live`** — live-runner observer interval (≤5s) + backoff;
-   `lf task status` degraded/last-observation fields. Integration test: live
-   steer < 5s, FIFO follow-ups, degraded + recovery.
+   wire shape is pinned.
+2. **`linear-observe-store`** ✅ *(commit 1f92e8a2d)* — migration 0.11.014 (the
+   two cursor tables) + `Store::apply_linear_observation` (atomic, exactly-once)
+   + `mark_task_linear_degraded` + `ops::linear_observe::reconcile_linear_observation`
+   (baseline, monotonic-revision guard, feedback-loop skip, versioned directive).
+   Planner unit tests + an end-to-end store integration test
+   (`tests/linear_observe_tests.rs`).
+3. **`linear-observe-live`** ⏭ *next* — wire the observer into the live task
+   runner's `tokio::select!` loop: fetch `viewer_id` once, `observe_issue` on a
+   ≤5s interval with backoff, call `reconcile_linear_observation`, and on failure
+   call `mark_task_linear_degraded` (never kill the task). Its own 200ms command
+   poll then delivers what it ingested (live steer / FIFO). Surface
+   `last_success_at` / `degraded_reason` in `lf task status`. Integration test:
+   live steer < 5s, FIFO follow-ups, degraded + recovery.
 4. **`linear-observe-resident`** — wave-resident sweep over resumable sessions,
    resume catch-up backstop, Mac Active Sessions surfacing the durable state.
    Restart-exactly-once test.
+
+## Landmarks for the next slice
+
+- The writer is done and drain-compatible: a persisted directive/follow-up is
+  delivered by the runner's existing **startup drain** (`runner.rs:128`) and
+  **200ms poll** (`runner.rs:188`). PR 3 only needs to *produce* observations on
+  time; delivery already works.
+- The runner loop to extend is `run_task_session_inner` (`task/runner.rs:51`);
+  add a `tokio::time::interval` arm alongside `command_poll`. Build a
+  `LinearClient` from `resolve_pm_token` (`ops/pm.rs:592`) + `viewer_id()` once
+  at startup; guard against no-PM-token by degrading, not failing.
+- Baseline currently = first observation. PR 3/4 should baseline at (or right
+  after) session creation so the "comments after creation" cutoff is exact; until
+  then a delayed first poll treats pre-poll comments as already-seen.

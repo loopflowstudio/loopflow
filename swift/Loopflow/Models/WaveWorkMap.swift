@@ -70,6 +70,40 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 }
 
+/// The observed state of a Session's current body, distinct from durable intent.
+/// `status` records intent; `BodyObservation` records what the current body is
+/// observed doing. Working versus Stalled is exactly the difference between a
+/// live body that advanced recently and one silent past its deadline.
+public enum BodyCategory: String, Decodable, Sendable, Hashable {
+    case working, stalled, recovering
+    case needsInput = "needs_input"
+    case stopped, failed, terminal, unobservable
+}
+
+public enum BodyOwner: String, Decodable, Sendable, Hashable {
+    case session, loopflow, human, nobody, unknown
+}
+
+public enum BodyControl: String, Decodable, Sendable, Hashable {
+    case steer, interrupt, stop, extend, resume, decide, abandon
+}
+
+public struct BodyObservation: Decodable, Sendable, Hashable {
+    public let category: BodyCategory
+    public let reason: String
+    public let owner: BodyOwner
+    public let controls: [BodyControl]
+    public let progressAgeSeconds: UInt64?
+    public let deadlineInSeconds: Int64?
+    public let step: String?
+
+    enum CodingKeys: String, CodingKey {
+        case category, reason, owner, controls, step
+        case progressAgeSeconds = "progress_age_secs"
+        case deadlineInSeconds = "deadline_in_secs"
+    }
+}
+
 public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let sessionId: String
     public let status: ProjectSessionStatus
@@ -79,9 +113,10 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let pendingObservations: UInt32
     public let provider: String
     public let processAlive: Bool
+    public let observation: BodyObservation
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, iteration, provider
+        case status, reason, iteration, provider, observation
         case sessionId = "session_id"
         case statusAt = "status_at"
         case pendingObservations = "pending_observations"
@@ -97,9 +132,10 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let statusAt: String
     public let provider: String
     public let processAlive: Bool
+    public let observation: BodyObservation
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, provider
+        case status, reason, provider, observation
         case sessionId = "session_id"
         case projectSessionId = "project_session_id"
         case statusAt = "status_at"

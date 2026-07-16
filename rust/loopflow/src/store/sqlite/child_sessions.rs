@@ -1695,6 +1695,23 @@ impl SqliteStore {
         .map_err(StoreError::from)
     }
 
+    /// When this Task Session last appended a durable event. This is the progress
+    /// signal the body observation reads: a live body that has written nothing to
+    /// its event log past the stall deadline is stalled, not working. `None` means
+    /// no events yet (the status change is the only progress the caller can use).
+    pub fn latest_task_event_at(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<OffsetDateTime>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let seconds: Option<i64> = conn.query_row(
+            "SELECT MAX(created_at) FROM task_events WHERE session_id = ?1",
+            params![session_id.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(seconds.map(crate::store::rows::unix_to_datetime))
+    }
+
     // Project Sessions are durable KR-pursuit children. They share the same
     // process/receipt shape as Task Sessions but deliberately own no worktree.
 
@@ -2249,6 +2266,21 @@ impl SqliteStore {
             events.push(row?);
         }
         Ok(events)
+    }
+
+    /// When this Project Session last appended a durable event. The progress
+    /// signal for the Project body observation, mirroring [`Self::latest_task_event_at`].
+    pub fn latest_project_event_at(
+        &self,
+        session_id: &ProjectSessionId,
+    ) -> StoreResult<Option<OffsetDateTime>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let seconds: Option<i64> = conn.query_row(
+            "SELECT MAX(created_at) FROM project_events WHERE session_id = ?1",
+            params![session_id.as_str()],
+            |row| row.get(0),
+        )?;
+        Ok(seconds.map(crate::store::rows::unix_to_datetime))
     }
 
     pub fn pending_observations(

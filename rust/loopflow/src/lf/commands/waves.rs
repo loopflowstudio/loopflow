@@ -17,7 +17,12 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::child_session::{ChildRef, DirectiveKind, ObservationRecipient};
+use crate::child_session::{
+    observe, BodyEvidence, BodyObservation, ChildRef, DirectiveKind, ObservationRecipient,
+    DEFAULT_STALL_AFTER,
+};
+#[cfg(test)]
+use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
@@ -230,6 +235,9 @@ pub struct ProjectRuntimeSnapshot {
     pub pending_observations: u32,
     pub provider: String,
     pub process_alive: bool,
+    /// The observed state of this Project's current body: durable intent
+    /// (`status`) and body observation are separate evidence, never one string.
+    pub observation: BodyObservation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,6 +249,9 @@ pub struct TaskRuntimeSnapshot {
     pub status_at: String,
     pub provider: String,
     pub process_alive: bool,
+    /// The observed state of this Task's current body, derived from durable
+    /// intent, body liveness, and how long since its last durable event.
+    pub observation: BodyObservation,
 }
 
 /// The compact Task attention signal shared by terminal and app surfaces. The
@@ -991,13 +1002,44 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     })
 }
 
-fn snapshot_task_runtime(task: &TaskSession, liveness: &TmuxLiveness) -> TaskRuntimeSnapshot {
+/// Seconds of no durable progress, measured from the freshest of the last event
+/// and the last status change. Clamped at zero so clock skew never reads as
+/// negative age. This is the signal that separates a working body from a stalled
+/// one (G3): a live body silent past its deadline is stalled, not working.
+fn progress_age(
+    latest_event_at: Option<time::OffsetDateTime>,
+    status_at: time::OffsetDateTime,
+    now: time::OffsetDateTime,
+) -> std::time::Duration {
+    let progress_at = latest_event_at.map_or(status_at, |event_at| event_at.max(status_at));
+    let seconds = (now - progress_at).whole_seconds().max(0);
+    std::time::Duration::from_secs(seconds as u64)
+}
+
+async fn snapshot_task_runtime(
+    store: &SharedStore,
+    task: &TaskSession,
+    liveness: &TmuxLiveness,
+    now: time::OffsetDateTime,
+) -> Result<TaskRuntimeSnapshot> {
     let process_alive = task.status.is_process_active()
         && task
             .latest_process
             .as_ref()
             .is_some_and(|process| liveness.is_alive(&process.tmux_name));
-    TaskRuntimeSnapshot {
+    let latest_event_at = store
+        .latest_task_event_at(&task.id)
+        .await
+        .map_err(|err| anyhow!("failed to read Task event log: {err}"))?;
+    let evidence = BodyEvidence {
+        intent: task.status.body_intent(),
+        observable: liveness.liveness() == Liveness::Observable,
+        process_alive,
+        progress_age: progress_age(latest_event_at, task.status_at, now),
+        step: Some(task.lifecycle_phase.as_str().to_string()),
+        reason: task.status_reason.clone(),
+    };
+    Ok(TaskRuntimeSnapshot {
         session_id: task.id.to_string(),
         project_session_id: task.project_session_id.to_string(),
         status: task.status,
@@ -1005,13 +1047,15 @@ fn snapshot_task_runtime(task: &TaskSession, liveness: &TmuxLiveness) -> TaskRun
         status_at: format_time(task.status_at).unwrap_or_default(),
         provider: task.provider.clone(),
         process_alive,
-    }
+        observation: observe(&evidence, DEFAULT_STALL_AFTER),
+    })
 }
 
 async fn snapshot_project_runtime(
     store: &SharedStore,
     project: &ProjectSession,
     liveness: &TmuxLiveness,
+    now: time::OffsetDateTime,
 ) -> Result<ProjectRuntimeSnapshot> {
     let process_alive = project.status.is_process_active()
         && project
@@ -1025,6 +1069,18 @@ async fn snapshot_project_runtime(
         .await
         .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
         .len() as u32;
+    let latest_event_at = store
+        .latest_project_event_at(&project.id)
+        .await
+        .map_err(|err| anyhow!("failed to read Project event log: {err}"))?;
+    let evidence = BodyEvidence {
+        intent: project.status.body_intent(),
+        observable: liveness.liveness() == Liveness::Observable,
+        process_alive,
+        progress_age: progress_age(latest_event_at, project.status_at, now),
+        step: Some(format!("iteration {}", project.iteration)),
+        reason: project.status_reason.clone(),
+    };
     Ok(ProjectRuntimeSnapshot {
         session_id: project.id.to_string(),
         status: project.status,
@@ -1034,6 +1090,7 @@ async fn snapshot_project_runtime(
         pending_observations,
         provider: project.provider.clone(),
         process_alive,
+        observation: observe(&evidence, DEFAULT_STALL_AFTER),
     })
 }
 
@@ -1100,7 +1157,7 @@ async fn snapshot_projects(
         details[index].next_move =
             next_move_for_project(project_session.status, &project_session.status_reason);
         details[index].runtime =
-            Some(snapshot_project_runtime(store, project_session, liveness).await?);
+            Some(snapshot_project_runtime(store, project_session, liveness, now()).await?);
         details[index].directive = current_directive(
             store,
             ChildRef::Project(project_session.id.clone()),
@@ -1190,7 +1247,11 @@ async fn snapshot_task_detail(
         None => Vec::new(),
     };
     let active = prs.iter().find(|pr| pr.is_active());
-    let runtime = session.map(|session| snapshot_task_runtime(session, liveness));
+    let observed_at = now();
+    let runtime = match session {
+        Some(session) => Some(snapshot_task_runtime(store, session, liveness, observed_at).await?),
+        None => None,
+    };
     let reference = task_reference(&item, session, active, &prs);
     let next_move = match session {
         Some(session) => next_move_for_task(
@@ -1208,7 +1269,6 @@ async fn snapshot_task_detail(
             reason: "Task is ready to start".to_string(),
         },
     };
-    let observed_at = now();
     let process = task_process_evidence(session, runtime.as_ref(), liveness);
     let local_progress = task_local_progress(session, active, &process);
     let attention = derive_task_attention(
@@ -2847,6 +2907,29 @@ mod tests {
             TaskAttentionLevel::Unknown
         );
 
+        // The leased body observation now rides the runtime snapshot on the wire,
+        // separate from the durable attention level: a live body advancing reads
+        // Working; a live body wedged past its progress deadline reads Stalled and
+        // hands ownership to Loopflow with Extend/Interrupt/Stop.
+        assert_eq!(
+            tasks["live_advancing"]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .observation
+                .category,
+            BodyCategory::Working
+        );
+        let stalled = &tasks["live_human_wait"]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .observation;
+        assert_eq!(stalled.category, BodyCategory::Stalled);
+        assert_eq!(stalled.owner, BodyOwner::Loopflow);
+        assert!(stalled.controls.contains(&BodyControl::Extend));
+        assert!(stalled.deadline_in_secs.unwrap() < 0);
+
         let dirty_row = task_roadmap_row(&tasks["dead_dirty"], now());
         assert_eq!(dirty_row.attention, Some(TaskAttentionLevel::Red));
         assert_eq!(
@@ -2861,6 +2944,17 @@ mod tests {
         status_at: String,
         process_alive: bool,
     ) -> TaskRuntimeSnapshot {
+        let observation = observe(
+            &BodyEvidence {
+                intent: status.body_intent(),
+                observable: true,
+                process_alive,
+                progress_age: std::time::Duration::from_secs(60),
+                step: Some("iterate".to_string()),
+                reason: reason.to_string(),
+            },
+            DEFAULT_STALL_AFTER,
+        );
         TaskRuntimeSnapshot {
             session_id: format!("ts_{}", status.as_str()),
             project_session_id: "ps_1".to_string(),
@@ -2869,6 +2963,7 @@ mod tests {
             status_at,
             provider: "claude".to_string(),
             process_alive,
+            observation,
         }
     }
 
@@ -3025,6 +3120,17 @@ mod tests {
         status_at: String,
         process_alive: bool,
     ) -> ProjectRuntimeSnapshot {
+        let observation = observe(
+            &BodyEvidence {
+                intent: status.body_intent(),
+                observable: true,
+                process_alive,
+                progress_age: std::time::Duration::from_secs(60),
+                step: Some("iteration 1".to_string()),
+                reason: "r".to_string(),
+            },
+            DEFAULT_STALL_AFTER,
+        );
         ProjectRuntimeSnapshot {
             session_id: "ps_1".to_string(),
             status,
@@ -3034,6 +3140,7 @@ mod tests {
             pending_observations: 0,
             provider: "codex".to_string(),
             process_alive,
+            observation,
         }
     }
 

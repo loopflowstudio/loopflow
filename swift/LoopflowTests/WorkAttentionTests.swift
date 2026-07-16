@@ -100,7 +100,7 @@ struct WorkAttentionTests {
             {
               "task": {"id":"\(identifier)","identifier":"\(identifier)","name":"n","description":"","rank":1,"completed":false,"assignee":null},
               "reference": {"issue_url":null,"workspace":null},
-              "runtime": {"session_id":"ts_\(identifier)","project_session_id":"ps_1","status":"running","reason":"working","status_at":"\(statusAt)","provider":"claude","process_alive":true},
+              "runtime": {"session_id":"ts_\(identifier)","project_session_id":"ps_1","status":"running","reason":"working","status_at":"\(statusAt)","provider":"claude","process_alive":true,"observation":{"category":"working","reason":"working","owner":"session","controls":["steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
               "next_move": {"owner":"task","reason":"working"},
               "attention": {"level":"green","reason":"working","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":60,"next_owner":"task","controls":["attach","interrupt"],"pm_completed":false,"session_status":"running","process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
               "active_pr": null,

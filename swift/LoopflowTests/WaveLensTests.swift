@@ -201,7 +201,7 @@ struct WaveLensTests {
 
     private func makeRuntime(status: String, alive: Bool, reason: String) throws -> ProjectRuntimeSnapshot {
         let json = """
-        {"session_id":"ps_1","status":"\(status)","reason":"\(reason)","status_at":"2026-07-15T00:00:00Z","iteration":1,"pending_observations":0,"provider":"codex","process_alive":\(alive)}
+        {"session_id":"ps_1","status":"\(status)","reason":"\(reason)","status_at":"2026-07-15T00:00:00Z","iteration":1,"pending_observations":0,"provider":"codex","process_alive":\(alive),"observation":{"category":"working","reason":"\(reason)","owner":"session","controls":["steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iteration 1"}}
         """
         return try JSONDecoder().decode(ProjectRuntimeSnapshot.self, from: Data(json.utf8))
     }

@@ -2092,8 +2092,20 @@ fn parse_github_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
     }
 }
 
+/// A loopback URL is the provider CLI's local callback listener, never the
+/// page a human authorizes on. codex prints its `localhost:1455` server line
+/// before the real authorization URL, and the first URL parsed wins the flow —
+/// treating loopback as a verification URL opened a dead "Not Found" tab and
+/// returned before the real URL was ever read.
+fn is_loopback_url(url: &str) -> bool {
+    Url::parse(url).is_ok_and(|url| {
+        matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+            || url.host_str().is_some_and(|host| host == "::1")
+    })
+}
+
 fn parse_generic_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
-    let url = extract_url(line);
+    let url = extract_url(line).filter(|url| !is_loopback_url(url));
     if let Some(url) = &url {
         if builder.verification_uri_complete.is_none() {
             builder.verification_uri_complete = Some(url.clone());
@@ -3780,6 +3792,36 @@ mod tests {
             Some("https://example.com/device?user_code=QWER-9876".to_string())
         );
         assert_eq!(response.user_code, Some("QWER-9876".to_string()));
+    }
+
+    /// `codex login` announces its localhost callback server before printing
+    /// the real authorization URL. The listener is not a page a human can
+    /// authorize on — taking it as the verification URL opened a dead
+    /// "Not Found" tab and ended the flow before the real URL arrived.
+    #[test]
+    fn generic_parser_waits_past_the_loopback_callback_listener() {
+        let mut builder = AuthFlowBuilder::default();
+        parse_generic_auth_line(
+            "Starting local login server on http://localhost:1455.",
+            &mut builder,
+        );
+        assert!(
+            build_flow_response(Provider::Codex, &builder).is_none(),
+            "a loopback URL alone must not complete the flow"
+        );
+
+        parse_generic_auth_line(
+            "If your browser did not open, navigate to https://auth.openai.com/oauth/authorize?client_id=abc&state=xyz",
+            &mut builder,
+        );
+        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        assert_eq!(
+            response.verification_uri,
+            "https://auth.openai.com/oauth/authorize"
+        );
+        assert!(!is_loopback_url("https://auth.openai.com/oauth/authorize"));
+        assert!(is_loopback_url("http://localhost:1455"));
+        assert!(is_loopback_url("http://127.0.0.1:1455/callback"));
     }
 
     #[test]

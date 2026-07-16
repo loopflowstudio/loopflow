@@ -465,11 +465,6 @@ async fn import_account(
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
-    if provider != Provider::Claude {
-        return Err(anyhow!(
-            "existing login import is supported for Claude only"
-        ));
-    }
     let account_id = parse_account_id(raw_account)?;
     let provider_profile = ensure_account_profile(provider, &account_id)?;
     let profile_id = raw_profile
@@ -482,7 +477,12 @@ async fn import_account(
         .and_then(|profile| profile.login.as_deref())
         .map(String::from);
 
-    let login = if provider_profile.join(".credentials.json").is_file() {
+    let credentials_file = match provider {
+        Provider::Claude => ".credentials.json",
+        Provider::Codex => "auth.json",
+        _ => unreachable!("parse_managed_provider admits Claude and Codex only"),
+    };
+    let login = if provider_profile.join(credentials_file).is_file() {
         match provider_account_auth_status(provider, provider_profile.clone()).await? {
             AuthStatus::Active { login } => login,
             other => {
@@ -495,6 +495,13 @@ async fn import_account(
             }
         }
     } else {
+        if provider != Provider::Claude {
+            return Err(anyhow!(
+                "no stored {} login at {}; importing the ambient login is supported for Claude only",
+                provider.display_name(),
+                provider_profile.display()
+            ));
+        }
         let ambient = read_ambient_claude_status()?;
         if !ambient.logged_in {
             return Err(anyhow!("the ambient Claude CLI is not logged in"));
@@ -1219,14 +1226,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn codex_login_cannot_be_created_by_importing_ambient_credentials() {
-        let error = import_account("codex", "engineering", None, None)
-            .await
-            .expect_err("Codex imports must require a direct login");
+    async fn codex_import_without_stored_credentials_names_the_ambient_limit() {
+        // Codex import adopts an existing auth.json in the account home; with
+        // none present there is no ambient fallback (that path is Claude's).
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", home.path());
+        let result = import_account("codex", "engineering", None, None).await;
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
 
+        let error = result.expect_err("Codex imports must require a stored login");
         assert!(error
             .to_string()
-            .contains("existing login import is supported for Claude only"));
+            .contains("importing the ambient login is supported for Claude only"));
     }
 
     #[test]

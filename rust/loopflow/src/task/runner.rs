@@ -598,7 +598,20 @@ The durable reviewer outcome is:\n{}",
                             )
                             .await
                             .map_err(|error| anyhow!(error.to_string()))?;
-                            let needs_rotation = if observed_pr
+                            let settled_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
+                                pr.is_settled()
+                                    && pr
+                                        .publication
+                                        .as_ref()
+                                        .is_some_and(|publication| {
+                                            publication.after_merge
+                                                == crate::task::AfterMerge::CompleteTask
+                                        })
+                            });
+                            let needs_rotation = if settled_completing_pr {
+                                // A completing PR settles the Task, never rotates to a next PR.
+                                false
+                            } else if observed_pr
                                 .as_ref()
                                 .is_some_and(|pr| pr.is_settled())
                             {
@@ -627,6 +640,22 @@ The durable reviewer outcome is:\n{}",
                                     TaskSessionStatus::Waiting,
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
+                            } else if settled_completing_pr {
+                                // The PR merged to complete the Task, but a required review is
+                                // still open. Wait for the gate to close before completion; do
+                                // not rotate to another PR.
+                                let number = observed_pr
+                                    .as_ref()
+                                    .and_then(|pr| pr.github())
+                                    .map(|github| github.number);
+                                let reason = match number {
+                                    Some(number) => format!(
+                                        "pull request #{number} merged; awaiting required review before completion"
+                                    ),
+                                    None => "pull request merged; awaiting required review before completion"
+                                        .to_string(),
+                                };
+                                (TaskSessionStatus::Waiting, reason)
                             } else if needs_rotation {
                                 crate::ops::task::ensure_working_pr_for_lease(
                                     &store,

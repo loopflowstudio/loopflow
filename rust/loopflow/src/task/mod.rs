@@ -588,8 +588,13 @@ impl TaskPr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum PmWritebackOperation {
     CompleteTask,
+    /// Repair: the Task was prematurely completed in the PM while its gates were
+    /// still open. Reopen the PM issue so the PM row reconverges with the
+    /// Session, PR, and review state.
+    ReopenTask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -804,14 +809,25 @@ impl TaskSession {
         if let Some(proposal) = &self.gate_proposal {
             proposal.validate()?;
         }
-        if matches!(self.pm_writeback, PmWritebackState::Pending { .. })
-            && self.status != TaskSessionStatus::Completed
-            && self.gate_cycle == 0
-        {
-            return Err(TaskDataError::InvalidInvariant(
-                "pending PM completion requires a completed Task or an active gate cycle"
-                    .to_string(),
-            ));
+        if let PmWritebackState::Pending { operation, .. } = &self.pm_writeback {
+            match operation {
+                PmWritebackOperation::CompleteTask => {
+                    if self.status != TaskSessionStatus::Completed && self.gate_cycle == 0 {
+                        return Err(TaskDataError::InvalidInvariant(
+                            "pending PM completion requires a completed Task or an active gate cycle"
+                                .to_string(),
+                        ));
+                    }
+                }
+                PmWritebackOperation::ReopenTask => {
+                    if self.status == TaskSessionStatus::Completed {
+                        return Err(TaskDataError::InvalidInvariant(
+                            "pending PM reopen requires the Task to no longer be completed"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
         }
         if self.incorporated_directive_version > self.current_directive_version {
             return Err(TaskDataError::InvalidInvariant(
@@ -1568,6 +1584,37 @@ mod tests {
 
         session.lifecycle.iterate.flow.clear();
         assert!(session.validate().is_err());
+    }
+
+    #[test]
+    fn pending_reopen_writeback_requires_an_uncompleted_task() {
+        let mut session = task_session();
+        session.status = TaskSessionStatus::Completed;
+        session.pm_writeback = PmWritebackState::Pending {
+            operation: PmWritebackOperation::ReopenTask,
+            error: "premature completion".to_string(),
+        };
+        assert!(session.validate().is_err());
+
+        session.status = TaskSessionStatus::Waiting;
+        assert!(session.validate().is_ok());
+    }
+
+    #[test]
+    fn pending_reopen_writeback_has_a_stable_json_shape() {
+        let state = PmWritebackState::Pending {
+            operation: PmWritebackOperation::ReopenTask,
+            error: "premature completion".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(state).unwrap(),
+            serde_json::json!({
+                "state": "pending",
+                "operation": "reopen_task",
+                "error": "premature completion"
+            })
+        );
     }
 
     #[test]

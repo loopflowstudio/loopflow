@@ -807,9 +807,23 @@ async fn inspect_outcome(
         crate::ops::task::reconcile_process_liveness(store, task)
             .await
             .map_err(|error| anyhow!(error.to_string()))?;
+        crate::ops::task::reconcile_task_completion(store, task, None)
+            .await
+            .map_err(|error| anyhow!(error.to_string()))?;
+        if task.status.is_terminal() {
+            continue;
+        }
         let settled = observed.as_ref().is_some_and(|pr| pr.is_settled())
             || (observed.is_none() && store.active_task_pr(&task.id).await?.is_none());
-        if settled && !task.status.is_terminal() {
+        // A settled completing PR is pending on the review gate, not on a
+        // follow-up PR: do not rotate or relaunch while it waits.
+        let completing = observed.as_ref().is_some_and(|pr| {
+            pr.is_settled()
+                && pr.publication.as_ref().is_some_and(|publication| {
+                    publication.after_merge == crate::task::AfterMerge::CompleteTask
+                })
+        });
+        if settled && !completing && !task.status.is_terminal() {
             crate::ops::task::ensure_working_pr(store, task)
                 .await
                 .map_err(|error| anyhow!(error.to_string()))?;

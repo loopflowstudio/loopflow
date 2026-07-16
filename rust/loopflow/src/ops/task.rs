@@ -25,9 +25,9 @@ use crate::engine::process::{
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
-use crate::engine::{expand_flow, load_flow, ConcreteStep};
+use crate::engine::{expand_flow, load_flow, ConcreteStep, InteractionPolicy};
 use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
+    InteractionReview, InteractionReviewDisposition, InteractionReviewId, InteractionReviewStatus,
 };
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
@@ -2653,14 +2653,31 @@ async fn reconcile_task_pr_with_authority(
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
                 && !has_pending_directive(session);
             if completes {
-                session.set_status(
-                    TaskSessionStatus::Completed,
-                    format!(
-                        "pull request #{} merged and completed the Task",
-                        github_pr.number
-                    ),
-                );
-                reconcile_pm_writeback(store, session, Some(&url)).await;
+                // The completion gate: even with the PR merged, the Task cannot
+                // be completed in the PM until every required review is
+                // approved. The PR is settling in flight, so only the review
+                // half of the gate applies here. Do not weaken the review gate
+                // or infer merge from a green head.
+                let gate = review_gate(store, session).await?;
+                if gate.satisfied {
+                    session.set_status(
+                        TaskSessionStatus::Completed,
+                        format!(
+                            "pull request #{} merged and completed the Task",
+                            github_pr.number
+                        ),
+                    );
+                    reconcile_pm_writeback(store, session, Some(&url)).await;
+                } else if !session.status.is_process_active() {
+                    session.set_status(
+                        TaskSessionStatus::Waiting,
+                        format!(
+                            "pull request #{} merged; awaiting gate before completion: {}",
+                            github_pr.number,
+                            gate.reason()
+                        ),
+                    );
+                }
             } else if !session.status.is_process_active() {
                 let reason = if has_pending_directive(session) {
                     format!(
@@ -3089,6 +3106,16 @@ async fn ensure_working_pr_with_authority(
             settled.id
         )));
     }
+    // A settled completing PR never rotates: completion is pending on the
+    // review gate, not on a follow-up PR. `reconcile_task_completion` advances
+    // the Session to `Completed` once the gate closes.
+    if settled
+        .publication
+        .as_ref()
+        .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+    {
+        return Ok(None);
+    }
     if let Some(lease) = lease {
         store
             .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
@@ -3313,16 +3340,7 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
         reconcile_task_pr(&store, &mut session).await?;
         reconcile_process_liveness(&store, &mut session).await?;
-        if session.status == TaskSessionStatus::Completed
-            && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
-        {
-            retry_pm_writeback(&store, &mut session).await;
-            store
-                .update_task_session(&session)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-            return Ok(session);
-        }
+        reconcile_task_completion(&store, &mut session, None).await?;
         Ok(session)
     })
 }
@@ -3363,31 +3381,21 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
                 "Task worktree has uncommitted changes; publish or explicitly abandon them first",
             ));
         }
-        let skipped_pr = if let Some(pr) = store
-            .active_task_pr(&session.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-        {
-            if pr.publication.is_some() {
-                return Err(task_error(
-                    "Task has an open pull request; merge it or run `lf pr abandon` first",
-                ));
-            }
-            let head = rev_parse(&session.worktree, "HEAD")
-                .map_err(|error| task_error(format!("failed to inspect Task HEAD: {error}")))?;
-            if head != pr.base_commit {
-                return Err(task_error(
-                    "Task PR has unmerged commits; publish it or run `lf pr abandon` first",
-                ));
-            }
-            Some(pr)
-        } else {
-            None
-        };
+        // The completion gate: every active PR must be settled and every required
+        // review approved before the Task can be completed in the PM. Do not
+        // weaken the review gate or infer merge from a green head.
+        let gate = task_completion_gate(&store, &session).await?;
+        if !gate.satisfied {
+            return Err(task_error(format!(
+                "Task {} cannot complete until its gates close: {}",
+                session.launch.issue.identifier,
+                gate.reason()
+            )));
+        }
         let from = session.status;
         session.set_status(TaskSessionStatus::Completed, summary.clone());
         reconcile_pm_writeback(&store, &mut session, None).await;
-        complete_task_session_with_authority(&store, &session, skipped_pr.as_ref(), lease.as_ref())
+        complete_task_session_with_authority(&store, &session, None, lease.as_ref())
             .await
             .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
         append_task_event_with_authority(
@@ -3481,10 +3489,14 @@ async fn link_pr_to_linear(store: &SharedStore, session: &TaskSession, pr: &mut 
 }
 
 fn writeback_state(result: OpsResult<()>) -> PmWritebackState {
+    writeback_state_for(PmWritebackOperation::CompleteTask, result)
+}
+
+fn writeback_state_for(operation: PmWritebackOperation, result: OpsResult<()>) -> PmWritebackState {
     match result {
         Ok(()) => PmWritebackState::Current,
         Err(error) => PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
+            operation,
             error: error.to_string(),
         },
     }
@@ -3528,16 +3540,327 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
         };
         return;
     };
-    session.pm_writeback = writeback_state(
-        crate::ops::task_pm::retry_complete_task(
-            &session.worktree,
-            wave.name(),
-            session.launch.issue.id.as_str(),
-            pr_url,
-        )
-        .await,
-    );
+    session.pm_writeback = {
+        let operation = match &session.pm_writeback {
+            PmWritebackState::Pending { operation, .. } => *operation,
+            PmWritebackState::Current => PmWritebackOperation::CompleteTask,
+        };
+        let result = match operation {
+            PmWritebackOperation::CompleteTask => {
+                crate::ops::task_pm::retry_complete_task(
+                    &session.worktree,
+                    wave.name(),
+                    session.launch.issue.id.as_str(),
+                    pr_url,
+                )
+                .await
+            }
+            PmWritebackOperation::ReopenTask => {
+                crate::ops::task_pm::retry_reopen_task(
+                    &session.worktree,
+                    wave.name(),
+                    session.launch.issue.id.as_str(),
+                )
+                .await
+            }
+        };
+        writeback_state_for(operation, result)
+    };
     session.updated_at = time::OffsetDateTime::now_utc();
+}
+
+// ---------------------------------------------------------------------------
+// Completion gate: the single source of truth for "may this Task be completed
+// in the PM yet?" A Task is completable only when every active PR is settled
+// (merged or explicitly abandoned) AND every required interaction review has an
+// explicit Approved outcome. Every path that sets a Task to `Completed` and
+// fires the `CompleteTask` PM writeback consults this gate, so the PM row, the
+// durable Session, the PR state, and the review state converge monotonically.
+// ---------------------------------------------------------------------------
+
+/// The outcome of evaluating the completion gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CompletionGate {
+    pub satisfied: bool,
+    pub blockers: Vec<String>,
+}
+
+impl CompletionGate {
+    /// One actionable, human-readable sentence. Empty when the gate is
+    /// satisfied.
+    pub fn reason(&self) -> String {
+        if self.blockers.is_empty() {
+            String::new()
+        } else {
+            self.blockers.join("; ")
+        }
+    }
+}
+
+impl CompletionGate {
+    fn unsatisfied(blockers: Vec<String>) -> Self {
+        Self {
+            satisfied: false,
+            blockers,
+        }
+    }
+}
+
+/// The required interaction reviews for a Task: every review attached to this
+/// Session whose policy is `Require`. `Defer`-policy reviews never gate
+/// completion.
+async fn required_reviews_for_task(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<Vec<InteractionReview>> {
+    let reviews = store
+        .list_interaction_reviews(Some(&session.wave_id))
+        .await
+        .map_err(|error| task_error(format!("failed to read interaction reviews: {error}")))?;
+    Ok(reviews
+        .into_iter()
+        .filter(|review| {
+            review.task_session_id == session.id && review.policy == InteractionPolicy::Require
+        })
+        .collect())
+}
+
+/// The review half of the completion gate: every required interaction review
+/// must be completed with an `Approved` disposition. Used on the merge path,
+/// where the PR being reconciled is settling in flight and must not be re-read
+/// from the store as an active PR.
+async fn review_gate(store: &SharedStore, session: &TaskSession) -> OpsResult<CompletionGate> {
+    let mut blockers = Vec::new();
+    for review in required_reviews_for_task(store, session).await? {
+        let approved = review.status == InteractionReviewStatus::Completed
+            && review
+                .disposition
+                .is_some_and(|disposition| disposition == InteractionReviewDisposition::Approved);
+        if !approved {
+            let kind = review.reviewer.kind();
+            let state = if review.status == InteractionReviewStatus::Completed {
+                "completed without approval"
+            } else {
+                "awaiting review"
+            };
+            blockers.push(format!("required {kind} review {} is {state}", review.id));
+        }
+    }
+    Ok(if blockers.is_empty() {
+        CompletionGate {
+            satisfied: true,
+            blockers: Vec::new(),
+        }
+    } else {
+        CompletionGate::unsatisfied(blockers)
+    })
+}
+
+/// Evaluate the completion gate against the Session's durable PR and review
+/// state. Pure over store state: running it twice changes nothing. Use this from
+/// paths where the PR state is already persisted (`task_complete`, the
+/// reconcile advance, the repair). The merge-reconcile path uses
+/// [`review_gate`] instead, since the PR it is settling is not yet on disk.
+pub(crate) async fn task_completion_gate(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<CompletionGate> {
+    let mut gate = review_gate(store, session).await?;
+
+    // An accepted but unincorporated directive blocks completion: an auto-merge
+    // armed by `lf pr land` must not silently erase direction accepted after it
+    // was armed.
+    if has_pending_directive(session) {
+        gate.blockers.push(format!(
+            "directive v{} is not yet incorporated; acknowledge it or re-steer before completing",
+            session.current_directive_version
+        ));
+    }
+
+    // Every active PR must be settled (merged or explicitly abandoned).
+    if let Some(pr) = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+    {
+        let which = pr
+            .github()
+            .map(|github| format!("#{}", github.number))
+            .unwrap_or_else(|| format!("sequence {}", pr.sequence));
+        match pr.phase() {
+            PrPhase::Open => gate.blockers.push(format!(
+                "pull request {which} is open for review; merge it or run `lf pr abandon`"
+            )),
+            PrPhase::Publishing => gate.blockers.push(format!(
+                "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
+            )),
+            PrPhase::Working => gate.blockers.push(format!(
+                "pull request {which} is unpublished; publish and merge it or run `lf pr abandon`"
+            )),
+            PrPhase::Merged | PrPhase::Abandoned => {}
+        }
+    }
+
+    gate.satisfied = gate.blockers.is_empty();
+    Ok(gate)
+}
+
+/// True when the Session has a settled merged PR whose `after_merge` is
+/// `CompleteTask` — i.e. completion is pending on the gate, not on a future PR.
+async fn merged_completing_pr(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<Option<TaskPr>> {
+    let prs = store
+        .task_prs(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    Ok(prs.into_iter().find(|pr| {
+        pr.phase() == PrPhase::Merged
+            && pr
+                .publication
+                .as_ref()
+                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+    }))
+}
+
+/// Complete a Task Session after its gate closed, persisting the merged
+/// `CompleteTask` PR and firing the `CompleteTask` PM writeback. Used by the
+/// reconcile advance path (no lease) once a required review approves after a
+/// merge. Idempotent: a Session already `Completed` is left untouched.
+async fn advance_completion_after_gate(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: Option<&ChildWriteLease>,
+) -> OpsResult<bool> {
+    if session.status.is_terminal() || session.status.is_process_active() {
+        return Ok(false);
+    }
+    let Some(pr) = merged_completing_pr(store, session).await? else {
+        return Ok(false);
+    };
+    let gate = task_completion_gate(store, session).await?;
+    if !gate.satisfied {
+        return Ok(false);
+    }
+    let from = session.status;
+    let url = pr.github().map(|github| github.url.clone());
+    session.set_status(
+        TaskSessionStatus::Completed,
+        format!(
+            "pull request #{} merged and completed the Task",
+            pr.github().map(|github| github.number).unwrap_or_default()
+        ),
+    );
+    reconcile_pm_writeback(store, session, url.as_deref()).await;
+    complete_task_session_after_pr_with_authority(store, session, &pr, lease)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    append_task_event_with_authority(
+        store,
+        &session.id,
+        &TaskEventKind::StatusChanged {
+            from,
+            to: TaskSessionStatus::Completed,
+            reason: session.status_reason.clone(),
+        },
+        lease,
+    )
+    .await
+    .map_err(|error| task_error(error.to_string()))?;
+    Ok(true)
+}
+
+/// Repair a prematurely completed Task: the PM row says `done` but a PR is still
+/// unsettled or a required review is still open. Revert the Session to `Waiting`
+/// with an actionable reason and queue a `ReopenTask` PM writeback so Linear
+/// reopens and the PM row reconverges. No Session, PR, directive, or review row
+/// is deleted. Idempotent: a Session already repaired (writeback Pending
+/// ReopenTask) is not repaired twice.
+async fn repair_premature_completion(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: Option<&ChildWriteLease>,
+) -> OpsResult<bool> {
+    if session.status != TaskSessionStatus::Completed {
+        return Ok(false);
+    }
+    // A writeback already in flight (either direction) owns the PM state; do not
+    // stack a second repair on top of a pending completion or reopen.
+    if matches!(session.pm_writeback, PmWritebackState::Pending { .. }) {
+        return Ok(false);
+    }
+    let gate = task_completion_gate(store, session).await?;
+    if gate.satisfied {
+        return Ok(false);
+    }
+    let from = session.status;
+    session.set_status(
+        TaskSessionStatus::Waiting,
+        format!("reopened: completion outran its gates ({})", gate.reason()),
+    );
+    session.pm_writeback = PmWritebackState::Pending {
+        operation: PmWritebackOperation::ReopenTask,
+        error: "premature completion pending reopen".to_string(),
+    };
+    if let Some(lease) = lease {
+        store
+            .update_task_session_for_lease(session, lease)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    } else {
+        store
+            .update_task_session(session)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    append_task_event_with_authority(
+        store,
+        &session.id,
+        &TaskEventKind::StatusChanged {
+            from,
+            to: TaskSessionStatus::Waiting,
+            reason: session.status_reason.clone(),
+        },
+        lease,
+    )
+    .await
+    .map_err(|error| task_error(error.to_string()))?;
+    Ok(true)
+}
+
+/// Reconcile completion toward the gate: retry any in-flight PM writeback,
+/// repair a premature completion, or advance completion once the gate closes.
+/// Shared by every read-side reconcile (`task_status`, Project Session task
+/// reconcile) so out-of-band merge, delayed review, writeback retry, restart,
+/// and duplicate observation all funnel through one idempotent path.
+pub(crate) async fn reconcile_task_completion(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: Option<&ChildWriteLease>,
+) -> OpsResult<()> {
+    if session.status == TaskSessionStatus::Completed
+        && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
+    {
+        retry_pm_writeback(store, session).await;
+        if let Some(lease) = lease {
+            store
+                .update_task_session_for_lease(session, lease)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        } else {
+            store
+                .update_task_session(session)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        return Ok(());
+    }
+    if repair_premature_completion(store, session, lease).await? {
+        return Ok(());
+    }
+    advance_completion_after_gate(store, session, lease).await?;
+    Ok(())
 }
 
 pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
@@ -7117,6 +7440,420 @@ mod tests {
         assert!(
             err.to_string().contains("lf pr next"),
             "expected dirty between-PR refusal, got: {err}"
+        );
+    }
+
+    // ── completion gate (W2-237) ───────────────────────────────────────────
+    // A Task may be completed in the PM only once every active PR is settled
+    // and every required review is approved. The tests below prove the gate and
+    // the reconcile advance/repair around it reproduce the W2-151 / W2-138
+    // ordering: a merge observed while a required review is open does not close
+    // the Task; the Task closes exactly once after the review approves.
+
+    use super::{reconcile_task_completion, task_completion_gate};
+    use crate::interaction_review::{
+        InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
+        InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
+    };
+    use crate::task::{
+        PmWritebackOperation, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
+    };
+
+    /// A Gate-phase Task Session with one merged `CompleteTask` PR, ready for a
+    /// required review to be opened against its gate waitpoint.
+    async fn gate_task(
+        repo: &TestRepo,
+        branch: &str,
+        base_commit: &str,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
+        let home = tempfile::tempdir().expect("task home");
+        let db_path = home.path().join("loopflow.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path.clone()))
+                .await
+                .expect("open store"),
+        );
+        let now = OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            WaveId::new(),
+            "completion-gate".to_string(),
+            repo.path().display().to_string(),
+        );
+        let project = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(format!("project-{}", WaveId::new()))
+                        .expect("project id"),
+                    slug: "completion-gate".to_string(),
+                    name: "Completion gate".to_string(),
+                    prompt_context: "Keep the gate honest.".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Running,
+            status_reason: "test project is running".to_string(),
+            status_at: now,
+            iteration: 1,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("completion-gate".to_string()),
+            latest_process: Some(ChildProcessGeneration {
+                generation: 1,
+                pid: None,
+                process_group_id: None,
+                tmux_name: "completion-gate".to_string(),
+                agent: "codex".to_string(),
+                provider: "codex".to_string(),
+                provider_session_id: Some("completion-gate".to_string()),
+                started_at: now,
+                state: crate::child_session::ChildLeaseState::Active,
+                outcome: None,
+                provenance: None,
+            }),
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let session = TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+                    identifier: "INF-GATE".to_string(),
+                    title: "Prove the completion gate".to_string(),
+                    description: "Completion waits on the review gate.".to_string(),
+                },
+                project: project.launch.project.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_session_id: project.id.clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Waiting,
+            status_reason: "merged; awaiting gate".to_string(),
+            status_at: now,
+            worktree: repo.path().to_path_buf(),
+            workspace_slug: "completion-gate".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: TaskLifecyclePhase::Gate,
+            phase_epoch: 2,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 1,
+            gate_proposal: Some(TaskGateProposal {
+                status: TaskSessionStatus::Completed,
+                reason: "merged and reviewed".to_string(),
+            }),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: crate::task::Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: session.workspace_slug.clone(),
+            branch: branch.to_string(),
+            base_commit: base_commit.to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_wave(&wave).await.expect("create wave");
+        store
+            .create_project_session(&project)
+            .await
+            .expect("create project");
+        store
+            .create_task_session(&session, &pr)
+            .await
+            .expect("create Task");
+        // Settle the PR as merged-with-complete-task after creation (the session
+        // is created with a sequence-1 Working PR).
+        let mut merged = pr.clone();
+        merged.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 912,
+                url: "https://example.com/pr/912".to_string(),
+                head_sha: None,
+            }),
+        });
+        merged.merge_commit = Some("merge-912".to_string());
+        merged.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&merged)
+            .await
+            .expect("settle merged PR");
+        (home, store, session, merged)
+    }
+
+    /// Open a required Human review at the Session's gate waitpoint and return
+    /// its id. The Session is left with a reserved process lease so the review
+    /// can be opened; tests that exercise the no-lease reconcile advance ignore
+    /// the lease (the non-lease completion path does not check it).
+    async fn open_gate_review(
+        store: &SharedStore,
+        session: &mut TaskSession,
+        pr: &TaskPr,
+    ) -> InteractionReviewId {
+        session.begin_generation("gate-review".to_string());
+        let lease = store
+            .reserve_task_process(session, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve process")
+            .expect("lease");
+        if let Some(process) = &mut session.latest_process {
+            process.state = crate::child_session::ChildLeaseState::Active;
+        }
+        session.set_status(TaskSessionStatus::Running, "gate review active");
+        store
+            .activate_task_process(session, &lease)
+            .await
+            .expect("activate process");
+        let plan = session.phase_plan();
+        let review = InteractionReview {
+            id: InteractionReviewId::new(),
+            wave_id: session.wave_id.clone(),
+            project_session_id: session.project_session_id.clone(),
+            task_session_id: session.id.clone(),
+            phase: session.lifecycle_phase,
+            phase_epoch: session.phase_epoch,
+            flow: plan.flow.clone(),
+            step: "demo".to_string(),
+            step_index: session.phase_cursor,
+            phase_iteration: session.phase_iteration,
+            policy: plan.interaction_policy,
+            reviewer: InteractionReviewer::Human,
+            status: InteractionReviewStatus::Requested,
+            reason: "Prove the gate holds.".to_string(),
+            prompt: "Prove the gate holds.".to_string(),
+            evidence: InteractionReviewEvidence {
+                worktree: session.worktree.clone(),
+                branch: pr.branch.clone(),
+                base_commit: pr.base_commit.clone(),
+                head_commit: pr.base_commit.clone(),
+                worktree_fingerprint: "fingerprint".to_string(),
+                pr: Some(InteractionReviewPr {
+                    number: 912,
+                    url: "https://example.com/pr/912".to_string(),
+                }),
+            },
+            requested_by_generation: lease.generation,
+            reviewer_generation: None,
+            disposition: None,
+            outcome: None,
+            requested_at: OffsetDateTime::now_utc(),
+            completed_at: None,
+        };
+        store
+            .open_interaction_review(session, &review, &lease)
+            .await
+            .expect("open gate review");
+        review.id
+    }
+
+    #[tokio::test]
+    async fn completion_gate_is_satisfied_with_no_prs_and_no_reviews() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let (_home, store, mut session, _pr) = gate_task(&repo, branch, &repo.head_sha()).await;
+        // The PR is settled (merged) and no required reviews are open: the gate
+        // is satisfied, so clean no-PR / no-review work can still complete.
+        session.status = TaskSessionStatus::Waiting;
+        let gate = task_completion_gate(&store, &session).await.expect("gate");
+        assert!(
+            gate.satisfied,
+            "gate should be satisfied: {:?}",
+            gate.blockers
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_gate_blocks_on_a_pending_required_review() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let review_id = open_gate_review(&store, &mut session, &pr).await;
+
+        // The merged PR is settled, but the required Human review is open: the
+        // gate must block on the review, not on the PR.
+        let gate = task_completion_gate(&store, &session).await.expect("gate");
+        assert!(!gate.satisfied);
+        assert!(
+            gate.reason().contains(&review_id.as_str().to_string()),
+            "blocker should name the open review {}: {}",
+            review_id,
+            gate.reason()
+        );
+
+        // Approve the review and the gate closes.
+        store
+            .complete_human_interaction_review(
+                &review_id,
+                InteractionReviewDisposition::Approved,
+                "approved",
+            )
+            .await
+            .expect("approve review");
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate after approve");
+        assert!(
+            gate.satisfied,
+            "gate should close after approval: {:?}",
+            gate.blockers
+        );
+    }
+
+    #[tokio::test]
+    async fn reconcile_advances_completion_once_the_gate_closes() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let review_id = open_gate_review(&store, &mut session, &pr).await;
+        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
+
+        // Reconcile with the review still open: no completion, no writeback.
+        reconcile_task_completion(&store, &mut session, None)
+            .await
+            .expect("reconcile while gate open");
+        assert_ne!(
+            session.status,
+            TaskSessionStatus::Completed,
+            "Task must not complete while the required review is open"
+        );
+        assert_eq!(session.pm_writeback, PmWritebackState::Current);
+
+        // Approve the review; the next reconcile completes the Task exactly once.
+        store
+            .complete_human_interaction_review(
+                &review_id,
+                InteractionReviewDisposition::Approved,
+                "approved",
+            )
+            .await
+            .expect("approve review");
+        reconcile_task_completion(&store, &mut session, None)
+            .await
+            .expect("reconcile after gate closes");
+        assert_eq!(session.status, TaskSessionStatus::Completed);
+        // The advance fires the CompleteTask writeback exactly once. In the test
+        // environment there is no Linear initiative, so the writeback lands as
+        // Pending (it attempted and will retry) — never Current-without-attempt,
+        // and never a second stacked operation.
+        assert!(
+            matches!(
+                session.pm_writeback,
+                PmWritebackState::Pending {
+                    operation: PmWritebackOperation::CompleteTask,
+                    ..
+                }
+            ),
+            "advance must fire the CompleteTask writeback once, got {:?}",
+            session.pm_writeback
+        );
+
+        // A duplicate reconcile does not stack a second operation: still
+        // Completed, still a single Pending CompleteTask writeback.
+        reconcile_task_completion(&store, &mut session, None)
+            .await
+            .expect("duplicate reconcile");
+        assert_eq!(session.status, TaskSessionStatus::Completed);
+        assert!(
+            matches!(
+                session.pm_writeback,
+                PmWritebackState::Pending {
+                    operation: PmWritebackOperation::CompleteTask,
+                    ..
+                }
+            ),
+            "duplicate reconcile must not stack a second writeback, got {:?}",
+            session.pm_writeback
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_reverts_a_premature_completion_to_waiting() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let review_id = open_gate_review(&store, &mut session, &pr).await;
+        // Simulate the W2-151 premature completion: the PM says done while the
+        // required review is still open.
+        session.set_status(TaskSessionStatus::Completed, "merged and completed");
+        session.pm_writeback = PmWritebackState::Current;
+
+        reconcile_task_completion(&store, &mut session, None)
+            .await
+            .expect("repair reconcile");
+
+        assert_eq!(
+            session.status,
+            TaskSessionStatus::Waiting,
+            "premature completion must revert to Waiting"
+        );
+        assert!(
+            matches!(
+                session.pm_writeback,
+                PmWritebackState::Pending {
+                    operation: PmWritebackOperation::ReopenTask,
+                    ..
+                }
+            ),
+            "repair must queue a ReopenTask writeback, got {:?}",
+            session.pm_writeback
+        );
+        assert!(
+            session
+                .status_reason
+                .contains(&review_id.as_str().to_string())
+                || session.status_reason.contains("outran its gates"),
+            "repair reason should be actionable: {}",
+            session.status_reason
+        );
+
+        // Nothing was lost: the PR, the review, and the directive rows survive.
+        let prs = store.task_prs(&session.id).await.expect("read PRs");
+        assert_eq!(prs.len(), 1, "PR row must survive repair");
+        assert!(
+            store
+                .list_interaction_reviews(Some(&session.wave_id))
+                .await
+                .expect("read reviews")
+                .iter()
+                .any(|review| review.id == review_id),
+            "review row must survive repair"
         );
     }
 }

@@ -208,6 +208,33 @@ pub async fn retry_complete_task(
     complete_task(repo, wave, item_id, pr).await
 }
 
+/// Reopen a prematurely completed PM issue. The repair path calls this when a
+/// Task Session was `Completed` in Linear while its PR or required review gates
+/// were still open.
+pub async fn reopen_task(repo: &Path, wave: &str, item_id: &str) -> OpsResult<()> {
+    crate::ops::pm::pm_reopen_task_async(repo, wave, item_id, &crate::ops::NullProgress).await?;
+    Ok(())
+}
+
+/// Idempotent retry of a reopen: if the snapshot already shows the issue open,
+/// the write-back is reconciled; otherwise issue the reopen mutation.
+pub async fn retry_reopen_task(repo: &Path, wave: &str, item_id: &str) -> OpsResult<()> {
+    let snapshot = load_wave_async(repo, wave, PmRefresh::Force).await?;
+    let item = snapshot
+        .items
+        .iter()
+        .find(|item| item.id == item_id)
+        .ok_or_else(|| {
+            OpsError::Message(format!(
+                "reopened task {item_id} is absent from refreshed wave/{wave} snapshot"
+            ))
+        })?;
+    if !item.completed {
+        return Ok(());
+    }
+    reopen_task(repo, wave, item_id).await
+}
+
 fn project_for_item(snapshot: &PmShowResult, item: &PmItem) -> OpsResult<PmProject> {
     let slug = item.project.as_deref().ok_or_else(|| {
         OpsError::Message(format!(

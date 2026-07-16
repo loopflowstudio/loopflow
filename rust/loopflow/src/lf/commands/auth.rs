@@ -8,11 +8,12 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
-use crate::profile::{EmailAddress, HostId, LocalChromeProfile, ProfileId};
+use crate::profile::{EmailAddress, HostId, LocalChromeProfile, ProfileId, ProfileProviderAccount};
 use crate::provider_account::{
     account_profile_path, ensure_account_profile, new_account, open_account_store,
     parse_account_id, remove_account_profile,
@@ -60,21 +61,8 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             None => disconnect(provider).await,
         },
         AuthCommand::Configure { provider } => configure(provider).await,
-        AuthCommand::Connect {
-            provider,
-            account,
-            chrome_profile,
-            profile,
-        } => match account {
-            Some(account) => {
-                connect_account(
-                    provider,
-                    account,
-                    profile.as_deref(),
-                    chrome_profile.as_deref(),
-                )
-                .await
-            }
+        AuthCommand::Connect { provider, profile } => match profile.as_deref() {
+            Some(profile) => connect_profile_account(provider, profile).await,
             None => connect(provider).await,
         },
         AuthCommand::Import {
@@ -167,49 +155,68 @@ async fn connect(raw_provider: &str) -> Result<()> {
     wait_for_active_status(&service, provider, flow.expires_in).await
 }
 
-async fn connect_account(
-    raw_provider: &str,
-    raw_account: &str,
-    raw_profile: Option<&str>,
-    raw_chrome_profile: Option<&str>,
-) -> Result<()> {
+async fn connect_profile_account(raw_provider: &str, raw_profile: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
-    let account_id = parse_account_id(raw_account)?;
-    let profile = ensure_account_profile(provider, &account_id)?;
-    let chrome_profile = resolve_auth_chrome_profile(raw_profile, raw_chrome_profile).await?;
+    let profile_id = ProfileId::parse(raw_profile).map_err(anyhow::Error::msg)?;
+    let store = open_account_store().await?;
+    if store.get_profile(&profile_id).await?.is_none() {
+        return Err(anyhow!(
+            "profile '{}' does not exist; run 'lf profile create {} --chrome-profile {}' first",
+            profile_id,
+            profile_id,
+            profile_id
+        ));
+    }
+    let account = account_for_profile(&store, provider, &profile_id).await?;
+    let account_id = account
+        .as_ref()
+        .map(|account| account.account_id.clone())
+        .unwrap_or_else(|| account_id_for_profile(&profile_id));
+    let auth_profile_id = account
+        .as_ref()
+        .and_then(|account| account.login_email.as_ref())
+        .map(|email| ProfileId::parse(email.as_str()))
+        .transpose()
+        .map_err(anyhow::Error::msg)?
+        .unwrap_or_else(|| profile_id.clone());
+    let chrome_profile = resolve_profile_chrome_profile(&store, &auth_profile_id).await?;
+    connect_managed_account(&store, provider, account_id, profile_id, chrome_profile).await
+}
+
+async fn connect_managed_account(
+    store: &SharedStore,
+    provider: Provider,
+    account_id: ProviderAccountId,
+    profile_id: ProfileId,
+    chrome_profile: LocalChromeProfile,
+) -> Result<()> {
+    let account_home = ensure_account_profile(provider, &account_id)?;
     let controller_profile = (provider == Provider::Claude
-        && profile.join(".credentials.json").is_file())
-    .then(|| profile.clone());
+        && account_home.join(".credentials.json").is_file())
+    .then(|| account_home.clone());
     let keychain_guard = if provider == Provider::Claude {
         Some(ClaudeKeychainGuard::preserve()?)
     } else {
         None
     };
-    let handle = start_provider_account_auth(provider, profile.clone()).await?;
+    let handle = start_provider_account_auth(provider, account_home.clone()).await?;
     let flow = handle.response.clone();
     let verification_url = flow
         .verification_uri_complete
         .clone()
         .unwrap_or_else(|| flow.verification_uri.clone());
     println!(
-        "Connecting {} account '{}'...",
+        "Connecting {} for profile '{}'...",
         provider.display_name(),
-        account_id
+        profile_id
     );
     if handle.requires_authorization_code() {
-        let opened_matching_chrome = if let Some(chrome_profile) = &chrome_profile {
-            open_chrome_profile(chrome_profile, &verification_url)?;
-            true
-        } else {
-            false
-        };
+        open_chrome_profile(&chrome_profile, &verification_url)?;
         println!("Authorizing with Claude in Chrome...");
         if let Some(code) = drive_claude_browser_authorization(
             &verification_url,
             controller_profile.as_deref(),
-            chrome_profile
-                .as_ref()
-                .map(|profile| profile.label.as_str()),
+            Some(chrome_profile.label.as_str()),
         )
         .await?
         {
@@ -218,9 +225,6 @@ async fn connect_account(
                 .await?;
         } else {
             println!("Chrome controller unavailable; complete authorization in the browser.");
-            if !opened_matching_chrome {
-                open_url(&verification_url);
-            }
             let code = SecretString::new(rpassword::prompt_password(
                 "Paste the one-time code from the browser: ",
             )?);
@@ -230,11 +234,7 @@ async fn connect_account(
         }
     } else {
         println!("Complete authorization in the browser.");
-        if let Some(chrome_profile) = &chrome_profile {
-            open_chrome_profile(chrome_profile, &verification_url)?;
-        } else {
-            open_url(&verification_url);
-        }
+        open_chrome_profile(&chrome_profile, &verification_url)?;
     }
     tokio::time::timeout(AUTH_STATUS_POLL_TIMEOUT, handle.wait())
         .await
@@ -247,12 +247,12 @@ async fn connect_account(
         })??;
 
     let observed_claude_login = if provider == Provider::Claude {
-        capture_claude_profile_credentials(&profile)?;
-        let login = match provider_account_auth_status(provider, profile.clone()).await? {
+        capture_claude_profile_credentials(&account_home)?;
+        let login = match provider_account_auth_status(provider, account_home.clone()).await? {
             AuthStatus::Active { login } => login,
             _ => None,
         };
-        require_managed_access_token(provider, &account_id, &profile).await?;
+        require_managed_access_token(provider, &account_id, &account_home).await?;
         if let Some(guard) = keychain_guard {
             guard.restore()?;
         }
@@ -264,7 +264,7 @@ async fn connect_account(
     let login = if provider == Provider::Claude {
         observed_claude_login
     } else {
-        match provider_account_auth_status(provider, profile.clone()).await? {
+        match provider_account_auth_status(provider, account_home.clone()).await? {
             AuthStatus::Active { login } => login,
             other => {
                 return Err(anyhow!(
@@ -276,23 +276,32 @@ async fn connect_account(
             }
         }
     };
-    let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login)?;
-    register_managed_account(provider, &account_id, profile, login).await?;
+    let login = verified_login_for_chrome_profile(Some(&chrome_profile), login)?;
+    register_managed_account(
+        store,
+        provider,
+        &account_id,
+        account_home,
+        login,
+        Some(&profile_id),
+    )
+    .await?;
     println!(
-        "Connected {} account '{}'",
+        "Connected {} for profile '{}'",
         provider.display_name(),
-        account_id
+        profile_id
     );
     Ok(())
 }
 
 async fn register_managed_account(
+    store: &SharedStore,
     provider: Provider,
     account_id: &ProviderAccountId,
-    profile: PathBuf,
+    account_home: PathBuf,
     login: Option<String>,
+    bind_profile: Option<&ProfileId>,
 ) -> Result<()> {
-    let store = open_account_store().await?;
     let accounts = store
         .list_provider_accounts(Some(provider.as_str()))
         .await?;
@@ -307,18 +316,104 @@ async fn register_managed_account(
         new_account(
             provider,
             account_id.clone(),
-            profile.clone(),
+            account_home.clone(),
             login_email.clone(),
         )
     });
-    account.home = Some(profile);
+    account.home = Some(account_home);
     if let Some(login_email) = login_email {
         account.login_email = Some(login_email);
     }
     account.credential_state = CredentialState::Connected;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
+    if let Some(profile_id) = bind_profile {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        store
+            .set_profile_provider_account(&ProfileProviderAccount {
+                profile_id: profile_id.clone(),
+                provider,
+                account_id: account_id.clone(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await?;
+    }
     Ok(())
+}
+
+async fn account_for_profile(
+    store: &SharedStore,
+    provider: Provider,
+    profile_id: &ProfileId,
+) -> Result<Option<ProviderAccount>> {
+    if let Some(mapping) = store.profile_provider_account(profile_id, provider).await? {
+        return store
+            .get_provider_account(provider.as_str(), &mapping.account_id)
+            .await?
+            .ok_or_else(|| {
+                anyhow!(
+                    "profile '{}' references missing {} account '{}'",
+                    profile_id,
+                    provider,
+                    mapping.account_id
+                )
+            })
+            .map(Some);
+    }
+
+    let matches = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?
+        .into_iter()
+        .filter(|account| {
+            account
+                .login_email
+                .as_ref()
+                .is_some_and(|email| email.as_str().eq_ignore_ascii_case(profile_id.as_str()))
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [account] => Ok(Some(account.clone())),
+        [_, ..] => Err(anyhow!(
+            "{} login '{}' matches multiple managed accounts",
+            provider,
+            profile_id
+        )),
+    }
+}
+
+fn account_id_for_profile(profile_id: &ProfileId) -> ProviderAccountId {
+    let mut prefix = String::new();
+    let mut last_was_separator = false;
+    for character in profile_id
+        .as_str()
+        .split_once('@')
+        .expect("profile ids contain an at sign")
+        .0
+        .chars()
+    {
+        if character.is_ascii_lowercase() || character.is_ascii_digit() {
+            prefix.push(character);
+            last_was_separator = false;
+        } else if !last_was_separator && !prefix.is_empty() {
+            prefix.push('-');
+            last_was_separator = true;
+        }
+        if prefix.len() == 50 {
+            break;
+        }
+    }
+    while prefix.ends_with('-') {
+        prefix.pop();
+    }
+    if prefix.is_empty() {
+        prefix.push_str("account");
+    }
+    let digest = hex::encode(Sha256::digest(profile_id.as_str().as_bytes()));
+    ProviderAccountId::parse(&format!("{prefix}-{}", &digest[..12]))
+        .expect("derived account ids satisfy provider account constraints")
 }
 
 async fn import_account(
@@ -375,7 +470,8 @@ async fn import_account(
 
     require_managed_access_token(provider, &account_id, &provider_profile).await?;
     let login = verified_login_for_chrome_profile(chrome_profile.as_ref(), login)?;
-    register_managed_account(provider, &account_id, provider_profile, login).await?;
+    let store = open_account_store().await?;
+    register_managed_account(&store, provider, &account_id, provider_profile, login, None).await?;
     println!(
         "Imported {} account '{}'",
         provider.display_name(),
@@ -422,28 +518,38 @@ async fn resolve_auth_chrome_profile(
 ) -> Result<Option<LocalChromeProfile>> {
     if let Some(raw_profile) = raw_profile {
         let profile_id = ProfileId::parse(raw_profile).map_err(|error| anyhow!(error))?;
-        let host_id = HostId::local().map_err(|error| anyhow!(error))?;
         let store = open_account_store().await?;
-        let binding = store
-            .chrome_profile_binding(&profile_id, &host_id)
-            .await?
-            .ok_or_else(|| {
-                anyhow!(
-                    "profile '{}' has no Chrome binding on {}; run 'lf profile create {} --chrome-profile <email>'",
-                    profile_id,
-                    host_id,
-                    profile_id
-                )
-            })?;
-        return Ok(Some(LocalChromeProfile {
-            directory: binding.chrome_directory,
-            label: binding.profile_id.to_string(),
-        }));
+        return resolve_profile_chrome_profile(&store, &profile_id)
+            .await
+            .map(Some);
     }
     raw_chrome_profile
         .map(crate::profile::resolve_local_chrome_profile)
         .transpose()
         .map_err(|error| anyhow!(error))
+}
+
+async fn resolve_profile_chrome_profile(
+    store: &SharedStore,
+    profile_id: &ProfileId,
+) -> Result<LocalChromeProfile> {
+    let host_id = HostId::local().map_err(anyhow::Error::msg)?;
+    let binding = store
+        .chrome_profile_binding(profile_id, &host_id)
+        .await?
+        .ok_or_else(|| {
+            anyhow!(
+                "profile '{}' has no Chrome binding on {}; run 'lf profile create {} --chrome-profile {}'",
+                profile_id,
+                host_id,
+                profile_id,
+                profile_id
+            )
+        })?;
+    Ok(LocalChromeProfile {
+        directory: binding.chrome_directory,
+        label: binding.profile_id.to_string(),
+    })
 }
 
 fn verified_login_for_chrome_profile(
@@ -899,18 +1005,44 @@ fn format_relative_delta(seconds: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
     use time::OffsetDateTime;
 
-    use crate::profile::{EmailAddress, LocalChromeProfile};
+    use crate::profile::{
+        EmailAddress, LocalChromeProfile, Profile, ProfileId, ProfileProviderAccount,
+    };
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
     use crate::store::{
-        CredentialState, CredentialType, ProviderAccount, ProviderAccountId, RoutingState,
+        open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId,
+        RoutingState, StorageConfig,
     };
 
     use super::{
-        format_account, format_relative_delta, format_snapshot, parse_paid_through,
-        parse_routing_state, verified_login_for_chrome_profile,
+        account_for_profile, account_id_for_profile, format_account, format_relative_delta,
+        format_snapshot, parse_paid_through, parse_routing_state, register_managed_account,
+        verified_login_for_chrome_profile,
     };
+
+    fn managed_account(provider: Provider, account_id: &str, login: &str) -> ProviderAccount {
+        ProviderAccount {
+            provider: provider.as_str().to_string(),
+            account_id: ProviderAccountId::parse(account_id).unwrap(),
+            home: Some(PathBuf::from(format!("/accounts/{account_id}"))),
+            login_email: Some(EmailAddress::parse(login).unwrap()),
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
 
     #[test]
     fn format_account_shows_routing_state() {
@@ -1034,5 +1166,137 @@ mod tests {
         )
         .is_err());
         assert!(verified_login_for_chrome_profile(Some(&chrome_profile), None).is_err());
+    }
+
+    #[test]
+    fn new_profile_accounts_get_stable_internal_ids() {
+        let profile = ProfileId::parse("Operator.Team@example.com").unwrap();
+
+        assert_eq!(
+            account_id_for_profile(&profile),
+            account_id_for_profile(&profile)
+        );
+        assert!(account_id_for_profile(&profile)
+            .as_str()
+            .starts_with("operator-team-"));
+    }
+
+    #[tokio::test]
+    async fn profile_connection_reuses_an_account_with_the_same_login() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let profile_id = ProfileId::parse("operator@example.com").unwrap();
+        store
+            .upsert_profile(&Profile {
+                id: profile_id.clone(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let account = managed_account(Provider::Codex, "existing", profile_id.as_str());
+        store.upsert_provider_account(&account).await.unwrap();
+
+        assert_eq!(
+            account_for_profile(&store, Provider::Codex, &profile_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id,
+            account.account_id
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_connection_follows_an_explicit_shared_mapping() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let profile_id = ProfileId::parse("engineering@example.com").unwrap();
+        store
+            .upsert_profile(&Profile {
+                id: profile_id.clone(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let account = managed_account(Provider::Claude, "shared", "personal@example.com");
+        store.upsert_provider_account(&account).await.unwrap();
+        store
+            .set_profile_provider_account(&ProfileProviderAccount {
+                profile_id: profile_id.clone(),
+                provider: Provider::Claude,
+                account_id: account.account_id.clone(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            account_for_profile(&store, Provider::Claude, &profile_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id,
+            account.account_id
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_profile_connection_registers_and_binds_the_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let profile_id = ProfileId::parse("operator@example.com").unwrap();
+        store
+            .upsert_profile(&Profile {
+                id: profile_id.clone(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+        let account_id = ProviderAccountId::parse("operator").unwrap();
+        let account_home = dir.path().join("accounts/codex/operator");
+
+        register_managed_account(
+            &store,
+            Provider::Codex,
+            &account_id,
+            account_home.clone(),
+            Some(profile_id.to_string()),
+            Some(&profile_id),
+        )
+        .await
+        .unwrap();
+
+        let account = store
+            .get_provider_account(Provider::Codex.as_str(), &account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.home, Some(account_home));
+        assert_eq!(account.login_email.unwrap().as_str(), profile_id.as_str());
+        assert_eq!(
+            store
+                .profile_provider_account(&profile_id, Provider::Codex)
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id,
+            account_id
+        );
     }
 }

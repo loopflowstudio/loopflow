@@ -491,25 +491,15 @@ lf profile create primary@example.com --chrome-profile primary@example.com
 lf profile create engineering@example.com --chrome-profile engineering@example.com
 lf profile create personal@example.com --chrome-profile personal@example.com
 
-lf auth import claude --account personal --profile personal@example.com
-lf auth set claude personal --login-email personal@example.com
-lf auth connect claude --account primary --profile primary@example.com
-lf auth set claude primary --login-email primary@example.com --plan max
+lf auth connect claude --profile primary@example.com
+lf auth connect claude --profile personal@example.com
 
-lf auth connect codex --account primary --profile primary@example.com
-lf auth set codex primary --login-email primary@example.com --plan max
-lf auth connect codex --account engineering --profile engineering@example.com
-lf auth set codex engineering --login-email engineering@example.com --plan max
-lf auth connect codex --account personal --profile personal@example.com
-lf auth set codex personal --login-email personal@example.com
+lf auth connect codex --profile primary@example.com
+lf auth connect codex --profile engineering@example.com
+lf auth connect codex --profile personal@example.com
 lf auth accounts claude
 
-lf profile account set primary@example.com claude primary@example.com
-lf profile account set primary@example.com codex primary@example.com
 lf profile account set engineering@example.com claude personal@example.com
-lf profile account set engineering@example.com codex engineering@example.com
-lf profile account set personal@example.com claude personal@example.com
-lf profile account set personal@example.com codex personal@example.com
 
 lf profile route set \
   --default primary@example.com \
@@ -517,21 +507,25 @@ lf profile route set \
   --backup personal@example.com
 lf profile route show
 
-lf auth set claude personal --paid-through 2026-08-14
-lf auth set claude personal --routing explicit-only
-lf auth reset claude personal
-lf auth disconnect claude --account personal
+lf auth set claude account-id --paid-through 2026-08-14
+lf auth set claude account-id --routing explicit-only
+lf auth reset claude account-id
+lf auth disconnect claude --account account-id
 ```
 
 These addresses are placeholders. Profiles, account bindings, and repository
 routes live in the local Loopflow database; Loopflow ships no account topology.
 
+`auth connect --profile` reuses a matching account or creates one, opens the
+profile's bound Chrome directory, verifies the provider login, and binds the
+account to the profile. Reconnect through the same profile; Loopflow follows
+shared mappings to the owning browser identity.
+
 Codex account connection uses Codex's native local OAuth callback. Loopflow
-opens the authorization URL in the profile's bound Chrome directory, waits for
-the human to approve it, verifies the login email from Codex's ID token, then
-registers the isolated account home. It does not drive the OpenAI page or use
-device-code auth. Authenticate on the local host before `lf ssh`; SSH forwards
-the selected credential for the process lifetime.
+waits for the human to approve it and verifies the login email from Codex's ID
+token. It does not drive the OpenAI page or use device-code auth. Authenticate
+on the local host before `lf ssh`; SSH forwards the selected credential for the
+process lifetime.
 
 Claude authorization runs through Claude in Chrome when its browser extension
 is connected. If the controller is unavailable, Loopflow falls back to a hidden

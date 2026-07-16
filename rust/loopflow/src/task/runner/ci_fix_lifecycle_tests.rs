@@ -554,6 +554,76 @@ impl Harness {
         Some((command.id, created))
     }
 
+    /// Kill this generation's body and boot its successor, as recovery does.
+    ///
+    /// Revokes and finishes the live process, then reserves and activates the
+    /// next generation, replacing the harness lease. A real succession, not a
+    /// re-arm: `arm()` alone reuses one lease, and `claim_child_commands_in`
+    /// skips rows already claimed by the asking generation, so re-arming can
+    /// never prove that a *successor* reclaims. Returns the new generation.
+    async fn crash_and_relaunch(&mut self) -> u32 {
+        let revoked = self
+            .store
+            .revoke_task_process(
+                &self.task.id,
+                &crate::child_session::ChildBodyOutcome::Lost {
+                    reason: "body died mid-repair".to_string(),
+                },
+            )
+            .await
+            .expect("revoke the live generation");
+        self.store
+            .finish_revoked_task_process(&self.task.id, revoked.generation)
+            .await
+            .expect("finish the revoked generation");
+
+        let mut successor = self
+            .store
+            .get_task_session(&self.task.id)
+            .await
+            .expect("read task")
+            .expect("task exists");
+        successor.set_status(TaskSessionStatus::Waiting, "body died; recovering");
+        self.store
+            .update_task_session(&successor)
+            .await
+            .expect("park the session for recovery");
+        let generation = successor.begin_generation("lf-ci-fix-successor".to_string());
+        successor.status = TaskSessionStatus::Running;
+        successor.status_reason = "ci-fix successor body".to_string();
+        let lease = self
+            .store
+            .reserve_task_process(&successor, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve the successor process")
+            .expect("a waiting task reserves its next generation");
+        // A reserved lease cannot write; the body activates it before touching
+        // anything, exactly as the first generation did.
+        if let Some(process) = successor.latest_process.as_mut() {
+            process.state = ChildLeaseState::Active;
+        }
+        self.store
+            .activate_task_process(&successor, &lease)
+            .await
+            .expect("activate the successor process");
+        self.lease = lease;
+        self.task = self
+            .store
+            .get_task_session(&self.task.id)
+            .await
+            .expect("read task")
+            .expect("task exists");
+        generation
+    }
+
+    async fn command(&self, id: &ChildCommandId) -> ChildCommand {
+        self.store
+            .get_child_command(id)
+            .await
+            .expect("read command")
+            .expect("command exists")
+    }
+
     /// What a body's boot does: claim, then select the flow from the claimed wake.
     /// Returns the armed wake, if this generation has one.
     async fn arm(&self) -> Option<super::CiFixWake> {
@@ -881,6 +951,127 @@ async fn a_changed_failing_set_on_the_same_head_rearms() {
             .iter()
             .any(|check| check.name == "rust-test"),
         "the body repairs the failure that woke it, including the newly broken check"
+    );
+}
+
+/// The window the whole `Claimed`-through-the-turn decision exists for, and the
+/// executable form of the argument for it.
+///
+/// A body dies mid-repair. Its successor must land back on the *same* wake and
+/// run ci-fix again. That works only because the command is still `Claimed`:
+/// `claim_child_commands_in` reassigns `persisted`/`claimed` rows to the asking
+/// generation and skips terminal ones.
+///
+/// Both rejected alternatives fail here, which is the point of the test:
+/// - **Accept at arm** — the wake would be terminal, the successor would claim
+///   nothing, `arm` would return `None`, the body would fall through to its
+///   lifecycle phase, and the PR would stay red with nobody repairing it. A
+///   silent strand.
+/// - **Deliver at arm** — `reconcile_stale_deliveries` would flip the dead
+///   generation's `Delivering` to `Uncertain`, and `plan_body_recovery` returns
+///   `NeedsInput`, stranding an *automatic* wake on a human.
+#[tokio::test]
+async fn a_crash_after_arm_reclaims_the_same_command_and_reselects_ci_fix() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_failing();
+    let (wake, _) = harness.observe().await.expect("a red head mints a wake");
+
+    // Generation 1 arms it and is servicing the repair.
+    let armed = harness.arm().await.expect("the first body arms the wake");
+    assert_eq!(armed.command_id, wake);
+    assert_eq!(harness.command(&wake).await.claimed_by_generation, Some(1));
+    assert_eq!(
+        harness.command_state(&wake).await,
+        ChildCommandState::Claimed,
+        "held for the repair turn, not settled at arm"
+    );
+
+    // The body dies mid-repair and recovery boots its successor.
+    let generation = harness.crash_and_relaunch().await;
+    assert_eq!(generation, 2, "a real succession, not a re-arm");
+
+    let resumed = harness.arm().await.expect(
+        "the successor reselects ci-fix rather than falling through to its lifecycle phase",
+    );
+    assert_eq!(
+        resumed.command_id, wake,
+        "the successor services the same command, not a new one"
+    );
+    assert_eq!(
+        resumed.head_sha, "h1",
+        "seeded from that same command's payload"
+    );
+
+    let command = harness.command(&wake).await;
+    assert_eq!(
+        command.claimed_by_generation,
+        Some(generation),
+        "the wake is reassigned to the successor generation"
+    );
+    assert_eq!(
+        command.state,
+        ChildCommandState::Claimed,
+        "still Claimed across the crash — never Accepted, never Uncertain"
+    );
+    assert_eq!(
+        harness.ci_fix_commands().await.len(),
+        1,
+        "a crash mints no second wake"
+    );
+    assert_eq!(
+        harness.incidents().await.len(),
+        1,
+        "and opens no second incident"
+    );
+}
+
+/// A wake is a command, not a direction — the sharpest trap in the change.
+///
+/// Minting a `ChildDirective` would bump `current_directive_version`, and
+/// `has_pending_directive` gates `task_completion_gate` on
+/// `current > incorporated`. A wake that minted one would block Task completion
+/// until a body acknowledged a direction no human ever gave.
+#[tokio::test]
+async fn a_ci_fix_wake_mints_no_directive() {
+    let mut harness = Harness::new().await;
+    let before = harness
+        .store
+        .get_task_session(&harness.task.id)
+        .await
+        .expect("read task")
+        .expect("task exists");
+
+    harness.head("h1");
+    harness.checks_failing();
+    harness.observe().await.expect("a red head mints a wake");
+    harness.arm().await.expect("the wake arms a body");
+
+    let after = harness
+        .store
+        .get_task_session(&harness.task.id)
+        .await
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(
+        after.current_directive_version, before.current_directive_version,
+        "a wake must not version a direction nobody gave"
+    );
+    assert_eq!(
+        after.incorporated_directive_version, before.incorporated_directive_version,
+        "so nothing is left pending incorporation, and completion stays reachable"
+    );
+    let wake_id = harness.ci_fix_commands().await[0].id.clone();
+    let directives = harness
+        .store
+        .child_directives(&ChildRef::Task(harness.task.id.clone()))
+        .await
+        .expect("read directives");
+    assert!(
+        directives
+            .iter()
+            .all(|directive| directive.command_id.as_ref() != Some(&wake_id)),
+        "no directive is bound to the wake command"
     );
 }
 

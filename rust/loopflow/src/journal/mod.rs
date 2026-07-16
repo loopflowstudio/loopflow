@@ -549,7 +549,16 @@ fn ensure_run_context(
     }
 
     let main_repo = main_repo_root(repo_root).ok();
-    let wave_name = crate::engine::wave_context::resolve_run_wave_name();
+    let attribution = crate::engine::wave_context::run_attribution();
+    let wave_name = attribution.wave;
+    if let Some(failure) = attribution.failure.as_deref() {
+        debug!(
+            error = failure,
+            repo = %repo_root.display(),
+            "ambient wave identity failed validation; run attributed to no wave, \
+             not inferred from the worktree"
+        );
+    }
 
     let (run_id, minted_run_id) = match configured_run_id(repo_root) {
         Some(run_id) => (run_id, false),
@@ -1122,6 +1131,85 @@ mod tests {
             .list_run_events_since(0)
             .expect("events");
         assert_eq!(events[0].wave.as_deref(), Some("context"));
+        std::env::remove_var(crate::engine::wave_context::WAVE_ID_ENV);
+    }
+
+    /// W2-239: a stale ambient UUID (registry has no row for it) is propagated
+    /// into the run record as a classified failure, never silently re-attributed
+    /// to the worktree or a different wave. The run records `wave: None`
+    /// (honest — no valid name) and the stale failure in the existing `error`
+    /// field; the text names the stale id and the `--wave <name>` recovery.
+    #[test]
+    fn stale_ambient_uuid_is_propagated_not_inferred_from_the_worktree() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let worktree = repo.create_named_worktree("ambient");
+
+        // A valid wave exists; the run's env names a different, unregistered UUID.
+        let registered = Wave::new(
+            WaveId::new(),
+            "context".to_string(),
+            repo.path().display().to_string(),
+        );
+        super::open_ledger()
+            .expect("ledger")
+            .create_wave(&registered)
+            .expect("registered wave row");
+        let stale_id = WaveId::new();
+        std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, stale_id.as_str());
+
+        // `with_runtime` resolves once and records wave + failure; mirror that.
+        let attribution = crate::engine::wave_context::run_attribution();
+        assert_eq!(
+            attribution.wave, None,
+            "stale identity attributes to no wave"
+        );
+        let failure = attribution
+            .failure
+            .clone()
+            .expect("classified stale failure");
+        assert!(failure.contains("stale"), "failure text: {failure}");
+        assert!(
+            failure.contains(stale_id.as_str()),
+            "failure names the stale id: {failure}"
+        );
+        assert!(
+            failure.contains("--wave"),
+            "failure names the explicit recovery: {failure}"
+        );
+
+        emit(
+            &worktree,
+            LfNode::Run,
+            LfEventType::Started,
+            LfEventFields {
+                wave_name: attribution.wave,
+                error: attribution.failure,
+                worktree: Some(worktree.display().to_string()),
+                command: Some(vec!["lf".to_string(), "design".to_string()]),
+                ..LfEventFields::default()
+            },
+        );
+        emit(
+            &worktree,
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+
+        let events = super::open_ledger()
+            .expect("ledger")
+            .list_run_events_since(0)
+            .expect("events");
+        let started = events
+            .iter()
+            .find(|row| row.node == "run" && row.event == "started")
+            .expect("started row");
+        // Attributed to NO wave — never the worktree or the registered wave —
+        // and the stale failure rides the existing error field (honest wire).
+        assert_eq!(started.wave, None);
+        assert_eq!(started.error.as_deref(), Some(failure.as_str()));
+
         std::env::remove_var(crate::engine::wave_context::WAVE_ID_ENV);
     }
 

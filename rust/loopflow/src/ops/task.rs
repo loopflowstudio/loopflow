@@ -2840,12 +2840,16 @@ async fn reconcile_task_pr_with_authority(
             merged_at = Some(now);
             // Record the merge, but withhold completion while an accepted
             // directive is unincorporated — an auto-merge armed by `lf pr land`
-            // must not silently erase direction accepted after it was armed.
+            // must not silently erase direction accepted after it was armed — or
+            // while the branch holds follow-up committed past the merged tip,
+            // which another serial PR still owes. The PR is settling in flight and
+            // is not on disk yet, so its range is read from it directly.
             let completes = pr
                 .publication
                 .as_ref()
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-                && !has_pending_directive(session);
+                && !has_pending_directive(session)
+                && committed_follow_up_range(&session.worktree, &pr)?.is_none();
             if completes {
                 // The completion gate: even with the PR merged, the Task cannot
                 // be completed in the PM until every required review is
@@ -3343,13 +3347,16 @@ async fn ensure_working_pr_with_authority(
             )));
         }
     }
-    // A settled completing PR never rotates: completion is pending on the
-    // review gate, not on a follow-up PR. `reconcile_task_completion` advances
-    // the Session to `Completed` once the gate closes.
+    // A settled completing PR normally never rotates: completion is pending on
+    // the review gate, not on a follow-up PR. `reconcile_task_completion`
+    // advances the Session to `Completed` once the gate closes. The one exception
+    // is follow-up committed past the merged tip: the completion gate refuses to
+    // settle over it, so one more serial PR is the only way it lands.
     if settled
         .publication
         .as_ref()
         .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+        && committed_follow_up_range(&session.worktree, &settled)?.is_none()
     {
         return Ok(None);
     }
@@ -3912,6 +3919,32 @@ pub(crate) async fn task_completion_gate(
             "directive v{} is not yet incorporated; acknowledge it or re-steer before completing",
             session.current_directive_version
         ));
+    }
+
+    // Work committed past the tip GitHub merged is owned by no PR; completing
+    // would strand it outside the Task. Only the newest PR can still hold it: a
+    // rotation carries the range onto its successor but leaves the settled
+    // branch's commits in place, so scanning every merged PR would never clear.
+    let prs = store
+        .task_prs(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    if let Some(newest) = prs.last() {
+        if newest.phase() == PrPhase::Merged
+            && newest
+                .publication
+                .as_ref()
+                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+            && committed_follow_up_range(&session.worktree, newest)?.is_some()
+        {
+            gate.blockers.push(format!(
+                "follow-up work is committed past merged pull request #{}",
+                newest
+                    .github()
+                    .map(|github| github.number)
+                    .unwrap_or_default()
+            ));
+        }
     }
 
     // Every active PR must be settled (merged or explicitly abandoned).
@@ -6731,6 +6764,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_completing_pr_rotates_only_to_carry_committed_follow_up() {
+        // A completing PR has nothing to rotate to — except follow-up committed
+        // past the merged tip (W2-293), which the completion gate refuses to
+        // settle over. Both halves read the same range, so both are proven here.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let settled_branch = "jack/task-pr-proof";
+        repo.create_branch(settled_branch);
+        repo.create_file("merged.txt", "merged work\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let merged_tip = repo.head_sha();
+        git(repo.path(), &["push", "origin", "jack/task-pr-proof:main"]);
+
+        let (_home, store, mut session, mut settled) =
+            rotation_task(&repo, settled_branch, &base).await;
+        settled.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 1042,
+                url: "https://example.com/pr/1042".to_string(),
+                head_sha: Some(merged_tip.clone()),
+            }),
+        });
+        settled.merge_commit = Some("merge-1042".to_string());
+        settled.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&settled, None)
+            .await
+            .expect("settle merged completing PR");
+
+        // Nothing past the merged tip: the completing PR does not rotate.
+        let none =
+            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
+                .await
+                .expect("completing PR with no follow-up");
+        assert!(
+            none.is_none(),
+            "a completing PR with no follow-up must not mint a successor"
+        );
+
+        // The body commits the follow-up its directive asked for, after the merge.
+        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
+        repo.stage_all();
+        repo.commit("follow-up the directive asked for");
+
+        let next =
+            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
+                .await
+                .expect("rotate to carry follow-up")
+                .expect("successor PR");
+
+        assert_eq!(next.sequence, 2);
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            next.branch
+        );
+        // The follow-up survives on the successor, and only the follow-up: the
+        // merged work rides in from the base rather than being re-applied.
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("follow-up.txt")).expect("follow-up carried"),
+            "acknowledged follow-up\n"
+        );
+        let beyond = git(
+            repo.path(),
+            &["log", "origin/main..HEAD", "--oneline", "--format=%s"],
+        );
+        assert_eq!(
+            beyond.lines().collect::<Vec<_>>(),
+            vec!["follow-up the directive asked for"]
+        );
+    }
+
+    #[tokio::test]
     async fn failed_committed_carry_restores_the_settled_branch_for_retry() {
         let repo = TestRepo::new();
         let base = repo.head_sha();
@@ -8227,6 +8336,71 @@ mod tests {
             "gate should be satisfied: {:?}",
             gate.blockers
         );
+    }
+
+    #[tokio::test]
+    async fn completion_is_withheld_over_work_committed_past_the_merged_tip() {
+        // W2-293/#1042: GitHub merged the recorded head; the body then committed
+        // acknowledged follow-up on top. Completing would leave that commit owned
+        // by no PR, so the gate and the reconcile advance must both withhold.
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        let base = repo.head_sha();
+        repo.create_branch(branch);
+        repo.create_file("merged.txt", "merged work\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let merged_tip = repo.head_sha();
+
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let mut merged = pr.clone();
+        merged
+            .publication
+            .as_mut()
+            .and_then(|publication| publication.github.as_mut())
+            .expect("published github PR")
+            .head_sha = Some(merged_tip);
+        store.update_task_pr(&merged).await.expect("record tip");
+
+        // The branch ends at the merged tip: completion is owed and fires.
+        let gate = task_completion_gate(&store, &session).await.expect("gate");
+        assert!(
+            gate.satisfied,
+            "a completing PR with no follow-up must still complete: {:?}",
+            gate.blockers
+        );
+
+        // The body commits the follow-up its directive asked for, after the merge.
+        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
+        repo.stage_all();
+        repo.commit("follow-up the directive asked for");
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate with follow-up");
+        assert!(
+            !gate.satisfied,
+            "completion must not fire over committed follow-up"
+        );
+        assert!(
+            gate.reason().contains(&format!("#{}", 912)),
+            "blocker should name the merged PR: {}",
+            gate.reason()
+        );
+
+        // The reconcile advance honours the same gate: no completion, and no
+        // writeback that would close the Linear issue over the commit.
+        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
+        reconcile_task_completion(&store, &mut session, None)
+            .await
+            .expect("reconcile with follow-up outstanding");
+        assert_ne!(
+            session.status,
+            TaskSessionStatus::Completed,
+            "reconcile must not complete over committed follow-up"
+        );
+        assert_eq!(session.pm_writeback, PmWritebackState::Current);
+        assert!(repo.path().join("follow-up.txt").exists());
     }
 
     #[tokio::test]

@@ -66,6 +66,14 @@ also confirms the candidate is a content-addressed member of `~/.lf/bin`.
   candidate (bodies run the CLI, not the app's bundled helper); the stale app is
   a safe degraded state and the staged copy is cleaned up. Preserves the
   post-failure compatible-command guarantee.
+- **The app commit itself never strands the old bundle.** `commit_app_bundle`
+  moves the old app to a unique sidecar, then renames the staged bundle into
+  place. If that second rename fails — the window between old→sidecar and
+  staged→target — it renames the sidecar back, so the target is either the old
+  app or the new app and never absent or partial. This restoration is a hard
+  guarantee, not best-effort; a crash mid-sequence leaves either the target or a
+  recoverable sidecar, never a half-copied bundle (the copy already finished
+  during staging).
 - **Call-time global resolution in `install.py`.** `_promote_with_candidate`
   resolves `APPLICATIONS_DIR` at call time and `local()` its bundle spec from the
   module global, instead of freezing them as def-time defaults. Production is
@@ -96,6 +104,12 @@ also confirms the candidate is a content-addressed member of `~/.lf/bin`.
   `copy_tree_preserves_symlinks_and_permissions`,
   `commit_app_bundle_replaces_the_old_app_and_removes_the_legacy_bundle`,
   `a_frontier_failure_leaves_the_cli_new_and_the_app_untouched`.
+- **The old app is restored when the staged→target rename fails mid-commit** —
+  `commit_app_bundle_restores_the_old_app_when_the_staged_rename_fails` forces
+  that exact failure (a missing staged bundle) and asserts the old app is back at
+  the target with no leaked sidecar. Deleting the restore branch strands the old
+  bytes in the sidecar and leaves the target absent, reddening the test — the
+  reviewer's requested sabotage proof for the atomicity guarantee.
 - `uv run pytest python/tests/test_install_script.py` green (10 passed locally);
   full CI green (rust-lint/rust-test are the real verifier — no local cargo on
   this host). Exact-head Project review, then land.

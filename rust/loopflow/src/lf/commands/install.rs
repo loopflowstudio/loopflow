@@ -1356,6 +1356,46 @@ mod promote_tests {
     }
 
     #[test]
+    fn commit_app_bundle_restores_the_old_app_when_the_staged_rename_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("Applications/Loopflow.app");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("marker"), b"old-app").unwrap();
+
+        // A staged path that does not exist forces the staged -> target rename to
+        // fail *after* the old app has already moved to its sidecar — exactly the
+        // window between old-app->sidecar and staged->target. The old app must be
+        // restored in place, not stranded in the sidecar.
+        let missing_staged = dir.path().join("Applications/.never-staged");
+        let plan = AppPromotion {
+            source: dir.path(), // unused on the commit path
+            target: &target,
+            legacy_target: None,
+        };
+        let error = commit_app_bundle(&missing_staged, &plan).unwrap_err();
+        assert!(error.to_string().contains("commit staged app"), "{error}");
+
+        // Removing the `fs::rename(&superseded, plan.target)` restore branch
+        // leaves the target absent and the old bytes stranded in the sidecar, so
+        // both assertions below go red — this is the restore's sabotage proof.
+        assert!(
+            target.exists(),
+            "old app must be restored to the target on a failed commit"
+        );
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"old-app");
+        let sidecars: Vec<_> = fs::read_dir(dir.path().join("Applications"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("superseded"))
+            .collect();
+        assert!(
+            sidecars.is_empty(),
+            "superseded sidecar leaked: {sidecars:?}"
+        );
+    }
+
+    #[test]
     fn a_frontier_failure_leaves_the_cli_new_and_the_app_untouched() {
         let dir = tempfile::tempdir().unwrap();
         let cli_target = dir.path().join("lf");

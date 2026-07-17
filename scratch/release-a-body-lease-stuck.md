@@ -61,6 +61,54 @@ event log shows one `BodyLeaseChanged` to `finished` naming the absence that
 justified it, and no human touched the store. On a Session whose group is still
 alive, the same command refuses and names the live lease.
 
+## Computable contract
+
+Verified in the tree during clarify, so pursue does not re-derive it.
+
+**Source of truth.** `task_sessions.process_lease_state` + `process_generation`
+(and the `project_sessions` twin). These columns are written **only** by the
+revoke/finish CAS path — `update_task_session` does not persist them. That is
+not a guess: the existing `dead_lease_task` helper (`ops/task.rs:5946`) says so
+in its own doc comment and seeds the lease at `create_task_session` for exactly
+this reason, and it matches the wave's `TASK_SESSION_UPDATE` finding. Derived
+views: `TaskSession.latest_process.state`, and the snapshot's `latest_process`.
+
+**User-visible outcome.** A supervisor or operator whose Task is pinned at
+`revoked` over a dead group. `lf task resume <issue>` starts the next
+generation instead of failing, with no human touching the store.
+
+**End-to-end proof.** The W2-297-shaped runtime test under *Done when* is the
+executable proof. The **observable** is `lf task status --json` →
+`latest_process.state` moving `revoked` → `finished`, followed by a successful
+reservation. That field is already the one the fleet's standing supervisor rule
+reads ("never Resume while the lease is revoked"), so the release clears that
+rule's precondition on the surface supervisors already poll — no new field, and
+nothing new to teach them.
+
+**Affected surfaces and consumers** — every reader of lease state in the tree:
+
+| consumer | reads | effect of `revoked` → `finished` |
+|----------|-------|----------------------------------|
+| `reserve_task_process` CAS (`store/sqlite/child_sessions.rs:669`) | `IS NULL OR = 'finished'` | the point of the change: the CAS becomes passable |
+| `lf task status --json` → `latest_process.state` (`TaskSessionSnapshot`, `ops/task.rs:165`) | the whole `ChildProcessGeneration` | the transition is observable; no schema or field change |
+| `strand_verdict` (`child_session.rs:920`) | the only `Revoked` arm in the tree | releasing *before* planning makes its existing `Finished` + `Superseded` arm read `Redispatch`, with no new variant |
+| `lf pm reteam` `protection_reason` (`ops/pm.rs:1686`) | protects `Reserved \| Active` only | **invisible** — `revoked` and `finished` are both already unprotected, so reteam is compatible and unchanged |
+| `derive_task_actions` / `TaskActionModel` | does **not** read lease state | unaffected, so this carries **no ordering dependency on W2-290** |
+| wire DTOs / Swift / `tests/fixtures/dto/` | nothing — no mirror exists | no DTO obligation |
+
+**Operational boundary.** The probe runs only when the recorded lease is
+`revoked` — 1 of 117 Sessions today — so the healthy reservation path pays
+nothing. Its worst case is one `tmux list-sessions` fork plus one or two
+`kill(…, 0)` syscalls. A probe on every reservation would be a regression; gate
+it on the lease state, not on the code path.
+
+**Test seam.** Reuse `dead_lease_task` (`ops/task.rs:5946`) rather than
+inventing one. It already seeds a non-active status carrying a dead lease at row
+creation, which is the only way to get a `revoked` lease into the store, and it
+already parameterizes `lease_state` and `outcome`. It currently seeds
+`pid: None, process_group_id: None`; the new tests need those populated, which
+is a parameter, not a new fixture.
+
 ## Approach
 
 Split the two halves of the reap that are currently fused, and make the second

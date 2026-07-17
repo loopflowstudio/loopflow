@@ -333,17 +333,16 @@ fn codex_rpc_error_response_maps_to_error_event() {
 }
 
 #[test]
-fn opencode_trace_normal_turn() {
+fn opencode_trace_normal_turn_reports_no_usage_when_none_was_reported() {
     let events = replay_opencode_trace("opencode_normal_turn.ndjson");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
+    // This fixture's idle status carries no usage, so the turn must end without
+    // a usage report. Emitting a defaulted one here would assert "the provider
+    // measured zero" and erase the totals the stream already accumulated.
     assert_eq!(
         event_types,
-        vec!["turn_started", "text_delta", "turn_completed", "turn_usage"]
+        vec!["turn_started", "text_delta", "turn_completed"]
     );
-    assert!(matches!(
-        events.last(),
-        Some(ConversationEvent::TurnUsage { .. })
-    ));
     assert!(matches!(
         events
             .iter()
@@ -353,6 +352,31 @@ fn opencode_trace_normal_turn() {
             ..
         })
     ));
+}
+
+/// Pins that a reported usage survives the mapping with its real values.
+///
+/// This test alone does NOT guard the zeroed-usage bug: its fixture reports
+/// usage, so `usage.unwrap_or_default()` would return the same numbers and it
+/// stays green against the defect. Its sibling —
+/// `opencode_trace_normal_turn_reports_no_usage_when_none_was_reported` — is
+/// what goes red when a defaulted `TurnUsage` is emitted. Keep both.
+#[test]
+fn opencode_trace_reports_the_tokens_the_provider_measured() {
+    let events = replay_opencode_trace("opencode_reported_usage.ndjson");
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
+    assert_eq!(
+        event_types,
+        vec!["turn_started", "text_delta", "turn_completed", "turn_usage"]
+    );
+    let Some(ConversationEvent::TurnUsage { usage, .. }) = events.last() else {
+        panic!("a reported idle usage should produce a turn_usage event");
+    };
+    assert_eq!(usage.input_tokens, 40);
+    assert_eq!(usage.output_tokens, 5197);
+    assert_eq!(usage.total_input_tokens, Some(40));
+    assert_eq!(usage.model.as_deref(), Some("opencode/glm-5.2"));
+    assert_eq!(usage.cost_usd, Some(0.985363));
 }
 
 #[test]
@@ -365,8 +389,7 @@ fn opencode_trace_tool_lifecycle() {
             "turn_started",
             "item_started",
             "item_completed",
-            "turn_completed",
-            "turn_usage"
+            "turn_completed"
         ]
     );
     assert!(matches!(
@@ -384,10 +407,7 @@ fn opencode_trace_tool_lifecycle() {
 fn opencode_trace_error_turn() {
     let events = replay_opencode_trace("opencode_error_turn.ndjson");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    assert_eq!(
-        event_types,
-        vec!["turn_started", "turn_completed", "turn_usage", "error"]
-    );
+    assert_eq!(event_types, vec!["turn_started", "turn_completed", "error"]);
     assert!(matches!(
         events[1],
         ConversationEvent::TurnCompleted {
@@ -396,7 +416,7 @@ fn opencode_trace_error_turn() {
         }
     ));
     assert!(matches!(
-        events[3],
+        events[2],
         ConversationEvent::Error { ref code, .. } if code == "command_failed"
     ));
 }

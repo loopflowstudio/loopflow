@@ -1,0 +1,4 @@
+{"id":"sess_opencode_usage"}
+{"type":"session.status","properties":{"sessionID":"sess_opencode_usage","status":"active"}}
+{"type":"message.part.updated","properties":{"sessionID":"sess_opencode_usage","part":{"id":"part_text_1","type":"TextPart","delta":"Hello from OpenCode"}}}
+{"type":"session.status","properties":{"sessionID":"sess_opencode_usage","status":"idle","model":"opencode/glm-5.2","usage":{"input_tokens":40,"output_tokens":5197,"cost":0.985363}}}

@@ -1807,6 +1807,7 @@ mod tests {
         task.enter_gate(crate::task::TaskGateProposal {
             status: TaskSessionStatus::Completed,
             reason: "implementation complete".to_string(),
+            settlement: None,
         })
         .unwrap();
         task.set_status(TaskSessionStatus::Running, "gate active");
@@ -1864,6 +1865,7 @@ mod tests {
         task.gate_proposal = Some(TaskGateProposal {
             status: TaskSessionStatus::Waiting,
             reason: "PR ready".to_string(),
+            settlement: None,
         });
         task.set_status(TaskSessionStatus::Waiting, "ready for gate review");
         store
@@ -2086,6 +2088,7 @@ mod tests {
         task.enter_gate(TaskGateProposal {
             status: TaskSessionStatus::Waiting,
             reason: "PR ready after review changes".to_string(),
+            settlement: None,
         })
         .unwrap();
         store
@@ -2120,6 +2123,7 @@ mod tests {
         task.enter_gate(TaskGateProposal {
             status: TaskSessionStatus::Waiting,
             reason: "PR ready for attended review".to_string(),
+            settlement: None,
         })
         .unwrap();
         store
@@ -2509,6 +2513,7 @@ mod tests {
         task.gate_proposal = Some(TaskGateProposal {
             status: TaskSessionStatus::Waiting,
             reason: "PR ready".to_string(),
+            settlement: None,
         });
         task.set_status(TaskSessionStatus::Waiting, "ready for gate review");
         store

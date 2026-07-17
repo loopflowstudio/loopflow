@@ -5,7 +5,6 @@ use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
-use loopflow::task::{AfterMerge, PrPhase};
 use loopflow_test_support::TestRepo;
 use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
@@ -489,7 +488,7 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
 }
 
 #[test]
-fn latest_land_disposition_wins_before_merge() {
+fn managed_task_land_is_rejected_before_github_mutation() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let log_path = home.path().join("gh.log");
@@ -505,9 +504,9 @@ fn latest_land_disposition_wins_before_merge() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let _task = register_task(home.path(), repo.path(), branch, &base);
 
-    land(
+    let error = land(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -523,36 +522,13 @@ fn latest_land_disposition_wins_before_merge() {
         },
         &NullProgress,
     )
-    .expect("land as completing PR");
-
-    land(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: false,
-            create_pr: false,
-            complete: false,
-            next_slug: Some("follow-up-proof".to_string()),
-            worktree: None,
-            commit_message: None,
-            pr_title: Some("test title".to_string()),
-            pr_body: Some("test body".to_string()),
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("revise land disposition");
-
-    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
-    let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
-        .expect("read active PR")
-        .expect("active PR");
-    assert_eq!(pr.phase(), PrPhase::Open);
-    let publication = pr.publication.expect("publication");
-    assert_eq!(publication.after_merge, AfterMerge::Review);
-    assert_eq!(publication.next_slug.as_deref(), Some("follow-up-proof"));
-    assert_eq!(publication.github.map(|pr| pr.number), Some(912));
+    .expect_err("managed Task land must not bypass lifecycle review");
+    assert!(error.to_string().contains("lf pr publish"));
+    assert!(error.to_string().contains("InteractionReview"));
+    assert!(
+        !log_path.exists() || fs::read_to_string(log_path).unwrap_or_default().is_empty(),
+        "rejected Task land must not mutate GitHub"
+    );
 }
 
 #[test]

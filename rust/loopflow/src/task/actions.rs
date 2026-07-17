@@ -239,21 +239,40 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                 TaskAction::NoAction => "action available: fix failing required checks".into(),
             },
         ),
+        Some(CiState::Passing) | None
+            if evidence.review_gate == Some(ReviewGateState::Approved) =>
+        {
+            one_action(
+                TaskAction::NoAction,
+                match evidence.ci {
+                    Some(_) => "lifecycle approved; checks passed; awaiting mechanical merge",
+                    None => "lifecycle approved; awaiting mechanical merge",
+                },
+                |a| match a {
+                    TaskAction::NoAction => unreachable!(),
+                    TaskAction::Review => "required lifecycle reviews are approved".into(),
+                    TaskAction::Resume => "awaiting mechanical merge".into(),
+                    TaskAction::Complete => "PR is open, not merged".into(),
+                    TaskAction::StartNextPr => "PR is open, not merged".into(),
+                    TaskAction::Recover => "body is not dead; merge is armed".into(),
+                },
+            )
+        }
         Some(CiState::Passing) | None => one_action(
             TaskAction::Review,
             match evidence.ci {
-                Some(_) => "checks passed; awaiting review",
-                None => "awaiting review",
+                Some(_) => "checks passed; awaiting lifecycle review",
+                None => "awaiting lifecycle review",
             },
             |a| match a {
                 TaskAction::Review => unreachable!(),
                 TaskAction::Resume => {
-                    "awaiting review; resume after review to address feedback".into()
+                    "awaiting lifecycle review; resume after requested changes".into()
                 }
                 TaskAction::Complete => "PR is open, not merged".into(),
                 TaskAction::StartNextPr => "PR is open, not merged".into(),
-                TaskAction::Recover => "body is not dead; PR is open for review".into(),
-                TaskAction::NoAction => "action available: review the PR".into(),
+                TaskAction::Recover => "body is not dead; lifecycle review is pending".into(),
+                TaskAction::NoAction => "action available: review the Task conversation".into(),
             },
         ),
     }
@@ -638,8 +657,8 @@ mod tests {
         assert_eq!(cases, 8 * 6 * 4 * 4 * 4 * 3 * 3);
     }
 
-    /// The directive's named fix: a Task waiting on an open PR whose required
-    /// checks pass advertises Review, never Resume.
+    /// Before lifecycle approval, a Task waiting on a passing PR advertises the
+    /// provider-backed review conversation, never Resume or a GitHub action.
     #[test]
     fn waiting_on_a_passing_open_pr_advertises_review_not_resume() {
         let passing = ci(CiState::Passing);
@@ -651,14 +670,31 @@ mod tests {
         assert_eq!(model.recommended, Some(TaskAction::Review));
         assert_eq!(
             model.status(TaskAction::Review).unwrap().reason,
-            "checks passed; awaiting review"
+            "checks passed; awaiting lifecycle review"
         );
         let resume = model.status(TaskAction::Resume).unwrap();
         assert!(!resume.available);
         assert_eq!(
             resume.reason,
-            "awaiting review; resume after review to address feedback"
+            "awaiting lifecycle review; resume after requested changes"
         );
+    }
+
+    #[test]
+    fn approved_open_pr_waits_for_mechanical_merge() {
+        let passing = ci(CiState::Passing);
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.ci = Some(&passing);
+        ev.review_gate = Some(ReviewGateState::Approved);
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(
+            model.status(TaskAction::NoAction).unwrap().reason,
+            "lifecycle approved; checks passed; awaiting mechanical merge"
+        );
+        assert!(!model.status(TaskAction::Review).unwrap().available);
     }
 
     #[test]

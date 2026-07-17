@@ -30,8 +30,12 @@ pub use cron::{
 };
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
+pub(crate) use land::arm_approved_task_pr;
 pub use land::{land, mark_ready, submit, LandOptions};
-pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
+pub use pr::{
+    create_or_update_pr, create_or_update_pr_with_settlement, current_pr, PrInfo, PrOptions,
+    PrResult,
+};
 pub use present::{present_pr_review, ReviewSurface};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{

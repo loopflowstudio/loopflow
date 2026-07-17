@@ -2,9 +2,13 @@
 requires: code on branch
 produces: PR ready, assigned to a human to merge
 ---
-Submit the current branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until a human clicks merge.
+Submit an ordinary non-Task branch for a human to land. Rebase, clear scratch,
+create/update the PR, mark it ready, and assign it — then stop.
 
-Use `submit` (not `land`) whenever a person should land the work by hand. `land` is for headless/auto runs where loopflow merges hands-off; `submit` leaves the one required merge click to a human. (GitHub blocks approving your own PR, so the gate is the merge click, not a review approval — the button unlocks once checks pass.)
+Use `submit` only for non-Task separation of duties. Managed Task human
+decisions happen in durable provider-backed InteractionReview conversations;
+the runner lands mechanically afterward, and `lf pr submit` rejects the Task
+worktree.
 
 ## Orientation
 
@@ -28,10 +32,6 @@ re-derive what these already record.
 ```
 lf pr submit [--create-pr] [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
 ```
-
-Inside a Task, bare submit leaves the Task open. Use `--next <slug>` when
-another serial PR follows, or `-c` when this merge completes the Task.
-Do not combine them; a retry before merge may change the disposition.
 
 **Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.
 

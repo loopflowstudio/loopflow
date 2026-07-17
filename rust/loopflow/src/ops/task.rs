@@ -1242,6 +1242,20 @@ async fn resolve_task_authority(repo: &Path) -> OpsResult<TaskAuthority> {
     }
 }
 
+pub(crate) fn reject_managed_task_shipping(repo: &Path, operation: &str) -> OpsResult<()> {
+    block_on_task(async move {
+        if matches!(
+            resolve_task_authority(repo).await?,
+            TaskAuthority::Authority { .. }
+        ) {
+            return Err(task_error(format!(
+                "`lf pr {operation}` cannot decide a managed Task lifecycle; publish PR evidence with `lf pr publish`, then let the Task runner land it after every required InteractionReview approves"
+            )));
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn request_task_pr_publication(
     repo: &Path,
     after_merge: AfterMerge,
@@ -2839,7 +2853,7 @@ async fn reconcile_task_pr_with_authority(
             pr.ci_observation = None;
             merged_at = Some(now);
             // Record the merge, but withhold completion while an accepted
-            // directive is unincorporated — an auto-merge armed by `lf pr land`
+            // directive is unincorporated — an auto-merge armed by the Task runner
             // must not silently erase direction accepted after it was armed — or
             // while the branch holds follow-up committed past the merged tip,
             // which another serial PR still owes. The PR is settling in flight and
@@ -2859,7 +2873,7 @@ async fn reconcile_task_pr_with_authority(
                 // approved. The PR is settling in flight, so only the review
                 // half of the gate applies here. Do not weaken the review gate
                 // or infer merge from a green head.
-                let gate = review_gate(store, session).await?;
+                let gate = task_review_gate(store, session).await?;
                 if gate.satisfied {
                     session.set_status(
                         TaskSessionStatus::Completed,
@@ -3861,9 +3875,9 @@ impl CompletionGate {
     }
 }
 
-/// The required interaction reviews for a Task: every review attached to this
-/// Session whose policy is `Require`. `Defer`-policy reviews never gate
-/// completion.
+/// The current required checkpoints for a Task. A changes-requested review is
+/// retained as history, but a later lifecycle entry for the same phase step
+/// supersedes it. `Defer`-policy reviews never gate settlement.
 async fn required_reviews_for_task(
     store: &SharedStore,
     session: &TaskSession,
@@ -3872,19 +3886,50 @@ async fn required_reviews_for_task(
         .list_interaction_reviews(Some(&session.wave_id))
         .await
         .map_err(|error| task_error(format!("failed to read interaction reviews: {error}")))?;
-    Ok(reviews
-        .into_iter()
-        .filter(|review| {
-            review.task_session_id == session.id && review.policy == InteractionPolicy::Require
-        })
-        .collect())
+    Ok(current_required_reviews(reviews, session))
+}
+
+fn current_required_reviews(
+    reviews: Vec<InteractionReview>,
+    session: &TaskSession,
+) -> Vec<InteractionReview> {
+    let mut current = BTreeMap::new();
+    for review in reviews.into_iter().filter(|review| {
+        review.task_session_id == session.id && review.policy == InteractionPolicy::Require
+    }) {
+        let key = (
+            review.phase.as_str().to_string(),
+            review.flow.clone(),
+            review.step_index,
+        );
+        let replaces = current
+            .get(&key)
+            .is_none_or(|existing: &InteractionReview| {
+                (
+                    review.phase_epoch,
+                    review.phase_iteration,
+                    review.requested_at,
+                ) > (
+                    existing.phase_epoch,
+                    existing.phase_iteration,
+                    existing.requested_at,
+                )
+            });
+        if replaces {
+            current.insert(key, review);
+        }
+    }
+    current.into_values().collect()
 }
 
 /// The review half of the completion gate: every required interaction review
 /// must be completed with an `Approved` disposition. Used on the merge path,
 /// where the PR being reconciled is settling in flight and must not be re-read
 /// from the store as an active PR.
-async fn review_gate(store: &SharedStore, session: &TaskSession) -> OpsResult<CompletionGate> {
+pub(crate) async fn task_review_gate(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<CompletionGate> {
     let mut blockers = Vec::new();
     for review in required_reviews_for_task(store, session).await? {
         let approved = review.status == InteractionReviewStatus::Completed
@@ -3920,10 +3965,10 @@ pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     session: &TaskSession,
 ) -> OpsResult<CompletionGate> {
-    let mut gate = review_gate(store, session).await?;
+    let mut gate = task_review_gate(store, session).await?;
 
     // An accepted but unincorporated directive blocks completion: an auto-merge
-    // armed by `lf pr land` must not silently erase direction accepted after it
+    // armed by the Task runner must not silently erase direction accepted after it
     // was armed.
     if has_pending_directive(session) {
         gate.blockers.push(format!(
@@ -3980,7 +4025,7 @@ pub(crate) async fn task_completion_gate(
             .unwrap_or_else(|| format!("sequence {}", pr.sequence));
         match pr.phase() {
             PrPhase::Open => gate.blockers.push(format!(
-                "pull request {which} is open for review; merge it or run `lf pr abandon`"
+                "pull request {which} is open; wait for lifecycle-approved mechanical settlement or run `lf pr abandon`"
             )),
             PrPhase::Publishing => gate.blockers.push(format!(
                 "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
@@ -8117,7 +8162,7 @@ mod tests {
     // ordering: a merge observed while a required review is open does not close
     // the Task; the Task closes exactly once after the review approves.
 
-    use super::{reconcile_task_completion, task_completion_gate};
+    use super::{current_required_reviews, reconcile_task_completion, task_completion_gate};
     use crate::interaction_review::{
         InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
         InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
@@ -8218,6 +8263,7 @@ mod tests {
             gate_proposal: Some(TaskGateProposal {
                 status: TaskSessionStatus::Completed,
                 reason: "merged and reviewed".to_string(),
+                settlement: None,
             }),
             agent: "codex".to_string(),
             provider: "codex".to_string(),
@@ -8547,6 +8593,40 @@ mod tests {
             "gate should close after approval: {:?}",
             gate.blockers
         );
+    }
+
+    #[tokio::test]
+    async fn later_lifecycle_review_supersedes_changes_requested_history() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let review_id = open_gate_review(&store, &mut session, &pr).await;
+        store
+            .complete_human_interaction_review(
+                &review_id,
+                InteractionReviewDisposition::ChangesRequested,
+                "repair the proof",
+            )
+            .await
+            .expect("request changes");
+        let rejected = store
+            .get_interaction_review(&review_id)
+            .await
+            .expect("read review")
+            .expect("review exists");
+        let mut approved = rejected.clone();
+        approved.id = InteractionReviewId::new();
+        approved.phase_epoch += 2;
+        approved.status = InteractionReviewStatus::Completed;
+        approved.disposition = Some(InteractionReviewDisposition::Approved);
+        approved.outcome = Some("repair verified".to_string());
+        approved.requested_at += time::Duration::seconds(1);
+        approved.completed_at = Some(approved.requested_at);
+
+        let current = current_required_reviews(vec![rejected, approved.clone()], &session);
+        assert_eq!(current, vec![approved]);
     }
 
     #[tokio::test]

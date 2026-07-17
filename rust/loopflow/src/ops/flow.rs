@@ -8,9 +8,10 @@ use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, land, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_run, release_status, release_tag, submit, AbandonOptions,
-    CommitOptions, LandOptions, PrOptions, RebaseOptions,
+    abandon_branch, commit_workflow, create_or_update_pr, create_or_update_pr_with_settlement,
+    land, rebase_with_recovery, release_bump, release_check, release_notes, release_run,
+    release_status, release_tag, submit, AbandonOptions, CommitOptions, LandOptions, PrOptions,
+    RebaseOptions,
 };
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
@@ -146,8 +147,27 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             model: _,
             title,
             body,
+            complete,
+            next,
+        } => {
+            create_or_update_pr_with_settlement(
+                repo,
+                &PrOptions {
+                    title,
+                    body,
+                    agent: None,
+                },
+                if complete {
+                    crate::task::AfterMerge::CompleteTask
+                } else {
+                    crate::task::AfterMerge::Review
+                },
+                next.as_deref(),
+                progress,
+            )?;
+            Ok(())
         }
-        | PrCommand::Open {
+        PrCommand::Open {
             model: _,
             title,
             body,

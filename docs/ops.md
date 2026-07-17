@@ -33,9 +33,9 @@ Push or GitHub failure returns an error and presents nothing.
 
 ## lf pr open
 
-Publish the PR (same as `lf pr publish`), then open it for review — the GitHub
-page in the browser. This is the explicit, human-initiated review action; agents
-use `publish`, `submit`, or `land` instead.
+Publish an ordinary PR (same as `lf pr publish`), then open it for review in
+GitHub. Managed Task reviews stay in their provider-backed InteractionReview
+conversation and reject this command.
 
 ```bash
 lf pr open
@@ -48,13 +48,15 @@ the GitHub browser default.
 
 ## lf pr land
 
-Submit PR to merge queue.
+Land an ordinary non-Task PR through the merge queue.
 
 ```bash
 lf pr land
 ```
 
-Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `lf wt prune` after merge completes to clean up.
+Managed Tasks reject `land`: publish evidence with `lf pr publish -c` or `lf pr
+publish --next <slug>`. Their runner arms auto-merge only after every required
+lifecycle review and current settlement condition clears.
 
 ## lf cron
 
@@ -245,7 +247,7 @@ lf task run CHILD --stack-on PARENT
 ```
 
 This creates CHILD's readable sibling worktree from PARENT's open PR branch.
-`lf pr open`, `lf rebase`, and `lf pr land` carry the recorded placement forward.
+`lf pr publish` and `lf rebase` carry the recorded placement forward.
 
 ### lf wt switch
 

@@ -34,7 +34,7 @@ use crate::store::{open_existing_store, SharedStore};
 use crate::task::interactive_rendezvous::{self, Rendezvous};
 use crate::task::{
     CiCheck, Observation, PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase,
-    TaskSession, TaskSessionId, TaskSessionStatus,
+    TaskSession, TaskSessionId, TaskSessionStatus, TaskSettlementIntent,
 };
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
@@ -696,6 +696,19 @@ The durable reviewer outcome is:\n{}",
                             )
                             .await
                             .map_err(|error| anyhow!(error.to_string()))?;
+                            if approved_gate
+                                .as_ref()
+                                .and_then(|proposal| proposal.settlement.as_ref())
+                                .is_some()
+                            {
+                                arm_approved_gate_settlement(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    observed_pr.as_ref(),
+                                )
+                                .await?;
+                            }
                             // Reconcile keeps the cached PR row through a GitHub
                             // outage and names the failure on the session. For a
                             // turn that just ran, that degraded reading is an
@@ -882,9 +895,24 @@ The durable reviewer outcome is:\n{}",
                             if session.lifecycle_phase == TaskLifecyclePhase::Iterate
                                 && status != Lifecycle::Interrupted
                             {
+                                let settlement = observed_pr
+                                    .as_ref()
+                                    .filter(|pr| pr.phase() == PrPhase::Open)
+                                    .and_then(|pr| {
+                                        let publication = pr.publication.as_ref()?;
+                                        Some(TaskSettlementIntent {
+                                            pr_id: pr.id.clone(),
+                                            head_sha: pr.head_sha()?.to_string(),
+                                            after_merge: publication.after_merge,
+                                            next_slug: publication.next_slug.clone(),
+                                            requested_at: publication.requested_at,
+                                            armed_at: None,
+                                        })
+                                    });
                                 session.enter_gate(TaskGateProposal {
                                     status: stopped_status,
                                     reason: stopped_reason,
+                                    settlement,
                                 })?;
                                 session.set_status(
                                     TaskSessionStatus::Running,
@@ -1602,6 +1630,71 @@ async fn pr_head_for_session(store: &SharedStore, session: &TaskSession) -> Resu
 fn task_gate_fingerprint(session: &TaskSession) -> Result<String> {
     let state = crate::engine::git::material_worktree_state(Path::new(&session.worktree))?;
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
+}
+
+async fn arm_approved_gate_settlement(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    observed_pr: Option<&crate::task::TaskPr>,
+) -> Result<()> {
+    let settlement = session
+        .gate_proposal
+        .as_ref()
+        .and_then(|proposal| proposal.settlement.as_ref())
+        .ok_or_else(|| anyhow!("approved Task gate has no settlement intent"))?;
+    if settlement.armed_at.is_some() {
+        return Ok(());
+    }
+    let pr = observed_pr.ok_or_else(|| {
+        anyhow!(
+            "approved Task gate settlement {} has no current PR",
+            settlement.pr_id
+        )
+    })?;
+    if pr.phase() != PrPhase::Open || pr.id != settlement.pr_id {
+        anyhow::bail!(
+            "approved Task gate settlement names PR {}, but the current PR is {} ({})",
+            settlement.pr_id,
+            pr.id,
+            pr.phase().as_str()
+        );
+    }
+    if pr.head_sha() != Some(settlement.head_sha.as_str()) {
+        anyhow::bail!(
+            "Task PR head changed after approval: gate reviewed {}, current head is {}",
+            settlement.head_sha,
+            pr.head_sha().unwrap_or("unknown")
+        );
+    }
+    let publication = pr
+        .publication
+        .as_ref()
+        .ok_or_else(|| anyhow!("approved Task PR has no publication intent"))?;
+    if publication.after_merge != settlement.after_merge
+        || publication.next_slug != settlement.next_slug
+    {
+        anyhow::bail!("Task PR settlement intent changed after gate review");
+    }
+    let review_gate = crate::ops::task::task_review_gate(store, session)
+        .await
+        .map_err(|error| anyhow!(error.to_string()))?;
+    if !review_gate.satisfied {
+        anyhow::bail!(
+            "Task PR cannot land until every required lifecycle review approves: {}",
+            review_gate.reason()
+        );
+    }
+    crate::ops::arm_approved_task_pr(&session.worktree)
+        .map_err(|error| anyhow!(error.to_string()))?;
+    session
+        .gate_proposal
+        .as_mut()
+        .and_then(|proposal| proposal.settlement.as_mut())
+        .expect("settlement was validated above")
+        .armed_at = Some(time::OffsetDateTime::now_utc());
+    store.update_task_session_for_lease(session, lease).await?;
+    Ok(())
 }
 
 async fn pending_input_is_current(
@@ -2504,7 +2597,7 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` proposes completing the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. Gate approves settlement or returns the same Task to iteration. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Publish evidence with `lf pr publish --next <slug>` when another serial PR follows, or `lf pr publish -c` when this merge completes the Task. Publication never arms merge. Required human checkpoints stay in this provider-backed InteractionReview conversation; after all required lifecycle reviews approve and the reviewed head and settlement intent remain current, the runner lands mechanically. Do not use `pr open`, `submit`, or `land` as managed Task authority. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,
@@ -2980,6 +3073,7 @@ mod tests {
         session.gate_proposal = Some(TaskGateProposal {
             status: TaskSessionStatus::Waiting,
             reason: "prove the delivered behavior".to_string(),
+            settlement: None,
         });
         store
             .update_task_session_for_lease(&session, &lease)

@@ -21,10 +21,10 @@ use crate::lf::{
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
-    create_or_update_pr, current_pr, land, plan_rebase, rebase_class_name, rebase_strategy_name,
-    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
-    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    create_or_update_pr_with_settlement, current_pr, land, plan_rebase, rebase_class_name,
+    rebase_strategy_name, rebase_with_recovery, release_bump, release_check, release_notes,
+    release_run, release_status, release_tag, start_rebase_for_resolution, submit, AbandonOptions,
+    CommitOptions, CronSpec, LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -38,9 +38,17 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         None | Some(PrCommand::Status) => pr_status(),
-        Some(PrCommand::Publish { model, title, body }) => publish_pr(
+        Some(PrCommand::Publish {
+            model,
+            title,
+            body,
+            complete,
+            next,
+        }) => publish_pr(
             title.clone(),
             body.clone(),
+            *complete,
+            next.clone(),
             model.as_deref().or(cli_model),
             &progress,
         ),
@@ -333,18 +341,29 @@ fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()>
 fn publish_current(
     title: Option<String>,
     body: Option<String>,
+    complete: bool,
+    next_slug: Option<String>,
     agent_override: Option<&str>,
     progress: &impl Progress,
 ) -> Result<crate::ops::PrResult> {
+    if complete && next_slug.is_some() {
+        return Err(anyhow!("--complete and --next cannot be used together"));
+    }
     let repo_root = find_repo_root()?;
     let result = with_rebase_retry(&repo_root, "PR publication", progress, |repo| {
-        create_or_update_pr(
+        create_or_update_pr_with_settlement(
             repo,
             &PrOptions {
                 title: title.clone(),
                 body: body.clone(),
                 agent: agent_override.map(str::to_string),
             },
+            if complete {
+                crate::task::AfterMerge::CompleteTask
+            } else {
+                crate::task::AfterMerge::Review
+            },
+            next_slug.as_deref(),
             progress,
         )
     })?;
@@ -354,10 +373,12 @@ fn publish_current(
 fn publish_pr(
     title: Option<String>,
     body: Option<String>,
+    complete: bool,
+    next_slug: Option<String>,
     agent_override: Option<&str>,
     progress: &impl Progress,
 ) -> Result<()> {
-    let result = publish_current(title, body, agent_override, progress)?;
+    let result = publish_current(title, body, complete, next_slug, agent_override, progress)?;
     print_published_pr(&result);
     Ok(())
 }
@@ -368,7 +389,9 @@ fn open_pr(
     agent_override: Option<&str>,
     progress: &impl Progress,
 ) -> Result<()> {
-    let result = publish_current(title, body, agent_override, progress)?;
+    let repo_root = find_repo_root()?;
+    crate::ops::task::reject_managed_task_shipping(&repo_root, "open")?;
+    let result = publish_current(title, body, false, None, agent_override, progress)?;
     // Publication succeeded — print the URL before presenting so a failed
     // review-surface launch fails only `pr open` and never hides the PR.
     print_published_pr(&result);

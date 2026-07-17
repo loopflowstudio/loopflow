@@ -175,9 +175,36 @@ impl TaskLifecyclePlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskSettlementIntent {
+    pub pr_id: TaskPrId,
+    pub head_sha: String,
+    pub after_merge: AfterMerge,
+    pub next_slug: Option<String>,
+    pub requested_at: OffsetDateTime,
+    pub armed_at: Option<OffsetDateTime>,
+}
+
+impl TaskSettlementIntent {
+    fn validate(&self) -> Result<(), TaskDataError> {
+        if self.head_sha.trim().is_empty() {
+            return Err(TaskDataError::InvalidInvariant(
+                "Task settlement intent requires a PR head".to_string(),
+            ));
+        }
+        if self.after_merge == AfterMerge::CompleteTask && self.next_slug.is_some() {
+            return Err(TaskDataError::InvalidInvariant(
+                "a completing Task settlement cannot name a next PR".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGateProposal {
     pub status: TaskSessionStatus,
     pub reason: String,
+    pub settlement: Option<TaskSettlementIntent>,
 }
 
 impl TaskGateProposal {
@@ -192,6 +219,9 @@ impl TaskGateProposal {
             return Err(TaskDataError::InvalidInvariant(
                 "gate proposal reason cannot be empty".to_string(),
             ));
+        }
+        if let Some(settlement) = &self.settlement {
+            settlement.validate()?;
         }
         Ok(())
     }
@@ -789,8 +819,8 @@ impl TaskSession {
     fn open_pr_bar(&self, pr: &TaskPr) -> String {
         let number = pr.github().expect("open Task PR passed validation").number;
         format!(
-            "Task {} submitted pull request #{} and is awaiting review; \
-             resume it explicitly with `lf task resume {}` to answer review",
+            "Task {} published pull request #{} and is awaiting lifecycle review or mechanical settlement; \
+             resume it explicitly with `lf task resume {}` to address requested changes",
             self.launch.issue.identifier, number, self.launch.issue.identifier,
         )
     }
@@ -1644,6 +1674,7 @@ mod tests {
         let proposal = TaskGateProposal {
             status: TaskSessionStatus::Waiting,
             reason: "pull request is ready for review".to_string(),
+            settlement: None,
         };
         session.phase_cursor = 2;
         session.phase_iteration = 3;

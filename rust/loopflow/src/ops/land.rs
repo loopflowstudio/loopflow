@@ -50,6 +50,13 @@ fn prepare_pr(
     finalize: Finalize,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
+    crate::ops::task::reject_managed_task_shipping(
+        repo,
+        match finalize {
+            Finalize::AutoMerge => "land",
+            Finalize::AssignForReview => "submit",
+        },
+    )?;
     if options.complete && options.next_slug.is_some() {
         return Err(OpsError::Message(
             "--complete and --next cannot be used together".to_string(),
@@ -124,6 +131,18 @@ fn prepare_pr(
         progress,
     )?;
     Ok(pr)
+}
+
+/// Arm an already-published Task PR after the Task runner has validated its
+/// durable lifecycle reviews and head fingerprint. This deliberately performs
+/// no commit, rebase, copy generation, or scratch cleanup: any head mutation
+/// after approval would invalidate the review evidence that authorized it.
+pub(crate) fn arm_approved_task_pr(repo: &Path) -> OpsResult<()> {
+    mark_ready(repo)?;
+    if !auto_merge_enabled(repo)? {
+        enable_auto_merge(repo, None, None)?;
+    }
+    Ok(())
 }
 
 /// Land a PR and walk away: commit, rebase, clear scratch, and arm auto-merge so
@@ -510,6 +529,22 @@ fn enable_auto_merge(repo: &Path, title: Option<&str>, body: Option<&str>) -> Op
         });
     }
     Ok(())
+}
+
+fn auto_merge_enabled(repo: &Path) -> OpsResult<bool> {
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr")
+        .arg("view")
+        .arg("--json")
+        .arg("autoMergeRequest")
+        .arg("--jq")
+        .arg(".autoMergeRequest != null")
+        .current_dir(repo);
+    let output = run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+        command: err.command_line(),
+        stderr: err.stderr,
+    })?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim() == "true")
 }
 
 fn delete_remote_branch(repo: &Path, branch: &str) -> OpsResult<()> {

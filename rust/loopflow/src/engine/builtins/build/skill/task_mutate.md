@@ -9,15 +9,18 @@ Inspect the worktree, focused verification, diff, PR, CI, and review state.
 
 - If the change is incomplete or verification fails, state the next concrete
   repair; the Task runner may start another full flow iteration.
-- If the diff is reviewable and has no PR, use the repository's Loopflow PR
-  operation to publish or refresh the active PR to `main`.
+- If the diff is reviewable, publish or refresh it with `lf pr publish -c` when
+  merge completes the Task, or `lf pr publish --next <slug>` when another serial
+  PR follows.
 - If CI or review has an obvious fix, make the bounded repair in this Task
   worktree, verify it, and update the same PR.
 - Treat an open or approved PR as submitted, never complete. A merge settles
   that PR; it does not inherently complete the Task.
-- Use bare `lf pr land --next <slug>` when another PR follows. Use
-  `lf pr land -c` only when this merge proves the whole Task complete. Use
-  `lf pr abandon` to discard the active PR without abandoning the Task.
+- Never use `pr open`, `submit`, or `land` as managed Task authority. Required
+  review occurs in the provider-backed InteractionReview conversation; after
+  every required review and current settlement condition clears, the runner
+  lands mechanically. Use `lf pr abandon` to discard the active PR without
+  abandoning the Task.
 - Use `lf task complete <issue> --summary "..."` only for a clean Task that
   honestly needs no PR. Loopflow owns Linear completion and pending writeback.
 

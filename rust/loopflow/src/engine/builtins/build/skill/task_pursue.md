@@ -19,7 +19,7 @@ selection. Follow the repo style guide.
   task acknowledge` command it provides. Summarize how that direction changes
   the execution plan; provider acceptance alone is not incorporation.
 - Own execution in this process and worktree. Operational Loopflow children such
-  as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
+  as `lf commit`, `lf pr publish`, `lf rebase`, and direct skill or flow calls are
   part of that execution and remain available. Do not boot a server, create a
   second Task Session, or delegate the task seed. If scoped PM reads fail,
   note the failure and continue from the seed rather than repairing auth.
@@ -33,15 +33,16 @@ selection. Follow the repo style guide.
   required Project Session resolves the routine choice or explicitly escalates
   it to the Wave. Do not invent a provider-specific approval path or start
   unrelated work while it is pending.
-- Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
-  pushes and creates or refreshes the PR without opening a browser. Reach for
-  `lf pr open` only when a human explicitly asked to see the PR for review.
-- A merged PR settles that PR. Use `lf pr land -c` only when that merge
-  completes the Task; use bare `lf pr land --next <slug>` when another serial
-  PR follows. Use `lf task complete <issue> --summary "..."` for clean
+- Use `lf pr publish -c` when the published PR completes the Task, or `lf pr
+  publish --next <slug>` when another serial PR follows. Publication records
+  evidence and settlement intent but never arms merge. Do not use `pr open`,
+  `submit`, or `land` in a managed Task; required review stays in the existing
+  provider-backed InteractionReview conversation and the runner lands
+  mechanically once every required checkpoint and current settlement condition
+  clears.
+- A merged PR settles that PR. Use `lf task complete <issue> --summary "..."` for clean
   work that needs no PR. Do not write Task completion directly through PM.
-- If a PR merged out of band (GitHub auto-merge, not settled by `lf pr land
-  -c`) and follow-up work remains, `lf pr next [slug]` reconciles the merge and
+- If a PR merged out of band and follow-up work remains, `lf pr next [slug]` reconciles the merge and
   rotates to the next serial PR, carrying committed and uncommitted follow-up
   forward — no manual git surgery.
 - File a concrete follow-up with `lf pm task create` when new work belongs later

@@ -4,6 +4,11 @@ produces: landed PR
 ---
 Land the current branch. Rebase, create/update the PR, and enable auto-merge.
 
+Use this skill only for ordinary non-Task PRs. A managed Task publishes PR
+evidence during Iterate and its runner arms merge only after every required
+provider-backed InteractionReview and the current settlement conditions clear.
+`lf pr land` rejects managed Task worktrees.
+
 ## Orientation
 
 Before starting, orient yourself in this branch:
@@ -21,7 +26,8 @@ re-derive what these already record.
 
 ## API
 
-`lf pr land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge. In a Task worktree, bare land settles one PR and keeps the Task open.
+`lf pr land` handles the ordinary PR workflow: staging uncommitted changes,
+rebasing, creating or updating the PR, and enabling auto-merge.
 
 ```
 lf pr land [--create-pr] [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
@@ -66,16 +72,6 @@ Examples:
 ```bash
 lf pr land --create-pr
 ```
-
-Inside a Task, choose the disposition explicitly:
-
-```bash
-lf pr land --next released-upgrade-proof  # another serial PR follows
-lf pr land -c                             # this merge completes the Task
-```
-
-Do not combine `--next` and `--complete`. A retry may change the disposition
-before merge; the last land or submit call wins.
 
 If you wrote title/body manually, include them:
 

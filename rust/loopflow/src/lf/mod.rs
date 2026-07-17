@@ -1208,6 +1208,12 @@ pub enum PrCommand {
         title: Option<String>,
         #[arg(long = "body")]
         body: Option<String>,
+        /// Complete the managed Task after this PR merges.
+        #[arg(short = 'c', long)]
+        complete: bool,
+        /// Continue the managed Task on this next serial PR after merge.
+        #[arg(long = "next")]
+        next: Option<String>,
     },
     /// Publish a PR, then open it for review (the GitHub page in the browser).
     /// The explicit human review action.
@@ -2360,6 +2366,32 @@ mod tests {
             Some(Commands::Task {
                 cmd: TaskCommand::Complete { issue, summary, .. }
             }) if issue == "INF-123" && summary == "Root cause recorded"
+        ));
+
+        let publish = Cli::try_parse_from(["lf", "pr", "publish", "-c"])
+            .expect("parse completing publication");
+        assert!(matches!(
+            publish.command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Publish {
+                    complete: true,
+                    next: None,
+                    ..
+                })
+            })
+        ));
+
+        let publish_next = Cli::try_parse_from(["lf", "pr", "publish", "--next", "parser-proof"])
+            .expect("parse continuation publication");
+        assert!(matches!(
+            publish_next.command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Publish {
+                    complete: false,
+                    next: Some(next),
+                    ..
+                })
+            }) if next == "parser-proof"
         ));
 
         let land =

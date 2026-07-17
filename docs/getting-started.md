@@ -141,7 +141,7 @@ lf audit    # runs your custom skill
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
-lf pr land    # submit to merge queue
+lf pr land      # land an ordinary non-Task PR
 ```
 
 ---

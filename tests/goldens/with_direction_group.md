@@ -12,44 +12,36 @@ Use the top-level `lf` command suites for mechanical git and GitHub operations.
 
 ```bash
 lf commit -m "message" -p     # commit and push
-lf pr publish --title "..."        # push + create/update PR, print state+URL (no browser)
+lf pr publish -c --title "..."     # publish final Task PR evidence; no browser
+lf pr publish --next parser-proof  # publish evidence; another serial PR follows
 lf pr open --title "..."           # publish, then open the PR for human review
-lf pr submit                     # prep + mark ready + assign to you; you click merge
-lf pr land                       # land one PR; Task remains open
-lf pr land -c                    # land and complete the owning Task after merge
-lf pr land --next parser-proof   # name the next serial Task PR
+lf pr submit                     # non-Task separation-of-duties handoff
+lf pr land                       # non-Task hands-off landing
 lf rebase --plan              # show reset/rebase strategy
 lf rebase                     # apply the planned update
 lf task run CHILD --stack-on PARENT  # separate Task worktree based on PARENT's open PR
 ```
 
-### `publish` vs `submit` vs `land`
+### Managed Tasks: publish, review, then mechanical land
 
-Three commitment levels — pick by how done the work is and who lands it. All
-three publish the PR headlessly and open no browser:
+A managed Task has one lifecycle authority: its durable InteractionReview
+conversations. A required checkpoint may occur in Kickoff, Iterate, or Gate.
+The human works inside the Task's provider-backed LLM session; GitHub review UI
+and merge clicks are never Task lifecycle decisions.
 
 - **`lf pr publish`** — push and create or refresh the PR while work is still in
-  flight. Rebases only if behind, writes title/body, prints state + URL, leaves
-  the PR up. Use it to make work visible mid-stream; nothing is finalized and
-  nothing is presented. This is the agent's default "make a PR" verb.
-- **`lf pr submit`** — the work is done and a **human** lands it. Rebases onto
-  main, clears `scratch/`, marks the PR ready, and assigns it to you. Stops
-  there: no auto-merge. Your merge click on GitHub is the one required gate —
-  the button unlocks once checks pass. (GitHub blocks approving your own PR, so
-  the gate is the merge click, not a review approval.) Use this as the default
-  finish for anything a person should land by hand.
-- **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
-  everything `submit` does, then arms auto-merge so it merges when checks pass.
-  Use it in headless/auto runs where no human is gating. Inside a Task, bare
-  `land` settles one PR but leaves the Task open; `-c` completes the Task
-  after merge. `--next <slug>` names the following PR. The Task keeps its
-  worktree while Loopflow rotates serial branches from fetched main.
+  flight. `-c` records that merge completes the Task; `--next <slug>` records
+  the following serial PR. Publication creates evidence but never arms merge.
+- **Task runner** — after every current required lifecycle review approves and
+  the approved PR head and settlement intent are still current, Loopflow arms
+  auto-merge mechanically. Required CI remains mechanical: failure keeps the PR
+  open and enters repair; green CI lets the merge queue settle it.
+- **`lf pr submit` / `lf pr land`** — remain available for ordinary non-Task
+  PRs. Managed Task worktrees reject them because they would bypass or duplicate
+  the durable lifecycle decision.
 
-**`lf pr open`** is the one command that *presents* — it publishes, then opens
-the PR for review (the GitHub page in the browser). It is a human-initiated
-review action; if launching the review surface fails, only `pr open` fails and
-the published PR is untouched. Agents publish/submit/land; reach for `pr open`
-only when a human explicitly asked to see the PR.
+**`lf pr open`** presents an ordinary PR in GitHub. Do not use it for managed
+Tasks; conduct required review in the existing provider session.
 
 Stay in the worktree Loopflow placed for this run. If the assigned task is
 explicitly about worktree management, use `lf wt`; never create another

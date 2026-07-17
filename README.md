@@ -156,7 +156,7 @@ lf project wait <linear-project-id> --until waiting
 
 lf task run INF-123 --flow code --name release-scoped-migrations
 # work
-lf pr land -c
+lf pr publish -c
 ```
 
 `--flow` selects the Task's inner loop. The Task Session retains that resolved
@@ -197,6 +197,13 @@ cycle. The durable review records the exercise, evidence snapshot, conversation,
 disposition, and outcome. A generic interactive handoff only tells another UI
 how to present or attach to the existing session; it does not decide the review.
 
+Managed Tasks never use a GitHub merge click as lifecycle authority. Publish
+PR evidence during work with `-c` when merge completes the Task or `--next
+<slug>` when another serial PR follows. After every current required Kickoff,
+inner-loop, and Gate InteractionReview approves, the runner verifies the same
+head and settlement intent, then arms auto-merge mechanically. Failed required
+CI stays open and enters repair; passing CI lets the merge queue settle it.
+
 Catch up accumulated parent-review and integration debt across a Wave:
 
 ```bash
@@ -216,14 +223,14 @@ lf task run INF-124 --stack-on INF-123
 lf pr publish   # targets INF-123's active branch
 ```
 
-The parent Task must already have an open PR. After it merges, `lf rebase` or
-`lf pr land` replays only INF-124's commits onto `main` and retargets its PR.
+The parent Task must already have an open PR. After it merges, `lf rebase`
+replays only INF-124's commits onto `main` and retargets its PR.
 The selector binds to INF-123's active PR at launch; it does not follow that
 Task onto a later serial PR.
 
 The Task keeps one worktree and an ordered PR history. Each serial PR owns one
-branch. Use bare `lf pr land --next <slug>` when another PR
-follows; use `-c` only when this merge completes the Task. Finish clean
+branch. Use `lf pr publish --next <slug>` when another PR follows; use
+`lf pr publish -c` only when this merge completes the Task. Finish clean
 investigation work without a PR using `lf task complete INF-123 --summary "..."`.
 
 Launch persists directive v1 before the provider starts. `steer` and an

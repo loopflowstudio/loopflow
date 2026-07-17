@@ -56,8 +56,8 @@ lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
 lf task acknowledge INF-123 --directive 2 --summary "the smaller approach is active"
 lf task decide INF-123 DECISION_ID approve
 lf task wait INF-123
-lf pr land --next parser-proof  # merge this PR, then rotate
-lf pr land -c                   # merge this PR, then complete the Task
+lf pr publish --next parser-proof  # publish; merge then rotates mechanically
+lf pr publish -c                   # publish; merge then completes the Task
 lf task complete INF-124 --summary "investigation recorded"  # no PR needed
 ```
 

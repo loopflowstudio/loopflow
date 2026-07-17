@@ -323,6 +323,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "lineage_boundary",
         sql: include_str!("migrations/0.11.026_lineage_boundary.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 27,
+        },
+        name: "task_gate_settlement",
+        sql: include_str!("migrations/0.11.027_task_gate_settlement.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

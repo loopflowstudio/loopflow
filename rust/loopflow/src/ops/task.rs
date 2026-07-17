@@ -7490,7 +7490,7 @@ mod tests {
     }
 
     impl RemintFixture {
-        const SUCCESSOR: &'static str = "jack/task-pr-proof-2";
+        const SUCCESSOR: &str = "jack/task-pr-proof-2";
 
         /// `carry` names a file committed onto the successor before main moves.
         async fn new(carry: Option<&str>) -> Self {

@@ -428,6 +428,20 @@ cannot touch its path. A single stash-and-compare initially suggested otherwise;
 one run each was coincidence, which is the same one-sample trap this Task's own
 regression exists to avoid.
 
+### What the reduction pass did and did NOT re-verify
+
+The results above were measured on the **pre-reduction** code. The reduction
+factored the three tests' shared setup into one test-only `RemintFixture`
+(260 → 163 lines) and trimmed the `fork_point` / `heal_incoherent_base` comments,
+which were larger than their code. The three behavior proofs and their assertions
+are unchanged, and no production abstraction was added.
+
+That reduction is **not locally verified**: the host stalled before it could
+compile (below). `cargo fmt --check` is clean, which proves the file *parses* —
+it proves nothing about types. Hosted CI is the proof. Stated rather than
+narrated, because "it's only a refactor" is exactly the claim that should not be
+taken on trust.
+
 ### Host: local proof is unavailable past this point
 
 `syspolicyd` is pegged at **98.1% CPU** (pid 5063, 13d uptime) and stalls every

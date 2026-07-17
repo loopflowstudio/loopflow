@@ -1,5 +1,43 @@
 # Open questions — W2-308
 
+## R7 — third yield, and a correction that matters more than the yield
+
+The sibling (3816, alive 8:02) is **actively working**: pid 45064 is a live
+`cargo check -p loopflow --lib --tests` whose parent chain resolves
+`45064 → 45031 (zsh) → 3816`. It started a fresh check 25s ago. Not stuck. No code
+touched and no commit this turn.
+
+**I corrected a false claim I had put in wave memory.** I had recorded "the cargo
+build lock is SHARED ACROSS WORKTREES," blamed pid 42954 in
+`loopflow.a-ci-fix-wake-arms` for blocking this Task, called it an ownerless
+orphan, and came close to killing another Task's process over it. All of that is
+wrong:
+
+- `CARGO_TARGET_DIR` is unset; no `[build] target-dir` in `~/.cargo/config.toml`
+  or any repo `.cargo/config.toml`; **each worktree has its own `target/`**
+  (verified both exist separately). A cargo in another worktree *cannot* hold this
+  worktree's build lock.
+- The real holder was **my own sibling turn** (45064, cwd = this worktree). Every
+  "Blocking waiting for file lock on build directory" I hit was generation 3's two
+  provider turns competing for one worktree's `target/`.
+
+So the lock contention is not a host-wide condition to route around — it is the
+**concurrent-turn defect wearing a different mask**, which makes that defect worse
+than R5/R6 recorded: it burns a body per spawn *and* serializes rebuilds inside the
+worktree. That is now the strongest argument for fixing it rather than tolerating
+it.
+
+Method, since this is the third turn of this Task to hit the family: I inferred a
+*shared resource* from a *shared symptom* without checking whether the resource was
+shared. `echo $CARGO_TARGET_DIR` plus one grep settles it, and costs far less than
+two wrong memory entries did. Blame a process only after resolving its cwd **and**
+its parent chain; blame a shared resource only after proving the sharing.
+
+**Unchanged for the next turn:** the sibling owns review items 1–4; both
+dependencies are on main (W2-309 `15e441e69`, W2-294 `062bd1e4c`); directive v3's
+hold condition is met, so what remains is rebase onto `062bd1e4c` → verify →
+publish. This branch still has no PR (`gh pr list` → `[]`).
+
 ## R6 — yielded again; the sibling is progressing and is doing the right thing
 
 Second consecutive wave-seed turn to yield. My predecessor (3916) ended, the

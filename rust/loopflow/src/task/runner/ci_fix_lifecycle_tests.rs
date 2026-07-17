@@ -213,6 +213,13 @@ struct PushingHarness {
     sends: Arc<AtomicUsize>,
 }
 
+/// One harness for both first-turn shapes, because the shape *is* the variable:
+/// `release_first_turn_after` = `Some` models ordinary work, which ends on its
+/// own and releases the arm's boundary; `None` models a parked interactive
+/// review, where the agent is waiting and no `TurnCompleted` is ever coming.
+/// Only an interrupt releases that one, which is why `interrupt` emits it — after
+/// a delay, so several 200ms `command_poll` ticks elapse while the turn is still
+/// active and already preempted, making `interrupts == 1` mean once-across-ticks.
 struct LiveIdleHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     gh_dir: std::path::PathBuf,
@@ -223,134 +230,7 @@ struct LiveIdleHarness {
     repair_started_while_active: Arc<AtomicBool>,
     sends: Arc<AtomicUsize>,
     interrupts: Arc<AtomicUsize>,
-}
-
-/// A provider parked in an interactive review: its first turn **never completes
-/// on its own**. That is the whole point — `human_interaction_review_protocol`
-/// tells the agent to ask and wait, so no `TurnCompleted` is coming and the arm
-/// at the turn boundary never runs. Only an interrupt can release it, which is
-/// why `interrupt` is what emits `TurnCompleted { Interrupted }` here.
-///
-/// The delay before that event is deliberate: several 200ms `command_poll` ticks
-/// elapse while the turn is still active and already preempted, so
-/// `interrupts == 1` proves once-across-ticks rather than once-per-run.
-struct ReviewWaitHarness {
-    events: mpsc::UnboundedSender<ConversationEvent>,
-    gh_dir: std::path::PathBuf,
-    store: SharedStore,
-    task_id: TaskSessionId,
-    lease: ChildWriteLease,
-    sends: Arc<AtomicUsize>,
-    interrupts: Arc<AtomicUsize>,
-    /// Set when the ci-fix seed arrives while the review turn is still live —
-    /// the repair must never race the transcript it interrupted.
-    repair_started_while_active: Arc<AtomicBool>,
-    review_turn_active: Arc<AtomicBool>,
-}
-
-#[async_trait]
-impl ProviderHarness for ReviewWaitHarness {
-    async fn start(&mut self, _config: &AgentConfig) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
-        match self.sends.fetch_add(1, Ordering::SeqCst) {
-            // The review turn: open it, arm the wake underneath it, and then
-            // wait forever. A real reviewer's answer is the only other way out.
-            0 => {
-                let session = self
-                    .store
-                    .get_task_session(&self.task_id)
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("review-wait Task disappeared"))?;
-                let pr = self
-                    .store
-                    .active_task_pr(&self.task_id)
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("review-wait Task lost its PR"))?;
-                crate::ops::task::queue_ci_fix_command(&self.store, &session, &pr)
-                    .await
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                self.review_turn_active.store(true, Ordering::SeqCst);
-                self.events
-                    .send(ConversationEvent::TurnStarted {
-                        turn_id: "review-wait-turn".to_string(),
-                    })
-                    .map_err(|_| anyhow::anyhow!("runner dropped the review event stream"))?;
-                // No TurnCompleted. The review waits.
-            }
-            // The bounded repair seed, delivered on the boundary the interrupt
-            // released.
-            1 => {
-                if self.review_turn_active.load(Ordering::SeqCst) {
-                    self.repair_started_while_active
-                        .store(true, Ordering::SeqCst);
-                }
-                let gh = FakeGh::new(self.gh_dir.clone());
-                gh.set_pr(1009, "open", "h2");
-                gh.set_checks(
-                    &[("tests-result", "pending")],
-                    &[("tests-result", "pending"), ("rust-test", "pending")],
-                );
-                let mut pr = self
-                    .store
-                    .active_task_pr(&self.task_id)
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("scripted repair lost its active PR"))?;
-                let observation = pr.github_observation.as_mut().ok_or_else(|| {
-                    anyhow::anyhow!("scripted repair has no cached PR observation")
-                })?;
-                observation.checked_at = OffsetDateTime::now_utc() - time::Duration::minutes(10);
-                self.store
-                    .update_task_pr_for_lease(&pr, &self.lease)
-                    .await?;
-
-                self.events
-                    .send(ConversationEvent::TurnStarted {
-                        turn_id: "review-wait-ci-fix".to_string(),
-                    })
-                    .map_err(|_| anyhow::anyhow!("runner dropped the ci-fix event stream"))?;
-                self.events
-                    .send(ConversationEvent::TurnCompleted {
-                        turn_id: "review-wait-ci-fix".to_string(),
-                        status: Lifecycle::Completed,
-                    })
-                    .map_err(|_| anyhow::anyhow!("runner dropped the ci-fix event stream"))?;
-            }
-            call => anyhow::bail!("unexpected provider input {}", call + 1),
-        }
-        Ok(())
-    }
-
-    async fn interrupt(&mut self) -> anyhow::Result<()> {
-        self.interrupts.fetch_add(1, Ordering::SeqCst);
-        let events = self.events.clone();
-        let review_turn_active = self.review_turn_active.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            review_turn_active.store(false, Ordering::SeqCst);
-            let _ = events.send(ConversationEvent::TurnCompleted {
-                turn_id: "review-wait-turn".to_string(),
-                status: Lifecycle::Interrupted,
-            });
-        });
-        Ok(())
-    }
-
-    async fn stop(&mut self) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            supports_steer: false,
-        }
-    }
-
-    fn provider_session_id(&self) -> Option<String> {
-        Some("scripted-review-wait".to_string())
-    }
+    release_first_turn_after: Option<std::time::Duration>,
 }
 
 #[async_trait]
@@ -437,21 +317,25 @@ impl ProviderHarness for LiveIdleHarness {
                 crate::ops::task::queue_ci_fix_command(&self.store, &session, &pr)
                     .await
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                self.first_turn_active.store(true, Ordering::SeqCst);
                 self.events
                     .send(ConversationEvent::TurnStarted {
-                        turn_id: "gate-review-turn".to_string(),
+                        turn_id: "first-turn".to_string(),
                     })
-                    .map_err(|_| anyhow::anyhow!("runner dropped the review event stream"))?;
-                let events = self.events.clone();
-                let first_turn_active = self.first_turn_active.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-                    first_turn_active.store(false, Ordering::SeqCst);
-                    let _ = events.send(ConversationEvent::TurnCompleted {
-                        turn_id: "gate-review-turn".to_string(),
-                        status: Lifecycle::Completed,
+                    .map_err(|_| anyhow::anyhow!("runner dropped the first event stream"))?;
+                // Ordinary work ends on its own; a parked review never does.
+                if let Some(after) = self.release_first_turn_after {
+                    let events = self.events.clone();
+                    let first_turn_active = self.first_turn_active.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(after).await;
+                        first_turn_active.store(false, Ordering::SeqCst);
+                        let _ = events.send(ConversationEvent::TurnCompleted {
+                            turn_id: "first-turn".to_string(),
+                            status: Lifecycle::Completed,
+                        });
                     });
-                });
+                }
             }
             1 => {
                 if self.first_turn_active.load(Ordering::SeqCst) {
@@ -495,8 +379,21 @@ impl ProviderHarness for LiveIdleHarness {
         Ok(())
     }
 
+    /// The only thing that can release a parked review. Delayed so poll ticks
+    /// keep firing on a turn that is active and already preempted. Never called
+    /// in the ordinary-work case, so the emit there is unreachable.
     async fn interrupt(&mut self) -> anyhow::Result<()> {
         self.interrupts.fetch_add(1, Ordering::SeqCst);
+        let events = self.events.clone();
+        let first_turn_active = self.first_turn_active.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            first_turn_active.store(false, Ordering::SeqCst);
+            let _ = events.send(ConversationEvent::TurnCompleted {
+                turn_id: "first-turn".to_string(),
+                status: Lifecycle::Interrupted,
+            });
+        });
         Ok(())
     }
 
@@ -2316,6 +2213,7 @@ async fn a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle() {
                     repair_started_while_active: creator_repair_started_while_active.clone(),
                     sends: creator_sends.clone(),
                     interrupts: creator_interrupts.clone(),
+                    release_first_turn_after: Some(std::time::Duration::from_millis(350)),
                 }))
             }),
         ),
@@ -2577,16 +2475,17 @@ async fn a_parked_review_wait_is_preempted_once_by_an_actionable_wake() {
             task_id.clone(),
             &lease,
             Box::new(move |_name, _approval, events| {
-                Ok(Box::new(ReviewWaitHarness {
+                Ok(Box::new(LiveIdleHarness {
                     events,
                     gh_dir: gh_dir.clone(),
                     store: creator_store.clone(),
                     task_id: creator_task_id.clone(),
                     lease: creator_lease.clone(),
+                    first_turn_active: creator_review_active.clone(),
+                    repair_started_while_active: creator_repair_started.clone(),
                     sends: creator_sends.clone(),
                     interrupts: creator_interrupts.clone(),
-                    repair_started_while_active: creator_repair_started.clone(),
-                    review_turn_active: creator_review_active.clone(),
+                    release_first_turn_after: None,
                 }))
             }),
         ),
@@ -2715,16 +2614,17 @@ async fn a_scratch_clear_only_wake_never_preempts_a_review_wait() {
             task_id.clone(),
             &lease,
             Box::new(move |_name, _approval, events| {
-                Ok(Box::new(ReviewWaitHarness {
+                Ok(Box::new(LiveIdleHarness {
                     events,
                     gh_dir: gh_dir.clone(),
                     store: creator_store.clone(),
                     task_id: creator_task_id.clone(),
                     lease: creator_lease.clone(),
+                    first_turn_active: creator_review_active.clone(),
+                    repair_started_while_active: creator_repair_started.clone(),
                     sends: creator_sends.clone(),
                     interrupts: creator_interrupts.clone(),
-                    repair_started_while_active: creator_repair_started.clone(),
-                    review_turn_active: creator_review_active.clone(),
+                    release_first_turn_after: None,
                 }))
             }),
         ),

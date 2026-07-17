@@ -99,6 +99,34 @@ incident it is completing without re-deriving the identity. Result: one row says
 "incident X, woken by command C at generation G, failed at head A, repaired to
 head B" — attribution stays automatic.
 
+**Definition.** `repaired_head_sha` is *the first authoritative post-turn remote
+head that settlement observed to differ from the incident's failed head* — the
+head the body actually shipped for this incident. It is **not** "the branch's
+latest tip forever."
+
+**First-write / idempotent.** The store write must never overwrite an existing
+value. A crash-then-restart (which re-runs the same wake and re-settles) or a
+later *unrelated* push to the branch must not rewrite which head originally
+settled this incident. Implement it as a conditional `COALESCE` update — the same
+first-write discipline `mark_ci_incident_triggered_on` already uses for
+`trigger_command_id`:
+
+```sql
+UPDATE ci_incidents
+SET repaired_head_sha = COALESCE(repaired_head_sha, ?2),
+    updated_at = MAX(updated_at, ?3)
+WHERE identity = ?1
+```
+
+so the second settle is a no-op on this field.
+
+**Exposed on the supported evidence surface.** `lf ci --json` maps `CiIncident`
+into the public `CiIncidentDto` (`lf/commands/ci.rs`). Add `repaired_head_sha:
+Option<String>` there beside `failed_head_sha`, map it in the `CiIncidentDto`
+constructor, and pin it in the `ci.rs` DTO/report tests (extend the
+`green_incident`/report fixtures). A column the operator-facing surface never
+prints is invisible attribution.
+
 ## De-risking
 
 | Question | Finding | Impact on design |
@@ -140,9 +168,12 @@ head B" — attribution stays automatic.
   - `PrReadFreshness` on `observe_pr_by_number`; `Fresh` omits `--cache`.
   - Freshness argument on `reconcile_task_pr_with_authority`;
     `reconcile_task_pr_fresh_for_lease` for the settlement call site.
-  - `CiFixWake.incident_identity`; `mark_ci_incident_repaired`;
-    `repaired_head_sha` column + migration.
-  - Settlement records the repaired head on head-advance.
+  - `CiFixWake.incident_identity`; `mark_ci_incident_repaired` as a first-write
+    `COALESCE` update; `repaired_head_sha` column + migration.
+  - Settlement records the repaired head on head-advance (first authoritative
+    post-turn remote head that differs from the failed head; never rewritten).
+  - `repaired_head_sha` exposed on `lf ci --json`'s `CiIncidentDto` + `ci.rs`
+    tests.
   - Deterministic regression: warm pre-turn cache at old head + fake body pushes
     new remote head → `Waiting`, no blocked incident, `repaired_head_sha` = new
     head, exactly one ci-fix command.
@@ -157,23 +188,46 @@ head B" — attribution stays automatic.
 ## Done when
 
 - `cargo test -p loopflow --lib runner::ci_fix` passes, including a new
-  regression that:
+  regression that **proves both stale layers independently, by behavior**.
+
+  The problem: today's `FakeGh` serves the current `pr.json` regardless of
+  whether `observe_pr_by_number` passed `--cache 60s`, so restoring only the gh
+  flag would leave the test green — it would assert argv wiring, not behavior.
+  Fix the fake to answer *by cache mode*: a **cached** invocation
+  (`gh api … --cache …`) returns `h1`; an **uncached** invocation returns `h2`.
+  The script inspects its own argv for `--cache` and `cat`s `pr_cached.json`
+  (h1) vs `pr_fresh.json` (h2). Checks stay **failing** on the new head so the
+  `Waiting` verdict is attributable to head advancement alone, not to a green
+  reading.
+
+  The regression:
   1. arms one ci-fix wake for failed head `h1`,
-  2. runs a fake body that "pushes" `h2` (sets the remote PR head to `h2`) while
-     leaving the pre-turn `github_observation` cache-**fresh** at `h1`,
-  3. settles, and asserts: Task status `Waiting` (not Blocked), the incident is
-     **not** blocked, `repaired_head_sha == h2`, and exactly one `CiFix` command
-     exists (no second body), and its state is `Accepted`.
-- Sabotage check: reverting the settlement reconcile to `Cached` (or restoring
-  `--cache` on the head read) turns the regression red with the "did not repair"
-  block — proving the test guards the freshness, not the shape.
+  2. runs a fake body that "pushes" `h2` — sets `pr_fresh.json` to `h2`, keeps
+     `pr_cached.json`/the store `github_observation` cache **fresh** at `h1`,
+  3. settles, and asserts: Task status `Waiting` (not Blocked); the incident for
+     `h1` is **not** blocked; `repaired_head_sha == h2`; exactly one `CiFix`
+     command exists (no second body) in state `Accepted`. (A fresh incident row
+     for `h2` may exist — that is the re-arm, not a second body: `observe_ci_
+     incident` mints a row, never a command.)
+
+  Two sabotage checks, each must flip the end-to-end settlement to
+  "did-not-repair" **Blocked**:
+  - Revert the settlement reconcile to `Cached` → the store cache short-circuits,
+    `gh` is never called, `h1` wins.
+  - Keep the store bypass but restore `--cache` on the head read → `gh` is called
+    *cached*, the fake returns `h1`, `h1` wins.
+
+  Because the fake serves different SHAs by cache mode, each sabotage produces the
+  wrong verdict — the test guards the two bypasses, not the argv.
 - The existing lifecycle test (`a_failed_head_wakes_exactly_one_ci_fix_body_and_
   rearms_until_green`) still passes; its `expire_read_cache()` becomes redundant
   for the settlement step but harmless.
 - `cargo clippy -p loopflow --lib --tests -- -D warnings` and `cargo fmt` clean.
-- No DTO ripple: `CiIncident` has no `tests/fixtures/dto/` fixture and is not
-  emitted by any `bin/` `--json` surface (verified), so the new column adds a
-  struct field + SQLite column mapping only.
+- `repaired_head_sha` is exposed on the `lf ci --json` `CiIncidentDto`
+  (`lf/commands/ci.rs`) beside `failed_head_sha`, mapped in the constructor, and
+  pinned in `ci.rs`'s DTO/report tests. Any `tests/fixtures/dto/` fixture for the
+  DTO is updated too. The column must be visible on the supported evidence
+  surface, not just in the store.
 
 ## Measure
 

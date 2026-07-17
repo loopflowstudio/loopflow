@@ -13,6 +13,7 @@ resolved at the head that carries this table.
 | "tmux binary missing ⇒ identity absent" is fail-open | `0de32ffd8` | removed; unavailable or ambiguous tmux is `Unprovable` |
 | Name the fail-closed cases as executable guards | `e067f44e6` | the named-guard table in Done when |
 | pid 1's group is not a valid `EPERM` fixture (`Group(1)` is `kill(-1, 0)` broadcast; root makes it non-deterministic) | `fc002534a` | pure `classify_signal_probe` + `signal_probe_id`; no privileged host identity is a fixture; real spawned/absent groups retained for end-to-end |
+| W2-297: keep one authoritative execution identity; a recycled pid must not veto a release | this head | `Gone` = tmux-absent + **one** identity (group; pid only as fallback when no group was recorded). The all-identities conjunction is gone, and the `observe_provider` finding below explains why tmux — not the pid — carries the veto |
 
 ## Problem
 
@@ -88,11 +89,63 @@ pub(crate) async fn probe_child_body_presence(
 ) -> BodyPresence
 ```
 
-It probes, in order: the recorded tmux session, the recorded process group, the
-recorded pid. `Gone` requires *every* identity to be **positively** absent. Any
-identity `Present` makes the body `Present`; otherwise `Unprovable`. The probe
-never guesses, and — the rule the whole design turns on — **it never treats an
+The probe reads **one** execution identity, plus tmux as positive evidence. It
+is not a conjunction over every recorded id — that shape is a defect, and
+W2-297 is why (see *One authoritative identity* below).
+
+| step | question | verdict |
+|------|----------|---------|
+| tmux | is the recorded session live? | live ⇒ `Present`; probe unavailable/ambiguous ⇒ `Unprovable`; positively no such session ⇒ continue |
+| the body group | `process_group_id` recorded? probe it with signal `0` | `ESRCH` ⇒ `Absent`; `0`/`EPERM` ⇒ `Present`; other errno / unaddressable ⇒ `Unprovable` |
+| pid **fallback only** | *no* group was recorded? probe the pid | same table |
+
+`Gone` is tmux-positively-absent **and** that single identity `Absent`. The
+recorded pid is **never** consulted when a group exists. The probe never
+guesses, and — the rule the whole design turns on — **it never treats an
 unanswered question as a "no".**
+
+#### One authoritative identity: why pid must not be a second veto
+
+The earlier draft required *every* recorded identity to be absent. That is
+strictly-more-conservative reasoning, and it is wrong: it manufactures the exact
+defect this task exists to remove.
+
+A pid is a recycled resource. A stuck lease is old by construction, so by
+release time the recorded pid may name an unrelated process that merely inherited
+the number. Under a conjunction, that stranger answers `Present` and pins the
+lease **forever** — a permanent false blocker, no different in kind from the
+corpse pinning W2-230, and unreachable by any evidence since the recycler has no
+reason to exit. Requiring more absences does not make a release safer; past the
+authoritative identity it only adds ways to be permanently wrong.
+
+Which identity is authoritative is not a free choice, and the tree answers it:
+
+```rust
+// child_session.rs:313 — observe_provider overwrites the group...
+if let Some(process_group_id) = process_group_id { self.process_group_id = Some(process_group_id); }
+// ...with the harness's own child group:
+// harness/mod.rs:277  fn process_group_id(&self) -> Option<u32> { None }   // default: no overwrite
+// harness/opencode.rs:490  (group > 1).then_some(group)                    // the provider CLI's group
+// harness/codex.rs:592     (group > 1).then_some(group)
+```
+
+So `process_group_id` is the **provider's** group for opencode/codex bodies,
+while `pid` stays the lf body's own pid from `mark_booted`. The two name
+different processes. `reap_child_process` already knows this — it signals both
+and dedups only `if process.process_group_id != Some(pid)`, i.e. only when they
+happen to coincide (a claude body, where the harness returns the default `None`
+and the group stays the lf body's own).
+
+That is precisely why tmux carries the veto rather than the pid. The lf body
+always runs inside its recorded tmux session, so a live session is positive proof
+of a live body **whatever the group names**. It covers the one case group-only
+would miss: an opencode body whose provider group exited while the lf body is
+still running. A recycled pid proves nothing about either, and buys nothing tmux
+does not already cover — which is what makes it pure cost.
+
+The residual order of business is the reverse case, and the group is there for
+it: tmux positively gone but the provider group orphaned and still running
+(`#1000`'s territory). `Absent` requires both answers, so an orphan blocks.
 
 Absence per signal identity is a tri-state `kill(target, 0)`:
 
@@ -297,6 +350,8 @@ The status-changed message survives for the case it actually describes.
 | Why did W2-230's kill return `EPERM` if `ps` showed no members? | The two observations are minutes apart, so they do not conflict: `EPERM` proves the group had a member at kill time; `ps` proves it had none later. Most likely a recycled pgid briefly owned by a process we could not signal. | Reinforces probe-at-release-time rather than reasoning from the recorded failure. The `status_reason` prose is a historical artifact and must never be parsed. |
 | Can pid 1's process group manufacture a deterministic `EPERM` fixture? | **No, twice over.** `Group(1)` negates to `kill(-1, 0)`, whose POSIX meaning is broadcast — every process the caller may signal — not process group 1. And the verdict depends on the host identity: as root the caller can signal everything, so no `EPERM` arises at all. CI may run as root. | The errno table is proven through the pure `classify_signal_probe`, which takes the syscall's return and errno as plain values. No privileged host identity is a fixture, and the `EPERM` arm is deterministic on every machine. Real spawned/absent groups stay, for the end-to-end release cases where a real kernel answer is the point. |
 | Does the `kill(-1, …)` hazard reach production? | Not today. All three writers of `process_group_id` filter `> 1` (`engine/process.rs:8`, `opencode.rs:490`, `codex.rs:592`). Worth noting `reap_child_process`'s self-check could not catch it anyway: `current_process_group_id()` returns `None` for its own group when that group is 1. | `signal_probe_id` enforces the invariant at the reader this design owns. `signal_process_target` is left alone — a guard there checks a condition no writer can produce, which CLAUDE.md calls a net-negative line. Recorded here so the next person to touch that path knows the edge exists and why it was left. |
+| Is requiring *every* recorded identity absent the safe choice? | **No — it is the defect in reverse.** A pid is recycled; a stuck lease is old by construction; so the recorded pid may name an unrelated stranger who answers `Present` and pins the lease forever, unreachable by any future evidence. That is W2-230's corpse with a different mechanism. | The probe reads one authoritative identity — the group — and consults the pid only when no group was recorded. Extra vetoes past the authoritative identity add ways to be permanently wrong, not safety. |
+| Is the recorded group actually the body's group? | Not always. `observe_provider` (`child_session.rs:313`) overwrites it with `harness.process_group_id()`, which is the **provider CLI's** child group for opencode (`opencode.rs:490`) and codex (`codex.rs:592`); the trait default is `None` (`harness/mod.rs:277`), so a claude body keeps the lf body's own group. `pid` always stays the lf body's, from `mark_booted`. `reap_child_process` already assumes this — it dedups only when the two coincide. | tmux carries the `Present` veto: the lf body always runs in its recorded session, so a live session proves a live body whatever the group names. This covers the only case group-only would miss — an opencode body whose provider group exited while the lf body runs. The group still covers the reverse (tmux gone, provider group orphaned — `#1000`'s case). |
 | Does the design have a single fail-open path left? | No, by construction: `Gone` is a conjunction of positive absences, so every "I could not ask" anywhere in the probe demotes the verdict to `Unprovable` and the lease stays blocked. | The cost of every `Unprovable` is exactly today's behavior — a lease that stays `revoked` — so a wrong `Unprovable` costs nothing new, while a wrong `Gone` unbars a second body. The asymmetry decides every ambiguous case in the design. |
 | Does releasing a lease on a `waiting` Session restart delivered work? | No. Releasing changes only the lease; status, PR phase, and the W2-129 open-PR bar are untouched, and `plan_stranded_recovery` returns `LeaveAlone` for `Waiting`/`Blocked` before the lease is ever read. | W2-230 (status=waiting) is released only when something explicitly asks to reserve — i.e. `lf task resume`. Automatic redispatch stays scoped to `Active`/`Failed` intents, exactly as W2-267 drew it. |
 | Can this run against the live registry? | No, and it must not. Release 0.11.3 runs the fleet and dev builds are walled off from the production store (wave memory, 2026-07-17). | Every test builds its own store. The W2-230 row is evidence, not a target; the fix reaches it when a release ships. |
@@ -331,6 +386,13 @@ would release exactly the case where a body may still be alive and unkillable.
 W2-230 stays stuck under this rule *at the moment of its reap failure*, and is
 released later when the group is verifiably gone. That is the intended shape.
 
+**One authoritative identity, not every identity.** `Gone` is tmux-absent plus
+*one* signal identity absent — the group, or the pid only when no group was
+recorded. Piling on vetoes reads as caution and is the opposite: a recycled pid
+answering `Present` pins the lease forever, which is W2-230's corpse wearing a
+different hat. Conservatism has a direction, and past the authoritative identity
+it points the wrong way.
+
 **Only a positive "no" counts as absence.** Not a `bool` that ran out of ways to
 say yes, not a syscall that failed for a reason we did not model, not a tmux we
 could not run. `Gone` is a conjunction of positive absences; everything else is
@@ -341,10 +403,15 @@ reaper that use them and unsafe for a release. So the release owns its own
 probe, and the reaper keeps its shortcuts. **Reap may fail open; release must
 fail closed.** Two functions, because they are asking two different questions.
 
-**No new plan variant, no new command, no schema change.**
-`finish_revoked_*_process` already exists and already CASes on `revoked`; the
-verdict table already handles a finished lease. This task supplies the evidence
-those two were missing, and nothing else.
+**No new plan variant, no new command, no schema change — and no sweeper or
+recovery framework.** The release calls the existing
+`finish_revoked_task_process` / `finish_revoked_project_process`, whose CAS
+already pins both the generation and `process_lease_state='revoked'`, so only
+the same generation still in `revoked` can become `finished`. It rides the
+existing pre-reservation and stranded-recovery paths; the verdict table already
+handles a finished lease. This task supplies the evidence those two were
+missing, and nothing else. The live registry is never mutated — W2-230's row is
+evidence, not a target.
 
 **The failure text stops instructing humans.** `ops/task.rs:2405`'s "manual
 cleanup is required" survives only for the `Present`/`Unprovable` case, and says
@@ -363,6 +430,22 @@ release itself when it can.
 
 ## Done when
 
+- **The W2-297-shaped runtime test, required before landing.** Not a probe unit
+  test — the whole path, over a real kernel:
+  1. reserve and activate a Task body with a **real** process group;
+  2. revoke it, and let that group exit;
+  3. **retain an unrelated live pid** in the recorded generation — a real,
+     running process that is not the body. This is the regression that pins the
+     pid-veto fix: under the earlier conjunction this test cannot pass, because
+     the stranger's `Present` blocks the release forever;
+  4. prove **the matching revoked generation alone** finishes — a different
+     generation, and a lease not in `revoked`, both refuse (the
+     `finish_revoked_task_process` CAS carries this; the test proves it holds
+     rather than trusting it);
+  5. prove the existing recovery/reservation path then launches **exactly one**
+     successor — one generation, not two, so the release cannot double-dispatch;
+  6. prove a **live group** stays blocked, and that an `EPERM`/unprovable probe
+     stays blocked, with the lease still `revoked` in the store after each.
 - `cargo test -p loopflow --lib ops::child ops::task engine::process` is green,
   including new tests that:
   - spawn a real process group, kill it, and prove a `revoked` lease over it
@@ -400,6 +483,7 @@ release itself when it can.
   |------|---------------------|---------|
   | `an_unrepresentable_signal_identity_is_unprovable_and_does_not_release` | group id that does not fit `i32` | `Unprovable`, lease stays `revoked` |
   | `a_zero_converting_signal_identity_is_unprovable_and_does_not_release` | id addressing `raw == 0` (own group) | `Unprovable`, lease stays `revoked` |
+  | `a_recycled_pid_does_not_block_a_release_when_a_group_is_recorded` | absent group + live unrelated pid | `Gone`; the pid is never probed |
   | `a_broadcast_converting_signal_identity_is_unprovable_and_does_not_release` | `Group(1)`, i.e. `raw == -1` (broadcast) | `Unprovable`, lease stays `revoked` |
   | `an_unspawnable_tmux_probe_is_unprovable_and_does_not_release` | `tmux` not runnable | `Unprovable`, lease stays `revoked` |
   | `an_unrecognized_tmux_error_is_unprovable_and_does_not_release` | non-zero exit, unrecognized stderr | `Unprovable`, lease stays `revoked` |

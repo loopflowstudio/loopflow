@@ -335,7 +335,18 @@ incident (2026-07-16), and W2-284, W2-285 and W2-287 are parked failed on
 `database is locked` right now. ENG-7 owns deterministic concurrent ledger
 writes and is in kickoff.
 
-**Decision: PR1 does not land until ENG-7 lands.** Not "unless contention looks
+**Decision: PR1 does not land until the contention fix lands. It has —
+PR #1030 (`store: skip no-op migration transactions`) merged 2026-07-17
+00:48:58Z, taking receipt loss from 426/1020 to 0. The gate's substance is met.**
+
+Read the gate on the *fix*, not on ENG-7 the Task: ENG-7's own review gate is
+permanently shut (wave MEMORY — a require-policy review completed
+changes-requested can never be re-disposed), so "until ENG-7 lands" as literally
+worded would block this PR forever on a Task that can never close while its code
+is already on main. The condition was always about the store being safe to add
+writers to, and #1030 is what made it so.
+
+Original wording, kept for the reasoning: not "unless contention looks
 resolved" — settled. The one-UPDATE-per-turn-boundary measurement (the rate
 `flowloop/wave.rs` already sustains across 1,030 launches) argues the pressure is
 additive rather than multiplicative, but that is still an assumption about a

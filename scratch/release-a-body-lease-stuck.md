@@ -88,7 +88,27 @@ Absence per signal identity is a tri-state `kill(target, 0)`:
 | returns `0` | a process answers | `Present` |
 | `EPERM` | a process answers, we may not signal it | `Present` |
 | any other errno | the kernel refused the question | `Unprovable` |
-| id does not fit `i32`, or converts to `0` | not a body identity we can ask about | `Unprovable` |
+| id does not fit `i32`, or addresses `0` or `-1` | not a body identity we can ask about | `Unprovable` |
+
+The probe is split into two pure functions and one thin syscall caller, because
+the two facts it decides on are decidable without a kernel:
+
+```rust
+/// The addressable form of a recorded identity, or `None` when it is not one.
+fn signal_probe_id(target: ProcessSignalTarget) -> Option<i32>
+
+/// Classify one `kill(id, 0)` outcome: the syscall's two facts in, a verdict out.
+fn classify_signal_probe(returned: i32, errno: Option<i32>) -> Presence
+```
+
+This is not a test seam. `signal_probe_id` answers "is this something I can
+ask about?" and `classify_signal_probe` answers "what did the answer mean?" —
+two questions the current code answers implicitly, in the same expression, which
+is how it came to conflate `ESRCH` with `EINVAL` in the first place. Naming them
+is the decomposition that makes the collapse impossible to write; that the errno
+table becomes deterministically testable without a privileged host is a
+consequence, not the motive. No trait, no injected syscall, no parameter that
+exists only for a test — per CLAUDE.md.
 
 `EPERM` reads as **present**, and that is not conservatism for its own sake —
 POSIX only returns `EPERM` for `kill(-pgid, …)` when the group had at least one
@@ -115,9 +135,35 @@ the same syscall — a bounded waiter wants "is it still there?", a release want
 "can I prove it is not?" — so they get two functions. `wait_for_process_exit`
 keeps its bool and is untouched.
 
-Note that `raw == 0` is not merely unrepresentable: `kill(0, sig)` signals the
-*caller's own* process group. Reading it as absence is the worst available
-answer, which is why it is `Unprovable` rather than folded into `Absent`.
+Two of those rejected ids are rejected because they *would* be answered, by the
+wrong question:
+
+- `kill(0, sig)` signals the **caller's own process group**.
+- `kill(-1, sig)` is POSIX **broadcast** — every process the caller may signal.
+  `Group(1)` negates to exactly this, so probing "process group 1" silently
+  probes the whole machine and answers `Present` on any host where the caller
+  can signal anything at all.
+
+Neither is a body identity, and reading either as absence is the worst available
+answer. Both are `Unprovable`.
+
+The `-1` case has a sharper edge worth recording. In `signal_process_target`,
+`Group(1)` means `kill(-1, SIGTERM)` — a mass TERM of everything the caller can
+signal. That is **unreachable today**: all three writers of `process_group_id`
+independently filter `> 1` (`engine/process.rs:8` via `current_process_group_id`,
+`harness/opencode.rs:490`, `harness/codex.rs:592`), so a group of 1 never reaches
+the store. Note also that `reap_child_process`'s self-check
+(`current_process_group_id() == Some(group)`) cannot catch it, since that helper
+returns `None` for its own group when the group is 1 — the guard would be absent
+in exactly the case it was needed.
+
+The invariant is real but is held by convention at three writers and enforced at
+no reader. So this design enforces it at the reader it owns — `signal_probe_id`
+— and deliberately leaves `signal_process_target` alone. Adding a guard there
+would be a check for a condition no writer can produce, which CLAUDE.md names as
+a line that does not earn its place. The distinction: in the probe, rejecting
+`0`/`-1` is not a defensive check but the `Unprovable` arm of a total
+classifier, which is the function's whole job.
 
 The tmux identity gets the same treatment, and for the same reason — the two
 existing helpers are both fail-open at exactly the point a release cares about:
@@ -235,6 +281,8 @@ The status-changed message survives for the case it actually describes.
 | Can the existing `process_target_exists` be the release predicate? | **No.** It returns `bool`, and collapses two distinct things into `false`: an id that does not fit `i32` (`map_or(0, …)` → `raw == 0` → `false`) and *every* errno other than `EPERM` — so `ESRCH` and "the kernel refused the question" are the same value. | The probe is a new tri-state function; `process_target_exists` and `wait_for_process_exit` keep their bool and are untouched. Reusing it would have made the release fail **open** — releasing a lease on an unreadable identity is precisely the outcome this task exists to prevent. |
 | Is "tmux is not on `PATH`" evidence that the tmux body is gone? | No. `PATH` is per-process: a probe with a different environment than the launcher can miss a tmux that is running. `tmux_session_exists` also maps *any* non-zero exit to `Ok(false)`, and `tmux_live_sessions` maps any failure to an empty set — a server error and an absent session are indistinguishable. | The release gets its own tri-state tmux probe. Only exit-0 set membership, or a positively recognized no-server/no-sessions stderr, counts as `Absent`; an unspawnable or unrecognized tmux is `Unprovable`. `reap_child_process` keeps its `tmux_installed()` shortcut — reap may fail open, release must fail closed. |
 | Why did W2-230's kill return `EPERM` if `ps` showed no members? | The two observations are minutes apart, so they do not conflict: `EPERM` proves the group had a member at kill time; `ps` proves it had none later. Most likely a recycled pgid briefly owned by a process we could not signal. | Reinforces probe-at-release-time rather than reasoning from the recorded failure. The `status_reason` prose is a historical artifact and must never be parsed. |
+| Can pid 1's process group manufacture a deterministic `EPERM` fixture? | **No, twice over.** `Group(1)` negates to `kill(-1, 0)`, whose POSIX meaning is broadcast — every process the caller may signal — not process group 1. And the verdict depends on the host identity: as root the caller can signal everything, so no `EPERM` arises at all. CI may run as root. | The errno table is proven through the pure `classify_signal_probe`, which takes the syscall's return and errno as plain values. No privileged host identity is a fixture, and the `EPERM` arm is deterministic on every machine. Real spawned/absent groups stay, for the end-to-end release cases where a real kernel answer is the point. |
+| Does the `kill(-1, …)` hazard reach production? | Not today. All three writers of `process_group_id` filter `> 1` (`engine/process.rs:8`, `opencode.rs:490`, `codex.rs:592`). Worth noting `reap_child_process`'s self-check could not catch it anyway: `current_process_group_id()` returns `None` for its own group when that group is 1. | `signal_probe_id` enforces the invariant at the reader this design owns. `signal_process_target` is left alone — a guard there checks a condition no writer can produce, which CLAUDE.md calls a net-negative line. Recorded here so the next person to touch that path knows the edge exists and why it was left. |
 | Does the design have a single fail-open path left? | No, by construction: `Gone` is a conjunction of positive absences, so every "I could not ask" anywhere in the probe demotes the verdict to `Unprovable` and the lease stays blocked. | The cost of every `Unprovable` is exactly today's behavior — a lease that stays `revoked` — so a wrong `Unprovable` costs nothing new, while a wrong `Gone` unbars a second body. The asymmetry decides every ambiguous case in the design. |
 | Does releasing a lease on a `waiting` Session restart delivered work? | No. Releasing changes only the lease; status, PR phase, and the W2-129 open-PR bar are untouched, and `plan_stranded_recovery` returns `LeaveAlone` for `Waiting`/`Blocked` before the lease is ever read. | W2-230 (status=waiting) is released only when something explicitly asks to reserve — i.e. `lf task resume`. Automatic redispatch stays scoped to `Active`/`Failed` intents, exactly as W2-267 drew it. |
 | Can this run against the live registry? | No, and it must not. Release 0.11.3 runs the fleet and dev builds are walled off from the production store (wave memory, 2026-07-17). | Every test builds its own store. The W2-230 row is evidence, not a target; the fix reaches it when a release ships. |
@@ -309,9 +357,24 @@ release itself when it can.
     asserts the reservation is refused before it);
   - hold a real live process group and prove the lease stays `revoked` and the
     reservation is refused;
-  - prove `EPERM` does not release: probe a group we may not signal (pid 1's
-    group, owned by root) and assert `Present`, not `Gone`;
   - prove the refusal names the lease, not the status.
+- **No privileged host identity is a fixture, and no test's verdict may depend
+  on the user it runs as.** The errno table is proven through the pure
+  `classify_signal_probe`, never by manufacturing a real `EPERM` — a real one
+  needs a process we may not signal, which is a fact about the CI user, not
+  about the code. Real spawned and killed process groups stay, for the
+  end-to-end release cases where a genuine kernel answer is the whole point.
+  The division: **pure classifier for what an outcome means, real processes for
+  whether the lease releases.**
+
+  | test | input | asserts |
+  |------|-------|---------|
+  | `classify_signal_probe_reads_esrch_as_absent` | `(-1, Some(ESRCH))` | `Absent` |
+  | `classify_signal_probe_reads_success_as_present` | `(0, None)` | `Present` |
+  | `classify_signal_probe_reads_eperm_as_present` | `(-1, Some(EPERM))` | `Present` |
+  | `classify_signal_probe_reads_an_unmodelled_errno_as_unprovable` | `(-1, Some(EINVAL))` | `Unprovable` — the arm `process_target_exists` folds into `false` |
+  | `signal_probe_id_rejects_the_broadcast_and_self_group_ids` | `Group(0)`, `Group(1)` | `None` both; `Group(1)` is called out as `kill(-1, …)` broadcast, not group 1 |
+  | `signal_probe_id_rejects_an_unrepresentable_id` | group id `> i32::MAX` | `None` |
 - **The fail-closed guards.** These are the executable proof of the two
   corrected absence claims, and neither is covered by the `EPERM` test above:
   `EPERM` exercises the one errno `process_target_exists` *does* model, so it
@@ -322,7 +385,8 @@ release itself when it can.
   | test | identity under probe | asserts |
   |------|---------------------|---------|
   | `an_unrepresentable_signal_identity_is_unprovable_and_does_not_release` | group id that does not fit `i32` | `Unprovable`, lease stays `revoked` |
-  | `a_zero_converting_signal_identity_is_unprovable_and_does_not_release` | id converting to `raw == 0` | `Unprovable`, lease stays `revoked` |
+  | `a_zero_converting_signal_identity_is_unprovable_and_does_not_release` | id addressing `raw == 0` (own group) | `Unprovable`, lease stays `revoked` |
+  | `a_broadcast_converting_signal_identity_is_unprovable_and_does_not_release` | `Group(1)`, i.e. `raw == -1` (broadcast) | `Unprovable`, lease stays `revoked` |
   | `an_unspawnable_tmux_probe_is_unprovable_and_does_not_release` | `tmux` not runnable | `Unprovable`, lease stays `revoked` |
   | `an_unrecognized_tmux_error_is_unprovable_and_does_not_release` | non-zero exit, unrecognized stderr | `Unprovable`, lease stays `revoked` |
   | `a_recognized_no_server_tmux_probe_reads_absent` | non-zero exit, no-server stderr | `Absent` |

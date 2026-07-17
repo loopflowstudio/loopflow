@@ -1684,9 +1684,6 @@ pub enum RouteCommand {
         /// Repository owner/name; defaults to the current repository
         #[arg(long)]
         repo: Option<String>,
-        /// Explain health demotion and preview the next unpinned selection
-        #[arg(long)]
-        explain: bool,
     },
 }
 
@@ -1871,22 +1868,6 @@ mod tests {
                     repo: None,
                 }
             }) if provider == "claude" && accounts == vec!["loopflow", "primary"]
-        ));
-    }
-
-    #[test]
-    fn route_show_accepts_health_explanation() {
-        let cli = Cli::try_parse_from(["lf", "route", "show", "--explain"])
-            .expect("parse route explanation");
-
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Route {
-                cmd: RouteCommand::Show {
-                    repo: None,
-                    explain: true,
-                }
-            })
         ));
     }
 

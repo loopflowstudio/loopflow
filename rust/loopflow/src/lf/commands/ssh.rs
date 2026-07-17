@@ -661,7 +661,6 @@ mod tests {
                         cooldown_reason: None,
                     },
                 ],
-                vec![],
                 vec![
                     crate::provider_account::ForwardedProviderCredential::new(
                         crate::provider_auth::Provider::Claude,

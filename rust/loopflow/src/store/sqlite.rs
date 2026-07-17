@@ -773,42 +773,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Hydrate exact observations from a foreground forwarding snapshot.
-    /// Older snapshots cannot overwrite health learned inside the lease.
-    pub fn upsert_provider_account_limit_rows(
-        &self,
-        limits: &[AccountLimitRow],
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for limit in limits {
-            transaction.execute(
-                "INSERT INTO provider_account_limits
-                     (provider, account_id, window, used_percent, resets_at, plan, observed_at, source)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(provider, account_id, window) DO UPDATE SET
-                     used_percent = excluded.used_percent,
-                     resets_at = excluded.resets_at,
-                     plan = excluded.plan,
-                     observed_at = excluded.observed_at,
-                     source = excluded.source
-                 WHERE excluded.observed_at >= provider_account_limits.observed_at",
-                params![
-                    limit.provider,
-                    limit.account_id.as_str(),
-                    limit.window,
-                    limit.used_percent,
-                    limit.resets_at,
-                    limit.plan,
-                    limit.observed_at,
-                    limit.source,
-                ],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub fn provider_account_limits(
         &self,
         provider: Option<&str>,
@@ -1105,7 +1069,8 @@ impl SqliteStore {
                 .optional()?
                 .transpose()?;
             if let Some(account) = account.filter(|account| {
-                crate::provider_account::account_is_automatic_candidate(account, now, today)
+                account.eligible_for_automatic_routing(today)
+                    && account.cooldown_until.is_none_or(|until| until <= now)
             }) {
                 available.push(account);
             }

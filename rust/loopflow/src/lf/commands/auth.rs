@@ -19,8 +19,8 @@ use crate::engine::platform::open_url;
 use crate::lf::{AuthAccessCommand, AuthCommand};
 use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
 use crate::provider_account::{
-    account_home_path, active_account_strain, ensure_account_home, new_account, open_account_store,
-    parse_account_id, remove_account_home,
+    account_home_path, ensure_account_home, new_account, open_account_store, parse_account_id,
+    remove_account_home,
 };
 use crate::provider_auth::{
     capture_claude_authorization_code_from_chrome, capture_claude_profile_credentials,
@@ -882,10 +882,8 @@ async fn accounts(raw_provider: Option<&str>) -> Result<()> {
         println!("No managed OAuth accounts");
         return Ok(());
     }
-    let limits = store.provider_account_limits(None).await?;
-    let now = OffsetDateTime::now_utc().unix_timestamp();
     for account in accounts {
-        println!("{}", format_account_with_limits(&account, &limits, now));
+        println!("{}", format_account(&account));
         let provider = account
             .provider
             .parse::<Provider>()
@@ -1025,14 +1023,6 @@ fn parse_managed_provider(raw: &str) -> Result<Provider> {
 }
 
 fn format_account(account: &ProviderAccount) -> String {
-    format_account_with_limits(account, &[], OffsetDateTime::now_utc().unix_timestamp())
-}
-
-fn format_account_with_limits(
-    account: &ProviderAccount,
-    limits: &[crate::store::AccountLimitRow],
-    now: i64,
-) -> String {
     let mut details = Vec::new();
     let routing_state = account.effective_routing_state(OffsetDateTime::now_utc().date());
     if routing_state != RoutingState::Automatic {
@@ -1050,15 +1040,7 @@ fn format_account_with_limits(
     if let Some(utilization) = account.utilization_percent {
         details.push(format!("{utilization}% used"));
     }
-    if let Some(strain) = active_account_strain(&account.provider, &account.account_id, limits, now)
-    {
-        details.push(format!(
-            "strained: {} {}%, resets {}",
-            strain.window,
-            strain.used_percent,
-            format_relative_delta(strain.resets_at - now)
-        ));
-    }
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     if let Some(cooldown_until) = account.cooldown_until.filter(|until| *until > now) {
         details.push(format!(
             "cooling for {}",
@@ -1264,14 +1246,13 @@ mod tests {
     use crate::profile::EmailAddress;
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
     use crate::store::{
-        AccountLimitRow, CredentialState, CredentialType, ProviderAccount, ProviderAccountId,
-        RoutingState,
+        CredentialState, CredentialType, ProviderAccount, ProviderAccountId, RoutingState,
     };
 
     use super::{
-        acquire_managed_login_lock, format_account, format_account_with_limits,
-        format_relative_delta, format_snapshot, import_account, install_claude_login,
-        install_codex_login, parse_paid_through, parse_routing_state,
+        acquire_managed_login_lock, format_account, format_relative_delta, format_snapshot,
+        import_account, install_claude_login, install_codex_login, parse_paid_through,
+        parse_routing_state,
     };
 
     #[test]
@@ -1301,41 +1282,6 @@ mod tests {
         assert!(rendered.contains("72% used"));
         assert!(rendered.contains("cooling for"));
         assert!(rendered.contains("operator@example.com"));
-    }
-
-    #[test]
-    fn format_account_marks_active_limit_strain() {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        let account = ProviderAccount {
-            provider: "codex".to_string(),
-            account_id: ProviderAccountId::parse("engineering").unwrap(),
-            home: None,
-            login_email: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let limits = vec![AccountLimitRow {
-            provider: "codex".to_string(),
-            account_id: account.account_id.clone(),
-            window: "weekly".to_string(),
-            used_percent: 80,
-            resets_at: Some(now + 3600),
-            plan: None,
-            observed_at: now,
-            source: "poll".to_string(),
-        }];
-
-        let rendered = format_account_with_limits(&account, &limits, now);
-
-        assert!(rendered.contains("strained: weekly 80%"));
     }
 
     #[test]

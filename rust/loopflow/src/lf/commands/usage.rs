@@ -3,8 +3,6 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use time::OffsetDateTime;
 
-use crate::provider_account::active_window_strain;
-
 use crate::journal::open_ledger;
 use crate::lf::commands::runs::{boundary_spans, SpanDto};
 use crate::lf::output::{format_int, truncate, Colors};
@@ -61,7 +59,6 @@ struct AccountStatus {
     windows: Vec<AccountLimitWindow>,
     observed_at: Option<i64>,
     note: Option<String>,
-    strained: bool,
 }
 
 /// Every managed account with its freshest subscription windows: stored
@@ -114,7 +111,6 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
                 .collect(),
             observed_at: stored_windows.iter().map(|row| row.observed_at).max(),
             note: None,
-            strained: false,
         };
         match poll {
             Some(Ok(usage)) => {
@@ -156,7 +152,6 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
                 None => note,
             });
         }
-        status.strained = active_window_strain(&status.windows, now).is_some();
         statuses.push(status);
     }
     Ok(statuses)
@@ -196,7 +191,14 @@ fn print_accounts(statuses: &[AccountStatus]) {
         weekly = "WEEKLY USED",
     );
     for status in statuses {
-        let note = account_status_note(status, now);
+        let mut note = status.note.clone().unwrap_or_default();
+        if status.note.is_none() {
+            if let Some(observed) = status.observed_at {
+                if now - observed > FRESH_SECS {
+                    note = format!("as of {}", format_age(now - observed));
+                }
+            }
+        }
         println!(
             "{provider:<PROVIDER_WIDTH$}  {account:<ACCOUNT_WIDTH$}  {plan:<6}  {session:<WINDOW_WIDTH$}  {weekly:<WINDOW_WIDTH$}  {note}",
             provider = status.provider,
@@ -207,21 +209,6 @@ fn print_accounts(statuses: &[AccountStatus]) {
         );
     }
     println!();
-}
-
-fn account_status_note(status: &AccountStatus, now: i64) -> String {
-    let mut notes = Vec::new();
-    if let Some(note) = &status.note {
-        notes.push(note.clone());
-    } else if let Some(observed) = status.observed_at {
-        if now - observed > FRESH_SECS {
-            notes.push(format!("as of {}", format_age(now - observed)));
-        }
-    }
-    if status.strained {
-        notes.push("strained".to_string());
-    }
-    notes.join(" · ")
 }
 
 /// Render one window group: the group's own window when present, otherwise
@@ -460,8 +447,7 @@ fn short_repo(repo: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        account_status_note, aggregate_spend, format_share, format_window, or_unattributed,
-        short_repo, AccountStatus, Totals, UsageRow,
+        aggregate_spend, format_share, format_window, or_unattributed, short_repo, Totals, UsageRow,
     };
     use crate::lf::commands::runs::SpanDto;
     use crate::store::AccountLimitWindow;
@@ -539,24 +525,6 @@ mod tests {
         assert_eq!(format_window(&windows, "session", 0), "22%");
         assert_eq!(format_window(&windows, "weekly", 0), "11% (fable)");
         assert_eq!(format_window(&[], "session", 0), "-");
-    }
-
-    #[test]
-    fn account_note_marks_strain_without_hiding_an_existing_warning() {
-        let status = AccountStatus {
-            provider: "codex".to_string(),
-            label: "engineering".to_string(),
-            plan: None,
-            windows: vec![],
-            observed_at: Some(1),
-            note: Some("needs re-login".to_string()),
-            strained: true,
-        };
-
-        assert_eq!(
-            account_status_note(&status, 10_000),
-            "needs re-login · strained"
-        );
     }
 
     fn boundary(process: &str, seq: i64, provider: &str, input: i64) -> SpanDto {

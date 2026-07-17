@@ -8,10 +8,7 @@ use crate::lf::{DefaultRouteCommand, ProfileCommand, RouteCommand};
 use crate::profile::{
     resolve_local_chrome_profile, AccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
-use crate::provider_account::{
-    account_is_automatic_candidate, account_unavailable_reason, active_account_strain,
-    open_account_store, order_accounts_by_strain, STRAINED_UTILIZATION_PERCENT,
-};
+use crate::provider_account::{active_account_strain, open_account_store};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
@@ -54,9 +51,7 @@ async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
                 set_route(&store, RouteScope::Default, provider, accounts).await
             }
         },
-        RouteCommand::Show { repo, explain } => {
-            show_routes(&store, repo_root, repo.as_deref(), *explain).await
-        }
+        RouteCommand::Show { repo } => show_routes(&store, repo_root, repo.as_deref()).await,
     }
 }
 
@@ -172,12 +167,7 @@ async fn set_route(
     Ok(())
 }
 
-async fn show_routes(
-    store: &SharedStore,
-    repo_root: &Path,
-    raw_repo: Option<&str>,
-    explain: bool,
-) -> Result<()> {
+async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&str>) -> Result<()> {
     let repo_id = resolve_repo_id(repo_root, raw_repo)?;
     let accounts = store
         .list_provider_accounts(None)
@@ -190,11 +180,7 @@ async fn show_routes(
             )
         })
         .collect::<HashMap<_, _>>();
-    let limits = if explain {
-        store.provider_account_limits(None).await?
-    } else {
-        Vec::new()
-    };
+    let limits = store.provider_account_limits(None).await?;
     let now = now_unix();
     for provider in [Provider::Claude, Provider::Codex] {
         let repo_scope = RouteScope::Repo(repo_id.clone());
@@ -214,12 +200,6 @@ async fn show_routes(
         } else {
             println!("{provider}  ({repo_id})");
         }
-        if explain {
-            for line in route_explanation(provider, &route, &accounts, &limits, now) {
-                println!("{line}");
-            }
-            continue;
-        }
         for (position, account_id) in route.accounts.iter().enumerate() {
             let account = accounts.get(&(provider.as_str().to_string(), account_id.clone()));
             let login = account
@@ -229,85 +209,25 @@ async fn show_routes(
             let state = account
                 .map(|account| account.credential_state.as_str())
                 .unwrap_or("missing row");
+            // Declared order is intent; this marks where health currently overrides it.
+            let demotion = match active_account_strain(provider.as_str(), account_id, &limits, now)
+            {
+                Some(strain) => {
+                    format!("  demoted: {} {}% used", strain.window, strain.used_percent)
+                }
+                None => String::new(),
+            };
             println!(
-                "  {}. {:<20} {:<32} {}",
+                "  {}. {:<20} {:<32} {}{}",
                 position + 1,
                 account_id,
                 login,
-                state
+                state,
+                demotion
             );
         }
     }
     Ok(())
-}
-
-fn route_explanation(
-    provider: Provider,
-    route: &ProviderRoute,
-    accounts: &HashMap<(String, ProviderAccountId), ProviderAccount>,
-    limits: &[crate::store::AccountLimitRow],
-    now: i64,
-) -> Vec<String> {
-    let today = OffsetDateTime::from_unix_timestamp(now)
-        .expect("route preview timestamp is valid")
-        .date();
-    let mut lines = Vec::new();
-    let mut available = Vec::new();
-    for (position, account_id) in route.accounts.iter().enumerate() {
-        let Some(account) = accounts.get(&(provider.as_str().to_string(), account_id.clone()))
-        else {
-            lines.push(format!("  {}. {account_id:<20} missing row", position + 1));
-            continue;
-        };
-        if !account_is_automatic_candidate(account, now, today) {
-            lines.push(format!(
-                "  {}. {account_id:<20} excluded: {}",
-                position + 1,
-                account_unavailable_reason(account, now, today)
-            ));
-            continue;
-        }
-        available.push(account.clone());
-        match active_account_strain(provider.as_str(), account_id, limits, now) {
-            Some(strain) => lines.push(format!(
-                "  {}. {account_id:<20} {} {}%  demoted: strained (>= {}%, resets {})",
-                position + 1,
-                strain.window,
-                strain.used_percent,
-                STRAINED_UTILIZATION_PERCENT,
-                format_reset_in(strain.resets_at, now)
-            )),
-            None => lines.push(format!("  {}. {account_id:<20} ready", position + 1)),
-        }
-    }
-    order_accounts_by_strain(&mut available, limits, now);
-    lines.push(format!(
-        "  effective order: {}",
-        available
-            .iter()
-            .map(|account| account.account_id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    ));
-    lines.push(match available.first() {
-        Some(account) => format!(
-            "  next unpinned selection: {provider}/{}",
-            account.account_id
-        ),
-        None => "  next unpinned selection: none".to_string(),
-    });
-    lines
-}
-
-fn format_reset_in(resets_at: i64, now: i64) -> String {
-    let seconds = (resets_at - now).max(0);
-    if seconds >= 86_400 {
-        format!("in {}d", seconds / 86_400)
-    } else if seconds >= 3_600 {
-        format!("in {}h", seconds / 3_600)
-    } else {
-        format!("in {}m", seconds / 60)
-    }
 }
 
 pub(crate) async fn find_provider_account(
@@ -369,77 +289,4 @@ fn resolve_repo_id(repo_root: &Path, raw_repo: Option<&str>) -> Result<RepoId> {
 
 fn now_unix() -> i64 {
     OffsetDateTime::now_utc().unix_timestamp()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::store::{AccountLimitRow, CredentialState, RoutingState};
-
-    fn account(account_id: &str) -> ProviderAccount {
-        ProviderAccount {
-            provider: Provider::Codex.as_str().to_string(),
-            account_id: ProviderAccountId::parse(account_id).unwrap(),
-            home: None,
-            login_email: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }
-    }
-
-    #[test]
-    fn explanation_previews_demotion_without_selecting() {
-        let now = 1_000_000;
-        let first = account("strained");
-        let second = account("healthy");
-        let route = ProviderRoute {
-            scope: RouteScope::Default,
-            provider: Provider::Codex,
-            accounts: vec![first.account_id.clone(), second.account_id.clone()],
-            created_at: 1,
-            updated_at: 1,
-        };
-        let accounts = [first.clone(), second.clone()]
-            .into_iter()
-            .map(|account| {
-                (
-                    (account.provider.clone(), account.account_id.clone()),
-                    account,
-                )
-            })
-            .collect();
-        let limits = vec![AccountLimitRow {
-            provider: Provider::Codex.as_str().to_string(),
-            account_id: first.account_id.clone(),
-            window: "weekly".to_string(),
-            used_percent: 80,
-            resets_at: Some(now + 86_400),
-            plan: None,
-            observed_at: now - 10,
-            source: "poll".to_string(),
-        }];
-
-        let rendered =
-            route_explanation(Provider::Codex, &route, &accounts, &limits, now).join("\n");
-
-        assert!(rendered.contains("weekly 80%  demoted: strained"));
-        assert!(rendered.contains("effective order: healthy, strained"));
-        assert!(rendered.contains("next unpinned selection: codex/healthy"));
-        assert_eq!(
-            accounts[&("codex".to_string(), first.account_id)].last_selected_at,
-            None
-        );
-        assert_eq!(
-            accounts[&("codex".to_string(), second.account_id)].last_selected_at,
-            None
-        );
-    }
 }

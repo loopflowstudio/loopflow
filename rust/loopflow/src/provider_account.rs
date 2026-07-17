@@ -30,80 +30,73 @@ pub const ACCOUNT_REPO_ID_ENV: &str = "LF_ACCOUNT_REPO_ID";
 pub const PROVIDER_ACCOUNT_ENV: &str = "LF_ACCOUNT";
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
-pub(crate) const STRAINED_UTILIZATION_PERCENT: u8 = 75;
+const STRAINED_UTILIZATION_PERCENT: u8 = 75;
 
+/// The provider-observed limit window that most justifies demoting an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AccountStrain {
     pub window: String,
     pub used_percent: u8,
-    pub resets_at: i64,
 }
 
-fn strongest_active_strain<'a>(
-    windows: impl Iterator<Item = (&'a str, u8, Option<i64>)>,
-    now: i64,
-) -> Option<AccountStrain> {
-    let mut strongest: Option<AccountStrain> = None;
-    for (window, used_percent, resets_at) in windows {
-        let Some(resets_at) = resets_at.filter(|reset| *reset > now) else {
-            continue;
-        };
-        if used_percent < STRAINED_UTILIZATION_PERCENT {
-            continue;
-        }
-        if strongest.as_ref().is_none_or(|current| {
-            used_percent > current.used_percent
-                || (used_percent == current.used_percent && window < current.window.as_str())
-        }) {
-            strongest = Some(AccountStrain {
-                window: window.to_string(),
-                used_percent,
-                resets_at,
-            });
-        }
-    }
-    strongest
-}
-
+/// An account is strained while a provider-observed window sits at or above
+/// [`STRAINED_UTILIZATION_PERCENT`] and has not yet reset. Ties break on window
+/// name so the reported evidence is stable however the rows arrive.
 pub(crate) fn active_account_strain(
     provider: &str,
     account_id: &ProviderAccountId,
     limits: &[AccountLimitRow],
     now: i64,
 ) -> Option<AccountStrain> {
-    strongest_active_strain(
-        limits
-            .iter()
-            .filter(|limit| limit.provider == provider && limit.account_id == *account_id)
-            .map(|limit| (limit.window.as_str(), limit.used_percent, limit.resets_at)),
-        now,
-    )
+    limits
+        .iter()
+        .filter(|limit| limit.provider == provider && limit.account_id == *account_id)
+        .filter(|limit| limit.used_percent >= STRAINED_UTILIZATION_PERCENT)
+        .filter(|limit| limit.resets_at.is_some_and(|reset| reset > now))
+        .max_by(|left, right| {
+            left.used_percent
+                .cmp(&right.used_percent)
+                .then_with(|| right.window.cmp(&left.window))
+        })
+        .map(|limit| AccountStrain {
+            window: limit.window.clone(),
+            used_percent: limit.used_percent,
+        })
 }
 
-pub(crate) fn active_window_strain(
-    windows: &[crate::store::AccountLimitWindow],
+fn is_strained(
+    provider: &str,
+    account_id: &ProviderAccountId,
+    limits: &[AccountLimitRow],
     now: i64,
-) -> Option<AccountStrain> {
-    strongest_active_strain(
-        windows.iter().map(|window| {
-            (
-                window.window.as_str(),
-                window.used_percent,
-                window.resets_at,
-            )
-        }),
-        now,
-    )
+) -> bool {
+    active_account_strain(provider, account_id, limits, now).is_some()
 }
 
+/// Stable sort: strained accounts fall behind unstrained ones, and declared
+/// route order decides everything else.
 pub(crate) fn order_accounts_by_strain(
     accounts: &mut [ProviderAccount],
     limits: &[AccountLimitRow],
     now: i64,
 ) {
-    accounts.sort_by_key(|account| {
-        active_account_strain(&account.provider, &account.account_id, limits, now).is_some()
-    });
+    accounts
+        .sort_by_key(|account| is_strained(&account.provider, &account.account_id, limits, now));
+}
+
+/// Bake the same demotion into a forwarded route, so a remote resolver that
+/// cannot see local limit observations still tries healthy accounts first.
+fn order_forwarded_routes_by_strain(
+    routes: &mut [ForwardedProviderRoute],
+    limits: &[AccountLimitRow],
+    now: i64,
+) {
+    for route in routes {
+        let provider = route.provider;
+        route
+            .accounts
+            .sort_by_key(|account_id| is_strained(provider.as_str(), account_id, limits, now));
+    }
 }
 
 #[derive(Debug, Error)]
@@ -210,7 +203,6 @@ pub enum ForwardedAccountSelection {
 pub struct ForwardedAccountBundle {
     pub selection: ForwardedAccountSelection,
     pub accounts: Vec<ForwardedProviderAccount>,
-    pub limits: Vec<AccountLimitRow>,
     credentials: Vec<ForwardedProviderCredential>,
 }
 
@@ -218,13 +210,11 @@ impl ForwardedAccountBundle {
     pub fn new(
         selection: ForwardedAccountSelection,
         accounts: Vec<ForwardedProviderAccount>,
-        limits: Vec<AccountLimitRow>,
         credentials: Vec<ForwardedProviderCredential>,
     ) -> Self {
         Self {
             selection,
             accounts,
-            limits,
             credentials,
         }
     }
@@ -520,59 +510,8 @@ pub fn decode_forwarded_account_bundle(
     let bytes = URL_SAFE_NO_PAD
         .decode(encoded.trim())
         .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))?;
-    let bundle: ForwardedAccountBundle = serde_json::from_slice(&bytes)
-        .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))?;
-    validate_forwarded_account_limits(&bundle)?;
-    Ok(bundle)
-}
-
-fn validate_forwarded_account_limits(
-    bundle: &ForwardedAccountBundle,
-) -> Result<(), ProviderAccountError> {
-    let ForwardedAccountSelection::Routed { routes, .. } = &bundle.selection else {
-        if bundle.limits.is_empty() {
-            return Ok(());
-        }
-        return Err(ProviderAccountError::ForwardedBundle(
-            "explicit pinned bundle carries routed limit observations".to_string(),
-        ));
-    };
-    let accounts = bundle
-        .accounts
-        .iter()
-        .map(|account| (account.provider.as_str(), account.account_id.clone()))
-        .collect::<HashSet<_>>();
-    let routed = routes
-        .iter()
-        .flat_map(|route| {
-            route
-                .accounts
-                .iter()
-                .cloned()
-                .map(move |account_id| (route.provider.as_str(), account_id))
-        })
-        .collect::<HashSet<_>>();
-    let mut seen = HashSet::new();
-    for limit in &bundle.limits {
-        let key = (limit.provider.as_str(), limit.account_id.clone());
-        if !accounts.contains(&key) || !routed.contains(&key) {
-            return Err(ProviderAccountError::ForwardedBundle(format!(
-                "limit row references {}/{} outside its routed account snapshot",
-                limit.provider, limit.account_id
-            )));
-        }
-        if !seen.insert((
-            limit.provider.as_str(),
-            limit.account_id.clone(),
-            limit.window.as_str(),
-        )) {
-            return Err(ProviderAccountError::ForwardedBundle(format!(
-                "duplicate limit row for {}/{} window '{}'",
-                limit.provider, limit.account_id, limit.window
-            )));
-        }
-    }
-    Ok(())
+    serde_json::from_slice(&bytes)
+        .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))
 }
 
 pub async fn local_forwarded_account_bundle(
@@ -604,19 +543,11 @@ pub async fn local_forwarded_account_bundle(
     if routes.is_empty() {
         return Ok(None);
     }
+    // Health lives in the local limit snapshot, so decide the routed order here
+    // and forward the answer rather than the observations behind it.
+    let limits = store.provider_account_limits(None).await?;
+    order_forwarded_routes_by_strain(&mut routes, &limits, now_unix());
     let routed_accounts = referenced_provider_accounts(store, &routes).await?;
-    let routed_account_ids = routed_accounts
-        .iter()
-        .map(|(provider, account)| (provider.as_str(), account.account_id.clone()))
-        .collect::<HashSet<_>>();
-    let limits = store
-        .provider_account_limits(None)
-        .await?
-        .into_iter()
-        .filter(|limit| {
-            routed_account_ids.contains(&(limit.provider.as_str(), limit.account_id.clone()))
-        })
-        .collect();
     let mut accounts = Vec::new();
     let mut credentials = Vec::new();
     for (provider, account) in routed_accounts {
@@ -629,7 +560,6 @@ pub async fn local_forwarded_account_bundle(
     Ok(Some(ForwardedAccountBundle::new(
         ForwardedAccountSelection::Routed { repo_id, routes },
         accounts,
-        limits,
         credentials,
     )))
 }
@@ -682,7 +612,6 @@ async fn explicit_forwarded_account_bundle(
     Ok(Some(ForwardedAccountBundle::new(
         ForwardedAccountSelection::Pinned(pins),
         accounts,
-        Vec::new(),
         credentials,
     )))
 }
@@ -874,15 +803,13 @@ pub async fn resolve_provider_account(
         let accounts = store
             .list_provider_accounts(Some(provider.as_str()))
             .await?;
-        let now = now_unix();
-        let today = time::OffsetDateTime::now_utc().date();
         let reasons = candidates
             .iter()
             .map(|account_id| {
                 accounts
                     .iter()
                     .find(|account| account.account_id == *account_id)
-                    .map(|account| account_unavailable_reason(account, now, today))
+                    .map(account_unavailable_reason)
                     .unwrap_or_else(|| format!("'{account_id}' missing"))
             })
             .collect::<Vec<_>>()
@@ -998,24 +925,12 @@ async fn resolve_forwarded_pin(
     }))
 }
 
-pub(crate) fn account_is_automatic_candidate(
-    account: &ProviderAccount,
-    now: i64,
-    today: time::Date,
-) -> bool {
-    account.eligible_for_automatic_routing(today)
-        && account.cooldown_until.is_none_or(|until| until <= now)
-}
-
-pub(crate) fn account_unavailable_reason(
-    account: &ProviderAccount,
-    now: i64,
-    today: time::Date,
-) -> String {
+fn account_unavailable_reason(account: &ProviderAccount) -> String {
+    let now = now_unix();
     if account.credential_state != CredentialState::Connected {
         return format!("'{}' credential is missing", account.account_id);
     }
-    let routing = account.effective_routing_state(today);
+    let routing = account.effective_routing_state(time::OffsetDateTime::now_utc().date());
     if routing != RoutingState::Automatic {
         return format!("'{}' routing is {}", account.account_id, routing.as_str());
     }
@@ -1175,22 +1090,6 @@ async fn hydrate_forwarded_route(
                 .upsert_provider_account(&provider_account_from_forwarded(account))
                 .await?;
         }
-        let limits = bundle
-            .limits
-            .iter()
-            .filter(|limit| limit.provider == provider.as_str())
-            .cloned()
-            .collect::<Vec<_>>();
-        if let Some(limit) = limits
-            .iter()
-            .find(|limit| !route.accounts.contains(&limit.account_id))
-        {
-            return Err(ProviderAccountError::ForwardedBundle(format!(
-                "limit row references {provider}/{} outside its routed account snapshot",
-                limit.account_id
-            )));
-        }
-        store.upsert_provider_account_limit_rows(&limits).await?;
         store
             .set_provider_route(&ProviderRoute {
                 scope,
@@ -1895,9 +1794,9 @@ mod account_first_tests {
         let second = account(Provider::Codex, "second", temp.path());
         store.upsert_provider_account(&first).await.unwrap();
         store.upsert_provider_account(&second).await.unwrap();
-        let window = |resets_at| crate::store::AccountLimitWindow {
+        let window = |used_percent, resets_at| crate::store::AccountLimitWindow {
             window: "weekly".to_string(),
-            used_percent: 80,
+            used_percent,
             resets_at,
             plan: None,
         };
@@ -1905,7 +1804,7 @@ mod account_first_tests {
             .upsert_provider_account_limits(
                 Provider::Codex.as_str(),
                 &first.account_id,
-                &[window(Some(now_unix() + 3600))],
+                &[window(80, Some(now_unix() + 3600))],
                 "poll",
             )
             .await
@@ -1933,12 +1832,17 @@ mod account_first_tests {
             .unwrap();
         assert_eq!(only.account.account_id, first.account_id);
 
-        for resets_at in [Some(now_unix() - 1), None] {
+        // Under the bar, already reset, or never resetting: declared order stands.
+        for window in [
+            window(STRAINED_UTILIZATION_PERCENT - 1, Some(now_unix() + 3600)),
+            window(80, Some(now_unix() - 1)),
+            window(80, None),
+        ] {
             store
                 .upsert_provider_account_limits(
                     Provider::Codex.as_str(),
                     &first.account_id,
-                    &[window(resets_at)],
+                    &[window],
                     "poll",
                 )
                 .await
@@ -2128,90 +2032,133 @@ printf '{"id":2,"result":{"account":null}}\n'
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn ordinary_forwarded_route_preserves_health_aware_failover() {
+    async fn ordinary_forwarded_route_demotes_strain_before_the_bundle_leaves_the_host() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let codex = bin.join("codex");
+        fs::write(
+            &codex,
+            r#"#!/bin/sh
+IFS= read -r line
+printf '{"id":1,"result":{}}\n'
+IFS= read -r line
+IFS= read -r line
+printf '{"id":2,"result":{"account":null}}\n'
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = fs::metadata(&codex).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&codex, permissions).unwrap();
+        }
         let _restore = EnvRestore::capture(&[
+            "PATH",
+            ACCOUNT_REPO_ID_ENV,
             PROVIDER_ACCOUNT_ENV,
             FORWARDED_ACCOUNT_BUNDLE_ENV,
             FORWARDED_ACCOUNT_STORE_ENV,
         ]);
-        let first = parse_account_id("first").unwrap();
-        let second = parse_account_id("second").unwrap();
-        let bundle = ForwardedAccountBundle::new(
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        std::env::set_var(ACCOUNT_REPO_ID_ENV, "loopflowstudio/loopflow");
+        std::env::remove_var(PROVIDER_ACCOUNT_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
+        let source_store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("source.db")))
+                .await
+                .unwrap(),
+        );
+        let strained = account(Provider::Codex, "strained", temp.path());
+        let healthy = account(Provider::Codex, "healthy", temp.path());
+        for (account, signature) in [(&strained, "strained-sig"), (&healthy, "healthy-sig")] {
+            let home = account.home.as_ref().unwrap();
+            fs::create_dir_all(home).unwrap();
+            fs::write(
+                home.join("auth.json"),
+                format!(
+                    r#"{{"tokens":{{"access_token":"e30.eyJleHAiOjQxMDI0NDQ4MDB9.{signature}","id_token":"e30.eyJlbWFpbCI6ImVuZ2luZWVyaW5nQGV4YW1wbGUuY29tIn0.sig"}}}}"#
+                ),
+            )
+            .unwrap();
+            source_store.upsert_provider_account(account).await.unwrap();
+        }
+        // Declared intent puts the strained account first.
+        source_store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Codex,
+                accounts: vec![strained.account_id.clone(), healthy.account_id.clone()],
+                created_at: now_unix(),
+                updated_at: now_unix(),
+            })
+            .await
+            .unwrap();
+        source_store
+            .upsert_provider_account_limits(
+                Provider::Codex.as_str(),
+                &strained.account_id,
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly".to_string(),
+                    used_percent: 80,
+                    resets_at: Some(now_unix() + 3600),
+                    plan: None,
+                }],
+                "poll",
+            )
+            .await
+            .unwrap();
+
+        let bundle = local_forwarded_account_bundle(&source_store, None)
+            .await
+            .unwrap()
+            .expect("a routed repository should produce a bundle");
+
+        assert_eq!(
+            bundle.selection,
             ForwardedAccountSelection::Routed {
                 repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
                 routes: vec![ForwardedProviderRoute {
                     provider: Provider::Codex,
-                    accounts: vec![first.clone(), second.clone()],
+                    accounts: vec![healthy.account_id.clone(), strained.account_id.clone()],
                 }],
-            },
-            vec![
-                ForwardedProviderAccount {
-                    provider: Provider::Codex,
-                    account_id: first.clone(),
-                    login_email: None,
-                    credential_state: CredentialState::Connected,
-                    routing_state: RoutingState::Automatic,
-                    plan: None,
-                    paid_through: None,
-                    utilization_percent: None,
-                    cooldown_until: None,
-                    cooldown_reason: None,
-                },
-                ForwardedProviderAccount {
-                    provider: Provider::Codex,
-                    account_id: second.clone(),
-                    login_email: None,
-                    credential_state: CredentialState::Connected,
-                    routing_state: RoutingState::Automatic,
-                    plan: None,
-                    paid_through: None,
-                    utilization_percent: None,
-                    cooldown_until: None,
-                    cooldown_reason: None,
-                },
-            ],
-            vec![AccountLimitRow {
-                provider: Provider::Codex.as_str().to_string(),
-                account_id: first,
-                window: "weekly".to_string(),
-                used_percent: 80,
-                resets_at: Some(now_unix() + 3600),
-                plan: None,
-                observed_at: 123,
-                source: "poll".to_string(),
-            }],
-            vec![ForwardedProviderCredential::new(
-                Provider::Codex,
-                second.clone(),
-                "second-token".to_string(),
-            )],
+            }
         );
-        std::env::remove_var(PROVIDER_ACCOUNT_ENV);
+
         std::env::set_var(
             FORWARDED_ACCOUNT_BUNDLE_ENV,
             encode_forwarded_account_bundle(&bundle).unwrap(),
         );
-        std::env::set_var(
-            FORWARDED_ACCOUNT_STORE_ENV,
-            temp.path().join("forwarded.db"),
-        );
+        std::env::set_var(FORWARDED_ACCOUNT_STORE_ENV, temp.path().join("remote.db"));
 
         let route = resolve_provider_account(Provider::Codex, None)
             .await
             .unwrap()
             .into_route()
-            .expect("ordinary forwarded route should select its healthy fallback");
+            .expect("ordinary forwarded route should select its healthy account");
 
-        assert_eq!(route.account_id(), &second);
+        // The remote store holds no limit observations, so the forwarded order
+        // is the only thing that can carry the demotion this far.
+        assert_eq!(route.account_id(), &healthy.account_id);
         assert!(!route.uses_native_home());
-        let remote = open_store(&StorageConfig::sqlite(temp.path().join("forwarded.db")))
-            .await
-            .unwrap();
+        let mut command = Command::new("codex");
+        route.apply(&mut command);
         assert_eq!(
-            remote.provider_account_limits(None).await.unwrap()[0].observed_at,
-            123
+            command
+                .get_envs()
+                .find(|(name, _)| *name == std::ffi::OsStr::new("CODEX_ACCESS_TOKEN"))
+                .and_then(|(_, value)| value)
+                .map(|value| value.to_string_lossy()),
+            Some("e30.eyJleHAiOjQxMDI0NDQ4MDB9.healthy-sig".into())
         );
     }
 
@@ -2223,7 +2170,6 @@ printf '{"id":2,"result":{"account":null}}\n'
                 provider: Provider::Codex,
                 account_id: account_id.clone(),
             }]),
-            vec![],
             vec![],
             vec![ForwardedProviderCredential::new(
                 Provider::Codex,
@@ -2241,9 +2187,6 @@ printf '{"id":2,"result":{"account":null}}\n'
             .unwrap()
             .remove("selection");
         assert!(serde_json::from_value::<ForwardedAccountBundle>(missing_selection).is_err());
-        let mut missing_limits = serde_json::to_value(&bundle).unwrap();
-        missing_limits.as_object_mut().unwrap().remove("limits");
-        assert!(serde_json::from_value::<ForwardedAccountBundle>(missing_limits).is_err());
     }
 
     #[test]
@@ -2259,7 +2202,6 @@ printf '{"id":2,"result":{"account":null}}\n'
             },
             vec![],
             vec![],
-            vec![],
         );
         let mut value = serde_json::to_value(bundle).unwrap();
         value["selection"]["routed"]
@@ -2268,39 +2210,5 @@ printf '{"id":2,"result":{"account":null}}\n'
             .remove("repo_id");
 
         assert!(serde_json::from_value::<ForwardedAccountBundle>(value).is_err());
-    }
-
-    #[test]
-    fn forwarded_limits_must_belong_to_the_routed_account_snapshot() {
-        let account_id = parse_account_id("engineering").unwrap();
-        let bundle = ForwardedAccountBundle::new(
-            ForwardedAccountSelection::Routed {
-                repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
-                routes: vec![ForwardedProviderRoute {
-                    provider: Provider::Codex,
-                    accounts: vec![],
-                }],
-            },
-            vec![],
-            vec![AccountLimitRow {
-                provider: Provider::Codex.as_str().to_string(),
-                account_id,
-                window: "weekly".to_string(),
-                used_percent: 80,
-                resets_at: Some(now_unix() + 3600),
-                plan: None,
-                observed_at: now_unix(),
-                source: "poll".to_string(),
-            }],
-            vec![],
-        );
-
-        let error =
-            decode_forwarded_account_bundle(&encode_forwarded_account_bundle(&bundle).unwrap())
-                .unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains("outside its routed account snapshot"));
     }
 }

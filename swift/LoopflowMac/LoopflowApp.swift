@@ -64,6 +64,7 @@ struct LoopflowApp: App {
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
             .onOpenURL { handleDeepLink($0) }
+            .uiTestWindowWidth()
             .uiTestSnapshot()
             .task {
                 openCaptureViewIfNeeded(repoURL: launchRepoURL)
@@ -244,6 +245,20 @@ struct LoopflowApp: App {
 }
 
 private extension View {
+    /// Pin the window to `LOOPFLOW_UI_TEST_WIDTH` when a UI-test run renders
+    /// without a snapshot path — the narrow and wide legs of the
+    /// selectable-without-clipping proof. Snapshot runs skip this pin:
+    /// `uiTestSnapshot()` sizes the real window at capture time, width and
+    /// height together.
+    @ViewBuilder
+    func uiTestWindowWidth() -> some View {
+        if let width = AppTestMode.viewPinnedWidth {
+            frame(width: width)
+        } else {
+            self
+        }
+    }
+
     /// In a UI-test run, once the surface has settled, render the key window to
     /// a PNG at `LOOPFLOW_UI_TEST_SNAPSHOT_PATH` and exit. `SnapshotService`
     /// renders the view (`cacheDisplay`) rather than the screen, so this needs

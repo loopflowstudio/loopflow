@@ -100,9 +100,11 @@ def _stage(candidate: Path, shot: LiveCapture, provenance: CaptureProvenance, st
     sidecar, status_path = sidecar_paths(candidate)
     write_json(sidecar, asdict(provenance))
     write_json(status_path, status)
-    errors = validate_capture(candidate, shot)
-    if errors:
-        raise CaptureUnavailable("; ".join(errors))
+    # A capture staged moments ago must be beyond structural *and* freshness
+    # complaint; either kind blocks the refresh.
+    errors, warnings = validate_capture(candidate, shot)
+    if errors or warnings:
+        raise CaptureUnavailable("; ".join(errors + warnings))
 
 
 def _install(candidate: Path, target: Path) -> None:

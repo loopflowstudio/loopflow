@@ -1,20 +1,21 @@
 # Assumptions and tensions
 
-- Chose trusted straight-to-main publication for unattended captures. The
-  publisher refuses a dirty tree or a non-default branch, then uses
-  `lf commit -m ... -p`; install still succeeds when that precondition is not
-  met.
-- The freshness and no-churn requirements conflict when pixels remain genuinely
-  unchanged: advancing `captured_at` creates a metadata-only commit, while not
-  advancing it eventually trips the 14-day gate. This draft preserves zero
-  no-op commits and lets the age gate block after 14 unchanged days rather than
-  silently claim old pixels are new.
-- The current local `product` status cannot be captured: its PM snapshot has a
-  stale Project Session and the Wave is not served. The install hook therefore
-  exercises the intended skip path until live state is repaired outside this
-  change.
-- The laptop install hook is the primary trigger. The repo now exposes an
-  `lf website-screens` flow, but does not install a launchd backstop: current
-  `lf cron` jobs are Wave-scoped and run through a resident, so they are not an
-  independent fallback. Pick the always-on capture host before declaring that
-  schedule.
+Resolved by the 2026-07-17 revision (scratch/living-website.md):
+
+- Straight-to-main publication stands. The publisher refuses a dirty tree or a
+  non-default branch, then uses `lf commit -m ... -p`; install still succeeds
+  when that precondition is not met.
+- The freshness/no-churn tension is dissolved by splitting the deploy gate:
+  structural failures block, staleness warns loudly and ships. Zero no-op
+  commits remain possible without the age check blocking unrelated docs or
+  website deploys.
+- The busted-live-state note is superseded: the liveness bar is a served Wave
+  only. Red or failed task states are honest and publishable, so the current
+  imperfect `product` state is a valid capture subject once the Wave is served.
+
+Parked with the revised bar:
+
+- Backstop capture host (laptop launchd vs mini-heart) is deferred along with
+  Done When 2's four-unattended-weeks streak. This round's only triggers are
+  the install hook and a hand-run
+  `uv run python scripts/refresh_website_screens.py --publish`.

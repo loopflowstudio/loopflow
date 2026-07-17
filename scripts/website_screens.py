@@ -1,8 +1,9 @@
 """Live product captures for the website: manifest, capture, provenance, gate.
 
 Every published image is the promoted app photographed against this repo's own
-running Wave. There is no fixture path: when live state is absent the capture
-fails rather than inventing a subject.
+served Wave. There is no fixture path: when the Wave is not real and served the
+capture fails rather than inventing a subject. Red or failed task states are
+honest and publishable — the bar is a served Wave, not a healthy one.
 """
 
 from __future__ import annotations
@@ -107,9 +108,6 @@ def require_live_wave(payload: dict[str, Any], expected_wave: str) -> None:
         raise CaptureUnavailable(f"lf status returned {wave.get('name')!r}, not {expected_wave!r}")
     if not wave.get("live"):
         raise CaptureUnavailable(f"{expected_wave} is not served")
-    tasks = [task for project in payload.get("projects", []) for task in project.get("tasks", [])]
-    if not any((task.get("runtime") or {}).get("process_alive") for task in tasks):
-        raise CaptureUnavailable(f"{expected_wave} has no live Task to show")
 
 
 def live_status(lf_binary: Path, repo_path: Path, wave: str) -> dict[str, Any]:
@@ -232,21 +230,28 @@ def validate_capture(
     shot: LiveCapture,
     *,
     now: datetime | None = None,
-) -> list[str]:
-    """Why `image` is unpublishable, or nothing. An absent capture is allowed."""
+) -> tuple[list[str], list[str]]:
+    """Structural reasons `image` is unpublishable, plus freshness warnings.
+
+    Structural errors (missing or invalid sidecars, wrong Wave, non-2x pixels,
+    an unserved status snapshot, a future-dated capture) block the deploy.
+    Staleness only warns, so shipping docs or website changes is never coupled
+    to promoting a new app build. An absent capture is allowed.
+    """
     if not image.is_file():
-        return []
+        return [], []
     sidecar, status = sidecar_paths(image)
     if not sidecar.is_file():
-        return [f"{image}: capture exists without {sidecar.name}"]
+        return [f"{image}: capture exists without {sidecar.name}"], []
     try:
         raw = json.loads(sidecar.read_text())
         provenance = CaptureProvenance(**raw)
         captured_at = datetime.fromisoformat(provenance.captured_at.replace("Z", "+00:00"))
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        return [f"{sidecar}: invalid provenance: {exc}"]
+        return [f"{sidecar}: invalid provenance: {exc}"], []
 
     errors = []
+    warnings = []
     current_time = now or datetime.now(timezone.utc)
     if captured_at.tzinfo is None:
         errors.append(f"{sidecar}: captured_at must include a timezone")
@@ -254,7 +259,7 @@ def validate_capture(
         errors.append(f"{sidecar}: captured_at is in the future")
     elif current_time - captured_at > MAX_CAPTURE_AGE:
         age = (current_time - captured_at).days
-        errors.append(f"{image}: capture is {age} days old (maximum is {MAX_CAPTURE_AGE.days})")
+        warnings.append(f"{image}: capture is {age} days old (stale after {MAX_CAPTURE_AGE.days})")
     if provenance.wave != shot.wave:
         errors.append(f"{sidecar}: wave is {provenance.wave!r}, expected {shot.wave!r}")
     if not provenance.app_version:
@@ -265,7 +270,7 @@ def validate_capture(
         with Image.open(image) as opened:
             actual_size = opened.size
     except OSError as exc:
-        return [*errors, f"{image}: invalid image: {exc}"]
+        return [*errors, f"{image}: invalid image: {exc}"], warnings
     expected_size = (shot.width * 2, shot.height * 2)
     if actual_size != expected_size:
         errors.append(
@@ -279,4 +284,4 @@ def validate_capture(
             require_live_wave(json.loads(status.read_text()), shot.wave)
         except (CaptureUnavailable, json.JSONDecodeError) as exc:
             errors.append(f"{status}: invalid live status snapshot: {exc}")
-    return errors
+    return errors, warnings

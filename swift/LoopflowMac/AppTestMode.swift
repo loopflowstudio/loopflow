@@ -86,6 +86,19 @@ enum AppTestMode: String {
         return CGFloat(value)
     }
 
+    /// The width a view pins itself to when no snapshot path is set — the
+    /// narrow and wide legs of `WaveSurfaceStateTests` launch the app with
+    /// only `LOOPFLOW_UI_TEST_WIDTH`, and without this pin they both render
+    /// at the default window size and prove nothing. Capture runs
+    /// (`LOOPFLOW_UI_TEST_SNAPSHOT_PATH` set) size the real window at
+    /// snapshot time instead, height included, so the view-level pin stays
+    /// out of their way.
+    static var viewPinnedWidth: CGFloat? {
+        guard ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] == nil
+        else { return nil }
+        return windowWidth
+    }
+
     /// A fixed window height for a screenshot run. Website captures set both
     /// dimensions so every image has the same frame regardless of the host's
     /// saved window state.

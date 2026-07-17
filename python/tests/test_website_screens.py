@@ -36,11 +36,8 @@ finally:
     sys.path.pop(0)
 
 
-def _live_status(*, live: bool = True, process_alive: bool = True) -> dict:
-    return {
-        "wave": {"name": "product", "live": live},
-        "projects": [{"tasks": [{"runtime": {"process_alive": process_alive}}]}],
-    }
+def _live_status(*, live: bool = True) -> dict:
+    return {"wave": {"name": "product", "live": live}}
 
 
 def _write_image(
@@ -90,13 +87,12 @@ def test_roadmap_capture_does_not_auto_select_a_wave(tmp_path: Path) -> None:
     assert context_lab["LOOPFLOW_UI_TEST_SELECT_BRANCH"] == "product"
 
 
-def test_live_capture_requires_a_served_wave_with_a_live_task() -> None:
+def test_live_capture_requires_a_served_wave() -> None:
+    """Served is the bar; red or failed task states are still publishable."""
     require_live_wave(_live_status(), "product")
 
     with pytest.raises(CaptureUnavailable, match="not served"):
         require_live_wave(_live_status(live=False), "product")
-    with pytest.raises(CaptureUnavailable, match="no live Task"):
-        require_live_wave(_live_status(process_alive=False), "product")
 
 
 def test_live_status_reports_invalid_json_as_unavailable(
@@ -187,22 +183,31 @@ def _publishable_capture(tmp_path: Path, captured_at: datetime) -> Path:
 def test_capture_gate_passes_a_fresh_proven_capture(tmp_path: Path) -> None:
     image = _publishable_capture(tmp_path, datetime.now(timezone.utc))
 
-    assert validate_capture(image, _shot(tmp_path)) == []
+    assert validate_capture(image, _shot(tmp_path)) == ([], [])
 
 
-def test_capture_gate_rejects_stale_provenance(tmp_path: Path) -> None:
+def test_capture_gate_warns_on_stale_provenance_without_failing(tmp_path: Path) -> None:
     image = _publishable_capture(tmp_path, datetime.now(timezone.utc) - timedelta(days=15))
 
-    errors = validate_capture(image, _shot(tmp_path))
+    errors, warnings = validate_capture(image, _shot(tmp_path))
 
-    assert any("15 days old" in error for error in errors)
+    assert errors == []
+    assert any("15 days old" in warning for warning in warnings)
+
+
+def test_capture_gate_rejects_a_future_dated_capture(tmp_path: Path) -> None:
+    image = _publishable_capture(tmp_path, datetime.now(timezone.utc) + timedelta(hours=1))
+
+    errors, _ = validate_capture(image, _shot(tmp_path))
+
+    assert any("in the future" in error for error in errors)
 
 
 def test_capture_gate_rejects_a_capture_whose_live_state_was_not_live(tmp_path: Path) -> None:
     image = _publishable_capture(tmp_path, datetime.now(timezone.utc))
     write_json(image.with_suffix(".status.json"), _live_status(live=False))
 
-    errors = validate_capture(image, _shot(tmp_path))
+    errors, _ = validate_capture(image, _shot(tmp_path))
 
     assert any("not served" in error for error in errors)
 
@@ -211,7 +216,7 @@ def test_capture_gate_rejects_an_image_without_provenance(tmp_path: Path) -> Non
     image = tmp_path / "context-lab.png"
     _write_image(image, (255, 255, 255), size=(2880, 1800))
 
-    errors = validate_capture(image, _shot(tmp_path))
+    errors, _ = validate_capture(image, _shot(tmp_path))
 
     assert any("without context-lab.json" in error for error in errors)
 
@@ -220,13 +225,13 @@ def test_capture_gate_rejects_the_wrong_retina_dimensions(tmp_path: Path) -> Non
     image = _publishable_capture(tmp_path, datetime.now(timezone.utc))
     _write_image(image, (255, 255, 255), size=(2880, 1600))
 
-    errors = validate_capture(image, _shot(tmp_path))
+    errors, _ = validate_capture(image, _shot(tmp_path))
 
     assert any("is not a 2x capture of 1440x900pt" in error for error in errors)
 
 
 def test_capture_gate_allows_an_image_to_be_absent(tmp_path: Path) -> None:
-    assert validate_capture(tmp_path / "not-published.png", _shot(tmp_path)) == []
+    assert validate_capture(tmp_path / "not-published.png", _shot(tmp_path)) == ([], [])
 
 
 def test_publish_allows_an_unchanged_live_status_snapshot(

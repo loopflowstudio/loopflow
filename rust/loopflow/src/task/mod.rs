@@ -178,22 +178,29 @@ impl TaskLifecyclePlan {
 pub struct TaskSettlementIntent {
     pub pr_id: TaskPrId,
     pub head_sha: String,
+    pub worktree_fingerprint: String,
     pub after_merge: AfterMerge,
     pub next_slug: Option<String>,
     pub requested_at: OffsetDateTime,
+    pub lifecycle_approved_at: Option<OffsetDateTime>,
     pub armed_at: Option<OffsetDateTime>,
 }
 
 impl TaskSettlementIntent {
     fn validate(&self) -> Result<(), TaskDataError> {
-        if self.head_sha.trim().is_empty() {
+        if self.head_sha.trim().is_empty() || self.worktree_fingerprint.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(
-                "Task settlement intent requires a PR head".to_string(),
+                "Task settlement intent requires a PR head and worktree fingerprint".to_string(),
             ));
         }
         if self.after_merge == AfterMerge::CompleteTask && self.next_slug.is_some() {
             return Err(TaskDataError::InvalidInvariant(
                 "a completing Task settlement cannot name a next PR".to_string(),
+            ));
+        }
+        if self.armed_at.is_some() && self.lifecycle_approved_at.is_none() {
+            return Err(TaskDataError::InvalidInvariant(
+                "an armed Task settlement requires lifecycle approval".to_string(),
             ));
         }
         Ok(())
@@ -926,6 +933,19 @@ impl TaskSession {
             TaskLifecyclePhase::Iterate => self.gate_cycle + 1,
             TaskLifecyclePhase::Gate => self.gate_cycle,
         }
+    }
+
+    pub fn restart_phase(&mut self) -> Result<(), TaskDataError> {
+        if self.lifecycle_phase == TaskLifecyclePhase::Gate {
+            return Err(TaskDataError::InvalidInvariant(
+                "gate changes must return to iterate".to_string(),
+            ));
+        }
+        self.phase_epoch += 1;
+        self.phase_cursor = 0;
+        self.phase_iteration = 0;
+        self.updated_at = OffsetDateTime::now_utc();
+        Ok(())
     }
 
     pub fn enter_iterate(&mut self) -> Result<(), TaskDataError> {
@@ -1690,6 +1710,26 @@ mod tests {
         assert_eq!(session.lifecycle_cycle(), 2);
         assert_eq!(session.gate_proposal, None);
         assert_eq!(session.phase_epoch, 4);
+    }
+
+    #[test]
+    fn requested_changes_restart_the_owning_non_gate_phase() {
+        let mut session = task_session();
+        session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
+        session.phase_cursor = 2;
+        session.phase_iteration = 3;
+
+        session.restart_phase().unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Kickoff);
+        assert_eq!(session.phase_epoch, 2);
+        assert_eq!((session.phase_cursor, session.phase_iteration), (0, 0));
+
+        session.enter_iterate().unwrap();
+        session.phase_cursor = 1;
+        session.restart_phase().unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Iterate);
+        assert_eq!(session.phase_epoch, 4);
+        assert_eq!(session.phase_cursor, 0);
     }
 
     #[test]

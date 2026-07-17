@@ -4,10 +4,12 @@ produces: landed PR
 ---
 Land the current branch. Rebase, create/update the PR, and enable auto-merge.
 
-Use this skill only for ordinary non-Task PRs. A managed Task publishes PR
-evidence during Iterate and its runner arms merge only after every required
-provider-backed InteractionReview and the current settlement conditions clear.
-`lf pr land` rejects managed Task worktrees.
+For a managed Task, this is the lifecycle-authoritative shipping declaration.
+Publish PR evidence during work, conduct every required human checkpoint in the
+provider-backed InteractionReview conversation, then call `land -c` or `land
+--next <slug>` only after those reviews and the current settlement conditions
+clear. Managed land validates the reviewed head without committing or rebasing,
+then arms mechanical GitHub execution.
 
 ## Orientation
 
@@ -26,8 +28,9 @@ re-derive what these already record.
 
 ## API
 
-`lf pr land` handles the ordinary PR workflow: staging uncommitted changes,
-rebasing, creating or updating the PR, and enabling auto-merge.
+For an ordinary PR, `lf pr land` stages, rebases, creates or updates the PR, and
+enables auto-merge. For a managed Task, it consumes the already-published,
+reviewed PR without mutating its head.
 
 ```
 lf pr land [--create-pr] [--complete|-c] [--next <slug>] [-m "commit message"] [--title "..."] [--body "..."]
@@ -72,6 +75,18 @@ Examples:
 ```bash
 lf pr land --create-pr
 ```
+
+Inside an approved managed Task Gate, choose the disposition explicitly:
+
+```bash
+lf pr land --next released-upgrade-proof  # another serial PR follows
+lf pr land -c                             # this merge completes the Task
+```
+
+Managed Task land rejects `--create-pr`, an unfinished Gate, a changed head or
+worktree, pending or changes-requested required reviews, pending or failing
+current check evidence, an unmerged stack parent, and an unincorporated
+directive.
 
 If you wrote title/body manually, include them:
 

@@ -1334,15 +1334,24 @@ async fn snapshot_task_detail(
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
                 None => None,
             };
-            let review_gate = store
-                .interaction_review_at(
-                    &session.id,
-                    session.phase_epoch,
-                    session.phase_iteration,
-                    session.phase_cursor,
-                )
-                .await?
-                .map(|r| review_gate_from(&r));
+            let lifecycle_approved = session
+                .gate_proposal
+                .as_ref()
+                .and_then(|proposal| proposal.settlement.as_ref())
+                .is_some_and(|settlement| settlement.lifecycle_approved_at.is_some());
+            let review_gate = if lifecycle_approved {
+                Some(ReviewGateState::Approved)
+            } else {
+                store
+                    .interaction_review_at(
+                        &session.id,
+                        session.phase_epoch,
+                        session.phase_iteration,
+                        session.phase_cursor,
+                    )
+                    .await?
+                    .map(|r| review_gate_from(&r))
+            };
             Some(TaskActionEvidence {
                 status: session.status,
                 active_pr_phase: active.map(TaskPr::phase),
@@ -1356,6 +1365,11 @@ async fn snapshot_task_detail(
                 process_alive: process.alive,
                 predecessor_phase,
                 review_gate,
+                settlement_armed: session
+                    .gate_proposal
+                    .as_ref()
+                    .and_then(|proposal| proposal.settlement.as_ref())
+                    .is_some_and(|settlement| settlement.armed_at.is_some()),
                 abandon_intent: session.abandon_intent.is_some(),
                 local_progress_unsettled: local_progress.unsettled,
             })
@@ -3106,6 +3120,7 @@ mod tests {
             process_alive: process.alive,
             predecessor_phase: None,
             review_gate: None,
+            settlement_armed: false,
             abandon_intent: false,
             local_progress_unsettled: local_progress.unsettled,
         });
@@ -3169,6 +3184,7 @@ mod tests {
             process_alive: process.alive,
             predecessor_phase: None,
             review_gate: None,
+            settlement_armed: false,
             abandon_intent: false,
             local_progress_unsettled: local_progress.unsettled,
         });

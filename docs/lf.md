@@ -181,7 +181,8 @@ Every Task runs `kickoff → iterate N → gate`. Standard Tasks conduct interac
 kickoff and gate steps with the human in the existing provider transcript, while
 the owning Project conducts interactive iteration steps. `--headless` assigns
 all three phases to the Project without skipping their skills. Approval exits a
-Gate; `changes-requested` sends the same Task back to Iterate.
+Gate. `changes-requested` restarts a Kickoff or Iterate checkpoint in its owning
+phase; from Gate it sends the same Task back to Iterate.
 
 `lf task attach` is the live attended-review prototype. Bare attached input and
 `lf task review message` become FIFO follow-ups, so the provider answers in the

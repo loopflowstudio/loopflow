@@ -110,9 +110,9 @@ Make the change easy to review.
    - `scratch/pr-body.md` — markdown PR body
    - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
 
-   `lf pr publish` consumes these files. In a managed Task, publish with `-c`
-   or `--next <slug>`; the Task runner lands mechanically after required
-   InteractionReviews approve.
+   `lf pr land` consumes these files. In a managed Task, call it only after all
+   applicable required InteractionReviews and the current settlement conditions
+   clear; use `-c` or `--next <slug>` to declare the reviewed outcome ready.
 
 4. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it
@@ -149,6 +149,12 @@ Phase 1 produces clean, tested code. Phase 2 produces:
 - updated docs
 
 If nothing needs fixing and tests pass, say so—but still write the design review doc.
+
+When running inside a managed Task, finish by recording the reviewed shipping
+declaration. Use `lf pr land -c` when this PR completes the Task, or `lf pr land
+--next <slug>` when another serial PR follows. If the command refuses, report
+its named stale review, head, directive, or settlement blocker; never fall back
+to `submit`, `pr open`, or a GitHub merge click.
 
 ## Reference
 

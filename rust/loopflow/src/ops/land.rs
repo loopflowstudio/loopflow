@@ -50,13 +50,6 @@ fn prepare_pr(
     finalize: Finalize,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    crate::ops::task::reject_managed_task_shipping(
-        repo,
-        match finalize {
-            Finalize::AutoMerge => "land",
-            Finalize::AssignForReview => "submit",
-        },
-    )?;
     if options.complete && options.next_slug.is_some() {
         return Err(OpsError::Message(
             "--complete and --next cannot be used together".to_string(),
@@ -69,6 +62,27 @@ fn prepare_pr(
         ));
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
+    if finalize == Finalize::AssignForReview {
+        crate::ops::task::reject_managed_task_shipping(&repo_root, "submit")?;
+    } else if crate::ops::task::authorize_managed_task_land(
+        &repo_root,
+        if options.complete {
+            crate::task::AfterMerge::CompleteTask
+        } else {
+            crate::task::AfterMerge::Review
+        },
+        options.next_slug.as_deref(),
+    )? {
+        if options.local || options.create_pr {
+            return Err(OpsError::Message(
+                "managed Task land uses its current published PR; --local and --create-pr are not valid"
+                    .to_string(),
+            ));
+        }
+        arm_approved_task_pr(&repo_root)?;
+        crate::ops::task::record_managed_task_land_armed(&repo_root)?;
+        return crate::ops::pr::current_pr(&repo_root);
+    }
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;

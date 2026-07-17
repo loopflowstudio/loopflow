@@ -1249,10 +1249,198 @@ pub(crate) fn reject_managed_task_shipping(repo: &Path, operation: &str) -> OpsR
             TaskAuthority::Authority { .. }
         ) {
             return Err(task_error(format!(
-                "`lf pr {operation}` cannot decide a managed Task lifecycle; publish PR evidence with `lf pr publish`, then let the Task runner land it after every required InteractionReview approves"
+                "`lf pr {operation}` cannot decide a managed Task lifecycle; required human decisions belong to provider-backed InteractionReview conversations, and an approved Task ships with `lf pr land -c` or `lf pr land --next <slug>`"
             )));
         }
         Ok(())
+    })
+}
+
+pub(crate) fn authorize_managed_task_land(
+    repo: &Path,
+    after_merge: AfterMerge,
+    next_slug: Option<&str>,
+) -> OpsResult<bool> {
+    let next_slug = next_slug.map(parse_pr_slug).transpose()?;
+    if after_merge == AfterMerge::CompleteTask && next_slug.is_some() {
+        return Err(task_error("--complete and --next cannot be used together"));
+    }
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            mut session,
+            lease,
+        } = resolve_task_authority(repo).await?
+        else {
+            return Ok(false);
+        };
+        let lease = lease.ok_or_else(|| {
+            task_error("managed Task land must run inside its active provider-backed Task Session")
+        })?;
+        if after_merge == AfterMerge::Review && next_slug.is_none() {
+            return Err(task_error(
+                "managed Task land requires `-c` when this PR completes the Task or `--next <slug>` when another serial PR follows",
+            ));
+        }
+        if session.lifecycle_phase != crate::task::TaskLifecyclePhase::Gate {
+            return Err(task_error(format!(
+                "managed Task land is available only from Gate after lifecycle review; {} is in {}",
+                session.launch.issue.identifier,
+                session.lifecycle_phase.as_str()
+            )));
+        }
+        let gate = task_review_gate(&store, &session).await?;
+        if !gate.satisfied {
+            return Err(task_error(format!(
+                "managed Task land is waiting on required provider-backed reviews: {}",
+                gate.reason()
+            )));
+        }
+        if has_pending_directive(&session) {
+            return Err(task_error(format!(
+                "directive v{} is not yet incorporated; acknowledge it before land",
+                session.current_directive_version
+            )));
+        }
+        let mut pr = store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .ok_or_else(|| task_error("managed Task land requires an active published PR"))?;
+        if pr.phase() != PrPhase::Open {
+            return Err(task_error(format!(
+                "managed Task land requires an open PR; current PR is {}",
+                pr.phase().as_str()
+            )));
+        }
+        if let Some(parent_id) = pr.parent_pr_id.as_ref() {
+            let parent = store
+                .get_task_pr(parent_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read stack parent: {error}")))?
+                .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
+            if parent.phase() != PrPhase::Merged {
+                return Err(task_error(format!(
+                    "managed Task land is waiting for stack parent {} to merge",
+                    parent.id
+                )));
+            }
+        }
+        match pr.fresh_ci().map(|observation| observation.state) {
+            Some(CiState::Passing) => {}
+            Some(CiState::Pending) => {
+                return Err(task_error(
+                    "managed Task land is waiting for required GitHub checks",
+                ));
+            }
+            Some(CiState::Failing) => {
+                return Err(task_error(
+                    "managed Task land requires passing GitHub checks; resume the CI repair lifecycle",
+                ));
+            }
+            None => {}
+        }
+        let settlement = session
+            .gate_proposal
+            .as_ref()
+            .and_then(|proposal| proposal.settlement.as_ref())
+            .ok_or_else(|| {
+                task_error(
+                    "Task Gate has no reviewed settlement evidence; return to Iterate and publish the PR before Gate",
+                )
+            })?;
+        if settlement.lifecycle_approved_at.is_none() {
+            return Err(task_error(
+                "managed Task land is waiting for the current Gate lifecycle to finish",
+            ));
+        }
+        if settlement.pr_id != pr.id || pr.head_sha() != Some(settlement.head_sha.as_str()) {
+            return Err(task_error(format!(
+                "Task PR changed after Gate evidence: reviewed {} at {}, current PR is {} at {}",
+                settlement.pr_id,
+                settlement.head_sha,
+                pr.id,
+                pr.head_sha().unwrap_or("unknown")
+            )));
+        }
+        let branch =
+            current_branch(repo)?.ok_or_else(|| task_error("Task worktree is not on a branch"))?;
+        let head = rev_parse(repo, "HEAD")?;
+        let fingerprint = hex::encode(Sha256::digest(
+            crate::engine::git::material_worktree_state(repo)?.as_bytes(),
+        ));
+        if branch != pr.branch
+            || head != settlement.head_sha
+            || fingerprint != settlement.worktree_fingerprint
+        {
+            return Err(task_error(
+                "Task worktree changed after Gate evidence; return to Iterate, publish the new head, and review it again",
+            ));
+        }
+        let already_armed = settlement.armed_at.is_some();
+        if already_armed
+            && (settlement.after_merge != after_merge || settlement.next_slug != next_slug)
+        {
+            return Err(task_error(
+                "managed Task land is already armed; its complete/next disposition cannot change",
+            ));
+        }
+        let now = time::OffsetDateTime::now_utc();
+        let publication = pr
+            .publication
+            .as_mut()
+            .expect("open Task PR has publication");
+        publication.after_merge = after_merge;
+        publication.next_slug = next_slug.clone();
+        pr.updated_at = now;
+        let settlement = session
+            .gate_proposal
+            .as_mut()
+            .and_then(|proposal| proposal.settlement.as_mut())
+            .expect("settlement was validated above");
+        settlement.after_merge = after_merge;
+        settlement.next_slug = next_slug;
+        if !already_armed {
+            settlement.requested_at = now;
+        }
+        store
+            .update_task_pr_for_lease(&pr, &lease)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        store
+            .update_task_session_for_lease(&session, &lease)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        Ok(true)
+    })
+}
+
+pub(crate) fn record_managed_task_land_armed(repo: &Path) -> OpsResult<bool> {
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            mut session,
+            lease,
+        } = resolve_task_authority(repo).await?
+        else {
+            return Ok(false);
+        };
+        let lease = lease.ok_or_else(|| {
+            task_error("managed Task land must run inside its active provider-backed Task Session")
+        })?;
+        let settlement = session
+            .gate_proposal
+            .as_mut()
+            .and_then(|proposal| proposal.settlement.as_mut())
+            .ok_or_else(|| task_error("managed Task land lost its settlement intent"))?;
+        if settlement.armed_at.is_none() {
+            settlement.armed_at = Some(time::OffsetDateTime::now_utc());
+            store
+                .update_task_session_for_lease(&session, &lease)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        Ok(true)
     })
 }
 
@@ -2853,7 +3041,7 @@ async fn reconcile_task_pr_with_authority(
             pr.ci_observation = None;
             merged_at = Some(now);
             // Record the merge, but withhold completion while an accepted
-            // directive is unincorporated — an auto-merge armed by the Task runner
+            // directive is unincorporated — an auto-merge armed by managed Task land
             // must not silently erase direction accepted after it was armed — or
             // while the branch holds follow-up committed past the merged tip,
             // which another serial PR still owes. The PR is settling in flight and
@@ -3968,7 +4156,7 @@ pub(crate) async fn task_completion_gate(
     let mut gate = task_review_gate(store, session).await?;
 
     // An accepted but unincorporated directive blocks completion: an auto-merge
-    // armed by the Task runner must not silently erase direction accepted after it
+    // armed by managed Task land must not silently erase direction accepted after it
     // was armed.
     if has_pending_directive(session) {
         gate.blockers.push(format!(
@@ -4248,16 +4436,25 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
                 .map(|pr| pr.phase()),
             None => None,
         };
-        let review_gate = store
-            .interaction_review_at(
-                &session.id,
-                session.phase_epoch,
-                session.phase_iteration,
-                session.phase_cursor,
-            )
-            .await
-            .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
-            .map(|r| review_gate_from(&r));
+        let lifecycle_approved = session
+            .gate_proposal
+            .as_ref()
+            .and_then(|proposal| proposal.settlement.as_ref())
+            .is_some_and(|settlement| settlement.lifecycle_approved_at.is_some());
+        let review_gate = if lifecycle_approved {
+            Some(ReviewGateState::Approved)
+        } else {
+            store
+                .interaction_review_at(
+                    &session.id,
+                    session.phase_epoch,
+                    session.phase_iteration,
+                    session.phase_cursor,
+                )
+                .await
+                .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
+                .map(|r| review_gate_from(&r))
+        };
         let action_evidence = TaskActionEvidence {
             status: session.status,
             active_pr_phase: active.map(|pr| pr.phase()),
@@ -4275,6 +4472,11 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             },
             predecessor_phase,
             review_gate,
+            settlement_armed: session
+                .gate_proposal
+                .as_ref()
+                .and_then(|proposal| proposal.settlement.as_ref())
+                .is_some_and(|settlement| settlement.armed_at.is_some()),
             abandon_intent: session.abandon_intent.is_some(),
             local_progress_unsettled: None,
         };

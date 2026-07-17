@@ -54,9 +54,10 @@ Land an ordinary non-Task PR through the merge queue.
 lf pr land
 ```
 
-Managed Tasks reject `land`: publish evidence with `lf pr publish -c` or `lf pr
-publish --next <slug>`. Their runner arms auto-merge only after every required
-lifecycle review and current settlement condition clears.
+For a managed Task, publish evidence first. After every applicable required
+provider-backed lifecycle review and the current settlement conditions clear,
+`lf pr land -c` or `lf pr land --next <slug>` records the authoritative shipping
+declaration and arms mechanical GitHub execution.
 
 ## lf cron
 

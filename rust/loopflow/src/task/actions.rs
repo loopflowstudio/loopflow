@@ -110,6 +110,7 @@ pub struct TaskActionEvidence<'a> {
     /// None=rooted on default branch; Some=parent PR phase.
     pub predecessor_phase: Option<PrPhase>,
     pub review_gate: Option<ReviewGateState>,
+    pub settlement_armed: bool,
     pub abandon_intent: bool,
     pub local_progress_unsettled: Option<bool>,
 }
@@ -240,7 +241,34 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
             },
         ),
         Some(CiState::Passing) | None
-            if evidence.review_gate == Some(ReviewGateState::Approved) =>
+            if evidence.review_gate == Some(ReviewGateState::Approved)
+                && !evidence.settlement_armed =>
+        {
+            if evidence.process_alive == Some(true) {
+                one_action(
+                    TaskAction::NoAction,
+                    "reviews and checks approved; Task body is recording the land declaration",
+                    |_| "Task body is still active".to_string(),
+                )
+            } else {
+                one_action(
+                    TaskAction::Resume,
+                    "reviews and checks approved; record `lf pr land -c` or `lf pr land --next <slug>`",
+                    |action| match action {
+                        TaskAction::Resume => unreachable!(),
+                        TaskAction::Review => "required lifecycle reviews are approved".into(),
+                        TaskAction::Complete | TaskAction::StartNextPr => {
+                            "record the managed Task land declaration first".into()
+                        }
+                        TaskAction::Recover => "body is not dead; resume the Gate".into(),
+                        TaskAction::NoAction => "action available: resume the Gate".into(),
+                    },
+                )
+            }
+        }
+        Some(CiState::Passing) | None
+            if evidence.review_gate == Some(ReviewGateState::Approved)
+                && evidence.settlement_armed =>
         {
             one_action(
                 TaskAction::NoAction,
@@ -560,6 +588,7 @@ mod tests {
             process_alive: None,
             predecessor_phase: None,
             review_gate: None,
+            settlement_armed: false,
             abandon_intent: false,
             local_progress_unsettled: None,
         }
@@ -687,6 +716,7 @@ mod tests {
         ev.active_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&passing);
         ev.review_gate = Some(ReviewGateState::Approved);
+        ev.settlement_armed = true;
         let model = derive_task_actions(&ev);
 
         assert_eq!(model.recommended, Some(TaskAction::NoAction));
@@ -695,6 +725,24 @@ mod tests {
             "lifecycle approved; checks passed; awaiting mechanical merge"
         );
         assert!(!model.status(TaskAction::Review).unwrap().available);
+    }
+
+    #[test]
+    fn approved_reviews_do_not_outrank_failing_checks() {
+        let failing = ci(CiState::Failing);
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.ci = Some(&failing);
+        ev.review_gate = Some(ReviewGateState::Approved);
+
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert!(model
+            .status(TaskAction::Resume)
+            .unwrap()
+            .reason
+            .contains("required checks failed"));
     }
 
     #[test]

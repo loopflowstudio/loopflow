@@ -13,11 +13,7 @@ use std::fs;
 use std::process::{Command, Stdio};
 
 use loopflow::ops::task::task_stack;
-use loopflow::ops::{
-    create_or_update_pr, create_or_update_pr_with_settlement, land, submit, LandOptions,
-    NullProgress, PrOptions,
-};
-use loopflow::task::AfterMerge;
+use loopflow::ops::{create_or_update_pr, land, submit, LandOptions, NullProgress, PrOptions};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 
@@ -393,15 +389,13 @@ fn valid_authority_publishes_and_records_the_pr() {
 
     let task = register_task(home.path(), repo.path(), branch, &base);
 
-    create_or_update_pr_with_settlement(
+    create_or_update_pr(
         repo.path(),
         &PrOptions {
             title: Some("valid authority".to_string()),
             body: Some("authority proof".to_string()),
             agent: None,
         },
-        AfterMerge::CompleteTask,
-        None,
         &NullProgress,
     )
     .expect("valid authority publishes");
@@ -421,10 +415,6 @@ fn valid_authority_publishes_and_records_the_pr() {
     assert!(
         pr.publication.is_some(),
         "publication must be recorded under valid authority, not degraded to generic"
-    );
-    assert_eq!(
-        pr.publication.as_ref().map(|intent| intent.after_merge),
-        Some(AfterMerge::CompleteTask)
     );
     let github = pr
         .github()

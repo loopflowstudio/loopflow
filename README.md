@@ -156,7 +156,9 @@ lf project wait <linear-project-id> --until waiting
 
 lf task run INF-123 --flow code --name release-scoped-migrations
 # work
-lf pr publish -c
+lf pr publish
+# after required lifecycle reviews approve
+lf pr land -c
 ```
 
 `--flow` selects the Task's inner loop. The Task Session retains that resolved
@@ -192,17 +194,19 @@ lf task review complete ir_... \
 
 Bare input while attached to a human review is a FIFO review message, not a
 steer. Use `/interrupt` explicitly to interrupt the provider. Approval advances
-the lifecycle; requested Gate changes return the same Task to another inner-loop
-cycle. The durable review records the exercise, evidence snapshot, conversation,
+the lifecycle. Requested Kickoff or inner-loop changes restart their owning
+phase; requested Gate changes return the same Task to another inner-loop cycle.
+The durable review records the exercise, evidence snapshot, conversation,
 disposition, and outcome. A generic interactive handoff only tells another UI
 how to present or attach to the existing session; it does not decide the review.
 
-Managed Tasks never use a GitHub merge click as lifecycle authority. Publish
-PR evidence during work with `-c` when merge completes the Task or `--next
-<slug>` when another serial PR follows. After every current required Kickoff,
-inner-loop, and Gate InteractionReview approves, the runner verifies the same
-head and settlement intent, then arms auto-merge mechanically. Failed required
-CI stays open and enters repair; passing CI lets the merge queue settle it.
+Managed Tasks never use a GitHub merge click as lifecycle authority. Publish PR
+evidence during work without arming merge. After every applicable required
+Kickoff, inner-loop, and Gate InteractionReview approves, `lf pr land -c` or
+`lf pr land --next <slug>` declares the current reviewed outcome ready. Managed
+land verifies the same head and settlement conditions, then arms auto-merge.
+Failed required CI stays open and enters repair; passing CI lets the merge queue
+settle it.
 
 Catch up accumulated parent-review and integration debt across a Wave:
 
@@ -229,8 +233,8 @@ The selector binds to INF-123's active PR at launch; it does not follow that
 Task onto a later serial PR.
 
 The Task keeps one worktree and an ordered PR history. Each serial PR owns one
-branch. Use `lf pr publish --next <slug>` when another PR follows; use
-`lf pr publish -c` only when this merge completes the Task. Finish clean
+branch. Use `lf pr land --next <slug>` when another PR follows; use `lf pr land
+-c` only when this merge completes the Task. Finish clean
 investigation work without a PR using `lf task complete INF-123 --summary "..."`.
 
 Launch persists directive v1 before the provider starts. `steer` and an

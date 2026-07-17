@@ -68,22 +68,6 @@ pub fn create_or_update_pr(
     options: &PrOptions,
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
-    create_or_update_pr_with_settlement(
-        repo,
-        options,
-        crate::task::AfterMerge::Review,
-        None,
-        progress,
-    )
-}
-
-pub fn create_or_update_pr_with_settlement(
-    repo: &Path,
-    options: &PrOptions,
-    after_merge: crate::task::AfterMerge,
-    next_slug: Option<&str>,
-    progress: &impl Progress,
-) -> OpsResult<PrResult> {
     reject_control_plane_pr(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
@@ -150,7 +134,7 @@ pub fn create_or_update_pr_with_settlement(
     let body = copy.body.trim();
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    crate::ops::task::request_task_pr_publication(repo, after_merge, next_slug)?;
+    crate::ops::task::request_task_pr_publication(repo, crate::task::AfterMerge::Review, None)?;
 
     let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
         progress.status("Updating PR...");

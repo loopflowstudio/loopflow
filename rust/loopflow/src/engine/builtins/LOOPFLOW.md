@@ -11,11 +11,12 @@ Use the top-level `lf` command suites for mechanical git and GitHub operations.
 
 ```bash
 lf commit -m "message" -p     # commit and push
-lf pr publish -c --title "..."     # publish final Task PR evidence; no browser
-lf pr publish --next parser-proof  # publish evidence; another serial PR follows
-lf pr open --title "..."           # publish, then open the PR for human review
+lf pr publish --title "..."        # publish Task PR evidence; no browser
+lf pr open --title "..."           # publish, then present an ordinary PR in GitHub
 lf pr submit                     # non-Task separation-of-duties handoff
-lf pr land                       # non-Task hands-off landing
+lf pr land                       # ordinary non-Task hands-off landing
+lf pr land -c                    # approved Task declaration: merge completes Task
+lf pr land --next parser-proof   # approved Task declaration: another PR follows
 lf rebase --plan              # show reset/rebase strategy
 lf rebase                     # apply the planned update
 lf task run CHILD --stack-on PARENT  # separate Task worktree based on PARENT's open PR
@@ -29,15 +30,17 @@ The human works inside the Task's provider-backed LLM session; GitHub review UI
 and merge clicks are never Task lifecycle decisions.
 
 - **`lf pr publish`** — push and create or refresh the PR while work is still in
-  flight. `-c` records that merge completes the Task; `--next <slug>` records
-  the following serial PR. Publication creates evidence but never arms merge.
-- **Task runner** — after every current required lifecycle review approves and
-  the approved PR head and settlement intent are still current, Loopflow arms
-  auto-merge mechanically. Required CI remains mechanical: failure keeps the PR
-  open and enters repair; green CI lets the merge queue settle it.
-- **`lf pr submit` / `lf pr land`** — remain available for ordinary non-Task
-  PRs. Managed Task worktrees reject them because they would bypass or duplicate
-  the durable lifecycle decision.
+  flight. Publication creates review evidence but never declares the Task ready
+  or arms merge.
+- **`lf pr land -c` / `lf pr land --next <slug>`** — the lifecycle-authoritative
+  declaration that the current reviewed Task outcome is ready to ship. It fails
+  closed until every applicable required InteractionReview approves and the
+  reviewed head and settlement conditions remain current, then arms auto-merge.
+- **GitHub execution** — required CI, branch protection, merge queue, and the
+  observed merge remain authoritative execution and settlement evidence.
+- **`lf pr submit`** — remains available only for ordinary non-Task separation
+  of duties. Managed Tasks reject it because a GitHub merge click would create a
+  second human approval.
 
 **`lf pr open`** presents an ordinary PR in GitHub. Do not use it for managed
 Tasks; conduct required review in the existing provider session.

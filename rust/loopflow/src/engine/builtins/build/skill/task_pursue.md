@@ -33,13 +33,13 @@ selection. Follow the repo style guide.
   required Project Session resolves the routine choice or explicitly escalates
   it to the Wave. Do not invent a provider-specific approval path or start
   unrelated work while it is pending.
-- Use `lf pr publish -c` when the published PR completes the Task, or `lf pr
-  publish --next <slug>` when another serial PR follows. Publication records
-  evidence and settlement intent but never arms merge. Do not use `pr open`,
-  `submit`, or `land` in a managed Task; required review stays in the existing
-  provider-backed InteractionReview conversation and the runner lands
-  mechanically once every required checkpoint and current settlement condition
-  clears.
+- Use `lf pr publish` during work to create or refresh review evidence without
+  arming merge. Do not use `pr open` or `submit` in a managed Task; required
+  review stays in the existing provider-backed InteractionReview conversation.
+- After every applicable required checkpoint and current settlement condition
+  clears, `lf pr land -c` declares that merge completes the Task, while `lf pr
+  land --next <slug>` declares that another serial PR follows. That declaration
+  is lifecycle authority; GitHub then executes it mechanically.
 - A merged PR settles that PR. Use `lf task complete <issue> --summary "..."` for clean
   work that needs no PR. Do not write Task completion directly through PM.
 - If a PR merged out of band and follow-up work remains, `lf pr next [slug]` reconciles the merge and

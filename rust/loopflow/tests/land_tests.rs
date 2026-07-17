@@ -5,8 +5,14 @@ use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
+use loopflow::task::{
+    AfterMerge, CiObservation, CiState, GithubPr, PrPublication, TaskGateProposal,
+    TaskLifecyclePhase, TaskSessionStatus, TaskSettlementIntent,
+};
 use loopflow_test_support::TestRepo;
+use sha2::{Digest, Sha256};
 use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
+use time::OffsetDateTime;
 
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
@@ -96,6 +102,38 @@ if [ "$1 $2" = "pr list" ]; then
 fi
 if [ "$1 $2" = "pr view" ]; then
   echo 'https://example.com/pr/912'
+  exit 0
+fi
+exit 0
+"#
+    )
+}
+
+fn gh_replay_safe_task_land_script(log_path: &str, armed_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+echo "$@" >> "{log_path}"
+if [ "$1 $2" = "pr list" ]; then
+  echo '[{{"url":"https://example.com/pr/912","state":"OPEN","isDraft":false,"number":912,"mergeCommit":null}}]'
+  exit 0
+fi
+if [ "$1 $2 $3 $4" = "pr view --json autoMergeRequest" ]; then
+  if [ -f "{armed_path}" ]; then
+    echo true
+  else
+    echo false
+  fi
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'https://example.com/pr/912'
+  exit 0
+fi
+if [ "$1 $2" = "pr merge" ]; then
+  touch "{armed_path}"
   exit 0
 fi
 exit 0
@@ -488,7 +526,7 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
 }
 
 #[test]
-fn managed_task_land_is_rejected_before_github_mutation() {
+fn managed_task_land_requires_its_active_provider_session() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let log_path = home.path().join("gh.log");
@@ -506,6 +544,37 @@ fn managed_task_land_is_rejected_before_github_mutation() {
     repo.push_new_branch(branch);
     let _task = register_task(home.path(), repo.path(), branch, &base);
 
+    let submit_error = submit(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("managed Task submit must be rejected");
+    assert!(submit_error
+        .to_string()
+        .contains("cannot decide a managed Task lifecycle"));
+
+    let open = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["pr", "open"])
+        .current_dir(repo.path())
+        .output()
+        .expect("run managed Task pr open");
+    assert!(!open.status.success());
+    assert!(
+        String::from_utf8_lossy(&open.stderr).contains("cannot decide a managed Task lifecycle")
+    );
+
     let error = land(
         repo.path(),
         &LandOptions {
@@ -522,12 +591,244 @@ fn managed_task_land_is_rejected_before_github_mutation() {
         },
         &NullProgress,
     )
-    .expect_err("managed Task land must not bypass lifecycle review");
-    assert!(error.to_string().contains("lf pr publish"));
-    assert!(error.to_string().contains("InteractionReview"));
+    .expect_err("managed Task land must not bypass its provider session");
+    assert!(error
+        .to_string()
+        .contains("active provider-backed Task Session"));
     assert!(
         !log_path.exists() || fs::read_to_string(log_path).unwrap_or_default().is_empty(),
         "rejected Task land must not mutate GitHub"
+    );
+}
+
+#[test]
+fn approved_managed_task_cli_land_records_disposition_and_arms_merge() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let log_path = home.path().join("gh.log");
+    let armed_path = home.path().join("auto-merge-armed");
+    let script = gh_replay_safe_task_land_script(
+        log_path.to_string_lossy().as_ref(),
+        armed_path.to_string_lossy().as_ref(),
+    );
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-approved";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let now = OffsetDateTime::now_utc();
+    let fingerprint = hex::encode(Sha256::digest(
+        loopflow::engine::git::material_worktree_state(repo.path())
+            .expect("worktree state")
+            .as_bytes(),
+    ));
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        after_merge: AfterMerge::Review,
+        next_slug: None,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(head.clone()),
+        }),
+    });
+    pr.ci_observation = Some(CiObservation {
+        head_sha: head.clone(),
+        state: CiState::Passing,
+        failing_checks: Vec::new(),
+        observed_at: now,
+    });
+    let mut session = task.session.clone();
+    session.lifecycle_phase = TaskLifecyclePhase::Gate;
+    session.phase_epoch = 2;
+    session.gate_cycle = 1;
+    session.gate_proposal = Some(TaskGateProposal {
+        status: TaskSessionStatus::Waiting,
+        reason: "reviewed outcome is ready".to_string(),
+        settlement: Some(TaskSettlementIntent {
+            pr_id: pr.id.clone(),
+            head_sha: head,
+            worktree_fingerprint: fingerprint,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            requested_at: now,
+            lifecycle_approved_at: None,
+            armed_at: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("publish PR evidence");
+    let proposal = serde_json::to_string(
+        session
+            .gate_proposal
+            .as_ref()
+            .expect("Gate proposal exists"),
+    )
+    .expect("serialize Gate proposal");
+    let lease_token = "cl_00000000000000000000000000000001";
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .expect("open registry")
+        .execute(
+            "UPDATE task_sessions SET lifecycle_phase='gate', phase_epoch=?2, gate_cycle=?3, gate_proposal_json=?4, status='running', process_generation=1, process_tmux_name='task-land', process_started_at=?5, process_lease_token=?6, process_agent='codex', process_provider='codex', process_lease_state='active' WHERE id=?1",
+            rusqlite::params![session.id.as_str(), session.phase_epoch, session.gate_cycle, proposal, now.unix_timestamp_nanos() as i64, lease_token],
+        )
+        .expect("enter Gate");
+    std::env::set_var("LF_TASK_SESSION_ID", session.id.as_str());
+    std::env::set_var("LF_TASK_GENERATION", "1");
+    std::env::set_var("LF_TASK_LEASE_TOKEN", lease_token);
+    let stored = runtime
+        .block_on(task.store.get_task_session(&session.id))
+        .expect("read Gate")
+        .expect("Task exists");
+    assert_eq!(stored.lifecycle_phase, TaskLifecyclePhase::Gate);
+
+    let premature = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: true,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("an unfinished Gate must not land");
+    assert!(premature
+        .to_string()
+        .contains("waiting for the current Gate lifecycle to finish"));
+
+    session
+        .gate_proposal
+        .as_mut()
+        .and_then(|proposal| proposal.settlement.as_mut())
+        .expect("settlement exists")
+        .lifecycle_approved_at = Some(now);
+    let approved_proposal = serde_json::to_string(
+        session
+            .gate_proposal
+            .as_ref()
+            .expect("Gate proposal exists"),
+    )
+    .expect("serialize approved Gate proposal");
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .expect("open registry")
+        .execute(
+            "UPDATE task_sessions SET gate_proposal_json=?2 WHERE id=?1",
+            rusqlite::params![session.id.as_str(), approved_proposal],
+        )
+        .expect("approve Gate lifecycle");
+
+    pr.ci_observation.as_mut().expect("CI evidence").state = CiState::Pending;
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("record pending checks");
+    let pending = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: true,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("pending required checks must not land");
+    assert!(pending
+        .to_string()
+        .contains("waiting for required GitHub checks"));
+    pr.ci_observation.as_mut().expect("CI evidence").state = CiState::Passing;
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("record passing checks");
+
+    repo.create_file("feature.txt", "changed after review");
+    let stale = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: true,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("changed reviewed outcome must not land");
+    assert!(stale.to_string().contains("changed after Gate evidence"));
+    assert!(
+        !log_path.exists()
+            || !fs::read_to_string(&log_path)
+                .unwrap_or_default()
+                .contains("pr merge")
+    );
+    repo.create_file("feature.txt", "feature");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["pr", "land", "-c"])
+        .current_dir(repo.path())
+        .status()
+        .expect("run approved Task land");
+    assert!(status.success());
+
+    let replay = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["pr", "land", "-c"])
+        .current_dir(repo.path())
+        .status()
+        .expect("replay approved Task land");
+    assert!(replay.success());
+
+    let landed = runtime
+        .block_on(task.store.get_task_session(&session.id))
+        .expect("read Task")
+        .expect("Task exists");
+    assert!(landed
+        .gate_proposal
+        .as_ref()
+        .and_then(|proposal| proposal.settlement.as_ref())
+        .and_then(|settlement| settlement.armed_at)
+        .is_some());
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&session.id))
+        .expect("read PR")
+        .expect("PR exists");
+    assert_eq!(
+        pr.publication.map(|publication| publication.after_merge),
+        Some(AfterMerge::CompleteTask)
+    );
+    let log = fs::read_to_string(log_path).expect("read gh log");
+    assert_eq!(
+        log.lines()
+            .filter(|line| line.contains("pr merge --squash --auto"))
+            .count(),
+        1
     );
 }
 

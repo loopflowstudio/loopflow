@@ -7,8 +7,8 @@ create/update the PR, mark it ready, and assign it — then stop.
 
 Use `submit` only for non-Task separation of duties. Managed Task human
 decisions happen in durable provider-backed InteractionReview conversations;
-the runner lands mechanically afterward, and `lf pr submit` rejects the Task
-worktree.
+`lf pr land -c` or `lf pr land --next <slug>` records the reviewed shipping
+declaration afterward, and `lf pr submit` rejects the Task worktree.
 
 ## Orientation
 

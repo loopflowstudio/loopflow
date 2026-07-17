@@ -55,7 +55,8 @@ Today the same command prints the refusal above, and the Task keeps burning.
 
 ## Approach
 
-One function, called from the two paths that mutate a Session into `Completed`.
+The gate classifies; the completion transaction acts. No new mechanism — the
+store primitive that does this already exists.
 
 ### 1. Generalize the cut, not the tri-state
 
@@ -201,8 +202,10 @@ so `lf task complete` owns this shape, and there is one completion-decision path
 
 - `commits_past` factored out of `committed_follow_up_range`; new
   `unpublished_work` cutting at `base_commit`.
-- `settle_proven_empty_successor`, called from `task_complete` and
-  `advance_completion_after_gate`.
+- `CompletionGate::discardable_successor` — the gate classifies; it never mutates.
+- `task_complete` consumes that classification as `complete_task_session`'s
+  existing `skipped_pr`, so the discard is atomic with the terminal write.
+  `advance_completion_after_gate` declines a discardable successor.
 - The gate's `Working` arm names the tri-state reason.
 - Regression tests, including both sabotage directions.
 

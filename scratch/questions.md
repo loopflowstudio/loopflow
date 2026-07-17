@@ -19,8 +19,8 @@ escalated (headless run; each is defensible and reversible).
   W2-280 and not for W2-300, which has `active_pr = None` and exactly one PR row —
   sequence 1, merged, `after_merge = review`, not abandoned. It is parked *before*
   the rotation, not over a successor, so condition 1 of the discard ("an active PR
-  exists and its phase is `Working`") can never hold and
-  `settle_proven_empty_successor` returns false for it. W2-300 keeps today's
+  exists and its phase is `Working`") can never hold, so the gate never classifies
+  a discardable successor for it. W2-300 keeps today's
   behavior until it resumes and rotates a successor into the covered shape; only
   then does `lf task complete` settle it. **Do not widen scope to the no-successor
   shape** — rotation policy is out of scope by decision, and if the parked-before-
@@ -47,7 +47,8 @@ escalated (headless run; each is defensible and reversible).
   caller passed `None`. I found it only after writing a parallel
   `settle_proven_empty_successor`. Recorded because the near-miss is the point: the
   question "does a primitive for this exist?" has to be asked against the *store*,
-  not just the ops module I was standing in.
+  not just the ops module I was standing in. That parallel function is now deleted;
+  `complete_task_session`'s `skipped_pr` is the one implementation.
 
 - **A dirty worktree is not re-checked in the discard.** `task_complete` already
   refuses an unclean worktree at ops/task.rs:3632, before anything I add, and

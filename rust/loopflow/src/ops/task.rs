@@ -8461,9 +8461,9 @@ mod tests {
     // successor that was never published and never authored. `lf task complete`
     // refused on it, and both exits it named were wrong — publishing opens a
     // zero-commit PR, and abandoning leaves the Session `Waiting` so the next
-    // rotation mints PR N+1. `task_complete` composes
-    // `settle_proven_empty_successor` with `task_completion_gate`; it resolves the
-    // machine registry itself, so these drive the two functions it composes.
+    // rotation mints PR N+1. `task_complete` composes `task_completion_gate` with
+    // `complete_task_session_with_authority`; it resolves the machine registry
+    // itself, so these drive the two functions it composes.
 
     /// Reproduce W2-280: `gate_task`'s merged PR relanded with `after_merge =
     /// Review` (the disposition that actually rotates), plus an unpublished

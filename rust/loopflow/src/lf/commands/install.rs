@@ -208,7 +208,9 @@ fn read_live_bodies(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<LiveBod
             Ok(LiveBody {
                 kind,
                 session_id: row.get(0)?,
-                generation: row.get::<_, Option<i64>>(1)?.map(|generation| generation as u32),
+                generation: row
+                    .get::<_, Option<i64>>(1)?
+                    .map(|generation| generation as u32),
                 lease_state: row.get(2)?,
             })
         })?;
@@ -381,15 +383,14 @@ mod tests {
         let Verdict::Reject { reasons } = decide(ValidationOnly, &ahead(), &[]) else {
             panic!("a validation-only build must not advance the shared store");
         };
-        assert!(reasons.iter().any(|reason| reason.contains("validation-only")));
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.contains("validation-only")));
     }
 
     #[test]
     fn a_published_candidate_ahead_of_the_store_promotes_and_migrates() {
-        assert_eq!(
-            decide(Published, &ahead(), &[]),
-            Verdict::PromoteAndMigrate
-        );
+        assert_eq!(decide(Published, &ahead(), &[]), Verdict::PromoteAndMigrate);
     }
 
     #[test]
@@ -474,7 +475,11 @@ mod tests {
         .unwrap();
         let live = read_live_bodies(&conn).unwrap();
         let ids: Vec<&str> = live.iter().map(|body| body.session_id.as_str()).collect();
-        assert_eq!(ids, vec!["ts_active", "ps_reserved"], "only active + reserved");
+        assert_eq!(
+            ids,
+            vec!["ts_active", "ps_reserved"],
+            "only active + reserved"
+        );
         assert_eq!(live[0].kind, "task");
         assert_eq!(live[1].kind, "project");
     }

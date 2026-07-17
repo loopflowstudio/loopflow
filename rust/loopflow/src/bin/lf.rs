@@ -1394,9 +1394,7 @@ fn main() -> anyhow::Result<()> {
     // its own preflight.
     if let Some(Commands::Install { cmd }) = &cli.command {
         return match cmd {
-            InstallCommand::Preflight { json } => {
-                loopflow::lf::commands::install::preflight(*json)
-            }
+            InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
         };
     }
 

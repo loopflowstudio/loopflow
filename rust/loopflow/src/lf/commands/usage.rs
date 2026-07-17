@@ -528,6 +528,7 @@ mod tests {
             context_persist_ms: 0,
             first_event_seq: None,
             last_event_seq: None,
+            basis: None,
         }
     }
 

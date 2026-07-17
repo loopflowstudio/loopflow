@@ -2,6 +2,7 @@ pub mod build_info;
 pub mod chat;
 pub(crate) mod child_control;
 pub mod child_session;
+pub mod durable;
 pub mod engine;
 pub mod flowloop;
 pub mod harness;

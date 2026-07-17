@@ -6,6 +6,7 @@ use crate::child_session::{
     ChildCommandEffect, ChildCommandId, ChildDirective, ChildProcessGeneration, ChildRef,
     ChildWriteLease, ObservationRecipient,
 };
+use crate::durable::Author;
 use crate::id::WaveId;
 use crate::project_session::{
     ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession, ProjectSessionId,
@@ -41,17 +42,18 @@ impl Store {
         .await
     }
 
-    pub async fn reserve_task_session_with_directive(
+    pub async fn create_task_session_with_steer(
         &self,
         session: &TaskSession,
         pr: &TaskPr,
-        directive: &ChildDirective,
+        author: Author,
+        text: &str,
     ) -> StoreResult<()> {
         let session = session.clone();
         let pr = pr.clone();
-        let directive = directive.clone();
+        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session_with_directive(&session, &pr, &directive)
+            store.insert_task_session_with_steer(&session, &pr, &author, &text)
         })
         .await
     }
@@ -63,14 +65,15 @@ impl Store {
         predecessor: &TaskSession,
         successor: &TaskSession,
         pr: &TaskPr,
-        directive: &ChildDirective,
+        author: Author,
+        text: &str,
     ) -> StoreResult<TaskSessionSuccession> {
         let predecessor = predecessor.clone();
         let successor = successor.clone();
         let pr = pr.clone();
-        let directive = directive.clone();
+        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_session_successor(&predecessor, &successor, &pr, &directive)
+            store.reserve_task_session_successor(&predecessor, &successor, &pr, &author, &text)
         })
         .await
     }
@@ -81,13 +84,14 @@ impl Store {
         &self,
         predecessor: &TaskSession,
         successor: &TaskSession,
-        directive: &ChildDirective,
+        author: Author,
+        text: &str,
     ) -> StoreResult<TaskSessionSuccession> {
         let predecessor = predecessor.clone();
         let successor = successor.clone();
-        let directive = directive.clone();
+        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.recover_task_session_successor(&predecessor, &successor, &directive)
+            store.recover_task_session_successor(&predecessor, &successor, &author, &text)
         })
         .await
     }
@@ -969,15 +973,16 @@ impl Store {
         .await
     }
 
-    pub async fn create_project_session_with_directive(
+    pub async fn create_project_session_with_steer(
         &self,
         session: &ProjectSession,
-        directive: &ChildDirective,
+        author: Author,
+        text: &str,
     ) -> StoreResult<()> {
         let session = session.clone();
-        let directive = directive.clone();
+        let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_project_session_with_directive(&session, &directive)
+            store.insert_project_session_with_steer(&session, &author, &text)
         })
         .await
     }

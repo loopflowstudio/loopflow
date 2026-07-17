@@ -111,9 +111,16 @@ The provider may change how input arrives. It may not change whether input is
 durable, whether stale execution may complete Work, or whether a dead executor
 retains write authority.
 
+Work is the long-lived logical server. It remains addressable when no executor
+or provider process exists. A generic Work runtime hosted by the owning Home
+serves every Wave, Project, and Task; the Work kind supplies domain truth,
+flow, closure checks, and allowed effects rather than another lifecycle stack.
+One Home resident may host many Work instances. An OS process is only a Run or
+Launch implementation detail and may disappear without changing Work identity.
+
 | Noun | Durable truth | Deliberately absent |
 | --- | --- | --- |
-| Work | stable Wave, Project, or Task identity and parentage | Session identity and provider state |
+| Work | stable, addressable Wave, Project, or Task logical server and parentage | Session identity, provider state, and required resident process |
 | Epoch | one pursuit of Work: `Open`, `Done`, or `Abandoned` | retry count and provider generation |
 | Basis | `(epoch, rev)` for every prompt-relevant durable input | separate truth/directive/response cursors |
 | Steer | ordered authored direction from User or active parent Run | replacement, lifecycle, and response variants |
@@ -159,6 +166,13 @@ struct Basis {
 duplicates identity or parentage. Project and Task ids are local Loopflow ids;
 Linear ids are external bindings. A Project advancing Epoch does not reparent
 its Tasks. An explicit quiescent move changes parentage and records history.
+
+The runtime dispatches on `WorkRef` with an explicit typed match. It does not
+use a provider registry, factory trait, or generic Work row to erase the domain
+differences. All three kinds share input ordering, Run authority, provider
+delivery, containment, recovery, and status projection. Wave policy supplies
+chat/cadence/project selection; Project policy supplies KRs and child Task
+judgment; Task policy supplies workspace, PR, CI, and implementation flow.
 
 Use newtypes for every id. Public DTO fields are required or explicitly
 optional and have no wire defaults.
@@ -477,16 +491,24 @@ background pursuit:
 3. other child evidence that can unblock progress;
 4. the parent's own pursue, mutate, selection, and cadence work.
 
-At every parent Turn boundary, drain the control lane before starting more
-background work. If child attention arrives during background work, first try
-live delivery to the exact parent Turn. If that Turn cannot be steered, the
-controller composes interrupt plus the already-durable input and starts the
-next Turn from it. Plain User Steer still never implies interrupt; this is
-explicit parent scheduler policy for higher-priority child attention.
+The control lane is an ordered projection over durable inputs and child
+attention, not another stored inbox or priority table. The same parent agent
+that is running clarify, pursue, mutate, cadence, or another flow services it.
+There is no reviewer Launch and no second parent agent.
 
-The parent responds by sending ordinary Steers to the child's Review. A child
-reply creates another control-lane item until the parent closes the Review.
-After all child attention drains, the parent resumes its own flow from durable
+The active Run listens for control input concurrently with provider events. At
+every parent Turn boundary it drains control before starting more background
+work. If child attention arrives during a background Turn, it first tries live
+delivery to that exact Turn. If the Turn cannot be steered, the controller
+interrupts it and starts the next Turn from the already-durable child input.
+The durable playhead does not advance on interruption, so background work
+resumes after the interaction. Plain User Steer still never implies interrupt;
+this is explicit parent scheduler policy for higher-priority child attention.
+
+Transport delivery to the parent does not discharge attention. The item stays
+first until the parent actually sends an ordinary Steer to the child or closes
+the Review. A child reply creates another control-lane item. After all child
+attention drains, the same parent agent resumes its own flow from durable
 position and Basis.
 
 Serving child attention must not require a clean writable canonical checkout.
@@ -685,13 +707,15 @@ only behavior.
 The next implementation pass is one **large core-control cutover**, not a set of
 small additive phases:
 
-1. make stable Work/Epoch/revision, product Run, Steer/Send, and fixed boundary
-   Basis authoritative across Wave, Project, and Task;
+1. make each Wave, Project, and Task a stable logical Work server hosted by one
+   generic Home runtime, with Work/Epoch/revision, product Run, Steer/Send, and
+   fixed boundary Basis authoritative across all three;
 2. replace completion/directive checks with the Basis fence;
 3. collapse interactive Task flow into Review derived from flow + Launch +
    `attention: User | Parent(WorkRef)`;
-4. make Wave and Project control lanes preempt their background work to service
-   child Reviews across live-send and interrupt/restart providers;
+4. make the same Wave or Project agent concurrently accept control input and
+   preempt its durable background playhead to service child Reviews across
+   live-send and interrupt/restart providers;
 5. make parent control runnable without a writable clean-main checkout;
 6. cut User and parent direction through the same Steer API;
 7. delete Session/body/ChildCommand/ChildDirective/InteractionReview/Handoff
@@ -714,8 +738,12 @@ It is done when:
   dispositions;
 - Project and Wave service an awaiting child Review before beginning another
   background flow step;
+- the agent already running the parent flow receives the Review; no reviewer
+  Run, secondary parent agent, or stored priority inbox is created;
 - a child Review arriving during a non-steerable parent Turn interrupts and
   becomes the next seeded input;
+- responding to the child resumes the interrupted parent playhead without
+  replaying completed flow steps;
 - User and parent conduct the same Review protocol; only routing differs;
 - closing an old Review after Basis or flow position advances is rejected;
 - dirty canonical main cannot prevent a read-only parent control response;

@@ -93,6 +93,16 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 12. **Parent responsiveness is scheduler behavior.** Wave and Project must drain direct User interaction, awaiting child Reviews, and other unblocking child evidence before beginning their own background flow. Child attention may explicitly interrupt a non-steerable background Turn; this does not change plain Steer semantics.
 13. **`User` replaces `Human`.** User means an authenticated external Loopflow client, whether a person in Swift/CLI or another system's agent. Internal Loopflow authority remains `Run(RunId)`.
 14. **Small checkpoints optimize against the desired simplification.** The current working tree is 136,525 Rust lines and still contains all legacy authority. The next pass must cross the structural cut and delete at least 14,551 net lines to reach the 121,974 target, not preserve additive scaffolding as progress.
+15. **Work is the long-lived logical server; its process is not.** One generic
+    Home runtime serves stable Wave, Project, and Task Work. Each kind supplies
+    domain policy through an explicit `WorkRef` match, while Run reservation,
+    provider delivery, containment, recovery, and status are shared. A Work is
+    addressable with no active Run or OS process.
+16. **The flow agent is the reviewer.** The agent already running a Wave or
+    Project flow must receive child attention in its concurrent control input.
+    Live delivery or interrupt-and-seed preempts the durable background
+    playhead; no reviewer Launch, secondary agent, Review inbox, or end-of-flow
+    wait may stand between a child and its parent.
 
 No more behavior should be adapted around `ChildCommand`, `InteractionReview`,
 or Handoff. The next checkpoint is the large core-control cutover specified in
@@ -107,7 +117,7 @@ because it compiles.
 
 | Noun | Stored truth | Deliberately absent |
 | --- | --- | --- |
-| Work | Stable Wave, Project, or Task identity and parentage | Session identity, provider state |
+| Work | Stable, addressable Wave, Project, or Task logical server and parentage | Session identity, provider state, required resident process |
 | Epoch | One terminal pursuit of Work: `Open`, `Done`, or `Abandoned` | Retry count, provider generation |
 | Basis | `(epoch, rev)` for all prompt-relevant durable input | Separate truth/directive/response cursors |
 | Steer | Ordered authored direction from `User` or an active parent `Run` | Replace, resume message, lifecycle command |
@@ -119,6 +129,12 @@ because it compiles.
 | Home | Stable local execution authority identified by `HomeId` | Hostname as identity |
 
 `Exec` remains a low-level process receipt beneath Launch. It is useful evidence, not a public control target.
+
+One generic Work runtime is hosted by each Home resident and may serve many
+Work instances. It dispatches by an explicit `WorkRef` match: Wave supplies
+chat/cadence/project-selection policy, Project supplies KR and Task policy, and
+Task supplies workspace/PR/CI policy. Do not introduce factory traits, a
+generic Work table duplicating domain identity, or three lifecycle controllers.
 
 There is no first-class `Actor`, `Ack`, `Handle`, `Body`, `Session`, `Block`,
 `Sleep`, `Interaction`, `InteractionId`, Review row, or `ReviewId`. Review is a
@@ -226,9 +242,13 @@ control lane. The child remains Running while its Launch is usable.
 
 Wave and Project drain their control lane before their own pursuit work:
 explicit control, open child Reviews oldest-first, other unblocking child
-evidence, then background pursue/mutate/cadence. If a child Review arrives
-during a non-steerable background Turn, controller policy interrupts that Turn
-and seeds the already-durable input next. Parent control runs read-only and do
+evidence, then background pursue/mutate/cadence. This lane is an ordered query
+over durable facts, not a stored inbox. The same agent running the background
+flow listens concurrently. Child attention is live-delivered when the exact
+Turn accepts it; otherwise controller policy interrupts the Turn and seeds the
+already-durable input next. Delivery alone does not clear attention: only a
+parent Steer to the child or `close_review` does. The durable playhead then
+resumes without replaying completed steps. Parent control runs read-only and do
 not depend on canonical main being clean.
 
 ### Provider and subagent boundary
@@ -440,6 +460,9 @@ Done when:
 
 Implement one controller shared by Wave, Project, and Task:
 
+- one long-lived logical Work endpoint per stable Wave, Project, or Task id;
+- one Home resident capable of hosting and waking many Work endpoints without
+  requiring one resident OS process per Work;
 - `reserve`, `advance`, and `stop` transactions;
 - one active Run uniqueness constraint and opaque lease;
 - immutable triggers and Run lineage;
@@ -454,6 +477,10 @@ Move Task/Project-specific closure rules and flow selection behind typed boundar
 Done when:
 
 - the same transition suite runs against Wave, Project, and Task Work;
+- a Steer addressed while Work has no Run remains durable and causes the Home
+  runtime to reserve one without changing Work identity;
+- killing every Work executor leaves the Home resident able to recover all
+  runnable Work through the same controller;
 - reserve-versus-reserve, input-versus-advance, done-versus-input, stop-versus-start, and reap-versus-recovery races have deterministic tests;
 - killing the provider at every side-effect boundary leaves either a recoverable Run or an explicit unknown effect, never a second writer;
 - Run cannot be terminal while an owned Launch/containment is live;
@@ -536,8 +563,12 @@ Replace interactive records with one Review projection:
 - closing advances the flow with no disposition or approval state;
 - User and parent use the same protocol; only attention routing differs;
 - parent control lane drains awaiting child Reviews before background work;
+- the active parent flow agent, not a reviewer or secondary parent agent,
+  services that lane concurrently with provider events;
 - child attention live-steers the current parent Turn when possible and
   explicitly interrupts/restarts background work when not;
+- parent response or close clears attention; transport delivery never does;
+- interrupted background flow retains its playhead and resumes after control;
 - Wave/Project control runs read-only and can respond when canonical main is
   dirty;
 - explicit TUI close, handback, or failure records the opaque boundary outcome.
@@ -554,8 +585,11 @@ Done when:
 - parent-routed Review never appears in the User attention queue;
 - Project and Wave never start a background Turn while child Review attention
   is queued;
+- one provider identity conducts the background flow and child interaction;
+  no reviewer Launch or stored priority inbox is created;
 - seed-only parent harnesses interrupt background work and seed child attention
   next rather than starving it;
+- after servicing child attention, completed background steps are not replayed;
 - dirty canonical main cannot block Review Steer/close;
 - CLI, Swift, and keeper fixtures produce byte-for-byte equivalent status facts.
 

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
+use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 
 // -- Identity -----------------------------------------------------------------
@@ -349,6 +350,15 @@ const MIGRATIONS: &[Migration] = &[
         },
         name: "one_spend_grain",
         sql: include_str!("migrations/0.11.030_one_spend_grain.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 31,
+        },
+        name: "durable_input_spine",
+        sql: include_str!("migrations/0.11.031_durable_input_spine.sql"),
     },
 ];
 
@@ -720,6 +730,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
     let applied = applied_versions(conn)?;
     for migration in pending_migrations(&applied, set)? {
         let parent_history = migration_prefix_fingerprint(&applied_versions(conn)?, set)?;
+        migration_preflight(conn, migration)?;
         conn.execute_batch(migration.sql)?;
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
@@ -727,6 +738,57 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 
     validate_applied_checksums(conn, set)?;
     validate_schema(conn, set)
+}
+
+fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
+    if migration.name != "durable_input_spine" {
+        return Ok(());
+    }
+    let mut active = Vec::new();
+    for (kind, table) in [("Project", "project_sessions"), ("Task", "task_sessions")] {
+        let mut statement = conn.prepare(&format!(
+            "SELECT id FROM {table}
+             WHERE process_lease_state IN ('reserved', 'active', 'revoked')
+             ORDER BY id"
+        ))?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        active.extend(ids.into_iter().map(|id| format!("{kind} {id}")));
+    }
+    if !active.is_empty() {
+        return Err(StoreError::InvalidData(format!(
+            "durable input migration requires every writer to be quiescent and reaped; active: {}",
+            active.join(", ")
+        )));
+    }
+    let ambiguous_project: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM project_sessions
+             GROUP BY project_id HAVING COUNT(DISTINCT wave_id) > 1 LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(project) = ambiguous_project {
+        return Err(StoreError::InvalidData(format!(
+            "Project {project} appears under more than one Wave; repair parentage before durable input migration"
+        )));
+    }
+    let ambiguous_task: Option<String> = conn
+        .query_row(
+            "SELECT issue_id FROM task_sessions
+             GROUP BY issue_id HAVING COUNT(DISTINCT project_id) > 1 LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(task) = ambiguous_task {
+        return Err(StoreError::InvalidData(format!(
+            "Task {task} appears under more than one Project; repair parentage before durable input migration"
+        )));
+    }
+    Ok(())
 }
 
 fn migration_checksum(migration: &Migration) -> String {
@@ -1497,7 +1559,8 @@ mod tests {
                 "0.11.026_lineage_boundary".to_string(),
                 "0.11.027_accounts_first".to_string(),
                 "0.11.029_ci_incident_repaired_head".to_string(),
-                "0.11.030_one_spend_grain".to_string()
+                "0.11.030_one_spend_grain".to_string(),
+                "0.11.031_durable_input_spine".to_string()
             ]
         );
     }
@@ -1511,11 +1574,6 @@ mod tests {
             .position(|migration| migration.name == name)
             .expect("named migration is registered");
         &MIGRATIONS[..index]
-    }
-
-    fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
-        conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 0"))
-            .is_ok()
     }
 
     #[test]
@@ -1533,11 +1591,14 @@ mod tests {
             "a validation-only open advances nothing"
         );
         assert!(capture_status_accepts(&conn, "pruned"));
-        // Bait for the withheld tail (`one_spend_grain` drops the exec ledger's
-        // spend columns): the column's survival proves the tail stayed withheld.
-        assert_eq!(tail.name, "one_spend_grain", "bait tracks the current tail");
+        // Bait for the withheld tail: the durable input migration creates the
+        // stable Work tables. Their absence proves validation stayed read-only.
+        assert_eq!(
+            tail.name, "durable_input_spine",
+            "bait tracks the current tail"
+        );
         assert!(
-            has_column(&conn, "run_events", "input_tokens"),
+            conn.prepare("SELECT id FROM projects LIMIT 0").is_err(),
             "a validation-only open must not run the tail's schema change"
         );
     }

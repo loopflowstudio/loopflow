@@ -790,6 +790,7 @@ pub struct AgentTurnRow {
     pub context_persist_ms: i64,
     pub first_event_seq: Option<i64>,
     pub last_event_seq: Option<i64>,
+    pub basis: Option<crate::durable::Basis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -818,6 +819,7 @@ pub struct CaptureStart {
     pub gather_ms: u64,
     pub render_ms: u64,
     pub raw_provider: bool,
+    pub basis: Option<crate::durable::Basis>,
 }
 
 impl CaptureHandle {
@@ -854,17 +856,39 @@ impl CaptureHandle {
     }
 
     pub fn begin_turn(&self, input_op: &str, text: &str) -> StoreResult<()> {
+        self.begin_turn_at(input_op, text, None)
+    }
+
+    pub fn begin_turn_at(
+        &self,
+        input_op: &str,
+        text: &str,
+        basis: Option<crate::durable::Basis>,
+    ) -> StoreResult<()> {
         let mut capture = self.0.lock().expect("trace capture mutex poisoned");
         if let Some(message) = &capture.failed {
             return Err(StoreError::InvalidData(format!(
                 "trace capture is already partial: {message}"
             )));
         }
-        let result = capture.begin_turn(input_op, PreparedTurnContext::provider_total_only(text));
+        let result = capture.begin_turn(
+            input_op,
+            PreparedTurnContext::provider_total_only(text),
+            basis,
+        );
         if let Err(error) = &result {
             capture.failed = Some(error.to_string());
         }
         result
+    }
+
+    pub fn current_turn_id(&self) -> String {
+        self.0
+            .lock()
+            .expect("trace capture mutex poisoned")
+            .turn
+            .id
+            .clone()
     }
 
     pub fn set_provider_session_id(&self, session_id: Option<String>) {
@@ -1051,6 +1075,7 @@ impl TraceCapture {
             context_persist_ms: persist_ms,
             first_event_seq: Some(0),
             last_event_seq: Some(0),
+            basis: start.basis,
         };
         let assets = prepared
             .assets()
@@ -1104,7 +1129,12 @@ impl TraceCapture {
         Ok(())
     }
 
-    fn begin_turn(&mut self, input_op: &str, prepared: PreparedTurnContext) -> StoreResult<()> {
+    fn begin_turn(
+        &mut self,
+        input_op: &str,
+        prepared: PreparedTurnContext,
+        basis: Option<crate::durable::Basis>,
+    ) -> StoreResult<()> {
         validate_input_op(input_op)?;
         let now = OffsetDateTime::now_utc().unix_timestamp();
         self.finish_current_turn("partial", now)?;
@@ -1156,6 +1186,7 @@ impl TraceCapture {
             context_persist_ms: persist_start.elapsed().as_millis() as i64,
             first_event_seq: Some(self.event_seq as i64),
             last_event_seq: None,
+            basis,
         };
         let assets = prepared
             .assets()
@@ -1818,6 +1849,7 @@ mod tests {
                 gather_ms: 1,
                 render_ms: 2,
                 raw_provider: true,
+                basis: None,
             },
         )
         .unwrap();

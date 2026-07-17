@@ -1916,6 +1916,7 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
             gather_ms: 0,
             render_ms: 0,
             raw_provider: true,
+            basis: None,
         },
     )?;
 

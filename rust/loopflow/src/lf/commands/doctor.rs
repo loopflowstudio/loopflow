@@ -1011,6 +1011,7 @@ mod tests {
                 gather_ms: 1,
                 render_ms: 2,
                 raw_provider: true,
+                basis: None,
             },
         )
         .unwrap();
@@ -1054,6 +1055,7 @@ mod tests {
                 gather_ms: 1,
                 render_ms: 2,
                 raw_provider: true,
+                basis: None,
             },
         )
         .unwrap();

@@ -18,6 +18,7 @@ use crate::child_session::{
     ChildCommandState, ChildDirective, ChildDirectiveId, ChildLeaseState, ChildLeaseToken,
     ChildProcessGeneration, ChildRef, ChildWriteLease, DirectiveKind, ObservationRecipient,
 };
+use crate::durable::Author;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
 use crate::project_session::{
@@ -36,6 +37,10 @@ use crate::task::{
     TaskSessionId, TaskSessionStatus, TaskSessionSuccession,
 };
 
+use super::durable::{
+    activate_run_for_child, create_project_spine, create_task_spine, end_run_for_child,
+    fence_run_for_child, reserve_run_for_child, work_for_child_in,
+};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -50,17 +55,18 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn reserve_task_session_with_directive(
+    pub fn insert_task_session_with_steer(
         &self,
         session: &TaskSession,
         pr: &TaskPr,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<()> {
-        ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, session, pr)?;
-        insert_child_directive(&transaction, directive)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(session.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         transaction.commit()?;
         Ok(())
     }
@@ -89,9 +95,9 @@ impl SqliteStore {
         predecessor: &TaskSession,
         successor: &TaskSession,
         pr: &TaskPr,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<TaskSessionSuccession> {
-        ensure_directive_target(directive, "task", successor.id.as_str())?;
         validate_task_session(successor)?;
         validate_initial_task_pr(successor, pr)?;
         let issue_id = successor.launch.issue.id.as_str().to_string();
@@ -112,8 +118,10 @@ impl SqliteStore {
             TASK_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
+        create_task_spine(&transaction, successor)?;
         insert_task_pr(&transaction, pr)?;
-        insert_child_directive(&transaction, directive)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(successor.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         _carry_task_session_state(&transaction, predecessor, successor)?;
         transaction.commit()?;
         Ok(TaskSessionSuccession {
@@ -134,7 +142,8 @@ impl SqliteStore {
         &self,
         predecessor: &TaskSession,
         successor: &TaskSession,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<TaskSessionSuccession> {
         if predecessor.status != TaskSessionStatus::Abandoned {
             return Err(StoreError::InvalidData(format!(
@@ -169,7 +178,6 @@ impl SqliteStore {
                 "a recovered Task successor must begin waiting without a live body".to_string(),
             ));
         }
-        ensure_directive_target(directive, "task", successor.id.as_str())?;
         validate_task_session(successor)?;
         let issue_id = successor.launch.issue.id.as_str().to_string();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -198,6 +206,7 @@ impl SqliteStore {
             TASK_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
+        create_task_spine(&transaction, successor)?;
         let moved = transaction.execute(
             "UPDATE task_prs SET task_session_id=?1, updated_at=?2 WHERE task_session_id=?3",
             params![successor.id.as_str(), now_unix(), predecessor.id.as_str()],
@@ -208,16 +217,8 @@ impl SqliteStore {
                 predecessor.id
             )));
         }
-        insert_child_directive(&transaction, directive)?;
-        insert_task_event_in(
-            &transaction,
-            successor,
-            &TaskEventKind::DirectiveChanged {
-                directive_id: directive.id.clone(),
-                version: directive.version,
-                directive_kind: directive.kind,
-            },
-        )?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(successor.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         _carry_task_session_state(&transaction, predecessor, successor)?;
         transaction.commit()?;
         Ok(TaskSessionSuccession {
@@ -333,6 +334,11 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        activate_run_for_child(
+            &transaction,
+            &ChildRef::Task(session.id.clone()),
+            lease.generation,
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -380,6 +386,11 @@ impl SqliteStore {
             &TaskEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Task(session.id.clone()),
+            lease.generation,
         )?;
         transaction.commit()?;
         Ok(())
@@ -435,6 +446,11 @@ impl SqliteStore {
             &TaskEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        fence_run_for_child(
+            &transaction,
+            &ChildRef::Task(session_id.clone()),
+            process.generation,
         )?;
         transaction.commit()?;
         Ok(process)
@@ -509,6 +525,11 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        fence_run_for_child(
+            &transaction,
+            &ChildRef::Task(session_id.clone()),
+            generation,
+        )?;
         transaction.commit()?;
         Ok(Some(process))
     }
@@ -554,6 +575,11 @@ impl SqliteStore {
             &TaskEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Task(session_id.clone()),
+            generation,
         )?;
         transaction.commit()?;
         Ok(process)
@@ -694,6 +720,11 @@ impl SqliteStore {
         if changed == 0 {
             return Ok(None);
         }
+        reserve_run_for_child(
+            &transaction,
+            &ChildRef::Task(session.id.clone()),
+            process.generation,
+        )?;
         insert_task_event_in(
             &transaction,
             session,
@@ -2142,8 +2173,9 @@ impl SqliteStore {
 
     pub fn insert_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
         validate_project_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
             PROJECT_SESSION_INSERT,
             rusqlite::params_from_iter(
                 project_session_params(session)
@@ -2151,16 +2183,18 @@ impl SqliteStore {
                     .map(|value| value.as_ref()),
             ),
         )?;
+        create_project_spine(&transaction, session)?;
+        transaction.commit()?;
         Ok(())
     }
 
-    pub fn insert_project_session_with_directive(
+    pub fn insert_project_session_with_steer(
         &self,
         session: &ProjectSession,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<()> {
         validate_project_session(session)?;
-        ensure_directive_target(directive, "project", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_session_params(session);
@@ -2168,7 +2202,9 @@ impl SqliteStore {
             PROJECT_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
-        insert_child_directive(&transaction, directive)?;
+        create_project_spine(&transaction, session)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Project(session.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         transaction.commit()?;
         Ok(())
     }
@@ -2218,6 +2254,11 @@ impl SqliteStore {
             &ProjectEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        activate_run_for_child(
+            &transaction,
+            &ChildRef::Project(session.id.clone()),
+            lease.generation,
         )?;
         transaction.commit()?;
         Ok(())
@@ -2271,6 +2312,11 @@ impl SqliteStore {
             &ProjectEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Project(session.id.clone()),
+            lease.generation,
         )?;
         transaction.commit()?;
         Ok(())
@@ -2329,6 +2375,11 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        fence_run_for_child(
+            &transaction,
+            &ChildRef::Project(session_id.clone()),
+            process.generation,
+        )?;
         transaction.commit()?;
         Ok(process)
     }
@@ -2374,6 +2425,11 @@ impl SqliteStore {
             &ProjectEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Project(session_id.clone()),
+            generation,
         )?;
         transaction.commit()?;
         Ok(process)
@@ -2433,6 +2489,11 @@ impl SqliteStore {
         if changed == 0 {
             return Ok(None);
         }
+        reserve_run_for_child(
+            &transaction,
+            &ChildRef::Project(session.id.clone()),
+            process.generation,
+        )?;
         insert_project_event_in(
             &transaction,
             session,
@@ -3216,6 +3277,7 @@ fn insert_initial_task(conn: &Connection, session: &TaskSession, pr: &TaskPr) ->
         TASK_SESSION_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
+    create_task_spine(conn, session)?;
     insert_task_pr(conn, pr)?;
     seed_task_linear_observation(conn, session)
 }

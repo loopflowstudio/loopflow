@@ -138,6 +138,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         context_persist_ms: 1,
         first_event_seq: None,
         last_event_seq: None,
+        basis: None,
     };
     store
         .insert_trace_capture(&launch, &turn, &[], &[])

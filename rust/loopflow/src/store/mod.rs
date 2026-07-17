@@ -12,6 +12,7 @@ use crate::provider_auth::Provider;
 use crate::wave::Wave;
 mod child_sessions;
 pub(crate) mod ci_incidents;
+mod durable;
 mod interaction_reviews;
 mod interactive_handoffs;
 pub mod migrations;
@@ -113,6 +114,10 @@ pub enum StoreError {
     InvalidData(String),
     #[error("{target} generation {generation} no longer holds its write lease")]
     LeaseRevoked { target: String, generation: u32 },
+    #[error("stale Basis: expected {expected}, current {current}")]
+    StaleBasis { expected: String, current: String },
+    #[error("invalid control authority: {0}")]
+    InvalidAuthority(String),
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;

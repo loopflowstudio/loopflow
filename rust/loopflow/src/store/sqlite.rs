@@ -23,6 +23,7 @@ use crate::wave::Wave;
 
 mod child_sessions;
 mod ci_incidents;
+mod durable;
 mod interaction_reviews;
 mod interactive_handoffs;
 mod provider_deliveries;
@@ -1530,7 +1531,7 @@ impl SqliteStore {
         decisions: &[ContextDecisionRow],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "INSERT INTO agent_launches (
                 id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
@@ -1581,7 +1582,7 @@ impl SqliteStore {
         decisions: &[ContextDecisionRow],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_agent_turn(&tx, turn)?;
         insert_context_rows(&tx, assets, decisions)?;
         tx.commit()?;
@@ -1752,7 +1753,7 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq
+                    context_persist_ms, first_event_seq, last_event_seq, epoch_id, basis_rev
              FROM agent_turns WHERE launch_id IN ({placeholders})
              ORDER BY started_at, rowid, ordinal"
             );
@@ -1774,7 +1775,7 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq
+                    context_persist_ms, first_event_seq, last_event_seq, epoch_id, basis_rev
              FROM agent_turns WHERE id=?1",
         )?;
         let row = stmt.query_row(params![id], map_agent_turn).optional()?;
@@ -1942,10 +1943,10 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             provider_total_input_tokens, peak_input_tokens, context_window_tokens,
             provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
             cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
-            first_event_seq, last_event_seq
+            first_event_seq, last_event_seq, epoch_id, basis_rev
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
             ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-            ?28, ?29)",
+            ?28, ?29, ?30, ?31)",
         params![
             turn.id,
             turn.launch_id,
@@ -1976,8 +1977,13 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.context_persist_ms,
             turn.first_event_seq,
             turn.last_event_seq,
+            turn.basis.as_ref().map(|basis| basis.epoch_id.as_str()),
+            turn.basis.as_ref().map(|basis| basis.revision as i64),
         ],
     )?;
+    if let Some(basis) = &turn.basis {
+        durable::insert_seed_sends_for_turn(tx, &turn.id, basis)?;
+    }
     Ok(())
 }
 
@@ -2098,6 +2104,29 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         context_persist_ms: row.get(26)?,
         first_event_seq: row.get(27)?,
         last_event_seq: row.get(28)?,
+        basis: match (
+            row.get::<_, Option<String>>(29)?,
+            row.get::<_, Option<i64>>(30)?,
+        ) {
+            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
+                epoch_id: crate::durable::EpochId::parse(&epoch_id).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        29,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?,
+                revision: revision as u64,
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(rusqlite::Error::InvalidColumnType(
+                    29,
+                    "epoch_id/basis_rev".to_string(),
+                    rusqlite::types::Type::Null,
+                ))
+            }
+        },
     })
 }
 

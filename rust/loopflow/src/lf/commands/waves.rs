@@ -3155,8 +3155,7 @@ mod tests {
     fn projected_attention(
         completed: bool,
         runtime: Option<&TaskRuntimeSnapshot>,
-        owner: NextMoveOwner,
-        reason: &str,
+        next_move: NextMove,
         phase: Option<PrPhase>,
         ci: Option<&CiObservation>,
         process: TaskProcessEvidence,
@@ -3177,10 +3176,7 @@ mod tests {
         derive_task_attention(
             completed,
             runtime,
-            &NextMove {
-                owner,
-                reason: reason.into(),
-            },
+            &next_move,
             process,
             local_progress,
             action_evidence.as_ref(),
@@ -3194,8 +3190,10 @@ mod tests {
         let green = projected_attention(
             false,
             Some(&running),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
             None,
             process(TaskProcessEvidenceState::Observed, Some(true)),
@@ -3207,8 +3205,10 @@ mod tests {
         let human = projected_attention(
             false,
             Some(&running),
-            NextMoveOwner::Human,
-            "choose the recovery boundary",
+            NextMove {
+                owner: NextMoveOwner::Human,
+                reason: "choose the recovery boundary".into(),
+            },
             Some(PrPhase::Working),
             None,
             process(TaskProcessEvidenceState::Observed, Some(true)),
@@ -3221,8 +3221,10 @@ mod tests {
         let dirty = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
             None,
             process(TaskProcessEvidenceState::Observed, Some(false)),
@@ -3235,8 +3237,10 @@ mod tests {
         let commits = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Review,
-            "checks passed; awaiting review",
+            NextMove {
+                owner: NextMoveOwner::Review,
+                reason: "checks passed; awaiting review".into(),
+            },
             Some(PrPhase::Open),
             Some(&passing),
             process(TaskProcessEvidenceState::NotExpected, None),
@@ -3261,8 +3265,10 @@ mod tests {
         let backlog = projected_attention(
             false,
             None,
-            NextMoveOwner::Project,
-            "Task is ready to start",
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "Task is ready to start".into(),
+            },
             None,
             None,
             process(TaskProcessEvidenceState::NotApplicable, None),
@@ -3276,8 +3282,10 @@ mod tests {
         let completed = projected_attention(
             true,
             Some(&completed_runtime),
-            NextMoveOwner::Project,
-            "Linear Task is complete",
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "Linear Task is complete".into(),
+            },
             None,
             None,
             process(TaskProcessEvidenceState::NotExpected, None),
@@ -3289,8 +3297,10 @@ mod tests {
         let stale = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
             None,
             process(TaskProcessEvidenceState::Observed, Some(false)),
@@ -3305,8 +3315,10 @@ mod tests {
         let unavailable = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
             None,
             process(TaskProcessEvidenceState::Observed, Some(false)),
@@ -3318,8 +3330,10 @@ mod tests {
         let unobservable = projected_attention(
             false,
             Some(&running),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
             None,
             process(TaskProcessEvidenceState::Unavailable, None),

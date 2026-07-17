@@ -10,6 +10,26 @@ reopen.
   lock); publish contract rewritten to staged ordered commits; `install`
   dispatches before home/journal/store-open; rollback revalidates and may refuse.
 
+## Implementation sequencing (serial PRs)
+
+The approved design lands over two serial PRs on this Task branch — the change is
+too large to write and verify blind in one, and this host cannot run cargo
+locally (syspolicyd wedge), so each PR must be independently CI-verifiable.
+
+- **PR1 (this branch):** the read-only preflight boundary — `lf install
+  preflight [--json]`, the pure `decide()` core + `Compatibility`/`Verdict`
+  types, read-only frontier classification (reusing `store::migrations`
+  verbatim), lease-based live-body count, dispatched before home/journal/store
+  open. Fully unit-tested. Demonstrable: `lf install preflight` from a
+  behind-frontier checkout prints the refusal naming the unknown migration and
+  any live bodies. Mutates nothing.
+- **PR2 (`lf pr land --next`):** the mutating half — `lf install
+  {promote,rollback}` (content-addressed immutable binary, staged ordered
+  failure-preserving commits, `LOCK_EX`), the reservation `LOCK_SH` launch
+  fence, Python routing (delete `_promote`), and the two-worktree regression.
+  PR1's `decide()` is the source of truth PR2 consumes; the live-body *gate* is
+  already in PR1's decision, so PR2 adds only the launch-during-promotion fence.
+
 Still open / reviewable:
 
 1. **Blanket live-body gate obstructiveness.** Any Active/Reserved lease blocks

@@ -299,8 +299,10 @@ pub struct ChildProcessGeneration {
     /// Immutable binary provenance: which lf actually booted this generation,
     /// stamped by that process itself at boot. `None` until the generation has
     /// booted (a reserved-but-never-started generation ran nothing), and for
-    /// generations recorded before this field was added.
-    pub provenance: Option<BinaryProvenance>,
+    /// generations recorded before this field was added. Keep the audit record
+    /// boxed so extending it does not enlarge the runner futures that carry a
+    /// process generation.
+    pub provenance: Option<Box<BinaryProvenance>>,
 }
 
 impl ChildProcessGeneration {
@@ -312,7 +314,7 @@ impl ChildProcessGeneration {
         self.pid = Some(std::process::id());
         self.process_group_id = crate::engine::process::current_process_group_id();
         self.state = ChildLeaseState::Active;
-        self.provenance = Some(BinaryProvenance::current());
+        self.provenance = Some(Box::new(BinaryProvenance::current()));
     }
 
     pub(crate) fn observe_provider(

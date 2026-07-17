@@ -2237,12 +2237,12 @@ mod tests {
             started_at: OffsetDateTime::UNIX_EPOCH,
             state: ChildLeaseState::Active,
             outcome: None,
-            provenance: Some(BinaryProvenance {
+            provenance: Some(Box::new(BinaryProvenance {
                 version: "0.12.0".to_string(),
                 provenance: "release".to_string(),
                 source_identity: "release".to_string(),
                 source_revision: Some("3e9df06777297cd1cb83fccc1d0261fd3e74dfa8".to_string()),
-            }),
+            })),
         };
         let body = super::format_child_body("claude", "claude", Some(&process));
         assert!(
@@ -2278,12 +2278,12 @@ mod tests {
             started_at: OffsetDateTime::UNIX_EPOCH,
             state: ChildLeaseState::Active,
             outcome: None,
-            provenance: Some(BinaryProvenance {
+            provenance: Some(Box::new(BinaryProvenance {
                 version: "0.11.3".to_string(),
                 provenance: "release".to_string(),
                 source_identity: "release".to_string(),
                 source_revision: None,
-            }),
+            })),
         };
 
         let body = super::format_child_body("claude", "claude", Some(&process));

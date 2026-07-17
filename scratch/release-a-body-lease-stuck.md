@@ -75,26 +75,93 @@ pub(crate) async fn probe_child_body_presence(
 ```
 
 It probes, in order: the recorded tmux session, the recorded process group, the
-recorded pid. `Gone` requires *all* of them absent. Anything else is `Present`
-or `Unprovable`; the probe never guesses.
+recorded pid. `Gone` requires *every* identity to be **positively** absent. Any
+identity `Present` makes the body `Present`; otherwise `Unprovable`. The probe
+never guesses, and — the rule the whole design turns on — **it never treats an
+unanswered question as a "no".**
 
-Absence per identity is `kill(target, 0)`:
+Absence per signal identity is a tri-state `kill(target, 0)`:
 
-| errno | meaning | verdict |
-|-------|---------|---------|
-| `ESRCH` | no process answers | absent — authoritative |
-| `0` | a process answers | present |
-| `EPERM` | a process answers, we may not signal it | present |
+| outcome | meaning | verdict |
+|---------|---------|---------|
+| `ESRCH` | no process answers | `Absent` — authoritative |
+| returns `0` | a process answers | `Present` |
+| `EPERM` | a process answers, we may not signal it | `Present` |
+| any other errno | the kernel refused the question | `Unprovable` |
+| id does not fit `i32`, or converts to `0` | not a body identity we can ask about | `Unprovable` |
 
 `EPERM` reads as **present**, and that is not conservatism for its own sake —
 POSIX only returns `EPERM` for `kill(-pgid, …)` when the group had at least one
 member the caller lacked permission for. On a recycled pgid it means *someone
 else's* process is there. We cannot distinguish that from our own body, so we
-refuse to release. This is the directive's "unprovable" bucket, and it is where
-W2-230's original reap failure sat.
+refuse to release. This is where W2-230's original reap failure sat.
 
-The existing private `process_target_exists` already implements exactly this
-table. The probe reuses it rather than inventing a second liveness opinion.
+**This probe is new; it does not reuse `process_target_exists`.** That function
+is a `bool`, and its two false-y collapses are safe where it lives and unsafe
+here:
+
+```rust
+Group(group) => i32::try_from(group).map_or(0, |group| -group),  // out of range -> 0
+if raw == 0 { return false; }                                    // ...which reads as absent
+result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+//                                                    ^ ESRCH and every other errno -> false
+```
+
+For `wait_for_process_exit`, `false` means "stop waiting" and both collapses are
+harmless. As a *release* predicate they are fail-open: an out-of-range recorded
+group id, or an `EINVAL`-class refusal, would read as `Gone` and release a lease
+over a body nobody ever asked about. The two callers want different things from
+the same syscall — a bounded waiter wants "is it still there?", a release wants
+"can I prove it is not?" — so they get two functions. `wait_for_process_exit`
+keeps its bool and is untouched.
+
+Note that `raw == 0` is not merely unrepresentable: `kill(0, sig)` signals the
+*caller's own* process group. Reading it as absence is the worst available
+answer, which is why it is `Unprovable` rather than folded into `Absent`.
+
+The tmux identity gets the same treatment, and for the same reason — the two
+existing helpers are both fail-open at exactly the point a release cares about:
+
+```rust
+// tmux_session_exists: any non-zero exit -> Ok(false) == "no session"
+Ok(status.success())
+// tmux_live_sessions: any failure -> empty set == "nothing is live"
+if !output.status.success() { return Ok(std::collections::HashSet::new()); }
+```
+
+A tmux server that errors, and a tmux server that reports no such session, are
+the same value. So the release probes tmux with its own tri-state, over
+`tmux list-sessions -F '#{session_name}'` with stderr captured:
+
+| outcome | verdict |
+|---------|---------|
+| exit 0, recorded name in the set | `Present` |
+| exit 0, recorded name not in the set | `Absent` — the server answered authoritatively |
+| non-zero exit, stderr recognized as no-server / no-sessions | `Absent` |
+| non-zero exit, stderr unrecognized | `Unprovable` |
+| the command cannot be spawned (incl. tmux absent from `PATH`) | `Unprovable` |
+
+**"tmux binary missing ⇒ identity absent" is removed from this design.** It was
+wrong twice over. `PATH` is per-process, so a probe running under a different
+environment than the launcher can fail to find a tmux that is running fine — the
+conclusion "no tmux here" is a fact about *this process's* `PATH`, not about the
+body. And it is the same absence-in-one-projection error the wave has now paid
+for repeatedly: a surface that cannot answer is not the world saying no.
+
+`reap_child_process`'s `tmux_installed()` shortcut stays as it is. Reap and
+release have opposite risk postures and must not share a predicate: a reap that
+wrongly concludes "nothing to kill" moves on and the lease still gets released
+by evidence later, whereas a release that wrongly concludes "nothing is there"
+has already unbarred a second body. Reap fails open by design; release fails
+closed by design. That divergence is deliberate and is worth a comment at both
+sites.
+
+Matching tmux's stderr by string is the one soft spot here, and it is soft in
+the safe direction: if tmux rewords its no-server message, unrecognized stderr
+falls to `Unprovable`, the lease stays blocked, and the behavior is exactly
+today's status quo. There is no wording change that turns into a wrong release.
+Note also that the common case — a running tmux server — is answered by exit 0
+and set membership, and never reads the strings at all.
 
 ### 2. Release is probe-only. It never re-signals.
 
@@ -165,8 +232,10 @@ The status-changed message survives for the case it actually describes.
 | Is the reap genuinely un-retried, or does something re-enter it? | Nothing does. `reap_revoked_child_body` has three callers (`revoke_and_reap_child_body`, the stall path at `ops/task.rs:2396`, a test), all of which reach it only while revoking a *fresh* generation. A lease already at `revoked` is never revisited. | The permanence is structural, not a lost wakeup. The fix must add a re-entry point, not repair a scheduler. |
 | Would simply retrying `reap_child_process` fix it? | Yes, mechanically: `signal_process_target` maps `ESRCH` to `Ok(())`, so a retry against a now-empty group walks straight through TERM → `wait_for_process_exit` → `Ok` → finish. | Rejected anyway — a retry *signals*. Between the strand and the retry the kernel may have recycled the pgid, and TERM to a recycled group kills a stranger. Probe-only gets the same release with no blast radius. |
 | Can `kill(-pgid, 0)` distinguish absent from unreachable? | Yes. `ESRCH` ⇒ no member exists; `EPERM` ⇒ a member exists that we may not signal. POSIX is explicit that `EPERM` on a negative pid requires at least one receiving process. | The three-way `Gone`/`Present`/`Unprovable` split is readable off one syscall. No `ps` scan, no `/proc` walk, no platform branch. |
+| Can the existing `process_target_exists` be the release predicate? | **No.** It returns `bool`, and collapses two distinct things into `false`: an id that does not fit `i32` (`map_or(0, …)` → `raw == 0` → `false`) and *every* errno other than `EPERM` — so `ESRCH` and "the kernel refused the question" are the same value. | The probe is a new tri-state function; `process_target_exists` and `wait_for_process_exit` keep their bool and are untouched. Reusing it would have made the release fail **open** — releasing a lease on an unreadable identity is precisely the outcome this task exists to prevent. |
+| Is "tmux is not on `PATH`" evidence that the tmux body is gone? | No. `PATH` is per-process: a probe with a different environment than the launcher can miss a tmux that is running. `tmux_session_exists` also maps *any* non-zero exit to `Ok(false)`, and `tmux_live_sessions` maps any failure to an empty set — a server error and an absent session are indistinguishable. | The release gets its own tri-state tmux probe. Only exit-0 set membership, or a positively recognized no-server/no-sessions stderr, counts as `Absent`; an unspawnable or unrecognized tmux is `Unprovable`. `reap_child_process` keeps its `tmux_installed()` shortcut — reap may fail open, release must fail closed. |
 | Why did W2-230's kill return `EPERM` if `ps` showed no members? | The two observations are minutes apart, so they do not conflict: `EPERM` proves the group had a member at kill time; `ps` proves it had none later. Most likely a recycled pgid briefly owned by a process we could not signal. | Reinforces probe-at-release-time rather than reasoning from the recorded failure. The `status_reason` prose is a historical artifact and must never be parsed. |
-| Does the probe hold if `tmux` is absent from the host? | `reap_child_process` already treats `!tmux_installed()` as nothing-to-check. A tmux body cannot outlive a host that has no tmux. | The probe mirrors that: no tmux binary ⇒ that identity is absent. Same rule in both places, so the two never disagree about the same body. |
+| Does the design have a single fail-open path left? | No, by construction: `Gone` is a conjunction of positive absences, so every "I could not ask" anywhere in the probe demotes the verdict to `Unprovable` and the lease stays blocked. | The cost of every `Unprovable` is exactly today's behavior — a lease that stays `revoked` — so a wrong `Unprovable` costs nothing new, while a wrong `Gone` unbars a second body. The asymmetry decides every ambiguous case in the design. |
 | Does releasing a lease on a `waiting` Session restart delivered work? | No. Releasing changes only the lease; status, PR phase, and the W2-129 open-PR bar are untouched, and `plan_stranded_recovery` returns `LeaveAlone` for `Waiting`/`Blocked` before the lease is ever read. | W2-230 (status=waiting) is released only when something explicitly asks to reserve — i.e. `lf task resume`. Automatic redispatch stays scoped to `Active`/`Failed` intents, exactly as W2-267 drew it. |
 | Can this run against the live registry? | No, and it must not. Release 0.11.3 runs the fleet and dev builds are walled off from the production store (wave memory, 2026-07-17). | Every test builds its own store. The W2-230 row is evidence, not a target; the fix reaches it when a release ships. |
 | Do the `ops::task` lib tests pass in a Task Session? | Two (`recover_refuses_a_non_abandoned_task`, `recover_abandoned_task_adopts_existing_worktree_pr_and_direction`) fail on clean main from inside a Session — they lack the `AMBIENT_TASK_ENV` scrub. Known, pre-existing (wave memory, 2026-07-16). | Not caused by this branch. New tests use the guard that scrubs ambient `LF_*`. |
@@ -200,6 +269,16 @@ would release exactly the case where a body may still be alive and unkillable.
 W2-230 stays stuck under this rule *at the moment of its reap failure*, and is
 released later when the group is verifiably gone. That is the intended shape.
 
+**Only a positive "no" counts as absence.** Not a `bool` that ran out of ways to
+say yes, not a syscall that failed for a reason we did not model, not a tmux we
+could not run. `Gone` is a conjunction of positive absences; everything else is
+`Unprovable` and the lease holds. The two existing helpers this design first
+reached for — `process_target_exists` and `tmux_session_exists` — are both
+fail-open at exactly this point, which is safe for the bounded waiter and the
+reaper that use them and unsafe for a release. So the release owns its own
+probe, and the reaper keeps its shortcuts. **Reap may fail open; release must
+fail closed.** Two functions, because they are asking two different questions.
+
 **No new plan variant, no new command, no schema change.**
 `finish_revoked_*_process` already exists and already CASes on `revoked`; the
 verdict table already handles a finished lease. This task supplies the evidence
@@ -230,7 +309,20 @@ release itself when it can.
     asserts the reservation is refused before it);
   - hold a real live process group and prove the lease stays `revoked` and the
     reservation is refused;
-  - prove an `EPERM`-style unprovable identity does not release;
+  - prove `EPERM` does not release: probe a group we may not signal (pid 1's
+    group, owned by root) and assert `Present`, not `Gone`;
+  - **fail-closed, signal identity:** a recorded group id that does not fit
+    `i32`, and one that converts to `0`, each probe `Unprovable` and do not
+    release. This is the case `process_target_exists` answers `false` to; the
+    test is written to go red against that function, so reusing it later cannot
+    pass silently;
+  - **fail-closed, tmux:** a tmux probe that cannot be spawned, and one that
+    exits non-zero with unrecognized stderr, each probe `Unprovable` and do not
+    release; a positively recognized no-server stderr probes `Absent`; a live
+    recorded session probes `Present`. Per the wave's 2026-07-16 finding, the
+    outage is modelled by *replacing* the fake `tmux` with a failing script —
+    never by deleting it, since `AmbientGuard` prepends its temp bin dir to the
+    real `PATH` and a deleted fake falls through to the host's real tmux;
   - prove the refusal names the lease, not the status.
 - Each test is sabotage-checked: reverting the release makes it red. A test that
   passes with the fix removed is pinning the fixture.

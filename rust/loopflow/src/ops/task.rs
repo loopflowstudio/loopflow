@@ -3259,6 +3259,36 @@ enum CommittedFollowUp {
     Unprovable { reason: &'static str },
 }
 
+/// Classify the commits reachable from `branch` but not from `cut`. The cut is
+/// the boundary past which commits are work this classification is asked about;
+/// each caller picks it. A cut that cannot be placed on the branch is
+/// `Unprovable` rather than empty: `is_ancestor` maps every nonzero exit to
+/// false, so a rewritten branch and a missing object arrive here identically and
+/// neither proves there is nothing there.
+fn commits_past(
+    worktree: &Path,
+    branch: &str,
+    cut: &str,
+    not_ancestor: &'static str,
+) -> OpsResult<CommittedFollowUp> {
+    let tip = rev_parse(worktree, branch)
+        .map_err(|error| task_error(format!("failed to resolve settled branch tip: {error}")))?;
+    if tip == cut {
+        return Ok(CommittedFollowUp::ProvenEmpty);
+    }
+    let ancestor = is_ancestor(worktree, cut, branch)
+        .map_err(|error| task_error(format!("failed to check follow-up ancestry: {error}")))?;
+    if !ancestor {
+        return Ok(CommittedFollowUp::Unprovable {
+            reason: not_ancestor,
+        });
+    }
+    Ok(CommittedFollowUp::Range {
+        from: cut.to_string(),
+        to: branch.to_string(),
+    })
+}
+
 /// Classify follow-up work committed on the settled branch *after* its PR
 /// merged. The merged branch tip is `head_sha` — recorded by reconcile from
 /// GitHub's `headRefOid`; commits reachable from the branch but not from
@@ -3271,22 +3301,25 @@ fn committed_follow_up_range(worktree: &Path, settled: &TaskPr) -> OpsResult<Com
             reason: "the published pull request head is missing",
         });
     };
-    let tip = rev_parse(worktree, &settled.branch)
-        .map_err(|error| task_error(format!("failed to resolve settled branch tip: {error}")))?;
-    if tip == head_sha {
-        return Ok(CommittedFollowUp::ProvenEmpty);
-    }
-    let ancestor = is_ancestor(worktree, &head_sha, &settled.branch)
-        .map_err(|error| task_error(format!("failed to check follow-up ancestry: {error}")))?;
-    if !ancestor {
-        return Ok(CommittedFollowUp::Unprovable {
-            reason: "the published pull request head is not an ancestor of the settled branch",
-        });
-    }
-    Ok(CommittedFollowUp::Range {
-        from: head_sha,
-        to: settled.branch.clone(),
-    })
+    commits_past(
+        worktree,
+        &settled.branch,
+        &head_sha,
+        "the published pull request head is not an ancestor of the settled branch",
+    )
+}
+
+/// Classify the authored work an unpublished PR holds. The cut is the fork point
+/// recorded when the PR was minted, so commits past it are this PR's own work and
+/// `ProvenEmpty` means the branch never moved off its base. Same tri-state, same
+/// ancestry rule as the merged cut above — only the boundary differs.
+fn unpublished_work(worktree: &Path, pr: &TaskPr) -> OpsResult<CommittedFollowUp> {
+    commits_past(
+        worktree,
+        &pr.branch,
+        &pr.base_commit,
+        "the recorded base is not an ancestor of the unpublished branch",
+    )
 }
 
 /// A directive was accepted (its version advanced) but the body has not yet
@@ -3641,6 +3674,9 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
         // weaken the review gate or infer merge from a green head.
         let gate = task_completion_gate(&store, &session).await?;
         if !gate.satisfied {
+            // Nothing has been written. A refusal here — an open review, a
+            // committed follow-up, anything — leaves a discardable successor
+            // active, so the Task keeps its PR and no rotation is provoked.
             return Err(task_error(format!(
                 "Task {} cannot complete until its gates close: {}",
                 session.launch.issue.identifier,
@@ -3650,9 +3686,19 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
         let from = session.status;
         session.set_status(TaskSessionStatus::Completed, summary.clone());
         reconcile_pm_writeback(&store, &mut session, None).await;
-        complete_task_session_with_authority(&store, &session, None, lease.as_ref())
-            .await
-            .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
+        // Every other condition is now proven, so the rotation's empty artifact
+        // is dropped as part of completing — one transaction that deletes the row
+        // and writes the terminal status together. There is no instant at which
+        // the successor is gone and the Task is not yet terminal, which is the
+        // only state `ensure_working_pr_with_authority` would rotate from.
+        complete_task_session_with_authority(
+            &store,
+            &session,
+            gate.discardable_successor.as_ref(),
+            lease.as_ref(),
+        )
+        .await
+        .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
         append_task_event_with_authority(
             &store,
             &session.id,
@@ -3838,6 +3884,20 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
 pub(crate) struct CompletionGate {
     pub satisfied: bool,
     pub blockers: Vec<String>,
+    /// An active successor PR the lifecycle rotated after the Task's work merged,
+    /// which provably holds nothing: never published, and its branch never moved
+    /// off the base recorded when it was minted. It is the rotation's own
+    /// artifact, not work, so it does not block completion — but it must not
+    /// outlive one either.
+    ///
+    /// Classification only. The gate never mutates, so a gate that goes on to
+    /// refuse for any other reason leaves this row untouched. Exactly one thing
+    /// acts on it: [`task_complete`] passes it as the completion transaction's
+    /// `skipped_pr`, which deletes the row and completes the Session in a single
+    /// write. `None` on every other shape — including a successor carrying
+    /// commits, an unprovable base, or a Task with no merged predecessor, each of
+    /// which blocks instead.
+    pub discardable_successor: Option<TaskPr>,
 }
 
 impl CompletionGate {
@@ -3857,6 +3917,7 @@ impl CompletionGate {
         Self {
             satisfied: false,
             blockers,
+            discardable_successor: None,
         }
     }
 }
@@ -3905,6 +3966,7 @@ async fn review_gate(store: &SharedStore, session: &TaskSession) -> OpsResult<Co
         CompletionGate {
             satisfied: true,
             blockers: Vec::new(),
+            discardable_successor: None,
         }
     } else {
         CompletionGate::unsatisfied(blockers)
@@ -3940,6 +4002,10 @@ pub(crate) async fn task_completion_gate(
         .task_prs(&session.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    // Discarding a successor is only ever settling *over* landed work. Without a
+    // merged predecessor there is nothing to settle, and an empty unpublished PR
+    // keeps today's refusal.
+    let has_merged_predecessor = prs.iter().any(|pr| pr.phase() == PrPhase::Merged);
     if let Some(newest) = prs.last() {
         if newest.phase() == PrPhase::Merged
             && newest
@@ -3985,9 +4051,28 @@ pub(crate) async fn task_completion_gate(
             PrPhase::Publishing => gate.blockers.push(format!(
                 "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
             )),
-            PrPhase::Working => gate.blockers.push(format!(
-                "pull request {which} is unpublished; publish and merge it or run `lf pr abandon`"
-            )),
+            // An unpublished PR means three different things; say which. A
+            // successor the lifecycle rotated after the work merged, never
+            // published and never authored, is the rotation's artifact rather
+            // than work: it is classified as discardable and does not block. Only
+            // a completion that clears every other blocker acts on that — the
+            // classification is inert here, so a gate that goes on to refuse
+            // leaves the row exactly as it found it.
+            PrPhase::Working => match unpublished_work(&session.worktree, &pr)? {
+                CommittedFollowUp::ProvenEmpty if has_merged_predecessor => {
+                    gate.discardable_successor = Some(pr.clone());
+                }
+                CommittedFollowUp::ProvenEmpty => gate.blockers.push(format!(
+                    "pull request {which} is unpublished; publish and merge it or run `lf pr abandon`"
+                )),
+                CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
+                    "follow-up work is committed on unpublished pull request {which}; \
+                     publish and merge it or run `lf pr abandon`"
+                )),
+                CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
+                    "cannot prove unpublished pull request {which} is empty: {reason}"
+                )),
+            },
             PrPhase::Merged | PrPhase::Abandoned => {}
         }
     }
@@ -4032,6 +4117,15 @@ async fn advance_completion_after_gate(
     };
     let gate = task_completion_gate(store, session).await?;
     if !gate.satisfied {
+        return Ok(false);
+    }
+    // This path completes through `complete_task_session_after_pr`, which settles
+    // the merged PR and has no `skipped_pr`, so it cannot drop a successor in the
+    // same transaction. Rather than complete and leave the row active — a
+    // completed Task still holding an active PR — decline and let `lf task
+    // complete` own this shape. Unreachable on current rows: a `CompleteTask`
+    // merge no longer rotates, so it never has a successor to discard.
+    if gate.discardable_successor.is_some() {
         return Ok(false);
     }
     let from = session.status;
@@ -8117,7 +8211,9 @@ mod tests {
     // ordering: a merge observed while a required review is open does not close
     // the Task; the Task closes exactly once after the review approves.
 
-    use super::{reconcile_task_completion, task_completion_gate};
+    use super::{
+        complete_task_session_with_authority, reconcile_task_completion, task_completion_gate,
+    };
     use crate::interaction_review::{
         InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
         InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
@@ -8358,6 +8454,400 @@ mod tests {
             "gate should be satisfied: {:?}",
             gate.blockers
         );
+    }
+
+    // ── settling over a proven-empty successor (W2-304) ────────────────────
+    // W2-280's shape: the real work merged, then the lifecycle rotated a serial
+    // successor that was never published and never authored. `lf task complete`
+    // refused on it, and both exits it named were wrong — publishing opens a
+    // zero-commit PR, and abandoning leaves the Session `Waiting` so the next
+    // rotation mints PR N+1. `task_complete` composes
+    // `settle_proven_empty_successor` with `task_completion_gate`; it resolves the
+    // machine registry itself, so these drive the two functions it composes.
+
+    /// Reproduce W2-280: `gate_task`'s merged PR relanded with `after_merge =
+    /// Review` (the disposition that actually rotates), plus an unpublished
+    /// successor branched from `successor_base` and minted through the production
+    /// path. Returns the successor row.
+    const SUCCESSOR_BRANCH: &str = "jack/gate-proof-2";
+
+    async fn rotated_successor(
+        store: &SharedStore,
+        session: &TaskSession,
+        merged: &TaskPr,
+        branch: &str,
+        successor_base: &str,
+    ) -> TaskPr {
+        let mut merged = merged.clone();
+        merged
+            .publication
+            .as_mut()
+            .expect("published PR")
+            .after_merge = AfterMerge::Review;
+        merged.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&merged)
+            .await
+            .expect("reland merged PR for review");
+        // Re-read: `settle_task_pr` re-presents the settled row and compares it
+        // field-for-field, and `publication.requested_at` loses sub-second
+        // precision through the store. The round-tripped row is the only one that
+        // compares equal to itself.
+        let merged = store
+            .get_task_pr(&merged.id)
+            .await
+            .expect("read merged PR")
+            .expect("merged row");
+
+        let now = OffsetDateTime::now_utc();
+        let next = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: merged.sequence + 1,
+            slug: "successor".to_string(),
+            branch: branch.to_string(),
+            base_commit: successor_base.to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store
+            .settle_task_pr(&merged, Some(&next))
+            .await
+            .expect("rotate successor");
+        next
+    }
+
+    /// The W2-280 fixture: merged work on `jack/gate-proof`, plus an unpublished
+    /// successor at `head == base` that the lifecycle rotated behind it.
+    async fn merged_task_with_empty_successor(
+        repo: &TestRepo,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr, TaskPr) {
+        let merged_branch = "jack/gate-proof";
+        let base = repo.head_sha();
+        repo.create_branch(merged_branch);
+        repo.create_file("merged.txt", "the real work\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let (home, store, mut session, merged) = gate_task(repo, merged_branch, &base).await;
+        session.status = TaskSessionStatus::Waiting;
+        git(repo.path(), &["checkout", "-b", SUCCESSOR_BRANCH, &base]);
+        let successor = rotated_successor(&store, &session, &merged, SUCCESSOR_BRANCH, &base).await;
+        (home, store, session, merged, successor)
+    }
+
+    #[tokio::test]
+    async fn a_merged_task_settles_over_a_proven_empty_successor() {
+        let repo = TestRepo::new();
+        let (_home, store, mut session, _merged, successor) =
+            merged_task_with_empty_successor(&repo).await;
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate over empty successor");
+        assert!(
+            gate.satisfied,
+            "the rotation's empty artifact must not block merged work: {:?}",
+            gate.blockers
+        );
+        assert_eq!(
+            gate.discardable_successor.as_ref().map(|pr| &pr.id),
+            Some(&successor.id),
+            "the empty successor must be classified as discardable"
+        );
+
+        // The gate is pure: classifying it changed nothing.
+        assert_eq!(
+            store
+                .get_task_pr(&successor.id)
+                .await
+                .expect("read successor")
+                .expect("successor row")
+                .phase(),
+            PrPhase::Working,
+            "evaluating the gate must not mutate the successor"
+        );
+
+        // Completion drops the artifact and writes the terminal status together.
+        session.set_status(
+            TaskSessionStatus::Completed,
+            "merged work settled".to_string(),
+        );
+        complete_task_session_with_authority(
+            &store,
+            &session,
+            gate.discardable_successor.as_ref(),
+            None,
+        )
+        .await
+        .expect("complete over the empty successor");
+
+        let prs = store.task_prs(&session.id).await.expect("read PRs");
+        assert_eq!(
+            prs.len(),
+            1,
+            "the empty successor must be gone and no replacement minted: {prs:?}"
+        );
+        assert_eq!(
+            prs[0].phase(),
+            PrPhase::Merged,
+            "the merged work must stand"
+        );
+        assert!(
+            store
+                .active_task_pr(&session.id)
+                .await
+                .expect("read active PR")
+                .is_none(),
+            "no PR may remain active after the Task settles"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pending_required_review_blocks_completion_and_keeps_the_successor() {
+        let repo = TestRepo::new();
+        let (_home, store, mut session, merged, successor) =
+            merged_task_with_empty_successor(&repo).await;
+
+        // The whole point of the ordering: a discardable successor must survive a
+        // completion that fails for an unrelated reason. If the discard were a
+        // precondition, this review would block *after* the successor was already
+        // dropped, leaving a non-terminal Task with no active PR — the exact shape
+        // `ensure_working_pr_with_authority` rotates a fresh empty PR from, which
+        // is the loop this Task exists to remove.
+        let review_id = open_gate_review(&store, &mut session, &merged).await;
+        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate with review open");
+        assert!(
+            !gate.satisfied,
+            "an unapproved required review must block completion"
+        );
+        assert!(
+            gate.reason().contains("awaiting review"),
+            "the refusal must name the review: {}",
+            gate.reason()
+        );
+        assert_eq!(
+            store
+                .get_task_pr(&successor.id)
+                .await
+                .expect("read successor")
+                .expect("successor row")
+                .phase(),
+            PrPhase::Working,
+            "a completion blocked for any other reason must leave the successor active"
+        );
+
+        // The store is what makes a pre-gate discard unrepresentable through this
+        // path, rather than ordering discipline in the caller: skipping a PR is
+        // only legal inside a transaction that completes the Session.
+        let refused = complete_task_session_with_authority(
+            &store,
+            &session,
+            gate.discardable_successor.as_ref().or(Some(&successor)),
+            None,
+        )
+        .await;
+        assert!(
+            refused.is_err(),
+            "dropping a successor outside a completing transaction must refuse"
+        );
+
+        store
+            .complete_human_interaction_review(
+                &review_id,
+                InteractionReviewDisposition::Approved,
+                "approved",
+            )
+            .await
+            .expect("approve review");
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate after approval");
+        assert!(
+            gate.satisfied,
+            "an approved review must let the merged work settle: {:?}",
+            gate.blockers
+        );
+        session.set_status(
+            TaskSessionStatus::Completed,
+            "merged work settled".to_string(),
+        );
+        complete_task_session_with_authority(
+            &store,
+            &session,
+            gate.discardable_successor.as_ref(),
+            None,
+        )
+        .await
+        .expect("complete after approval");
+
+        let prs = store.task_prs(&session.id).await.expect("read PRs");
+        assert_eq!(
+            prs.len(),
+            1,
+            "one completion must settle it with no replacement minted: {prs:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_is_withheld_over_work_committed_on_an_empty_successor() {
+        let repo = TestRepo::new();
+        let (_home, store, session, _merged, successor) =
+            merged_task_with_empty_successor(&repo).await;
+
+        // The successor carries authored work: it is a real PR, not an artifact.
+        repo.create_file("follow-up.txt", "work that must not be dropped\n");
+        repo.stage_all();
+        repo.commit("follow-up work");
+        let follow_up = repo.head_sha();
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate over authored successor");
+        assert!(!gate.satisfied);
+        assert!(
+            gate.discardable_successor.is_none(),
+            "a successor carrying commits must never be classified discardable"
+        );
+        assert!(
+            gate.reason()
+                .contains("follow-up work is committed on unpublished pull request"),
+            "the refusal must name the committed follow-up: {}",
+            gate.reason()
+        );
+
+        assert_eq!(
+            store
+                .get_task_pr(&successor.id)
+                .await
+                .expect("read successor")
+                .expect("successor row")
+                .phase(),
+            PrPhase::Working,
+            "the authored successor must stay active"
+        );
+        assert_eq!(
+            super::rev_parse(repo.path(), SUCCESSOR_BRANCH).expect("resolve successor tip"),
+            follow_up,
+            "the committed follow-up must be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_is_withheld_when_the_successor_base_is_unprovable() {
+        let repo = TestRepo::new();
+        let merged_branch = "jack/gate-proof";
+        let base = repo.head_sha();
+        repo.create_branch(merged_branch);
+        repo.create_file("merged.txt", "the real work\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let (_home, store, mut session, merged) = gate_task(&repo, merged_branch, &base).await;
+        session.status = TaskSessionStatus::Waiting;
+
+        // The successor branch is rewritten off its recorded base, so the base is
+        // no longer an ancestor. `is_ancestor` reports the same false for a base
+        // whose object is gone — "cannot see it" must never read as "it is empty".
+        git(repo.path(), &["checkout", "--orphan", SUCCESSOR_BRANCH]);
+        git(
+            repo.path(),
+            &["commit", "--allow-empty", "-m", "rewritten successor"],
+        );
+        let successor = rotated_successor(&store, &session, &merged, SUCCESSOR_BRANCH, &base).await;
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate over unprovable successor");
+        assert!(!gate.satisfied);
+        assert!(
+            gate.discardable_successor.is_none(),
+            "an unprovable base must never be classified discardable"
+        );
+        assert!(
+            gate.reason()
+                .contains("cannot prove unpublished pull request")
+                && gate
+                    .reason()
+                    .contains("recorded base is not an ancestor of the unpublished branch"),
+            "an unprovable base must fail closed and say why: {}",
+            gate.reason()
+        );
+        assert_eq!(
+            store
+                .get_task_pr(&successor.id)
+                .await
+                .expect("read successor")
+                .expect("successor row")
+                .phase(),
+            PrPhase::Working,
+            "the unprovable successor row must be untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_settled_task_stays_completed_across_reconciliation() {
+        let repo = TestRepo::new();
+        let (_home, store, mut session, _merged, _successor) =
+            merged_task_with_empty_successor(&repo).await;
+
+        let gate = task_completion_gate(&store, &session).await.expect("gate");
+        assert!(gate.satisfied);
+        session.set_status(
+            TaskSessionStatus::Completed,
+            "merged work settled".to_string(),
+        );
+        complete_task_session_with_authority(
+            &store,
+            &session,
+            gate.discardable_successor.as_ref(),
+            None,
+        )
+        .await
+        .expect("settle over the empty successor");
+
+        // Completion is a terminal fact. Terminal Task status has proven
+        // non-monotonic in this wave (W2-296/W2-299), so pin it rather than argue
+        // it: the repair must not walk a settled Task back to Waiting.
+        for pass in 1..=2 {
+            reconcile_task_completion(&store, &mut session, None)
+                .await
+                .unwrap_or_else(|error| panic!("reconcile pass {pass}: {error}"));
+            assert_eq!(
+                session.status,
+                TaskSessionStatus::Completed,
+                "pass {pass} must not move a settled Task out of Completed: {}",
+                session.status_reason
+            );
+            assert!(
+                !matches!(
+                    session.pm_writeback,
+                    PmWritebackState::Pending {
+                        operation: PmWritebackOperation::ReopenTask,
+                        ..
+                    }
+                ),
+                "pass {pass} must not queue a reopen: {:?}",
+                session.pm_writeback
+            );
+            assert_eq!(
+                store.task_prs(&session.id).await.expect("read PRs").len(),
+                1,
+                "pass {pass} must not mint a PR"
+            );
+        }
     }
 
     #[tokio::test]

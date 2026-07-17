@@ -13,6 +13,19 @@ escalated (headless run; each is defensible and reversible).
   CompleteTask`; W2-280's predecessor landed `--next`, so its disposition is
   `Review` and the auto path returns false before the gate is even read.
 
+- **W2-300 is not in this Task's covered shape, and this change does not settle
+  it.** Corrected on review (ir_5ce3dc83). The launch directive said "two live
+  Tasks are stranded over proven-empty successors right now"; that holds for
+  W2-280 and not for W2-300, which has `active_pr = None` and exactly one PR row —
+  sequence 1, merged, `after_merge = review`, not abandoned. It is parked *before*
+  the rotation, not over a successor, so condition 1 of the discard ("an active PR
+  exists and its phase is `Working`") can never hold and
+  `settle_proven_empty_successor` returns false for it. W2-300 keeps today's
+  behavior until it resumes and rotates a successor into the covered shape; only
+  then does `lf task complete` settle it. **Do not widen scope to the no-successor
+  shape** — rotation policy is out of scope by decision, and if the parked-before-
+  rotation strand proves real it is a separate Task.
+
 ## Assumptions
 
 - **Emptiness, not provenance, decides the discard.** The scope says
@@ -29,11 +42,27 @@ escalated (headless run; each is defensible and reversible).
   needs no PR", but the gate's `PrPhase::Working` arm blocks exactly that. If real,
   it deserves its own Task rather than a widened blast radius here.
 
+- **The `skipped_pr` capability was already built and unused.** `complete_task_session`
+  has taken an optional PR to delete-and-complete since before this Task; its only
+  caller passed `None`. I found it only after writing a parallel
+  `settle_proven_empty_successor`. Recorded because the near-miss is the point: the
+  question "does a primitive for this exist?" has to be asked against the *store*,
+  not just the ops module I was standing in.
+
 - **A dirty worktree is not re-checked in the discard.** `task_complete` already
   refuses an unclean worktree at ops/task.rs:3632, before anything I add, and
   `advance_completion_after_gate` refuses while the body is process-active. So the
   discard cannot strand uncommitted edits without a second check. If a third
   caller is ever added, it must carry one of those two guards.
+
+- **`advance_completion_after_gate` declines a discardable successor rather than
+  handling it.** Its store primitive (`complete_task_session_after_pr`) settles the
+  merged PR and has no `skipped_pr`, so it cannot drop the row atomically;
+  completing there would leave a terminal Task holding an active PR. Declining
+  preserves today's behavior exactly, and the path is unreachable on current rows
+  anyway (a `CompleteTask` merge no longer rotates). If a future change makes a
+  `CompleteTask` merge rotate again, that path needs the same transaction, not a
+  second discard.
 
 - **`rev_parse` failure stays a hard error, not `Unprovable`.** A missing branch
   makes `commits_past` error out of the gate, which means `lf task status` errors

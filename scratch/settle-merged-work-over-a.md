@@ -86,68 +86,68 @@ so its only `Unprovable` is the non-ancestor arm: the branch was rewritten off i
 recorded base, or the base object is gone. Both block. This is reuse, not a second
 authority — there is exactly one classifier and one enum.
 
-### 2. Discard on proof, not on provenance
+### 2. The gate classifies; only a completion acts
+
+The gate gains one field. It is a *classification*, never a mutation:
 
 ```rust
-/// Discard a proven-empty active successor so the merged predecessor can settle.
-/// Returns true when a PR was discarded. Emptiness is the authority: a successor
-/// holding any commit past its recorded base, or one whose base cannot be placed,
-/// is left alone for the gate to block.
-async fn settle_proven_empty_successor(
-    store: &SharedStore,
-    session: &mut TaskSession,
-    lease: Option<&ChildWriteLease>,
-) -> OpsResult<bool>
+pub(crate) struct CompletionGate {
+    pub satisfied: bool,
+    pub blockers: Vec<String>,
+    /// An active successor that provably holds nothing: never published, and its
+    /// branch never moved off the base recorded when it was minted.
+    pub discardable_successor: Option<TaskPr>,
+}
 ```
 
-Every condition must hold:
+In the gate's active-PR arm, a `Working` PR that is `ProvenEmpty` **and** has a
+merged predecessor is classified discardable and pushes no blocker. Every other
+shape blocks and says which: a `Range` is authored work that would be stranded,
+an `Unprovable` base means the branch cannot be *shown* empty (not the same as
+being empty), and `ProvenEmpty` with nothing merged keeps today's refusal.
 
-1. An active PR exists and its phase is `Working`. `Publishing` and `Open` have
-   GitHub side effects and are not ours to discard.
-2. Some earlier PR in the history is `Merged`. This is the *authoritative merged
-   predecessor*; without one there is no merged work to settle over and the Task
-   keeps today's behavior.
-3. `unpublished_work(&session.worktree, &active)` is `ProvenEmpty`.
-
-Then: set `abandoned_at`, persist via `store.settle_task_pr(&pr, None)`, return
-true. Deliberately **not** through `abandon_task_pr` — that path runs `gh pr
-close` on a branch with no PR, and sets `Waiting` / *"another PR may follow"*,
-which is precisely the rotation feed. The caller completes the Session in the same
-operation, so `ensure_working_pr_with_authority` returns `Ok(None)` at its
-terminal-status check (ops/task.rs:3323) and never reaches rotation.
-
-The scope says "lifecycle-created". I am keying on **emptiness, not provenance**: a
+The scope says "lifecycle-created". I key on **emptiness, not provenance**: a
 successor with no publication and no commits past its base holds nothing to lose,
 whoever minted it, and a `created_by` column would be new durable state no other
-decision reads. Named as a decision below.
+decision reads. Endorsed on review.
 
-### 3. Call it where completion is decided, never in the gate
+### 3. Discard is part of completing, not a precondition for it
 
-`task_completion_gate` is documented as pure over store state — "running it twice
-changes nothing" (ops/task.rs:3914). The discard is a mutation, so it does not go
-there. It goes in the two callers that mutate into `Completed`:
+**The store already does this.** `complete_task_session(session, skipped_pr)`
+(store/sqlite/child_sessions.rs:579) takes an optional PR, validates it is a
+`Working` unpublished row on that Session, `DELETE`s it, and writes the terminal
+status — in one `Immediate` transaction, guarded on
+`publication_requested_at IS NULL AND merge_commit IS NULL AND abandoned_at IS NULL`.
+It further refuses unless `session.status == Completed`. The capability was fully
+built and had exactly one caller, `task_complete`, passing `None`. I nearly built a
+second mechanism beside it; using it is keep-one-implementation, and it makes the
+discard atomic with the completion rather than merely adjacent to it.
 
-- `task_complete` — after the clean-worktree check (ops/task.rs:3632), before the
-  gate. This is W2-280's path.
-- `advance_completion_after_gate` — after the terminal/active-process check, before
-  the gate. A no-op for post-#1050 rows (a `CompleteTask` merge never rotates), but
-  it settles legacy rows minted before that guard.
+So `task_complete` becomes:
 
-Both already refuse while the body is live: `task_complete` validates the write
-lease, and `advance_completion_after_gate` returns early on
-`status.is_process_active()`. So the discard cannot race a body that is about to
-commit into the successor.
+```rust
+let gate = task_completion_gate(&store, &session).await?;
+if !gate.satisfied {
+    return Err(...);            // nothing written; the successor stays active
+}
+session.set_status(Completed, summary);
+complete_task_session_with_authority(&store, &session, gate.discardable_successor.as_ref(), lease)?;
+```
 
-### 4. Make the refusals say why
+Ordering is the whole safety property. An earlier draft discarded *before* the
+gate, as a precondition. That was wrong in a way that rebuilt the very loop this
+Task removes: an unapproved review would then block **after** the successor was
+already abandoned, leaving a non-terminal Task with no active PR — exactly the
+state `ensure_working_pr_with_authority` rotates a fresh empty PR from. Because
+the store refuses to skip a PR unless the Session is `Completed`, that mistake is
+now unrepresentable through this path rather than merely avoided by discipline.
 
-The gate's `PrPhase::Working` arm currently prints one sentence for three
-different situations. It gains the tri-state:
-
-| Classification | Blocker |
-|---|---|
-| `Range` | `follow-up work is committed on unpublished pull request {which}; publish and merge it or run \`lf pr abandon\`` |
-| `Unprovable{reason}` | `cannot prove unpublished pull request {which} is empty: {reason}` |
-| `ProvenEmpty` | unchanged text — the gate is pure, so a *read* still reports the successor as a blocker; only `task_complete` clears it by discarding first |
+`advance_completion_after_gate` **declines** when a successor is discardable. It
+completes through `complete_task_session_after_pr`, which settles the merged PR
+and has no `skipped_pr`, so it cannot drop the row in the same transaction;
+completing there would leave a terminal Task still holding an active PR. It is
+unreachable on current rows anyway — a `CompleteTask` merge no longer rotates —
+so `lf task complete` owns this shape, and there is one completion-decision path.
 
 ## De-risking
 
@@ -159,6 +159,7 @@ different situations. It gains the tri-state:
 | Would abandoning really mint another PR? | Yes, and I read the code rather than trusting the memory entry. `abandon_task_pr` sets `Waiting` + "another PR may follow" (ops/task.rs:1761-1765); the next `ensure_working_pr` sees a settled PR and rotates. | The discard must settle the Task in the same operation, and must not reuse `abandon_task_pr`. |
 | Can the discard strand uncommitted work? | No. `task_complete` already refuses a dirty worktree (ops/task.rs:3632) before anything I add. | No new dirty-tree check needed on that path; `advance_completion_after_gate` is guarded by `is_process_active` instead. |
 | After the discard, does anything re-open the Task? | `repair_premature_completion` re-runs the gate. Post-discard: no active PR, and `prs.last()` is the abandoned successor whose phase is not `Merged`, so the merged-tip check is skipped. Gate satisfied → no repair. | Proof #4 holds by construction; pinned with a test rather than left to argument. |
+| Does a primitive already exist for this? | **Yes, and it was dead.** `complete_task_session(session, skipped_pr)` deletes an unpublished `Working` PR and completes the Session in one transaction, refusing unless the Session is `Completed`. Its only caller passed `None`. | Use it instead of a second mechanism. The discard is atomic with completion, and the store — not caller discipline — enforces the ordering. |
 | Is there a `PrAbandoned` event to emit? | No such variant in `TaskEventKind` (task/mod.rs:949-1035). | Do not invent one — a new event kind is a wire type mirrored in Rust and Swift. The discard is recorded in the completion `status_reason`, which flows into the existing `StatusChanged` event, plus `abandoned_at` on the row. |
 | Can I write a real-runner regression, or only a mocked one? | #1050 shipped a real-git harness in the same module: `TestRepo` + `gate_task`, used by `completion_gate_blocks_when_follow_up_range_is_unprovable`. Successors are minted with `store.settle_task_pr(&merged, Some(&next))`. | Tests reproduce the shape against real git and the real store. No new abstraction, no factory. |
 
@@ -167,9 +168,11 @@ different situations. It gains the tri-state:
 | Approach | Tradeoff | Why not |
 |---|---|---|
 | Make `lf pr abandon` not mint a successor | Fixes the observed loop at its feed | Abandon is the operator saying "this PR was a mistake, give me another"; that rotation is its job. Removing it breaks the legitimate use to fix a case abandon should never have been asked to handle. |
-| Never rotate after a merge until the body asks | Removes the empty successor at the source | Reshapes the serial-PR lifecycle wholesale, and strands the Tasks already sitting in this state. A settle-side discard fixes both live Tasks today. |
+| Never rotate after a merge until the body asks | Removes the empty successor at the source | Reshapes the serial-PR lifecycle wholesale, and strands the Tasks already sitting in this state. A settle-side discard settles W2-280 today; W2-300 is parked before its rotation and is not in this shape (see `scratch/questions.md`). |
 | Record `created_by: lifecycle \| operator` on `TaskPr` | Matches the scope's "lifecycle-created" wording literally | New durable column that exactly one branch reads, and it answers the wrong question. An operator's `lf pr next` successor that is proven empty is equally safe to discard; a lifecycle successor holding commits is not. Emptiness is the fact that matters. |
 | Let the gate itself discard | One call site instead of two | The gate is pure and is called from read-only paths (`task_status`, the repair). A mutating gate means `lf task status` silently changes PR state — and `repair_premature_completion` calls the gate on Completed sessions. |
+| Discard as a precondition, before the gate (my first draft) | Reads simply: clear the artifact, then complete | **Rebuilds the loop inside its own fix.** Any other blocker — an open review — then refuses *after* the successor was abandoned, leaving a non-terminal Task with no active PR, which is precisely what rotates a fresh empty PR. Caught on review. |
+| Abandon the row, then complete in a second write | Reuses `settle_task_pr` | Two writes have an instant between them. If the completion write fails, the Task is non-terminal with no active PR — the rotation shape again. The `skipped_pr` transaction has no such instant. |
 | Treat a missing/rewritten base as empty | The successor "looks" empty | This is the exact fail-open #1050 closed on the read side. `is_ancestor` returns false for a missing object, so "can't see it" would read as "there's nothing there". `Unprovable` blocks. |
 
 ## Key decisions
@@ -215,39 +218,49 @@ different situations. It gains the tri-state:
 ## Done when
 
 ```
-cargo test -p loopflow --lib ops::task
-cargo clippy -p loopflow --lib --tests -- -D warnings   # --lib alone does not lint test code
+cargo test -p loopflow --lib ops::task          # 67 pass; see note
+cargo clippy -p loopflow --lib --tests -- -D warnings
 cargo fmt --check
 ```
 
-Four tests, each named for the fact it pins:
+All green. Note: `recover_refuses_a_non_abandoned_task` and
+`recover_abandoned_task_adopts_existing_worktree_pr_and_direction` fail *inside a
+Task Session* on clean main — they lack the `AMBIENT_TASK_ENV` scrub, so the
+Session's own `LF_WAVE_ID` leaks in. Proven not mine by stashing: they fail
+identically with these changes removed. They pass in CI, which has no ambient Wave.
 
-1. `a_merged_task_settles_over_a_proven_empty_successor` — real git repo: PR 1
-   merged carrying a commit, PR 2 unpublished at `head == base_commit`, clean tree.
-   `task_complete` succeeds; the Session is `Completed`; sequence 2 reads
-   `PrPhase::Abandoned` and `is_active() == false`; `store.task_prs` still has
-   exactly 2 rows (no PR 3); no new process generation is reserved.
-2. `completion_is_withheld_over_work_committed_on_an_empty_successor` — same
-   shape, one commit on the successor past its base. `task_complete` errors; the
-   error names the committed follow-up; the successor is still `Working`; the
-   commit is still reachable from its branch.
-3. `completion_is_withheld_when_the_successor_base_is_unprovable` — the successor
-   branch is rewritten off its recorded `base_commit` (orphan commit, as
-   `completion_gate_blocks_when_follow_up_range_is_unprovable` does for the merged
-   cut). `task_complete` errors naming the unprovable base; the row is untouched.
-4. `a_settled_task_stays_completed_across_reconciliation` — run test 1, then
-   `reconcile_task_completion` twice. Status stays `Completed`, `pm_writeback`
-   is not flipped to `ReopenTask`, and no PR row is added.
+`task_complete` resolves the machine registry itself, so — like the existing gate
+tests — these drive the two functions it composes: `task_completion_gate` and
+`complete_task_session_with_authority`.
 
-**Sabotage proofs**, both directions, run by hand and recorded in the PR notes:
+Five tests, each named for the fact it pins:
 
-- Remove the `settle_proven_empty_successor` call from `task_complete` → test 1
-  goes red with today's exact refusal ("pull request sequence 2 is unpublished").
-  This proves the settle test guards the fix and not the fixture.
-- Make `settle_proven_empty_successor` ignore the tri-state and discard any
-  `Working` successor → tests 2 and 3 go red. This proves the *guard* is
-  load-bearing, which test 1 alone cannot show — the failure mode this Task is
-  most able to cause is discarding work, not refusing to.
+1. `a_merged_task_settles_over_a_proven_empty_successor` — the gate is satisfied
+   and classifies the successor; evaluating it mutates nothing; the completion
+   transaction leaves exactly 1 PR row (the merged one), no active PR, no
+   replacement.
+2. `a_pending_required_review_blocks_completion_and_keeps_the_successor` — the
+   reviewer's required regression, and the one that pins the ordering. With the
+   review open the gate refuses naming it, and the successor is **still Working**.
+   It also asserts the store *refuses* to skip a PR outside a completing
+   transaction — the invariant that makes a pre-gate discard unrepresentable. After
+   approval, one completion settles it with no replacement minted.
+3. `completion_is_withheld_over_work_committed_on_an_empty_successor` — `Range`:
+   refuses, classifies nothing, and the commit is still reachable from the branch.
+4. `completion_is_withheld_when_the_successor_base_is_unprovable` — the branch is
+   rewritten off its recorded base; refuses, classifies nothing, row untouched.
+5. `a_settled_task_stays_completed_across_reconciliation` — two reconcile passes
+   after settling: status stays `Completed`, no `ReopenTask` writeback, no PR minted.
+
+**Sabotage proofs**, both directions, run:
+
+- Never classify a successor as discardable → tests 1, 2 and 5 go red, and test 1
+  fails with today's exact refusal: *"the rotation's empty artifact must not block
+  merged work: [\"pull request sequence 2 is unpublished; publish and merge it or
+  run `lf pr abandon`\"]"*. The settle tests guard the fix, not the fixture.
+- Ignore the tri-state and classify any `Working` successor → tests 3 and 4 go red.
+  The guard is load-bearing, which test 1 alone cannot show — the failure this Task
+  is most able to cause is discarding work, not refusing to.
 
 ## Measure
 

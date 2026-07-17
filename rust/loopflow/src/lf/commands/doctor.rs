@@ -80,10 +80,6 @@ struct StoreReport {
     migration_authority: String,
     build_source_identity: String,
     build_source_root: Option<String>,
-    /// The commit this binary was built from. The identity block reported every
-    /// other build field for months while omitting this one, so the only way to
-    /// learn whether a merged fix was running was to guess from a version string
-    /// that does not move between releases.
     build_source_revision: String,
     database_path: String,
     latest_known_migration: String,
@@ -110,8 +106,7 @@ pub fn run(json: bool) -> Result<()> {
             (Vec::new(), vec![Check::fail("store", detail)])
         }
     };
-    // Runs even when the store refused to open: a binary old enough to disagree
-    // with the store's schema is exactly when its age is worth reporting.
+    // Binary freshness remains useful when the store cannot open.
     checks.push(check_binary_freshness());
     if json {
         println!(
@@ -132,15 +127,11 @@ pub fn run(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// The line that answers "is the fix I merged actually running?".
 const FRESHNESS: &str = "binary-freshness";
 const UPSTREAM: &str = "origin/main";
+const UPSTREAM_REFSPEC: &str = "+refs/heads/main:refs/remotes/origin/main";
 
 /// Report whether the running binary predates merged upstream work.
-///
-/// Reports only. A rebuild decides to restart bodies mid-flight, which is an
-/// operator's call and deliberately not this check's — the signal is the whole
-/// deliverable.
 fn check_binary_freshness() -> Check {
     let revision = crate::build_info::source_revision();
     let Some(repo) = freshness_repo() else {
@@ -155,40 +146,39 @@ fn check_binary_freshness() -> Check {
         );
     };
 
-    // Comparing against a stale `origin/main` under-reports the gap, which is
-    // the silence this check exists to break — so a failed refresh is named in
-    // the answer rather than swallowed.
-    let caveat = match crate::engine::git::fetch(&repo, "origin", "main") {
-        Ok(()) => String::new(),
-        Err(error) => format!(
-            "; could not refresh {UPSTREAM} ({error}), so this compares a possibly stale local ref"
-        ),
-    };
+    if let Err(error) = crate::engine::git::fetch(&repo, "origin", UPSTREAM_REFSPEC) {
+        return Check::warn(
+            FRESHNESS,
+            format!("cannot prove whether the running lf is current: could not refresh {UPSTREAM}: {error}"),
+        );
+    }
 
     match crate::build_info::classify_revision(revision, &repo, UPSTREAM) {
         crate::build_info::BuildFreshness::Current { revision } => Check::ok(
             FRESHNESS,
             format!(
-                "running lf is built from {}, current with {UPSTREAM}{caveat}",
+                "running lf is built from {}, current with {UPSTREAM}",
                 crate::build_info::short_revision(&revision)
             ),
         ),
-        crate::build_info::BuildFreshness::Behind {
-            revision,
-            upstream,
-            missing,
-        } => {
+        crate::build_info::BuildFreshness::Behind { revision, missing } => {
             let commits = missing
                 .iter()
-                .map(|commit| format!("{} {}", commit.short_revision(), commit.subject))
+                .map(|commit| {
+                    format!(
+                        "{} {}",
+                        crate::build_info::short_revision(&commit.revision),
+                        commit.subject
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("; ");
             Check::warn(
                 FRESHNESS,
                 format!(
-                    "running lf is built from {} and is {} merged commit(s) behind {upstream}, so \
+                    "running lf is built from {} and is {} merged commit(s) behind {UPSTREAM}, so \
                      these fixes are not running: {commits}. Rebuilding is an operator action; \
-                     this check installs nothing{caveat}",
+                     this check installs nothing",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
@@ -197,21 +187,18 @@ fn check_binary_freshness() -> Check {
         crate::build_info::BuildFreshness::OffMain { revision } => Check::ok(
             FRESHNESS,
             format!(
-                "running lf is built from {}, which is not on {UPSTREAM}; nothing to compare{caveat}",
+                "running lf is built from {}, which is not on {UPSTREAM}; nothing to compare",
                 crate::build_info::short_revision(&revision)
             ),
         ),
         crate::build_info::BuildFreshness::Unprovable { reason } => Check::warn(
             FRESHNESS,
-            format!("cannot prove whether the running lf is current: {reason}{caveat}"),
+            format!("cannot prove whether the running lf is current: {reason}"),
         ),
     }
 }
 
-/// The checkout to compare against: this binary's own source root when it still
-/// exists, otherwise the working directory's repo. Whether that repo is the
-/// right one is not assumed — `classify_revision` establishes that it holds the
-/// build revision, which is a fact rather than a guess about paths.
+/// Prefer the build checkout, then walk up from the working directory.
 fn freshness_repo() -> Option<std::path::PathBuf> {
     if let Some(root) = crate::build_info::source_root() {
         if root.join(".git").exists() {

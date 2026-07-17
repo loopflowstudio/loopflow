@@ -244,15 +244,6 @@ pub struct BinaryProvenance {
     pub version: String,
     pub provenance: String,
     pub source_identity: String,
-    /// The commit the booting binary was built from, or `None` when it did not
-    /// stamp one — a generation recorded before this field existed, or a build
-    /// with no git root. Absent means unstamped; it never means current.
-    ///
-    /// `version` cannot answer "which code booted this body": it stays fixed
-    /// across every build between releases, so bodies four merged commits apart
-    /// report the same string. The revision is what distinguishes them.
-    #[serde(default)]
-    pub source_revision: Option<String>,
 }
 
 impl BinaryProvenance {
@@ -261,9 +252,6 @@ impl BinaryProvenance {
             version: env!("CARGO_PKG_VERSION").to_string(),
             provenance: crate::build_info::provenance().to_string(),
             source_identity: crate::build_info::source_identity(),
-            source_revision: Some(crate::build_info::source_revision())
-                .filter(|revision| *revision != "unknown")
-                .map(str::to_string),
         }
     }
 
@@ -273,7 +261,6 @@ impl BinaryProvenance {
             version: "0.0.0-test".to_string(),
             provenance: "development".to_string(),
             source_identity: "test".to_string(),
-            source_revision: None,
         }
     }
 }
@@ -299,10 +286,8 @@ pub struct ChildProcessGeneration {
     /// Immutable binary provenance: which lf actually booted this generation,
     /// stamped by that process itself at boot. `None` until the generation has
     /// booted (a reserved-but-never-started generation ran nothing), and for
-    /// generations recorded before this field was added. Keep the audit record
-    /// boxed so extending it does not enlarge the runner futures that carry a
-    /// process generation.
-    pub provenance: Option<Box<BinaryProvenance>>,
+    /// generations recorded before this field was added.
+    pub provenance: Option<BinaryProvenance>,
 }
 
 impl ChildProcessGeneration {
@@ -314,7 +299,7 @@ impl ChildProcessGeneration {
         self.pid = Some(std::process::id());
         self.process_group_id = crate::engine::process::current_process_group_id();
         self.state = ChildLeaseState::Active;
-        self.provenance = Some(Box::new(BinaryProvenance::current()));
+        self.provenance = Some(BinaryProvenance::current());
     }
 
     pub(crate) fn observe_provider(
@@ -1728,35 +1713,5 @@ mod tests {
         ];
         assert_eq!(count_recovery_attempts(&events), 1);
         assert_eq!(count_recovery_attempts(&[]), 0);
-    }
-
-    /// The store is how a supervisor learns which binary booted a body, so a
-    /// generation recorded without a revision leaves the question unanswerable
-    /// for that body's whole life.
-    #[test]
-    fn a_booting_binary_stamps_the_commit_it_was_built_from() {
-        let provenance = super::BinaryProvenance::current();
-
-        let revision = provenance
-            .source_revision
-            .expect("a build with a git root stamps its revision");
-        let base = revision.strip_suffix("-dirty").unwrap_or(&revision);
-        assert_eq!(base.len(), 40, "{revision}");
-        assert!(
-            base.chars().all(|character| character.is_ascii_hexdigit()),
-            "{revision}"
-        );
-    }
-
-    /// Every generation recorded before this field existed is still readable;
-    /// making the field required would fail their whole row on decode.
-    #[test]
-    fn a_generation_recorded_before_revisions_still_reads_as_unstamped() {
-        let stored = r#"{"version":"0.11.3","provenance":"release","source_identity":"release"}"#;
-
-        let provenance: super::BinaryProvenance = serde_json::from_str(stored).unwrap();
-
-        assert_eq!(provenance.version, "0.11.3");
-        assert_eq!(provenance.source_revision, None);
     }
 }

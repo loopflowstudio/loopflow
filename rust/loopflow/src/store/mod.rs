@@ -1410,12 +1410,11 @@ mod tests {
             started_at: OffsetDateTime::UNIX_EPOCH,
             state: ChildLeaseState::Reserved,
             outcome: None,
-            provenance: Some(Box::new(BinaryProvenance {
+            provenance: Some(BinaryProvenance {
                 version: "0.12.0".to_string(),
                 provenance: "release".to_string(),
                 source_identity: "release".to_string(),
-                source_revision: None,
-            })),
+            }),
         });
         store
             .create_task_session(&task, &make_task_pr(&task))
@@ -1453,12 +1452,11 @@ mod tests {
             .unwrap();
         task.begin_generation("lf-task-prov".to_string());
         if let Some(process) = task.latest_process.as_mut() {
-            process.provenance = Some(Box::new(BinaryProvenance {
+            process.provenance = Some(BinaryProvenance {
                 version: "0.12.1".to_string(),
                 provenance: "development".to_string(),
                 source_identity: "loopflow-deadbeef".to_string(),
-                source_revision: None,
-            }));
+            });
         }
         let lease = store
             .reserve_task_process(&task, TaskSessionStatus::Waiting)
@@ -1512,7 +1510,6 @@ mod tests {
             version: "A-0.0.0".to_string(),
             provenance: "release".to_string(),
             source_identity: "launcher-A".to_string(),
-            source_revision: None,
         };
         let mut task = make_task_session(&wave, &project);
         task.set_status(TaskSessionStatus::Waiting, "ready");
@@ -1522,7 +1519,7 @@ mod tests {
             .unwrap();
         task.begin_generation("lf-task-ab".to_string());
         if let Some(process) = task.latest_process.as_mut() {
-            process.provenance = Some(Box::new(launcher_a.clone()));
+            process.provenance = Some(launcher_a.clone());
         }
         let lease = store
             .reserve_task_process(&task, TaskSessionStatus::Waiting)
@@ -1546,13 +1543,11 @@ mod tests {
             .expect("the booted generation records provenance");
         let booting_b = BinaryProvenance::current();
         assert_eq!(
-            recorded.as_ref(),
-            &booting_b,
+            recorded, &booting_b,
             "provenance must describe what ran (B)"
         );
         assert_ne!(
-            recorded.as_ref(),
-            &launcher_a,
+            recorded, &launcher_a,
             "provenance must not be the launcher's (A)"
         );
     }
@@ -1578,12 +1573,11 @@ mod tests {
             started_at: OffsetDateTime::UNIX_EPOCH,
             state: ChildLeaseState::Reserved,
             outcome: None,
-            provenance: Some(Box::new(BinaryProvenance {
+            provenance: Some(BinaryProvenance {
                 version: "0.12.0".to_string(),
                 provenance: "release".to_string(),
                 source_identity: "release".to_string(),
-                source_revision: None,
-            })),
+            }),
         });
         store.create_project_session(&project).await.unwrap();
         let persisted = store
@@ -1616,12 +1610,11 @@ mod tests {
         store.create_project_session(&project).await.unwrap();
         project.begin_generation("lf-project-prov".to_string());
         if let Some(process) = project.latest_process.as_mut() {
-            process.provenance = Some(Box::new(BinaryProvenance {
+            process.provenance = Some(BinaryProvenance {
                 version: "0.12.1".to_string(),
                 provenance: "development".to_string(),
                 source_identity: "loopflow-cafe".to_string(),
-                source_revision: None,
-            }));
+            });
         }
         let lease = store
             .reserve_project_process(&project, ProjectSessionStatus::Created)

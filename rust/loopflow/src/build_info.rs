@@ -4,75 +4,38 @@ use sha2::{Digest, Sha256};
 
 use crate::engine::git;
 
-/// One merged commit the running binary was built without.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergedCommit {
     pub revision: String,
     pub subject: String,
 }
 
-impl MergedCommit {
-    /// The short revision an operator would paste into `git show`.
-    pub fn short_revision(&self) -> &str {
-        short_revision(&self.revision)
-    }
-}
-
-/// Where a binary's build revision sits relative to merged upstream work.
+/// Where the running binary's revision sits relative to merged upstream work.
 ///
-/// `Behind` is the only variant that means "a merged fix is not running". The
-/// others are deliberately distinct and must not be collapsed:
-///
-/// - `Unprovable` is not `Current`. A binary that cannot locate its own source
-///   is not thereby fresh, and reporting it as fresh is the silence this type
-///   exists to break. Absence of proof is never proof of freshness.
-/// - `OffMain` is not `Behind`. A development build on a feature branch is not
-///   stale; it is not on the upstream line at all.
-///
-/// Classification establishes that the repo holds the build revision *before*
-/// asking about ancestry, because [`git::is_ancestor`] reports both "not an
-/// ancestor" and "no such object" as `false`. Without that guard a binary whose
-/// source the repo has never seen reads as a healthy `OffMain` build — a stale
-/// fleet reported as fine, which is precisely the failure being fixed.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
+/// `Behind` is the only state that means a merged fix is missing. An absent
+/// object or failed comparison is `Unprovable`, never `Current` or `OffMain`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BuildFreshness {
-    /// Built from the upstream tip.
-    Current { revision: String },
-    /// Built from an ancestor of upstream: `missing` is not running, oldest first.
+    Current {
+        revision: String,
+    },
     Behind {
         revision: String,
-        upstream: String,
         missing: Vec<MergedCommit>,
     },
-    /// Built from a commit that is not on the upstream line.
-    OffMain { revision: String },
-    /// The comparison could not be made. `reason` names why, for a human.
-    Unprovable { reason: String },
+    OffMain {
+        revision: String,
+    },
+    Unprovable {
+        reason: String,
+    },
 }
 
 /// Compare a build revision against `upstream` (e.g. `origin/main`) in `repo`.
-///
-/// Pure with respect to Loopflow state: it reads `repo` through git and touches
-/// no store, no network, and no environment, so it is testable against a
-/// throwaway repo on any host. Refreshing `upstream` is the caller's job —
-/// classifying against a stale ref silently under-reports the gap, so a caller
-/// that cannot refresh says so rather than staying quiet.
 pub fn classify_revision(revision: &str, repo: &Path, upstream: &str) -> BuildFreshness {
     let unprovable = |reason: String| BuildFreshness::Unprovable { reason };
 
-    if revision == "unknown" {
-        return unprovable(
-            "this binary was built with no git root, so it carries no source revision".to_string(),
-        );
-    }
-    if let Some(base) = revision.strip_suffix("-dirty") {
-        return unprovable(format!(
-            "built from a dirty tree at {}; a dirty build is not any commit",
-            short_revision(base)
-        ));
-    }
     if !is_revision(revision) {
         return unprovable(format!("build revision {revision} is not a commit id"));
     }
@@ -107,7 +70,6 @@ pub fn classify_revision(revision: &str, repo: &Path, upstream: &str) -> BuildFr
         Ok(true) => match git::commits_between(repo, revision, upstream) {
             Ok(commits) => BuildFreshness::Behind {
                 revision: revision.to_string(),
-                upstream: upstream.to_string(),
                 missing: commits
                     .into_iter()
                     .map(|(revision, subject)| MergedCommit { revision, subject })
@@ -124,7 +86,6 @@ pub fn classify_revision(revision: &str, repo: &Path, upstream: &str) -> BuildFr
     }
 }
 
-/// The first 9 characters, matching how this repo's commits are cited.
 pub fn short_revision(revision: &str) -> &str {
     revision.get(..9).unwrap_or(revision)
 }
@@ -229,8 +190,7 @@ mod tests {
         source_revision, source_root, BuildFreshness, BuildProvenance, MigrationAuthority,
     };
 
-    /// A throwaway repo shaped `A -> B -> C` on `main`, so a classification can
-    /// be made without a store, a network, or this host's own checkout.
+    /// A throwaway `A -> B -> C` repo keeps classifier tests offline.
     struct Fixture {
         _directory: tempfile::TempDir,
         repo: PathBuf,
@@ -270,9 +230,6 @@ mod tests {
         String::from_utf8(output.stdout).unwrap()
     }
 
-    /// The paired half of `a_build_at_the_tip_is_current`: a classifier hardcoded
-    /// to either verdict fails exactly one of the two, so neither can pin the
-    /// fixture alone.
     #[test]
     fn a_build_behind_the_tip_names_every_merged_commit_it_lacks() {
         let fixture = Fixture::new();
@@ -308,21 +265,19 @@ mod tests {
         );
     }
 
-    /// The guard that keeps a stale binary from reading as a healthy dev build.
-    /// `is_ancestor` answers `false` for an object the repo lacks, so dropping
-    /// the `commit_exists` establisher turns this into `OffMain` — fail-open,
-    /// and the reason this is a tri-state rather than a bool.
     #[test]
-    fn a_revision_this_repo_never_saw_is_unprovable_not_off_main() {
+    fn absent_objects_and_failed_comparisons_are_unprovable() {
         let fixture = Fixture::new();
         let stranger = "0123456789abcdef0123456789abcdef01234567";
 
-        let freshness = classify_revision(stranger, &fixture.repo, "main");
-
-        let BuildFreshness::Unprovable { reason } = freshness else {
-            panic!("an absent object cannot be classified: {freshness:?}");
-        };
-        assert!(reason.contains("012345678"), "{reason}");
+        assert!(matches!(
+            classify_revision(stranger, &fixture.repo, "main"),
+            BuildFreshness::Unprovable { .. }
+        ));
+        assert!(matches!(
+            classify_revision(&fixture.commits[0], &fixture.repo, "missing"),
+            BuildFreshness::Unprovable { .. }
+        ));
     }
 
     #[test]
@@ -342,45 +297,6 @@ mod tests {
         let freshness = classify_revision(&head, &fixture.repo, "main");
 
         assert_eq!(freshness, BuildFreshness::OffMain { revision: head });
-    }
-
-    #[test]
-    fn an_unstamped_build_is_unprovable() {
-        let fixture = Fixture::new();
-
-        let freshness = classify_revision("unknown", &fixture.repo, "main");
-
-        let BuildFreshness::Unprovable { reason } = freshness else {
-            panic!("an unstamped build cannot be classified: {freshness:?}");
-        };
-        assert!(reason.contains("no git root"), "{reason}");
-    }
-
-    /// A dirty build is not any commit, so comparing its base sha would report a
-    /// tree nobody ever committed as though it were merged code.
-    #[test]
-    fn a_dirty_build_is_unprovable_rather_than_its_base_commit() {
-        let fixture = Fixture::new();
-        let dirty = format!("{}-dirty", fixture.commits[0]);
-
-        let freshness = classify_revision(&dirty, &fixture.repo, "main");
-
-        let BuildFreshness::Unprovable { reason } = freshness else {
-            panic!("a dirty build cannot be classified: {freshness:?}");
-        };
-        assert!(reason.contains("dirty"), "{reason}");
-    }
-
-    #[test]
-    fn an_unresolvable_upstream_is_unprovable() {
-        let fixture = Fixture::new();
-
-        let freshness = classify_revision(&fixture.commits[0], &fixture.repo, "origin/nonexistent");
-
-        assert!(
-            matches!(freshness, BuildFreshness::Unprovable { .. }),
-            "{freshness:?}"
-        );
     }
 
     #[test]

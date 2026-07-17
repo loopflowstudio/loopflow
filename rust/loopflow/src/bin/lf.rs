@@ -588,23 +588,9 @@ fn format_child_body(
         || format!("none; next agent {agent}, provider {provider}"),
         |process| {
             let generation = process.generation;
-            // The revision rides here because this line is where a supervisor
-            // asks "which lf is running this body?" — and `version` alone
-            // answers the same for every build between releases.
             let provenance = process.provenance.as_ref().map_or_else(
                 || "binary unknown".to_string(),
-                |provenance| {
-                    let revision = provenance.source_revision.as_deref().map_or_else(
-                        || "revision unstamped".to_string(),
-                        |revision| {
-                            format!("from {}", loopflow::build_info::short_revision(revision))
-                        },
-                    );
-                    format!(
-                        "binary {} ({}) {revision}",
-                        provenance.version, provenance.provenance
-                    )
-                },
+                |provenance| format!("binary {} ({})", provenance.version, provenance.provenance),
             );
             format!("generation {generation}; agent {agent}; provider {provider}; {provenance}")
         },
@@ -2237,12 +2223,11 @@ mod tests {
             started_at: OffsetDateTime::UNIX_EPOCH,
             state: ChildLeaseState::Active,
             outcome: None,
-            provenance: Some(Box::new(BinaryProvenance {
+            provenance: Some(BinaryProvenance {
                 version: "0.12.0".to_string(),
                 provenance: "release".to_string(),
                 source_identity: "release".to_string(),
-                source_revision: Some("3e9df06777297cd1cb83fccc1d0261fd3e74dfa8".to_string()),
-            })),
+            }),
         };
         let body = super::format_child_body("claude", "claude", Some(&process));
         assert!(
@@ -2252,45 +2237,6 @@ mod tests {
         assert!(
             body.contains("binary 0.12.0 (release)"),
             "body shows binary provenance: {body}"
-        );
-        assert!(
-            body.contains("from 3e9df0677"),
-            "body names the commit the binary was built from: {body}"
-        );
-    }
-
-    /// Two bodies built four merged commits apart report the same `version`, so
-    /// an unstamped generation must say so rather than read as though its
-    /// version identified its code.
-    #[test]
-    fn format_child_body_names_an_unstamped_binary_rather_than_implying_currency() {
-        use loopflow::child_session::{BinaryProvenance, ChildLeaseState, ChildProcessGeneration};
-        use time::OffsetDateTime;
-
-        let process = ChildProcessGeneration {
-            generation: 3,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-x".to_string(),
-            agent: "claude".to_string(),
-            provider: "claude".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Active,
-            outcome: None,
-            provenance: Some(Box::new(BinaryProvenance {
-                version: "0.11.3".to_string(),
-                provenance: "release".to_string(),
-                source_identity: "release".to_string(),
-                source_revision: None,
-            })),
-        };
-
-        let body = super::format_child_body("claude", "claude", Some(&process));
-
-        assert!(
-            body.contains("revision unstamped"),
-            "an unstamped body says so: {body}"
         );
     }
 

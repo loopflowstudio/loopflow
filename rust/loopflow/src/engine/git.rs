@@ -127,7 +127,38 @@ pub fn fetch(repo: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
 /// Returns true if commit is fully merged into descendant.
 pub fn is_ancestor(repo: &Path, commit: &str, descendant: &str) -> Result<bool, GitError> {
     let output = run_git(repo, &["merge-base", "--is-ancestor", commit, descendant])?;
+    if output.status.success() {
+        return Ok(true);
+    }
+    if output.status.code() == Some(1) {
+        return Ok(false);
+    }
+    Err(GitError::CommandFailed {
+        command: format!("git merge-base --is-ancestor {commit} {descendant}"),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+/// Whether this repo holds `revision` as a commit object.
+pub fn commit_exists(repo: &Path, revision: &str) -> Result<bool, GitError> {
+    let object = format!("{revision}^{{commit}}");
+    let output = run_git(repo, &["cat-file", "-e", &object])?;
     Ok(output.status.success())
+}
+
+/// Commits reachable from `to` but not `from`, oldest first.
+pub fn commits_between(
+    repo: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<(String, String)>, GitError> {
+    let range = format!("{from}..{to}");
+    let stdout = git_stdout(repo, &["log", "--reverse", "--format=%H%x00%s", &range])?;
+    Ok(stdout
+        .lines()
+        .filter_map(|line| line.split_once('\0'))
+        .map(|(revision, subject)| (revision.to_string(), subject.to_string()))
+        .collect())
 }
 
 /// Find the merge-base (common ancestor) of two refs.

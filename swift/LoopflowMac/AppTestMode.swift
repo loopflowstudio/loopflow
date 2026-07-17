@@ -17,6 +17,10 @@ enum CaptureTarget {
     /// the primary window cannot be won by one that merely opened later.
     private static let secondaryTitles = ["Context Lab", "Portfolio", "Telemetry", "Task workspace"]
 
+    private static func normalizedTitle(_ title: String) -> String {
+        title.lowercased().filter(\.isLetter)
+    }
+
     init(view: String) {
         switch view {
         case "wave", "roadmap": self = .primary
@@ -31,12 +35,12 @@ enum CaptureTarget {
     func matches(_ window: NSWindow) -> Bool {
         switch self {
         case .primary:
-            return !Self.secondaryTitles.contains(window.title)
+            let title = Self.normalizedTitle(window.title)
+            return !Self.secondaryTitles.map(Self.normalizedTitle).contains(title)
         case .contextLab:
-            return window.title == "Context Lab"
+            return Self.normalizedTitle(window.title) == Self.normalizedTitle("Context Lab")
         case .window(let id):
-            let expected = id.split(separator: "-").map { $0.capitalized }.joined(separator: " ")
-            return window.title == expected
+            return Self.normalizedTitle(window.title) == Self.normalizedTitle(id)
         }
     }
 }

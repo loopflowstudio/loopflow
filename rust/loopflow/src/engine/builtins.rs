@@ -208,7 +208,7 @@ include!(concat!(env!("OUT_DIR"), "/builtin_ops_prompts.rs"));
 mod tests {
     use super::*;
 
-    const WAVE_AUTHORING_DOC: &str = include_str!("../../../../docs/wave-authoring.md");
+    const WAVES_DOC: &str = include_str!("../../../../docs/waves.md");
 
     #[test]
     fn wave_model_is_embedded_in_prompts_and_docs() {
@@ -226,9 +226,9 @@ mod tests {
         assert!(!design.contains("1-*.md"));
         assert!(scan_waves.contains("lf pm show"));
         assert!(split_wave.contains("lf pm"));
-        assert!(WAVE_AUTHORING_DOC.contains("GOAL.md"));
-        assert!(WAVE_AUTHORING_DOC.contains("Linear"));
-        assert!(!WAVE_AUTHORING_DOC.contains("1-fix-crash-loop.md"));
+        assert!(WAVES_DOC.contains("GOAL.md"));
+        assert!(WAVES_DOC.contains("Linear"));
+        assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
 
         // The ingest skill is gone; workers are handed their task at dispatch.
         assert!(get_builtin_skill("ingest").is_none());

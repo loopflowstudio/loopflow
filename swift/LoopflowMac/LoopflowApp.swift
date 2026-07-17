@@ -257,22 +257,34 @@ private extension View {
            let path = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] {
             let delay = AppTestMode.snapshotDelay
             task {
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                let window = NSApp.windows.first { window in
-                    window.isVisible && window.contentView != nil && target.matches(window)
-                }
-                if let window {
-                    do {
-                        if let width = AppTestMode.windowWidth {
-                            let height = AppTestMode.windowHeight
-                                ?? window.contentView?.frame.height
-                                ?? window.frame.height
-                            window.setContentSize(NSSize(width: width, height: height))
-                        }
-                        _ = try SnapshotService().snapshotWindow(window, to: path)
-                    } catch {
-                        fputs("website capture failed: \(error)\n", stderr)
+                var captureWindow: NSWindow?
+                for _ in 0 ..< 50 {
+                    captureWindow = NSApp.windows.first { window in
+                        window.isVisible && window.contentView != nil && target.matches(window)
                     }
+                    if captureWindow != nil { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+
+                if let window = captureWindow {
+                    if let width = AppTestMode.windowWidth {
+                        let height = AppTestMode.windowHeight
+                            ?? window.contentView?.frame.height
+                            ?? window.frame.height
+                        window.setContentSize(NSSize(width: width, height: height))
+                    }
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    if window.isVisible {
+                        do {
+                            _ = try SnapshotService().snapshotWindow(window, to: path)
+                        } catch {
+                            fputs("website capture failed: \(error)\n", stderr)
+                        }
+                    } else {
+                        fputs("website capture failed: target window closed before capture\n", stderr)
+                    }
+                } else {
+                    fputs("website capture failed: target window did not open\n", stderr)
                 }
                 NSApp.terminate(nil)
             }

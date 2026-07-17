@@ -26,6 +26,7 @@ MANIFEST_PATH = REPO_ROOT / "scripts/screenshots.yaml"
 MAX_CAPTURE_AGE = timedelta(days=14)
 MAX_CLOCK_SKEW = timedelta(minutes=5)
 CAPTURE_TIMEOUT = 30
+STATUS_TIMEOUT = 10
 # A pixel counts as changed past this per-channel delta; a capture counts as
 # changed past this fraction of pixels. Below it, only clocks and spinners moved.
 PIXEL_DELTA = 12
@@ -113,15 +114,22 @@ def require_live_wave(payload: dict[str, Any], expected_wave: str) -> None:
 
 def live_status(lf_binary: Path, repo_path: Path, wave: str) -> dict[str, Any]:
     """The Wave snapshot a capture must be showing, proven live before we shoot it."""
-    result = subprocess.run(
-        [str(lf_binary), "status", wave, "--json"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [str(lf_binary), "status", wave, "--json"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=STATUS_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CaptureUnavailable(f"lf status timed out after {STATUS_TIMEOUT}s") from exc
     if result.returncode != 0:
         raise CaptureUnavailable(result.stderr.strip() or "lf status failed")
-    payload = json.loads(result.stdout)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise CaptureUnavailable(f"lf status returned invalid JSON: {exc}") from exc
     require_live_wave(payload, wave)
     return payload
 
@@ -185,7 +193,10 @@ def capture(shot: LiveCapture, *, executable: Path, repo_path: Path, output: Pat
             timeout=CAPTURE_TIMEOUT,
         )
     except subprocess.TimeoutExpired as exc:
-        detail = (exc.stderr or b"").decode(errors="replace").strip()
+        stderr = exc.stderr or ""
+        detail = (
+            stderr.decode(errors="replace").strip() if isinstance(stderr, bytes) else stderr.strip()
+        )
         raise RuntimeError(
             f"{shot.name}: capture timed out after {CAPTURE_TIMEOUT}s; {detail}"
         ) from exc
@@ -252,11 +263,15 @@ def validate_capture(
         errors.append(f"{sidecar}: app_commit is not a full Git commit")
     try:
         with Image.open(image) as opened:
-            actual_width = opened.width
+            actual_size = opened.size
     except OSError as exc:
         return [*errors, f"{image}: invalid image: {exc}"]
-    if actual_width < shot.width * 2:
-        errors.append(f"{image}: {actual_width}px is not a 2x capture of {shot.width}pt")
+    expected_size = (shot.width * 2, shot.height * 2)
+    if actual_size != expected_size:
+        errors.append(
+            f"{image}: {actual_size[0]}x{actual_size[1]}px is not a 2x capture of "
+            f"{shot.width}x{shot.height}pt"
+        )
     if not status.is_file():
         errors.append(f"{sidecar}: live status snapshot is missing: {status.name}")
     else:

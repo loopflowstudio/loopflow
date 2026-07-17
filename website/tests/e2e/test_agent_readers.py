@@ -24,6 +24,11 @@ def test_content_negotiation(page: Page, base_url: str):
     assert "text/markdown" in response.headers["content-type"]
     assert response.headers.get("vary") == "Accept"
 
+    # FastHTML adds its own Vary on HTML responses; ours must survive beside it.
+    html = page.request.get(f"{base_url}/docs/waves", headers={"Accept": "text/html"})
+    assert html.status == 200
+    assert "Accept" in html.headers.get("vary", "")
+
 
 def test_markdown_404_suggests_pages(page: Page, base_url: str):
     response = page.request.get(f"{base_url}/docs/wavez.md")
@@ -57,6 +62,7 @@ def test_sitemap(page: Page, base_url: str):
     assert response.status == 200
     body = response.text()
     assert "<loc>https://loopflow.studio/docs/waves</loc>" in body
+    assert "<loc>https://loopflow.studio/story</loc>" not in body
     assert "<lastmod>" in body
 
 

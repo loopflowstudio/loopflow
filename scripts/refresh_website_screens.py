@@ -59,18 +59,27 @@ def _require_publishable_branch() -> None:
 
 
 def _publish(lf_binary: Path, targets: list[Path]) -> None:
-    expected = {
+    allowed = {
         path.relative_to(REPO_ROOT).as_posix()
         for target in targets
         for path in (target, *sidecar_paths(target))
     }
+    missing_files = sorted(
+        path.relative_to(REPO_ROOT).as_posix()
+        for target in targets
+        for path in (target, *sidecar_paths(target))
+        if not path.is_file()
+    )
     actual = _worktree_paths()
-    if actual != expected:
-        unexpected = ", ".join(sorted(actual - expected)) or "none"
-        missing = ", ".join(sorted(expected - actual)) or "none"
+    changed_images = {target.relative_to(REPO_ROOT).as_posix() for target in targets}
+    unexpected = sorted(actual - allowed)
+    unchanged_images = sorted(changed_images - actual)
+    if missing_files or unexpected or unchanged_images:
         raise CaptureUnavailable(
-            f"refusing to publish mixed worktree changes; unexpected: {unexpected}; "
-            f"missing: {missing}"
+            "refusing to publish an incomplete or mixed capture set; "
+            f"missing files: {', '.join(missing_files) or 'none'}; "
+            f"unexpected changes: {', '.join(unexpected) or 'none'}; "
+            f"unchanged images: {', '.join(unchanged_images) or 'none'}"
         )
     count = len(targets)
     subprocess.run(
@@ -98,12 +107,16 @@ def _stage(candidate: Path, shot: LiveCapture, provenance: CaptureProvenance, st
 
 def _install(candidate: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    for source, destination in zip(
-        (candidate, *sidecar_paths(candidate)), (target, *sidecar_paths(target))
-    ):
-        temporary = destination.with_suffix(f"{destination.suffix}.tmp")
-        shutil.copy2(source, temporary)
-        temporary.replace(destination)
+    pairs = list(zip((candidate, *sidecar_paths(candidate)), (target, *sidecar_paths(target))))
+    temporaries = [destination.with_suffix(f"{destination.suffix}.tmp") for _, destination in pairs]
+    try:
+        for (source, _), temporary in zip(pairs, temporaries):
+            shutil.copy2(source, temporary)
+        for (_, destination), temporary in zip(pairs, temporaries):
+            temporary.replace(destination)
+    finally:
+        for temporary in temporaries:
+            temporary.unlink(missing_ok=True)
 
 
 def refresh(executable: Path, lf_binary: Path, publish: bool) -> int:

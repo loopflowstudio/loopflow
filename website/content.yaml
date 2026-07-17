@@ -7,8 +7,8 @@ homepage:
     subline: >-
       Waves are persistent agents that hold a goal, remember what they learn,
       and stay steerable. The organization is recursive — waves conduct
-      projects, projects conduct tasks, agents launch agents — and nothing
-      sits at the center.
+      projects, projects conduct tasks, agents launch agents — and no Loopflow
+      server sits at the center.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
   showcase:
@@ -34,17 +34,18 @@ homepage:
           with a receipt. The same verbs you type.
       - title: "The whole lifecycle, not just the code"
         description: >-
-          Plans live in Linear. PRs publish, survive review, and land through
-          the merge queue. CI failures get repaired; releases cut on a
+          Plans live in Linear. PRs publish, survive review, and land after
+          required checks pass. CI failures get repaired; releases cut on a
           cadence; worktrees clean themselves up. Waves run the process
           around the code — building, deploying, and maintaining software,
           not just writing it.
       - title: "Self-organizing, all the way down"
         description: >-
-          Waves supervise projects; projects supervise tasks; every part
-          keeps its own journal, memory, and receipts. Coordination lives in
-          the repo, Linear, and GitHub — there is nothing central to die.
-      - title: "The whole orchestra on one screen"
+          Waves supervise projects; projects supervise tasks. Sessions keep
+          journals and receipts; Waves fold durable learning into memory.
+          Coordination lives in the repo, Linear, and GitHub — no Loopflow
+          server sits between them.
+      - title: "The whole system on one screen"
         description: >-
           `lf roadmap` buckets every open task by what it needs from you.
           Trace what any agent was told, what it spent, and what it shipped.

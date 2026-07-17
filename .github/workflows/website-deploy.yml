@@ -30,7 +30,7 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Fetch secrets
+      - name: Fetch deploy credentials
         uses: dopplerhq/secrets-fetch-action@v2.0.0
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
@@ -47,14 +47,6 @@ jobs:
       - name: Save current release image
         id: pre-deploy
         run: echo "image=$(flyctl releases --json -a loopflow-website | jq -r '.[0].ImageRef')" >> "$GITHUB_OUTPUT"
-
-      - name: Stage runtime secrets
-        run: |
-          flyctl secrets set --stage \
-            WEBSITE_DB_URL="$WEBSITE_DB_URL" \
-            RESEND_API_KEY="$RESEND_API_KEY" \
-            FIGMA_TOKEN="$FIGMA_TOKEN" \
-            -a loopflow-website
 
       - name: Deploy
         run: flyctl deploy --config fly.toml --wait-timeout 120

@@ -51,8 +51,12 @@ assigned work here with direct reads, edits, commands, and tests.
 
 Delegation must make the problem smaller: delegate only a strict subset that
 can finish independently; never hand off the whole seed or the one blocker
-between you and completion. Durable delegated work starts from an existing
-Linear task:
+between you and completion.
+
+Use `lf task`, `lf project`, `lf wave`, and `lf pm` only when the active skill
+or the human explicitly asks for orchestration. Do not inspect planning state,
+guess a Wave, start a server, or repair auth as a prerequisite for ordinary
+implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
 lf task run <issue-id>                       # durable Task Session, own worktree

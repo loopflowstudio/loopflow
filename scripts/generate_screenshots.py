@@ -79,7 +79,12 @@ def shot_environment(shot: WaveProofShot) -> dict[str, str]:
     return env
 
 
-def _write_log(path: Path, args: list[str], result: subprocess.CompletedProcess, duration: float):
+def _write_log(
+    path: Path,
+    args: list[str],
+    result: subprocess.CompletedProcess,
+    duration: float,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "\n".join(
@@ -130,7 +135,7 @@ def capture(shot: WaveProofShot) -> Path:
     marker = "UI_TEST_SCREENSHOT_PATH="
     source = next(
         (
-            Path(line.removeprefix(marker))
+            Path(line.removeprefix(marker).strip())
             for line in result.stdout.splitlines()
             if line.startswith(marker)
         ),

@@ -643,8 +643,7 @@ fails — the PR is already published and its URL printed.
 
 ### lf pr land
 
-Submit the PR to the merge queue: enables auto-merge, GitHub merges when CI
-passes and the queue clears.
+Arm auto-merge. GitHub merges when required checks and repository rules pass.
 
 ```bash
 lf pr land                    # land one PR; the Task stays open

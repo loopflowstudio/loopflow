@@ -18,6 +18,7 @@ DOCTRINE_ANCHORS = [
     "Execute Here First",
     "Checkpoint And Proceed",
     "Delegation must make the problem smaller",
+    "only when the active skill or the human explicitly asks for orchestration",
     "sibling naming convention (`<repo>.<name>`)",
     "`lf chat` is the human surface",
     "lf commit -m",

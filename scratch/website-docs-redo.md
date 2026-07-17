@@ -124,9 +124,10 @@ shrink it:
   merged into `waves.md`; `getting-started.md` Go Remote rewritten around
   Homes; `lf.md` got an audience map; Jekyll `_config.yml`, `stubs/`, and
   `concerto-*` screenshots deleted.
-- Website: story-first homepage from new `content.yaml` schema; `/story`
-  page rendered from `website/story.md`; `/team|/loopflow|/maestro`
-  redirect; `/download` covers CLI + Mac app; `llms.txt` rebuilt (doc list
+- Website: story-first homepage from new `content.yaml` schema; the product
+  story is folded into the homepage and `/team|/story` redirect there;
+  `/loopflow|/maestro` redirect to `/download`, which covers CLI + Mac app;
+  `llms.txt` rebuilt (doc list
   generated from `DOCS_NAV`); dead video/vocab/product-card code deleted;
   maestro/concerto-era static assets deleted.
 - Renderer: fixed an infinite loop on prose lines containing `|` (newly

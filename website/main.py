@@ -249,7 +249,7 @@ def generate_llms_full_txt() -> str:
 
 
 def generate_sitemap_xml() -> str:
-    pages = ["", "/story", "/download", "/docs"] + [
+    pages = ["", "/download", "/docs"] + [
         f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index"
     ]
     entries = []
@@ -513,7 +513,12 @@ def markdown_not_found(slug: str) -> PlainTextResponse:
         f"Closest pages:\n\n{suggestions}\n\n"
         f"Full index: {BASE_URL}/llms.txt\n"
     )
-    return PlainTextResponse(body, status_code=404, media_type=MARKDOWN_MEDIA_TYPE)
+    return PlainTextResponse(
+        body,
+        status_code=404,
+        media_type=MARKDOWN_MEDIA_TYPE,
+        headers={"Vary": "Accept"},
+    )
 
 
 def wants_markdown(request) -> bool:
@@ -772,7 +777,7 @@ def _docs_page(slug: str, title: str):
 def get(request):
     if wants_markdown(request):
         return markdown_doc_response("index")
-    return _docs_page("index", "Loopflow Documentation")
+    return (*_docs_page("index", "Loopflow Documentation"), HttpHeader("Vary", "Accept"))
 
 
 @rt("/docs/{slug:path}")
@@ -786,7 +791,10 @@ def get(request, slug: str):
     if not doc_path(slug):
         return RedirectResponse("/docs", status_code=302)
     title = _doc_title(slug)
-    return _docs_page(slug, f"{title} — Loopflow Documentation")
+    return (
+        *_docs_page(slug, f"{title} — Loopflow Documentation"),
+        HttpHeader("Vary", "Accept"),
+    )
 
 
 @rt("/download")

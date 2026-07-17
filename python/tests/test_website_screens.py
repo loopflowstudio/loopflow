@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import plistlib
+import subprocess
 import sys
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -14,13 +15,17 @@ from PIL import Image
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 try:
+    import refresh_website_screens
+    import website_screens
     from website_screens import (
         CaptureProvenance,
         CaptureUnavailable,
         LiveCapture,
+        capture,
         capture_environment,
         captured_wave,
         changed_meaningfully,
+        live_status,
         load_captures,
         read_app_build,
         require_live_wave,
@@ -94,6 +99,20 @@ def test_live_capture_requires_a_served_wave_with_a_live_task() -> None:
         require_live_wave(_live_status(process_alive=False), "product")
 
 
+def test_live_status_reports_invalid_json_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        website_screens.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "{", ""),
+    )
+
+    with pytest.raises(CaptureUnavailable, match="invalid JSON"):
+        live_status(Path("lf"), tmp_path, "product")
+
+
 def _promoted_app(tmp_path: Path, *, dirty: bool = False) -> Path:
     executable = tmp_path / "Loopflow.app/Contents/MacOS/Loopflow"
     executable.parent.mkdir(parents=True)
@@ -139,6 +158,24 @@ def test_perceptual_diff_ignores_one_volatile_pixel_but_catches_a_real_change(
     assert changed_meaningfully(current, changed)
 
 
+def test_capture_timeout_preserves_text_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _time_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 30, stderr="window did not settle")
+
+    monkeypatch.setattr(website_screens.subprocess, "run", _time_out)
+
+    with pytest.raises(RuntimeError, match="window did not settle"):
+        capture(
+            _shot(tmp_path),
+            executable=Path("Loopflow"),
+            repo_path=tmp_path,
+            output=tmp_path / "capture.png",
+        )
+
+
 def _publishable_capture(tmp_path: Path, captured_at: datetime) -> Path:
     image = tmp_path / "context-lab.png"
     _write_image(image, (255, 255, 255), size=(2880, 1800))
@@ -179,5 +216,38 @@ def test_capture_gate_rejects_an_image_without_provenance(tmp_path: Path) -> Non
     assert any("without context-lab.json" in error for error in errors)
 
 
+def test_capture_gate_rejects_the_wrong_retina_dimensions(tmp_path: Path) -> None:
+    image = _publishable_capture(tmp_path, datetime.now(timezone.utc))
+    _write_image(image, (255, 255, 255), size=(2880, 1600))
+
+    errors = validate_capture(image, _shot(tmp_path))
+
+    assert any("is not a 2x capture of 1440x900pt" in error for error in errors)
+
+
 def test_capture_gate_allows_an_image_to_be_absent(tmp_path: Path) -> None:
     assert validate_capture(tmp_path / "not-published.png", _shot(tmp_path)) == []
+
+
+def test_publish_allows_an_unchanged_live_status_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "website/static/context-lab.png"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"png")
+    target.with_suffix(".json").write_text("{}")
+    target.with_suffix(".status.json").write_text("{}")
+    monkeypatch.setattr(refresh_website_screens, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        refresh_website_screens,
+        "_worktree_paths",
+        lambda: {"website/static/context-lab.png", "website/static/context-lab.json"},
+    )
+    monkeypatch.setattr(
+        refresh_website_screens.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0),
+    )
+
+    refresh_website_screens._publish(Path("lf"), [target])

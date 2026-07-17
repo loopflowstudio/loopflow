@@ -136,7 +136,7 @@ lf audit    # runs your custom skill
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
-lf pr land    # submit to merge queue
+lf pr land      # arm auto-merge; GitHub merges after required checks pass
 ```
 
 ---
@@ -162,7 +162,8 @@ The Wave creates or selects a Linear task, starts it with `lf task run
 worktree. CI failures and review feedback return to the same session; linked
 events land in the Wave thread.
 
-Detached processes use named tmux sessions:
+Detached processes use named tmux sessions for process lifetime and read-only
+inspection:
 
 ```bash
 tmux ls               # live agent sessions

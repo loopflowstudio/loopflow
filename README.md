@@ -115,6 +115,10 @@ uv run python scripts/install.py local --use   # build lf + Loopflow.app from th
 uv run python scripts/install.py refresh       # fast CLI-only rebuild from the default branch
 ```
 
+`local --use` also attempts the public product captures after promotion. It
+publishes only from a clean default branch and skips unavailable live state
+without failing the install; pass `--no-screens` to disable the hook.
+
 `TESTING.md` covers the test suites; `STYLE.md` is the governing style guide;
 `RELEASE_NOTES.md` and `release/` carry the release chronology.
 

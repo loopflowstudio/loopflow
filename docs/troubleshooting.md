@@ -48,7 +48,7 @@ that body first.
 If a control returned a command id, inspect or wait for its durable receipt:
 
 ```bash
-lf task receipt cc_123 --wait --timeout 30s --json
+lf task receipt cc_123 --until incorporated --timeout 30s --json
 ```
 
 ## Rate limits

@@ -3,8 +3,8 @@
 Running one agent is a conversation. Running many is conducting: knowing what
 is playing, what is stuck, what needs you, what it cost — and redirecting a
 performer without stopping the piece. Loopflow answers all of that from the
-local ledger — every command below reads machine-local truth and takes
-`--json`.
+local ledger. Its read surfaces take `--json`; `lf top` is the human-oriented
+exception because it renders a live terminal graph.
 
 ## See everything
 
@@ -51,7 +51,7 @@ much of CI repair happened without a human.
 
 ## Steer
 
-Reading is half; the orchestra stays steerable while it plays.
+Reading is half; the system stays steerable while it runs.
 
 ```bash
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue

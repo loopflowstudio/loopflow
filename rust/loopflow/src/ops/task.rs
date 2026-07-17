@@ -43,8 +43,8 @@ use crate::task::actions::{
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-    PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId,
-    TaskSessionStatus, TaskSessionSuccession,
+    PrPhase, PrPublication, TaskEventKind, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession,
+    TaskSessionId, TaskSessionStatus, TaskSessionSuccession,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -4092,9 +4092,10 @@ impl CompletionGate {
     }
 }
 
-/// The required interaction reviews for a Task: every review attached to this
-/// Session whose policy is `Require`. `Defer`-policy reviews never gate
-/// completion.
+/// The required interaction reviews that still speak for this Task attempt.
+/// Current-epoch reviews hold their live waitpoint, and only the newest Gate
+/// epoch holds the standing settlement verdict. Superseded reviews remain audit
+/// history without becoming permanent completion blockers.
 async fn required_reviews_for_task(
     store: &SharedStore,
     session: &TaskSession,
@@ -4103,10 +4104,23 @@ async fn required_reviews_for_task(
         .list_interaction_reviews(Some(&session.wave_id))
         .await
         .map_err(|error| task_error(format!("failed to read interaction reviews: {error}")))?;
+    let newest_gate_epoch = reviews
+        .iter()
+        .filter(|review| {
+            review.task_session_id == session.id
+                && review.policy == InteractionPolicy::Require
+                && review.phase == TaskLifecyclePhase::Gate
+        })
+        .map(|review| review.phase_epoch)
+        .max();
     Ok(reviews
         .into_iter()
         .filter(|review| {
-            review.task_session_id == session.id && review.policy == InteractionPolicy::Require
+            review.task_session_id == session.id
+                && review.policy == InteractionPolicy::Require
+                && (review.phase_epoch == session.phase_epoch
+                    || (review.phase == TaskLifecyclePhase::Gate
+                        && Some(review.phase_epoch) == newest_gate_epoch))
         })
         .collect())
 }
@@ -5433,7 +5447,7 @@ mod tests {
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
         ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
-        ChildProcessGeneration, ChildRef, MAX_RECOVERY_ATTEMPTS,
+        ChildProcessGeneration, ChildRef, ChildWriteLease, MAX_RECOVERY_ATTEMPTS,
     };
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
@@ -9162,29 +9176,35 @@ mod tests {
         gate_task_fixture(repo, branch, base_commit, true, 0).await
     }
 
-    /// Open a required Human review at the Session's gate waitpoint and return
-    /// its id. The Session is left with a reserved process lease so the review
-    /// can be opened; tests that exercise the no-lease reconcile advance ignore
-    /// the lease (the non-lease completion path does not check it).
+    /// Open a required Human review at the Session's current waitpoint and
+    /// return its id with the lease that opened it. Pass `None` to reserve a
+    /// fresh lease; pass a prior lease to open a second review on the same
+    /// generation, which a Session can only do while that lease stays active.
     async fn open_gate_review(
         store: &SharedStore,
         session: &mut TaskSession,
         pr: &TaskPr,
-    ) -> InteractionReviewId {
-        session.begin_generation("gate-review".to_string());
-        let lease = store
-            .reserve_task_process(session, TaskSessionStatus::Waiting)
-            .await
-            .expect("reserve process")
-            .expect("lease");
-        if let Some(process) = &mut session.latest_process {
-            process.state = crate::child_session::ChildLeaseState::Active;
-        }
-        session.set_status(TaskSessionStatus::Running, "gate review active");
-        store
-            .activate_task_process(session, &lease)
-            .await
-            .expect("activate process");
+        lease: Option<ChildWriteLease>,
+    ) -> (InteractionReviewId, ChildWriteLease) {
+        let lease = if let Some(lease) = lease {
+            lease
+        } else {
+            session.begin_generation("gate-review".to_string());
+            let lease = store
+                .reserve_task_process(session, TaskSessionStatus::Waiting)
+                .await
+                .expect("reserve process")
+                .expect("lease");
+            if let Some(process) = &mut session.latest_process {
+                process.state = crate::child_session::ChildLeaseState::Active;
+            }
+            session.set_status(TaskSessionStatus::Running, "gate review active");
+            store
+                .activate_task_process(session, &lease)
+                .await
+                .expect("activate process");
+            lease
+        };
         let plan = session.phase_plan();
         let review = InteractionReview {
             id: InteractionReviewId::new(),
@@ -9224,7 +9244,7 @@ mod tests {
             .open_interaction_review(session, &review, &lease)
             .await
             .expect("open gate review");
-        review.id
+        (review.id, lease)
     }
 
     #[test]
@@ -9488,7 +9508,7 @@ mod tests {
         // review would block *after* the successor was dropped, leaving a
         // non-terminal Task with no active PR — the exact shape
         // `ensure_working_pr_with_authority` rotates a fresh empty PR from.
-        let review_id = open_gate_review(&store, &mut session, &merged).await;
+        let (review_id, _lease) = open_gate_review(&store, &mut session, &merged, None).await;
         session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
 
         let gate = task_completion_gate(&store, &session)
@@ -9753,7 +9773,7 @@ mod tests {
         repo.create_branch(branch);
         let base = repo.head_sha();
         let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let review_id = open_gate_review(&store, &mut session, &pr).await;
+        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
 
         // The merged PR is settled, but the required Human review is open: the
         // gate must block on the review, not on the PR.
@@ -9786,13 +9806,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_superseded_kickoff_changes_request_does_not_bar_completion() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
+        session.phase_epoch = 1;
+        session.gate_cycle = 0;
+        session.gate_proposal = None;
+        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
+        store
+            .complete_human_interaction_review(
+                &review_id,
+                InteractionReviewDisposition::ChangesRequested,
+                "repair the design",
+            )
+            .await
+            .expect("request kickoff changes");
+        session.enter_iterate().expect("enter repair iteration");
+
+        let gate = task_completion_gate(&store, &session).await.expect("gate");
+
+        assert!(
+            gate.satisfied,
+            "superseded kickoff review: {:?}",
+            gate.blockers
+        );
+    }
+
+    #[tokio::test]
+    async fn the_newest_gate_cycle_supersedes_an_earlier_changes_request() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let (first, lease) = open_gate_review(&store, &mut session, &pr, None).await;
+        store
+            .complete_human_interaction_review(
+                &first,
+                InteractionReviewDisposition::ChangesRequested,
+                "repair cycle one",
+            )
+            .await
+            .expect("request gate changes");
+        session.enter_iterate().expect("enter repair iteration");
+        session
+            .enter_gate(TaskGateProposal {
+                status: TaskSessionStatus::Completed,
+                reason: "repair verified".to_string(),
+            })
+            .expect("enter the next gate cycle");
+        store
+            .update_task_session_for_lease(&session, &lease)
+            .await
+            .expect("persist the next gate cycle");
+        let (second, _lease) = open_gate_review(&store, &mut session, &pr, Some(lease)).await;
+        store
+            .complete_human_interaction_review(
+                &second,
+                InteractionReviewDisposition::Approved,
+                "repair approved",
+            )
+            .await
+            .expect("approve the latest gate");
+
+        let gate = task_completion_gate(&store, &session).await.expect("gate");
+
+        assert!(
+            gate.satisfied,
+            "newest gate should supersede: {:?}",
+            gate.blockers
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_gate_cycle_still_bars_completion_from_iterate() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
+        store
+            .complete_human_interaction_review(
+                &review_id,
+                InteractionReviewDisposition::ChangesRequested,
+                "repair the implementation",
+            )
+            .await
+            .expect("request gate changes");
+        session.enter_iterate().expect("return to iteration");
+
+        let gate = task_completion_gate(&store, &session).await.expect("gate");
+
+        assert!(!gate.satisfied);
+        assert!(gate.reason().contains(review_id.as_str()));
+    }
+
+    #[tokio::test]
     async fn reconcile_advances_completion_once_the_gate_closes() {
         let repo = TestRepo::new();
         let branch = "jack/gate-proof";
         repo.create_branch(branch);
         let base = repo.head_sha();
         let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let review_id = open_gate_review(&store, &mut session, &pr).await;
+        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
         session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
 
         // Reconcile with the review still open: no completion, no writeback.
@@ -9861,7 +9982,7 @@ mod tests {
         repo.create_branch(branch);
         let base = repo.head_sha();
         let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let review_id = open_gate_review(&store, &mut session, &pr).await;
+        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
         // Simulate the W2-151 premature completion: the PM says done while the
         // required review is still open.
         session.set_status(TaskSessionStatus::Completed, "merged and completed");

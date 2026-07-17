@@ -3,6 +3,7 @@ mod support;
 use std::fs;
 use std::process::Command;
 
+use loopflow::child_session::CallerAuthority;
 use loopflow::ops::task::{task_follow_up, task_interrupt, task_status, task_steer};
 use loopflow::task::{AfterMerge, GithubPr, Observation, PrPublication, TaskSessionStatus};
 use loopflow_test_support::TestRepo;
@@ -122,11 +123,19 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
     assert!(matches!(first.observation, Observation::Fresh { .. }));
     assert_eq!(first.status, TaskSessionStatus::Running, "{first:?}");
 
-    let follow_up = task_follow_up("INF-123", "keep going".to_string())
-        .expect("follow-up remains local and durable");
+    let follow_up = task_follow_up(
+        "INF-123",
+        CallerAuthority::Operator,
+        "keep going".to_string(),
+    )
+    .expect("follow-up remains local and durable");
     assert!(matches!(follow_up.observation, Observation::Cached { .. }));
-    task_steer("INF-123", "prioritize the cache proof".to_string())
-        .expect("steer remains local and durable");
+    task_steer(
+        "INF-123",
+        CallerAuthority::Operator,
+        "prioritize the cache proof".to_string(),
+    )
+    .expect("steer remains local and durable");
     let cached = task_status("INF-123").expect("cached status succeeds");
     assert!(matches!(cached.observation, Observation::Cached { .. }));
 
@@ -172,10 +181,18 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
     };
     assert!(reason.contains("Internal Server Error"));
 
-    let follow_up = task_follow_up("INF-123", "work locally".to_string())
-        .expect("follow-up survives REST failure");
-    let interrupt = task_interrupt("INF-123", Some("pause safely".to_string()))
-        .expect("interrupt survives REST failure");
+    let follow_up = task_follow_up(
+        "INF-123",
+        CallerAuthority::Operator,
+        "work locally".to_string(),
+    )
+    .expect("follow-up survives REST failure");
+    let interrupt = task_interrupt(
+        "INF-123",
+        CallerAuthority::Operator,
+        Some("pause safely".to_string()),
+    )
+    .expect("interrupt survives REST failure");
     for observation in [&follow_up.observation, &interrupt.observation] {
         match observation {
             Observation::Degraded {

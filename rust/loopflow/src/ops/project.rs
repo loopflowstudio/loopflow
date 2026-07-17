@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child_session::{
-    project_write_lease_from_env, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration,
-    ChildRef,
+    project_write_lease_from_env, CallerAuthority, ChildCommandEffect, ChildCommandId,
+    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective,
+    ChildProcessGeneration, ChildRef,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -152,6 +152,7 @@ pub(crate) fn require_registered_wave(wave: &str) -> OpsResult<Wave> {
 pub fn project_run(
     repo: &Path,
     project_id: &str,
+    authority: CallerAuthority,
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let directive = normalize_directive(directive)?;
@@ -202,7 +203,7 @@ pub fn project_run(
 
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let mut session = reserve_project_session(&repo, resolved, directive)?;
+    let mut session = reserve_project_session(&repo, resolved, &authority, directive)?;
     if session.status.is_terminal() || session.status.is_process_active() {
         return Ok(session);
     }
@@ -216,6 +217,7 @@ pub fn project_run(
 pub(crate) fn reserve_project_session(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
+    authority: &CallerAuthority,
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let config = load_config_or_default(Some(repo));
@@ -286,7 +288,7 @@ pub(crate) fn reserve_project_session(
         let initial = ChildDirective::initial(
             ChildRef::Project(session.id.clone()),
             directive,
-            project_command_source(&store, &session).await?,
+            validate_project_caller_authority(&store, &session, authority).await?,
         );
         if let Err(error) = store
             .create_project_session_with_directive(&session, &initial)
@@ -323,8 +325,9 @@ pub(crate) fn reserve_project_session(
 pub(crate) fn ensure_project_session_for_task(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
+    authority: &CallerAuthority,
 ) -> OpsResult<ProjectSession> {
-    let session = reserve_project_session(repo, resolved, None)?;
+    let session = reserve_project_session(repo, resolved, authority, None)?;
     if session.status.is_terminal() {
         return Err(project_error(format!(
             "cannot start a Task under {}: Project Session {} is {}; create or select an active Project",
@@ -382,6 +385,7 @@ pub fn project_start(
     repo: &Path,
     title: &str,
     wave: Option<&str>,
+    authority: CallerAuthority,
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let main = ensure_clean_main(repo, "Project start")?;
@@ -403,7 +407,7 @@ pub fn project_start(
             project.project.id, project.project.id
         )));
     }
-    project_run(&main, &project.project.id, directive)
+    project_run(&main, &project.project.id, authority, directive)
 }
 
 pub(crate) async fn launch_project_process(
@@ -751,26 +755,31 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
     })
 }
 
-async fn project_command_source(
+async fn validate_project_caller_authority(
     store: &SharedStore,
     session: &ProjectSession,
+    authority: &CallerAuthority,
 ) -> OpsResult<ChildCommandSource> {
     // A Project target has no project-session caller arm (a Project is not
     // controlled through `LF_PROJECT_SESSION_ID`), so pass `None` for the route:
     // the funnel classifies it by wave / operator / fail-closed only.
     let target = crate::child_session::ChildRef::Project(session.id.clone());
-    super::util::resolve_caller_authority(
+    super::util::validate_caller_authority(
         store,
         &session.wave_id,
         &target,
         None,
         &format!("Project {}", session.launch.project.slug),
+        authority,
     )
     .await
-    .map(crate::child_session::CallerAuthority::into_source)
 }
 
-fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<ProjectControlResult> {
+fn queue_project_command(
+    project: &str,
+    authority: CallerAuthority,
+    kind: ChildCommandKind,
+) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
         let mut session = store
@@ -780,7 +789,7 @@ fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<Pro
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
         let project_id = session.launch.project.id.as_str().to_string();
-        let source = project_command_source(&store, &session).await?;
+        let source = validate_project_caller_authority(&store, &session, &authority).await?;
         let result = super::child::queue_command(
             &store,
             super::child::ChildSession::Project(Box::new(session)),
@@ -792,23 +801,45 @@ fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<Pro
     })
 }
 
-pub fn project_follow_up(project: &str, message: String) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ChildCommandKind::FollowUp { text: message })
+pub fn project_follow_up(
+    project: &str,
+    authority: CallerAuthority,
+    message: String,
+) -> OpsResult<ProjectControlResult> {
+    queue_project_command(
+        project,
+        authority,
+        ChildCommandKind::FollowUp { text: message },
+    )
 }
 
-pub fn project_steer(project: &str, message: String) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ChildCommandKind::Steer { text: message })
+pub fn project_steer(
+    project: &str,
+    authority: CallerAuthority,
+    message: String,
+) -> OpsResult<ProjectControlResult> {
+    queue_project_command(
+        project,
+        authority,
+        ChildCommandKind::Steer { text: message },
+    )
 }
 
 pub fn project_interrupt(
     project: &str,
+    authority: CallerAuthority,
     replacement: Option<String>,
 ) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ChildCommandKind::Interrupt { replacement })
+    queue_project_command(
+        project,
+        authority,
+        ChildCommandKind::Interrupt { replacement },
+    )
 }
 
 pub fn project_resume(
     project: &str,
+    authority: CallerAuthority,
     message: Option<String>,
     model: Option<String>,
     reason: Option<String>,
@@ -822,7 +853,7 @@ pub fn project_resume(
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
         let project_id = session.launch.project.id.as_str().to_string();
-        let source = project_command_source(&store, &session).await?;
+        let source = validate_project_caller_authority(&store, &session, &authority).await?;
         let result = super::child::resume_session(
             &store,
             super::child::ChildSession::Project(Box::new(session)),
@@ -838,6 +869,7 @@ pub fn project_resume(
 
 pub fn project_decide(
     project: &str,
+    authority: CallerAuthority,
     decision_id: &str,
     choice: String,
     message: Option<String>,
@@ -878,6 +910,7 @@ pub fn project_decide(
     }
     queue_project_command(
         project,
+        authority,
         ChildCommandKind::Decide {
             decision_id,
             choice,
@@ -1129,8 +1162,12 @@ pub fn project_acknowledge(
     })
 }
 
-pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ChildCommandKind::Abandon { reason })
+pub fn project_abandon(
+    project: &str,
+    authority: CallerAuthority,
+    reason: String,
+) -> OpsResult<ProjectControlResult> {
+    queue_project_command(project, authority, ChildCommandKind::Abandon { reason })
 }
 
 pub fn project_receipt(

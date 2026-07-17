@@ -1,5 +1,45 @@
 # Make Task command caller authority explicit
 
+## Review iteration: invocation authority is a surface input
+
+The first implementation built the right enum but resolved it in
+`ops::task::command_source` / `ops::project::project_command_source`. That is
+still ambient authority: the CLI passed no authority value, and the ops layer
+read the environment while executing the command.
+
+This iteration moves the ambient read to `bin/lf` dispatch. The invocation
+surface resolves one `CallerAuthority` before calling Task or Project ops:
+
+- an already-resolved top-level `--wave` becomes `CallerAuthority::Wave`
+  directly and wins over inherited markers;
+- otherwise inherited `LF_PROJECT_SESSION_ID` or `LF_WAVE_ID` is parsed once
+  into the typed value;
+- a remaining managed marker without either identity refuses at the surface;
+- no managed markers produces `CallerAuthority::Operator`.
+
+Every Task/Project command that creates a directive or queues a control command
+accepts that typed value. Ops validates it against the target's owning Wave or
+live Project route, converts it to `ChildCommandSource`, and never reads caller
+identity env. Environment remains transport into the CLI process and evidence
+that an incomplete managed identity must fail closed; it is not consulted after
+surface resolution.
+
+Executable proof runs the real `lf task resume` dispatch against one finished
+Task with an open PR:
+
+- inherited Wave authority refuses and creates no command;
+- inherited Project authority refuses and creates no command;
+- a clean operator invocation resumes, proving it is deliberately distinct;
+- explicit `--wave` remains Wave authority even if inherited context says
+  Project, proving the flag is not round-tripped through ambient inference.
+
+The Working-to-Open race gets a test-only interpose point after the Resume is
+persisted and before `ChildSession::launch` re-reads the PR. The test flips the
+fixture PR there, then asserts the command is `Failed` with the bar error, the
+generation is unchanged, and no Persisted/Claimed/Uncertain command remains.
+Removing either the interposed `reject_persisted_child_command` call or its
+state transition makes the regression fail.
+
 ## Problem
 
 A Task/Project control command's authority is decided by *mutable ambient

@@ -223,6 +223,7 @@ async fn resume_task_parent(
         .ok_or_else(|| anyhow!("parent Task Session {task_id} not found"))?;
     crate::ops::task::resume_task_async(
         &session.launch.issue.identifier,
+        crate::child_session::CallerAuthority::Operator,
         handoff_resume_message(outcome),
         None,
         Some("interactive handoff resolved".to_string()),

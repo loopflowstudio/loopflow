@@ -1,11 +1,12 @@
 use std::process::{Command, Output};
 
-use crate::child_session::{CallerAuthority, ChildRef};
-use crate::engine::wave_context::{resolve_managed_wave_name, WaveResolveError, WAVE_ID_ENV};
+use crate::child_session::{CallerAuthority, ChildCommandSource, ChildRef};
+use crate::engine::wave_context::{resolve_managed_wave_name_sync, WAVE_ID_ENV};
 use crate::id::WaveId;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::project_session::ProjectSessionId;
 use crate::store::SharedStore;
+use crate::wave::Wave;
 
 /// Env vars a managed body carries: their presence proves the process is inside
 /// a Wave/Project/Task Session, whatever else was stripped. Each body type
@@ -62,45 +63,86 @@ pub fn normalize_wave_name(value: &str) -> Option<String> {
     }
 }
 
-/// Resolve the ambient context into a typed [`CallerAuthority`] for a Task or
-/// Project control command. One funnel, shared by the Task and Project control
-/// paths so they cannot drift, evaluated top-down:
+/// Resolve caller identity once at the CLI invocation boundary.
 ///
-/// 1. **Project caller** (Task target only): `LF_PROJECT_SESSION_ID` present →
-///    `Project(id)` iff it equals `project_route_current` — the *live* routing
-///    target ([`resolve_task_project_route`](crate::ops::project::resolve_task_project_route)`.current`),
-///    which follows a terminal historical Project Session to its live successor
-///    (W2-243). A mismatch (or a Project caller against a target with no route)
-///    is a loud "cannot control". A Project target skips this arm — a Project is
-///    not controlled through the project-session marker.
-/// 2. **Wave caller**: `LF_WAVE_ID` resolves to the owning wave → `Wave`; a
-///    different registered wave → "cannot control"; unregistered → stale error.
-/// 3. **Inconsistent managed session**: no wave/project resolved but a managed
+/// An explicit, already-resolved `--wave` wins over inherited context and is
+/// converted directly to [`CallerAuthority::Wave`]. Otherwise the inherited
+/// Project/Wave identity is transport into this function and is parsed into the
+/// typed value. No ops function reads it again.
+///
+/// 1. **Explicit Wave**: the resolved `--wave` row → `Wave(id)`.
+/// 2. **Inherited Project**: `LF_PROJECT_SESSION_ID` → `Project(id)`.
+/// 3. **Inherited Wave**: `LF_WAVE_ID` resolves through the registry →
+///    `Wave(id)`; stale identity is a loud error.
+/// 4. **Inconsistent managed session**: no wave/project resolved but a managed
 ///    marker is still present (e.g. a body that stripped `LF_WAVE_ID` but keeps
 ///    `LF_CHANNEL`) → **refuse**, never downgrade to `Operator`.
-/// 4. **Operator**: no managed marker at all → `Operator`.
+/// 5. **Operator**: no managed marker at all → `Operator`.
 ///
 /// This is the fail-closed inversion of the old `NoContext → Human` rule:
 /// removing one variable from a managed body can no longer mint operator
 /// authority.
-pub(crate) async fn resolve_caller_authority(
+pub fn resolve_caller_authority(explicit_wave: Option<&Wave>) -> OpsResult<CallerAuthority> {
+    if let Some(wave) = explicit_wave {
+        return Ok(CallerAuthority::Wave(wave.id().clone()));
+    }
+
+    if let Some(raw) = std::env::var_os("LF_PROJECT_SESSION_ID") {
+        let raw = raw.into_string().map_err(|_| {
+            OpsError::Message("ambient Project Session id is not valid UTF-8".into())
+        })?;
+        let project_id = ProjectSessionId::parse(&raw).map_err(|error| {
+            OpsError::Message(format!("invalid ambient Project Session id: {error}"))
+        })?;
+        return Ok(CallerAuthority::Project(project_id));
+    }
+
+    if std::env::var_os(WAVE_ID_ENV).is_some() {
+        let name = resolve_managed_wave_name_sync(None)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let wave = crate::engine::wave_context::resolve_explicit_wave(&name)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        return Ok(CallerAuthority::Wave(wave.id().clone()));
+    }
+
+    match stray_managed_marker() {
+        Some(marker) => Err(OpsError::Message(format!(
+            "this command runs inside a managed session ({marker} is set) but carries no \
+             resolvable Wave or Project authority. Re-run with the session identity intact, \
+             or from a clean operator shell."
+        ))),
+        None => Ok(CallerAuthority::Operator),
+    }
+}
+
+/// Validate one surface-resolved authority against the command target and
+/// convert it to stored command provenance. This function uses only the typed
+/// value; environment is no longer an authority input below CLI dispatch.
+pub(crate) async fn validate_caller_authority(
     store: &SharedStore,
     owning_wave_id: &WaveId,
     target: &ChildRef,
     project_route_current: Option<&ProjectSessionId>,
     subject: &str,
-) -> OpsResult<CallerAuthority> {
-    // Arm 1: a Project caller, and only for a Task target.
-    if matches!(target, ChildRef::Task(_)) {
-        if let Some(raw) = std::env::var_os("LF_PROJECT_SESSION_ID") {
-            let raw = raw.into_string().map_err(|_| {
-                OpsError::Message("ambient Project Session id is not valid UTF-8".into())
-            })?;
-            let project_id = ProjectSessionId::parse(&raw).map_err(|error| {
-                OpsError::Message(format!("invalid ambient Project Session id: {error}"))
-            })?;
-            return match project_route_current {
-                Some(current) if *current == project_id => Ok(CallerAuthority::Project(project_id)),
+    authority: &CallerAuthority,
+) -> OpsResult<ChildCommandSource> {
+    match authority {
+        CallerAuthority::Operator => Ok(ChildCommandSource::Human),
+        CallerAuthority::Wave(wave_id) if wave_id == owning_wave_id => {
+            Ok(ChildCommandSource::Wave(wave_id.clone()))
+        }
+        CallerAuthority::Wave(wave_id) => {
+            let caller_name = owning_wave_name(store, wave_id).await;
+            let owning_name = owning_wave_name(store, owning_wave_id).await;
+            Err(OpsError::Message(format!(
+                "Wave {caller_name} cannot control {subject} owned by Wave {owning_name}"
+            )))
+        }
+        CallerAuthority::Project(project_id) if matches!(target, ChildRef::Task(_)) => {
+            match project_route_current {
+                Some(current) if current == project_id => {
+                    Ok(ChildCommandSource::Project(project_id.clone()))
+                }
                 Some(current) => Err(OpsError::Message(format!(
                     "Project Session {project_id} cannot control {subject}; \
                      its live routing target is Project Session {current}"
@@ -108,42 +150,11 @@ pub(crate) async fn resolve_caller_authority(
                 None => Err(OpsError::Message(format!(
                     "Project Session {project_id} cannot control {subject}"
                 ))),
-            };
+            }
         }
-    }
-
-    // Arms 2–4: wave, inconsistent managed session, or operator.
-    let env_wave_id = std::env::var(WAVE_ID_ENV).ok();
-    let resolved = resolve_managed_wave_name(Some(store), None, env_wave_id.as_deref()).await;
-
-    match resolved {
-        Ok(name) => match store.get_wave_by_name(&name).await {
-            Ok(Some(row)) if row.id() == owning_wave_id => {
-                Ok(CallerAuthority::Wave(owning_wave_id.clone()))
-            }
-            Ok(Some(_)) => {
-                let owning_name = owning_wave_name(store, owning_wave_id).await;
-                Err(OpsError::Message(format!(
-                    "Wave {name} cannot control {subject} owned by Wave {owning_name}"
-                )))
-            }
-            Ok(None) => Err(OpsError::Message(format!(
-                "ambient wave '{name}' is not registered on this machine; \
-                 the context is stale — re-register the wave or fix {WAVE_ID_ENV}"
-            ))),
-            Err(error) => Err(OpsError::Message(format!(
-                "failed to read wave registry: {error}"
-            ))),
-        },
-        Err(WaveResolveError::NoContext) => match stray_managed_marker() {
-            Some(marker) => Err(OpsError::Message(format!(
-                "{subject}: this command runs inside a managed session ({marker} is set) \
-                 but carries no resolvable Wave or Project authority. Re-run with the \
-                 session identity intact, or from a clean operator shell."
-            ))),
-            None => Ok(CallerAuthority::Operator),
-        },
-        Err(error) => Err(OpsError::Message(error.to_string())),
+        CallerAuthority::Project(project_id) => Err(OpsError::Message(format!(
+            "Project Session {project_id} cannot control {subject}"
+        ))),
     }
 }
 
@@ -174,6 +185,7 @@ mod tests {
     struct ManagedEnvGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+        previous_db_path: Option<std::ffi::OsString>,
     }
 
     impl ManagedEnvGuard {
@@ -187,9 +199,12 @@ mod tests {
                     (var, prior)
                 })
                 .collect();
+            let previous_db_path = std::env::var_os("LF_DB_PATH");
+            std::env::remove_var("LF_DB_PATH");
             Self {
                 _lock: lock,
                 previous,
+                previous_db_path,
             }
         }
     }
@@ -202,23 +217,69 @@ mod tests {
                     None => std::env::remove_var(var),
                 }
             }
+            match &self.previous_db_path {
+                Some(value) => std::env::set_var("LF_DB_PATH", value),
+                None => std::env::remove_var("LF_DB_PATH"),
+            }
         }
     }
 
-    /// The classification matrix: Task and Project controls share
-    /// `resolve_caller_authority`, so this single test proves identical
-    /// classification across every ambient context. Real store rows, no network.
     #[tokio::test]
-    async fn caller_authority_classifies_every_ambient_context() {
+    async fn invocation_authority_distinguishes_explicit_and_inherited_context() {
         let _guard = ManagedEnvGuard::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let database = tmp.path().join("loopflow.db");
+        std::env::set_var("LF_DB_PATH", &database);
+        let store = open_store(&StorageConfig::sqlite(database)).await.unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "infrastructure".into(),
+            tmp.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
 
+        let project = ProjectSessionId::new();
+        std::env::set_var("LF_PROJECT_SESSION_ID", project.as_str());
+        std::env::set_var(WAVE_ID_ENV, wave.id().as_str());
+        assert_eq!(
+            resolve_caller_authority(Some(&wave)).unwrap(),
+            CallerAuthority::Wave(wave.id().clone()),
+            "explicit --wave must win without round-tripping through inherited Project context"
+        );
+        assert_eq!(
+            resolve_caller_authority(None).unwrap(),
+            CallerAuthority::Project(project.clone())
+        );
+
+        std::env::remove_var("LF_PROJECT_SESSION_ID");
+        assert_eq!(
+            resolve_caller_authority(None).unwrap(),
+            CallerAuthority::Wave(wave.id().clone())
+        );
+
+        std::env::remove_var(WAVE_ID_ENV);
+        assert_eq!(
+            resolve_caller_authority(None).unwrap(),
+            CallerAuthority::Operator
+        );
+
+        std::env::set_var("LF_CHANNEL", "infrastructure");
+        let message = resolve_caller_authority(None).unwrap_err().to_string();
+        assert!(
+            message.contains("managed session") && message.contains("LF_CHANNEL"),
+            "stray managed evidence must fail closed: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn wave_authority_is_validated_against_the_target() {
+        let _guard = ManagedEnvGuard::new();
         let tmp = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
                 .await
                 .unwrap(),
         );
-
         let owning = Wave::new(
             WaveId::new(),
             "infrastructure".into(),
@@ -231,81 +292,32 @@ mod tests {
         );
         store.create_wave(&owning).await.unwrap();
         store.create_wave(&foreign).await.unwrap();
-        let owning_id = owning.id().clone();
-        let subject = "Task INF-123";
-        // A Task target with no parent Project route supplied: these cases
-        // exercise the wave/operator/fail-closed arms, not the Project arm.
         let target = ChildRef::Task(crate::task::TaskSessionId::new());
-        let resolve = |store: &SharedStore, owning: &WaveId| {
-            let store = store.clone();
-            let owning = owning.clone();
-            let target = target.clone();
-            async move { resolve_caller_authority(&store, &owning, &target, None, subject).await }
-        };
 
-        // 1. Registered name (== owning) → Wave
-        std::env::set_var(WAVE_ID_ENV, "infrastructure");
-        assert_eq!(
-            resolve(&store, &owning_id).await.unwrap(),
-            CallerAuthority::Wave(owning_id.clone())
-        );
+        let source = validate_caller_authority(
+            &store,
+            owning.id(),
+            &target,
+            None,
+            "Task INF-123",
+            &CallerAuthority::Wave(owning.id().clone()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(source, ChildCommandSource::Wave(owning.id().clone()));
 
-        // 2. Registered UUID (== owning) → Wave
-        std::env::set_var(WAVE_ID_ENV, owning_id.as_str());
-        assert_eq!(
-            resolve(&store, &owning_id).await.unwrap(),
-            CallerAuthority::Wave(owning_id.clone())
-        );
-
-        // 3. Stale UUID (valid UUID, not in registry) → loud error
-        std::env::set_var(WAVE_ID_ENV, WaveId::new().as_str());
-        let msg = resolve(&store, &owning_id).await.unwrap_err().to_string();
-        assert!(
-            msg.contains("stale"),
-            "stale UUID should mention stale: {msg}"
-        );
-
-        // 4. Stale name (not registered) → loud error, distinct from foreign
-        std::env::set_var(WAVE_ID_ENV, "ghost-wave");
-        let msg = resolve(&store, &owning_id).await.unwrap_err().to_string();
-        assert!(
-            msg.contains("not registered"),
-            "stale name should mention not registered: {msg}"
-        );
-
-        // 5. No managed marker at all → Operator (was Human under the old rule).
-        std::env::remove_var(WAVE_ID_ENV);
-        assert_eq!(
-            resolve(&store, &owning_id).await.unwrap(),
-            CallerAuthority::Operator
-        );
-
-        // 6. A stray managed marker with no resolvable wave → fail closed. This
-        //    is the ENG-19 escape (`env -u LF_WAVE_ID` from a wave body leaves
-        //    LF_CHANNEL): it must refuse, never downgrade to Operator.
-        std::env::set_var("LF_CHANNEL", "infrastructure");
-        let msg = resolve(&store, &owning_id).await.unwrap_err().to_string();
-        assert!(
-            msg.contains("managed session") && msg.contains("LF_CHANNEL"),
-            "stray marker should fail closed naming the marker: {msg}"
-        );
-        std::env::remove_var("LF_CHANNEL");
-
-        // 7. Foreign registered wave (by name) → "cannot control" error
-        std::env::set_var(WAVE_ID_ENV, "product");
-        let msg = resolve(&store, &owning_id).await.unwrap_err().to_string();
-        assert!(
-            msg.contains("cannot control"),
-            "foreign wave should mention cannot control: {msg}"
-        );
-
-        // 8. Foreign registered wave (by UUID) → "cannot control" error
-        std::env::set_var(WAVE_ID_ENV, foreign.id().as_str());
-        let msg = resolve(&store, &owning_id).await.unwrap_err().to_string();
-        assert!(
-            msg.contains("cannot control"),
-            "foreign wave UUID should mention cannot control: {msg}"
-        );
+        let message = validate_caller_authority(
+            &store,
+            owning.id(),
+            &target,
+            None,
+            "Task INF-123",
+            &CallerAuthority::Wave(foreign.id().clone()),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(message.contains("cannot control"), "{message}");
     }
 
     /// A Project caller is validated against the *live* routing target, not the
@@ -317,8 +329,6 @@ mod tests {
     /// would reject the successor here.
     #[tokio::test]
     async fn project_caller_is_validated_against_the_live_route() {
-        let _guard = ManagedEnvGuard::new();
-
         let tmp = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
@@ -338,21 +348,31 @@ mod tests {
         let successor = ProjectSessionId::new(); // the live routing target
         let target = ChildRef::Task(crate::task::TaskSessionId::new());
 
-        // The live successor's command controls.
-        std::env::set_var("LF_PROJECT_SESSION_ID", successor.as_str());
-        let authority =
-            resolve_caller_authority(&store, &owning_id, &target, Some(&successor), subject)
-                .await
-                .expect("the live routing target controls the Task");
-        assert_eq!(authority, CallerAuthority::Project(successor.clone()));
+        let source = validate_caller_authority(
+            &store,
+            &owning_id,
+            &target,
+            Some(&successor),
+            subject,
+            &CallerAuthority::Project(successor.clone()),
+        )
+        .await
+        .expect("the live routing target controls the Task");
+        assert_eq!(source, ChildCommandSource::Project(successor.clone()));
 
         // The terminal historical predecessor's command is refused, naming the
         // live target — a comparison against the historical id would accept it.
-        std::env::set_var("LF_PROJECT_SESSION_ID", historical.as_str());
-        let msg = resolve_caller_authority(&store, &owning_id, &target, Some(&successor), subject)
-            .await
-            .unwrap_err()
-            .to_string();
+        let msg = validate_caller_authority(
+            &store,
+            &owning_id,
+            &target,
+            Some(&successor),
+            subject,
+            &CallerAuthority::Project(historical),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(
             msg.contains("cannot control") && msg.contains(successor.as_str()),
             "a stale predecessor is refused, naming the live target: {msg}"

@@ -20,6 +20,46 @@ use super::{OpsError, OpsResult};
 const CHILD_STARTUP_GRACE_SECONDS: i64 = 10;
 pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 
+#[cfg(test)]
+struct BeforeLaunchHook {
+    target: ChildRef,
+    callback: Box<dyn FnOnce() -> OpsResult<()> + Send>,
+}
+
+#[cfg(test)]
+fn _before_launch_hook() -> &'static std::sync::Mutex<Option<BeforeLaunchHook>> {
+    static HOOK: std::sync::OnceLock<std::sync::Mutex<Option<BeforeLaunchHook>>> =
+        std::sync::OnceLock::new();
+    HOOK.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[cfg(test)]
+fn _set_before_launch_hook(
+    target: ChildRef,
+    callback: impl FnOnce() -> OpsResult<()> + Send + 'static,
+) {
+    let mut hook = _before_launch_hook()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *hook = Some(BeforeLaunchHook {
+        target,
+        callback: Box::new(callback),
+    });
+}
+
+#[cfg(test)]
+fn _run_before_launch_hook(target: &ChildRef) -> OpsResult<()> {
+    let mut guard = _before_launch_hook()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.as_ref().is_none_or(|hook| hook.target != *target) {
+        return Ok(());
+    }
+    let hook = guard.take().expect("matching test hook is present");
+    drop(guard);
+    (hook.callback)()
+}
+
 pub(crate) fn child_body_reservation_is_fresh(process: &ChildProcessGeneration) -> bool {
     if process.state != crate::child_session::ChildLeaseState::Reserved {
         return false;
@@ -343,6 +383,7 @@ impl ChildSession {
         command_id: ChildCommandId,
         state: ChildCommandState,
         effect: Option<ChildCommandEffect>,
+        error: Option<String>,
     ) -> OpsResult<()> {
         match self {
             Self::Project(session) => store
@@ -352,7 +393,7 @@ impl ChildSession {
                         command_id,
                         state,
                         effect,
-                        error: None,
+                        error,
                     },
                 )
                 .await
@@ -365,7 +406,7 @@ impl ChildSession {
                         command_id,
                         state,
                         effect,
-                        error: None,
+                        error,
                     },
                 )
                 .await
@@ -801,7 +842,7 @@ pub(crate) async fn queue_command(
 
     for command_id in superseded {
         session
-            .append_command_event(store, command_id, ChildCommandState::Superseded, None)
+            .append_command_event(store, command_id, ChildCommandState::Superseded, None, None)
             .await?;
     }
     if let Some(directive) = &directive {
@@ -813,8 +854,14 @@ pub(crate) async fn queue_command(
             command.id.clone(),
             ChildCommandState::Persisted,
             command.effect,
+            None,
         )
         .await?;
+
+    // The unit fixture interposes here to make the real post-persist/pre-launch
+    // PR race deterministic. Production builds contain no hook.
+    #[cfg(test)]
+    _run_before_launch_hook(&command.target)?;
 
     if let ChildCommandKind::Abandon { reason } = &command.kind {
         if !session.is_process_active() {
@@ -823,7 +870,13 @@ pub(crate) async fn queue_command(
                 .await
                 .map_err(child_error)?;
             session
-                .append_command_event(store, command.id.clone(), ChildCommandState::Accepted, None)
+                .append_command_event(
+                    store,
+                    command.id.clone(),
+                    ChildCommandState::Accepted,
+                    None,
+                    None,
+                )
                 .await?;
             session.abandon(store, reason).await?;
             let receipt = read_receipt(store, &command.id).await?;
@@ -843,7 +896,13 @@ pub(crate) async fn queue_command(
             .await
             .map_err(child_error)?;
         session
-            .append_command_event(store, command.id.clone(), ChildCommandState::Accepted, None)
+            .append_command_event(
+                store,
+                command.id.clone(),
+                ChildCommandState::Accepted,
+                None,
+                None,
+            )
             .await?;
         session.record_interrupt_of_inactive_process(store).await?;
         let receipt = read_receipt(store, &command.id).await?;
@@ -870,6 +929,7 @@ pub(crate) async fn queue_command(
                         command.id.clone(),
                         ChildCommandState::Failed,
                         command.effect,
+                        Some(bar.to_string()),
                     )
                     .await?;
             }
@@ -1024,12 +1084,14 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::store::{open_store, StorageConfig};
-    use crate::task::{GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
+    use crate::task::{
+        GithubPr, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSessionStatus,
+    };
     use crate::wave::Wave;
 
     use super::{
-        child_body_reservation_is_fresh, handoff_request, queue_command, relaunch_on_duplicate,
-        resume_session, revoke_and_reap_child_body, ChildSession,
+        _set_before_launch_hook, child_body_reservation_is_fresh, handoff_request, queue_command,
+        relaunch_on_duplicate, resume_session, revoke_and_reap_child_body, ChildSession,
     };
 
     #[test]
@@ -1477,6 +1539,95 @@ mod tests {
         );
         let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
         assert_eq!(persisted.latest_process, None);
+    }
+
+    #[tokio::test]
+    async fn a_working_to_open_race_rejects_the_persisted_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+
+        let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let generation_before = task.latest_process.as_ref().map(|body| body.generation);
+        let pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+        let target = ChildRef::Task(task.id.clone());
+        let task_id = task.id.clone();
+        let flip_store = store.clone();
+        let mut open_pr = pr;
+
+        _set_before_launch_hook(target.clone(), move || {
+            std::thread::spawn(move || {
+                let runtime = tokio::runtime::Runtime::new().unwrap();
+                runtime.block_on(async move {
+                    open_pr.publication = Some(PrPublication {
+                        requested_at: open_pr.updated_at,
+                        after_merge: crate::task::AfterMerge::Review,
+                        next_slug: None,
+                        github: Some(GithubPr {
+                            number: 1080,
+                            url: "https://github.com/loopflow/loopflow/pull/1080".to_string(),
+                            head_sha: None,
+                        }),
+                    });
+                    flip_store.update_task_pr(&open_pr).await.unwrap();
+                });
+            })
+            .join()
+            .unwrap();
+            Ok(())
+        });
+
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task)),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Resume { message: None },
+        )
+        .await
+        .expect_err("the launch re-read must observe the newly open PR");
+        let bar = error.to_string();
+        assert!(bar.contains("#1080") && bar.contains("reviewer"), "{bar}");
+
+        let commands = store.list_child_commands(&target).await.unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].state, ChildCommandState::Failed);
+        assert_eq!(commands[0].error.as_deref(), Some(bar.as_str()));
+        assert!(
+            commands.iter().all(|command| !matches!(
+                command.state,
+                ChildCommandState::Persisted
+                    | ChildCommandState::Claimed
+                    | ChildCommandState::Uncertain
+            )),
+            "the raced Resume must leave no live or uncertain orphan: {commands:?}"
+        );
+
+        let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted
+                .latest_process
+                .as_ref()
+                .map(|body| body.generation),
+            generation_before,
+            "launch bars before reserving a generation"
+        );
+        let events = store.task_events_after(&task_id, 0).await.unwrap();
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            TaskEventKind::CommandChanged {
+                state: ChildCommandState::Failed,
+                error: Some(recorded),
+                ..
+            } if recorded == &bar
+        )));
     }
 
     #[tokio::test]

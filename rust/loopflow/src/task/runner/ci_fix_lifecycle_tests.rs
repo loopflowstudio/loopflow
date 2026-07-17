@@ -2631,10 +2631,17 @@ async fn a_scratch_clear_only_wake_never_preempts_a_review_wait() {
         ),
     )
     .await;
-    assert!(
-        outcome.is_err(),
-        "an unrepairable head must leave the review waiting, not release it"
-    );
+    // Only the timeout is correct here: nothing releases the review, so the
+    // runner must still be waiting. `is_err()` alone could not say which way it
+    // went wrong -- a runner that *failed* returns `Ok(Err(..))` and reads the
+    // same as a runner that finished.
+    match outcome {
+        Err(_elapsed) => {}
+        Ok(Ok(())) => panic!("the runner returned instead of leaving the review waiting"),
+        Ok(Err(error)) => {
+            panic!("the runner failed instead of leaving the review waiting: {error:#}")
+        }
+    }
 
     assert_eq!(
         interrupts.load(Ordering::SeqCst),

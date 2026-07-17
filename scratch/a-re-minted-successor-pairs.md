@@ -290,6 +290,21 @@ So a completion committed by **any other actor** between the snapshot load and
 the mint is invisible to all three fences and to the write. That is exactly
 10291→10293: completed 08:18:25, minted 08:18:29, four seconds later.
 
+**Two conditions were required, not one** (merging the reviewer's read with
+mine — both are load-bearing):
+
+1. The caller's **stale `session.status`** passed the terminal fence at 3499.
+   Necessary: a fresh read would have returned `Ok(None)` there and no mint could
+   follow.
+2. The discard in the terminal write had just **deleted the row**, so the early
+   return at 3502-3508 had no active PR to hand back and execution fell through
+   to the mint path. 3502 is not a fence — it is a cache hit; **3499 is the
+   fence**, and it read a snapshot.
+
+This also corrects an earlier revision of `questions.md` which said "nothing
+re-mints the bad row". That is true of the **current** state, where a row exists
+and 3502 returns it. It was not true in the window the discard opened.
+
 ### (b) is true — "no replacement row" is unsatisfiable, and the honest assertion
 
 The reviewer's walkthrough is correct. My fix changes what the minted row

@@ -915,12 +915,13 @@ fn strand_verdict(process: &ChildProcessGeneration) -> StrandVerdict {
         // on a CAS that cannot pass, and surface a generic exhaustion instead of
         // the real cause. Say the real cause the first time.
         //
-        // Finishing such a lease (verifying the process group is truly gone, then
-        // releasing it) is the reaping task's job, not recovery's.
+        // The release runs before this plan, so a lease still at `revoked` here
+        // is one whose body could not be proven gone — present, or unprovable.
+        // A resume cannot help that; only the body actually leaving can.
         ChildLeaseState::Revoked => StrandVerdict::Terminal(format!(
-            "body generation {} is pinned by a lease stuck at `revoked`: its reap never completed, \
-             so no new generation can be reserved. The process group may already be gone; \
-             this needs the lease released, not a resume",
+            "body generation {} is pinned by a lease stuck at `revoked`: its reap never completed \
+             and its body could not be proven gone, so no new generation can be reserved. \
+             The lease releases itself once the body is verifiably absent",
             process.generation
         )),
         ChildLeaseState::Finished => match &process.outcome {

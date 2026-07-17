@@ -68,16 +68,69 @@ pub(crate) async fn reap_revoked_child_body(
     target: &ChildRef,
     revoked: ChildProcessGeneration,
 ) -> OpsResult<ChildProcessGeneration> {
-    crate::engine::process::reap_child_process(&revoked, Duration::from_secs(2))
+    if let Err(error) = crate::engine::process::reap_child_process(&revoked, Duration::from_secs(2))
         .await
-        .map_err(child_error)?;
+        .map_err(child_error)
+    {
+        // The kill failed, and this used to return here — leaving the lease at
+        // `revoked` forever, because nothing ever re-examines it and the reserve
+        // CAS accepts only NULL or `finished`. But a lease exists to bar a second
+        // body, and a body we can prove is gone cannot run anything, so it has no
+        // claim on the lease whatever happened during the reap. Release on proof;
+        // anything short of proof keeps the lease and surfaces the real failure.
+        // ("refusing to reap current process group" self-classifies as `Present`:
+        // that group is us.)
+        return match release_dead_revoked_child_body(store, target, &revoked).await? {
+            Some(finished) => Ok(finished),
+            None => Err(error),
+        };
+    }
+    finish_revoked_child_body(store, target, revoked.generation).await
+}
+
+/// Release a lease stuck at `revoked` whose body is provably gone.
+///
+/// `Some(finished)` only when the body probes [`Presence::Absent`]; `None` when
+/// it is present or unprovable, which leaves the lease exactly as it was.
+///
+/// This never re-signals. A stuck lease is old by construction and a pid is a
+/// recycled resource, so retrying the kill would mean sending TERM to whatever
+/// inherited the number — the release path would become a way to end a
+/// stranger's work. And if the body is provably gone there is nothing left to
+/// kill anyway.
+///
+/// The store's CAS pins both the generation and `process_lease_state='revoked'`,
+/// so only the same generation still awaiting reap can become `finished`.
+pub(crate) async fn release_dead_revoked_child_body(
+    store: &SharedStore,
+    target: &ChildRef,
+    revoked: &ChildProcessGeneration,
+) -> OpsResult<Option<ChildProcessGeneration>> {
+    if revoked.state != crate::child_session::ChildLeaseState::Revoked {
+        return Ok(None);
+    }
+    if crate::engine::process::probe_child_body_presence(revoked).await
+        != crate::engine::process::Presence::Absent
+    {
+        return Ok(None);
+    }
+    finish_revoked_child_body(store, target, revoked.generation)
+        .await
+        .map(Some)
+}
+
+async fn finish_revoked_child_body(
+    store: &SharedStore,
+    target: &ChildRef,
+    generation: u32,
+) -> OpsResult<ChildProcessGeneration> {
     match target {
         ChildRef::Project(session_id) => store
-            .finish_revoked_project_process(session_id, revoked.generation)
+            .finish_revoked_project_process(session_id, generation)
             .await
             .map_err(child_error),
         ChildRef::Task(session_id) => store
-            .finish_revoked_task_process(session_id, revoked.generation)
+            .finish_revoked_task_process(session_id, generation)
             .await
             .map_err(child_error),
     }

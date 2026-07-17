@@ -425,6 +425,26 @@ pub(crate) async fn launch_project_process(
         tmux_session_slug(&session.launch.project.slug),
         &session.id.as_str()[3..11]
     );
+    // A lease stuck at `revoked` bars every future generation — the reserve CAS
+    // accepts only NULL or `finished` — and nothing else revisits it. Release it
+    // when the body is provably gone; a present or unprovable body keeps its
+    // lease. Same boundary as the Task twin.
+    if let Some(revoked) = session
+        .latest_process
+        .as_ref()
+        .filter(|process| process.state == crate::child_session::ChildLeaseState::Revoked)
+        .cloned()
+    {
+        if let Some(finished) = super::child::release_dead_revoked_child_body(
+            store,
+            &ChildRef::Project(session.id.clone()),
+            &revoked,
+        )
+        .await?
+        {
+            session.latest_process = Some(finished);
+        }
+    }
     let from = session.status;
     let mut launch = session.clone();
     // The reserved generation records no provenance: nothing has run yet. The

@@ -74,17 +74,26 @@ $ lf usage --refresh                     # provider-observed, not inferred
 codex/manabot-eng   weekly 80%  resets in 6d   (poll, observed 2026-07-16 23:16)
 
 $ lf route default set codex manabot-eng engineering    # strained account, ordered FIRST
-$ lf -m codex --account-explain -- true
-route: default → [manabot-eng, engineering]
-  manabot-eng   demoted: weekly 80% >= 75% strained, resets in 6d
-  engineering   weekly 0%
-selected: codex/engineering
+$ lf route show --explain
+codex   (default route)
+  1. manabot-eng   weekly 80%  → demoted: >= 75% strained, resets in 6d
+  2. engineering   weekly  0%
+  effective order: engineering, manabot-eng        # health reorders the walk, not the route
+  next selection:  codex/engineering
+
+$ lf -m codex -- true                              # a real run, no fixture
+$ sqlite3 ~/.lf/loopflow.db "SELECT account_id, last_selected_at FROM \
+    provider_accounts WHERE provider='codex' ORDER BY last_selected_at DESC LIMIT 1"
+engineering|<just now>                             # the runtime agrees with the explanation
 ```
 
 Ordered first, and still not chosen — because the provider says it is nearly
 spent. That is the whole thesis in one line: order is intent, health is
 observation, and the account that spends is the one that can. It is also
-falsifiable: put `manabot-eng` at the head, and if it gets selected, PR 3 failed.
+falsifiable twice over: `--explain` must *say* engineering, and
+`last_selected_at` must *prove* the run took it. If `manabot-eng` gets selected,
+PR 3 failed.
+
 Re-read the live windows before landing (`sqlite3 ~/.lf/loopflow.db "SELECT
 provider, account_id, window, used_percent FROM provider_account_limits ORDER BY
 used_percent DESC"`) — if the fleet's strain has moved, the demo picks whichever
@@ -225,7 +234,7 @@ profile is ever invented to use an account.
 | Today | Target |
 |---|---|
 | `lf profile route set --default X --backup Y` | `lf route set claude <acct>…` (repo), `lf route default set codex <acct>…` (default) |
-| `lf profile route show` | `lf route show` (repo route, or the default route with a note) |
+| `lf profile route show` | `lf route show` (repo route, or the default route with a note); `--explain` adds the health verdict per account, the effective order after demotion, and what would be selected next (PR 3) |
 | `lf auth connect claude --profile X` | `lf auth connect claude <account>` |
 | `lf profile account set X claude <acct>` | `lf auth access set claude <acct> --profile A --profile B` (ordered), `lf auth access add/rm` |
 | `lf profile create X --chrome-profile X` | `lf profile create --chrome-profile "Profile 8" [--as <name>] [--expects <email>]` |
@@ -348,8 +357,9 @@ It is also the demo.
 `scripts/demo_profile_routing.py` rewritten account-first.
 
 **In scope (PR 3 — health policy):** utilization demotion from
-`provider_account_limits`; `lf usage` / `lf auth accounts` account-first
-presentation with the strained marker. Independent of the arrow: it changes
+`provider_account_limits` behind `STRAINED_UTILIZATION_PERCENT`; `lf route show
+--explain`; `lf usage` / `lf auth accounts` account-first presentation with the
+strained marker. Independent of the arrow: it changes
 which eligible account wins, not who owns whom, and it is separately observable
 (`manabot-eng` at 80% stops being picked before the provider refuses).
 

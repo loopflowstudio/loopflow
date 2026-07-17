@@ -1421,6 +1421,64 @@ mod tests {
         assert_eq!(persisted.latest_process, None);
     }
 
+    /// Move 2 (fast bar): a supervisor `Resume` of a submitted Task refuses
+    /// *before* creating any command, so the steady-state open-PR case — the
+    /// exact W2-319 shape — leaves the command ledger empty rather than stranding
+    /// an inert `Persisted` row. Sabotage that deletes the fast bar would create
+    /// the command, then `launch` would bar, leaving it `Persisted` and failing
+    /// the `is_empty` assertion.
+    #[tokio::test]
+    async fn a_supervisor_resume_of_an_open_pr_refuses_before_creating_a_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+
+        let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let mut pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: crate::task::AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 1077,
+                url: "https://github.com/loopflow/loopflow/pull/1077".to_string(),
+                head_sha: None,
+            }),
+        });
+        store.update_task_pr(&pr).await.unwrap();
+        let target = ChildRef::Task(task.id.clone());
+        let task_id = task.id.clone();
+
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task)),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Resume { message: None },
+        )
+        .await
+        .expect_err("a supervisor cannot restart a submitted Task");
+        assert!(
+            error.to_string().contains("#1077") && error.to_string().contains("reviewer"),
+            "the refusal names the open PR and the real owner: {error}"
+        );
+
+        // Nothing was queued: no command row, and no generation started.
+        assert!(
+            store.list_child_commands(&target).await.unwrap().is_empty(),
+            "the barred supervisor Resume left no command in the ledger"
+        );
+        let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
+        assert_eq!(persisted.latest_process, None);
+    }
+
     #[tokio::test]
     async fn ci_fix_wake_refuses_an_open_pr_without_a_warranted_failure() {
         let dir = tempfile::tempdir().unwrap();

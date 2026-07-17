@@ -307,4 +307,55 @@ mod tests {
             "foreign wave UUID should mention cannot control: {msg}"
         );
     }
+
+    /// A Project caller is validated against the *live* routing target, not the
+    /// historical `project_session_id`. W2-243 routes supervision to a live
+    /// successor when the launcher Project Session is terminal, so the successor
+    /// must be able to control the Task and the terminal predecessor must not.
+    /// This drives the funnel's arm 1 comparison directly by supplying
+    /// `route.current`; sabotage that compares against the historical id instead
+    /// would reject the successor here.
+    #[tokio::test]
+    async fn project_caller_is_validated_against_the_live_route() {
+        let _guard = ManagedEnvGuard::new();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let owning = Wave::new(
+            WaveId::new(),
+            "infrastructure".into(),
+            tmp.path().display().to_string(),
+        );
+        store.create_wave(&owning).await.unwrap();
+        let owning_id = owning.id().clone();
+        let subject = "Task INF-123";
+
+        let historical = ProjectSessionId::new(); // the terminal launcher
+        let successor = ProjectSessionId::new(); // the live routing target
+        let target = ChildRef::Task(crate::task::TaskSessionId::new());
+
+        // The live successor's command controls.
+        std::env::set_var("LF_PROJECT_SESSION_ID", successor.as_str());
+        let authority =
+            resolve_caller_authority(&store, &owning_id, &target, Some(&successor), subject)
+                .await
+                .expect("the live routing target controls the Task");
+        assert_eq!(authority, CallerAuthority::Project(successor.clone()));
+
+        // The terminal historical predecessor's command is refused, naming the
+        // live target — a comparison against the historical id would accept it.
+        std::env::set_var("LF_PROJECT_SESSION_ID", historical.as_str());
+        let msg = resolve_caller_authority(&store, &owning_id, &target, Some(&successor), subject)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            msg.contains("cannot control") && msg.contains(successor.as_str()),
+            "a stale predecessor is refused, naming the live target: {msg}"
+        );
+    }
 }

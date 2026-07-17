@@ -1906,6 +1906,32 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Pre-delivery rejection: transition a still-`persisted` command to
+    /// `failed`, recording `error`. Distinct from [`fail_child_command`], which
+    /// owns the post-delivery `claimed`/`delivering` → `failed` transition. The
+    /// `WHERE state = 'persisted'` clause means this can only terminalize a
+    /// command that was never claimed, so it never races a body that has since
+    /// taken ownership — a `changed == 0` is a genuine "no longer persisted".
+    pub fn reject_persisted_child_command(
+        &self,
+        command_id: &ChildCommandId,
+        error: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE child_commands
+             SET state = 'failed', error = ?2
+             WHERE id = ?1 AND state = 'persisted'",
+            params![command_id.as_str(), error],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "child command {command_id} is not persisted; cannot pre-delivery reject"
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn fail_child_command_for_lease(
         &self,
         target: &ChildRef,

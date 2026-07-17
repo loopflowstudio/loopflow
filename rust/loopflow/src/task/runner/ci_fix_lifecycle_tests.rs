@@ -61,15 +61,19 @@ use crate::wave::Wave;
 /// These are not incidental: a live `lf __task` exports them, and production
 /// reads them on the exact paths this proof drives. `ops/task.rs` gates task
 /// control on `LF_PROJECT_SESSION_ID` before it consults the ambient Wave, and
-/// `resolve_child_command_source` refuses when the ambient Wave does not own the
+/// `resolve_caller_authority` refuses when the ambient Wave does not own the
 /// Task ("Wave X cannot control Task Y"). Left set, this suite would fail inside
 /// a Task Session and pass in CI.
-const AMBIENT_TASK_ENV: [&str; 5] = [
+const AMBIENT_TASK_ENV: [&str; 6] = [
     "LF_TASK_SESSION_ID",
     "LF_TASK_GENERATION",
     "LF_TASK_LEASE_TOKEN",
     "LF_WAVE_ID",
     "LF_PROJECT_SESSION_ID",
+    // A managed marker in `resolve_caller_authority`'s fail-closed set: left set
+    // (e.g. running the suite inside a wave body), a no-wave command would refuse
+    // instead of classifying Operator.
+    "LF_CHANNEL",
 ];
 
 // This guard deliberately does NOT touch `LF_HOME`/`LF_CONTROL_*`. An earlier

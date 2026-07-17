@@ -670,6 +670,21 @@ pub(crate) async fn queue_command(
         _ => LaunchIntent::Supervisor,
     };
 
+    // Move 2 (fast bar): a supervisor `Resume` of a non-active body that is
+    // already barred (open PR / publishing / terminal) refuses *before* any
+    // command row is created, so the steady-state refusal — the common W2-319
+    // case where the PR is already Open — writes nothing to the ledger.
+    // (Operator `ExplicitResume` is abandon-only and answers review; `CiFix`
+    // owns its own persist-then-bar attribution.)
+    if matches!(kind, ChildCommandKind::Resume { .. })
+        && launch_intent == LaunchIntent::Supervisor
+        && !session.is_process_active()
+    {
+        if let Some(bar) = session.supervisor_restart_bar(store).await? {
+            return Err(child_error(bar));
+        }
+    }
+
     let command = ChildCommand::new(session.target(), source, kind);
     // A ci-fix wake is fire-and-forget like a follow-up: the supervision pass
     // that observed the failure must not block on a body's boot.
@@ -836,7 +851,30 @@ pub(crate) async fn queue_command(
     }
 
     if !session.is_process_active() {
-        session.launch(store, launch_intent).await?;
+        if let Err(bar) = session.launch(store, launch_intent).await {
+            // Move 2 (terminalize on race): the fast bar and `launch`'s own bar
+            // read the PR at different instants, so a `Working → Open` flip after
+            // creation can leave this just-created supervisor `Resume` barred and
+            // `Persisted`. `launch` bars *before* reserving a generation, so the
+            // generation is unchanged; terminalize the still-`Persisted` command
+            // to `Failed` (pre-delivery rejection — `fail_child_command` matches
+            // only `claimed`/`delivering` and cannot) so no orphan remains.
+            if matches!(&command.kind, ChildCommandKind::Resume { .. }) {
+                store
+                    .reject_persisted_child_command(&command.id, bar.to_string())
+                    .await
+                    .map_err(child_error)?;
+                session
+                    .append_command_event(
+                        store,
+                        command.id.clone(),
+                        ChildCommandState::Failed,
+                        command.effect,
+                    )
+                    .await?;
+            }
+            return Err(bar);
+        }
     }
     let mut receipt = resolve_receipt(store, &command.id, wait_for_resolution).await?;
     if matches!(

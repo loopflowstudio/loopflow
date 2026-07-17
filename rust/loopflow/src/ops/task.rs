@@ -385,32 +385,31 @@ async fn command_source(
     store: &SharedStore,
     session: &TaskSession,
 ) -> OpsResult<ChildCommandSource> {
-    match std::env::var("LF_PROJECT_SESSION_ID") {
-        Ok(value) => {
-            let project_id =
-                crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
-                    task_error(format!("invalid ambient Project Session id: {error}"))
-                })?;
-            return if session.project_session_id == project_id {
-                Ok(ChildCommandSource::Project(project_id))
-            } else {
-                Err(task_error(format!(
-                    "Project Session {project_id} cannot control Task {}; its Project Session is {}",
-                    session.launch.issue.identifier, session.project_session_id
-                )))
-            };
-        }
-        Err(std::env::VarError::NotPresent) => {}
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(task_error("ambient Project Session id is not valid UTF-8"))
-        }
-    }
-    super::util::resolve_child_command_source(
+    let subject = format!("Task {}", session.launch.issue.identifier);
+    let target = crate::child_session::ChildRef::Task(session.id.clone());
+    // A Project caller is validated against the *live* routing target, not the
+    // historical `project_session_id` (W2-243 routes supervision to a live
+    // successor). Resolve the route only when a Project caller is actually
+    // present: a Wave or operator command must not fail merely because the
+    // parent Project chain is dead.
+    let route_current = if std::env::var_os("LF_PROJECT_SESSION_ID").is_some() {
+        Some(
+            super::project::resolve_task_project_route(store.as_ref(), session)
+                .await?
+                .current,
+        )
+    } else {
+        None
+    };
+    super::util::resolve_caller_authority(
         store,
         &session.wave_id,
-        &format!("Task {}", session.launch.issue.identifier),
+        &target,
+        route_current.as_ref(),
+        &subject,
     )
     .await
+    .map(crate::child_session::CallerAuthority::into_source)
 }
 
 fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {

@@ -755,12 +755,19 @@ async fn project_command_source(
     store: &SharedStore,
     session: &ProjectSession,
 ) -> OpsResult<ChildCommandSource> {
-    super::util::resolve_child_command_source(
+    // A Project target has no project-session caller arm (a Project is not
+    // controlled through `LF_PROJECT_SESSION_ID`), so pass `None` for the route:
+    // the funnel classifies it by wave / operator / fail-closed only.
+    let target = crate::child_session::ChildRef::Project(session.id.clone());
+    super::util::resolve_caller_authority(
         store,
         &session.wave_id,
+        &target,
+        None,
         &format!("Project {}", session.launch.project.slug),
     )
     .await
+    .map(crate::child_session::CallerAuthority::into_source)
 }
 
 fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<ProjectControlResult> {

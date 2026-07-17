@@ -2868,7 +2868,12 @@ async fn reconcile_task_pr_with_authority(
             })
         }
         "closed" => {
-            pr.abandoned_at = Some(now);
+            // A PR the flow already abandoned settles again when GitHub's
+            // `closed` is observed. Re-stamping the time makes the second
+            // settle differ from the first and wedges the session on
+            // "already settled differently" — the first abandonment is the
+            // fact; observation only confirms it.
+            pr.abandoned_at = pr.abandoned_at.or(Some(now));
             pr.ci_observation = None;
             if !session.status.is_process_active() {
                 session.set_status(

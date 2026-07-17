@@ -3655,6 +3655,41 @@ mod tests {
         );
     }
 
+    /// The settle equality includes `abandoned_at`, so a re-settle must carry
+    /// the original abandonment time. GitHub-observation reconcile once
+    /// re-stamped it with `now` on every `lf task status`, and the session
+    /// wedged permanently on "already settled differently" (live: W2-283).
+    #[tokio::test]
+    async fn re_settling_an_abandoned_pr_is_idempotent_only_at_its_original_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let session = make_task_session(&wave, &project);
+        let mut pr = make_task_pr(&session);
+        store.create_task_session(&session, &pr).await.unwrap();
+
+        let first_abandonment = OffsetDateTime::now_utc();
+        pr.abandoned_at = Some(first_abandonment);
+        pr.updated_at = first_abandonment;
+        store.settle_task_pr(&pr, None).await.unwrap();
+        store
+            .settle_task_pr(&pr, None)
+            .await
+            .expect("same settle is idempotent");
+
+        let mut restamped = pr.clone();
+        restamped.abandoned_at = Some(first_abandonment + time::Duration::seconds(30));
+        assert!(
+            store.settle_task_pr(&restamped, None).await.is_err(),
+            "a drifted abandonment time is a different settle and must refuse"
+        );
+    }
+
     #[tokio::test]
     async fn separate_task_worktree_tracks_and_collapses_its_parent_pr() {
         let dir = tempfile::tempdir().unwrap();

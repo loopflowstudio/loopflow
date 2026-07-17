@@ -830,14 +830,23 @@ fn print_project_control(
     Ok(())
 }
 
-fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
+fn run_project_command(
+    repo: &Path,
+    command: &ProjectCommand,
+    authority: &loopflow::child_session::CallerAuthority,
+) -> anyhow::Result<()> {
     match command {
         ProjectCommand::Run {
             project_id,
             directive,
             json,
         } => {
-            let session = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
+            let session = loopflow::ops::project::project_run(
+                repo,
+                project_id,
+                authority.clone(),
+                directive.clone(),
+            )?;
             print_project_session(&session, *json)
         }
         ProjectCommand::Start {
@@ -850,6 +859,7 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
                 repo,
                 title,
                 wave.as_deref(),
+                authority.clone(),
                 directive.clone(),
             )?;
             print_project_session(&session, *json)
@@ -863,7 +873,11 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             message,
             json,
         } => {
-            let result = loopflow::ops::project::project_follow_up(project_id, message.clone())?;
+            let result = loopflow::ops::project::project_follow_up(
+                project_id,
+                authority.clone(),
+                message.clone(),
+            )?;
             print_project_control(&result, *json)
         }
         ProjectCommand::Steer {
@@ -871,7 +885,11 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             message,
             json,
         } => {
-            let result = loopflow::ops::project::project_steer(project_id, message.clone())?;
+            let result = loopflow::ops::project::project_steer(
+                project_id,
+                authority.clone(),
+                message.clone(),
+            )?;
             print_project_control(&result, *json)
         }
         ProjectCommand::Interrupt {
@@ -879,7 +897,11 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             message,
             json,
         } => {
-            let result = loopflow::ops::project::project_interrupt(project_id, message.clone())?;
+            let result = loopflow::ops::project::project_interrupt(
+                project_id,
+                authority.clone(),
+                message.clone(),
+            )?;
             print_project_control(&result, *json)
         }
         ProjectCommand::Receipt {
@@ -926,6 +948,7 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
         } => {
             let result = loopflow::ops::project::project_decide(
                 project_id,
+                authority.clone(),
                 decision_id,
                 choice.clone(),
                 message.clone(),
@@ -1018,6 +1041,7 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
         } => {
             let result = loopflow::ops::project::project_resume(
                 project_id,
+                authority.clone(),
                 message.clone(),
                 model.clone(),
                 reason.clone(),
@@ -1032,7 +1056,11 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             reason,
             json,
         } => {
-            let result = loopflow::ops::project::project_abandon(project_id, reason.clone())?;
+            let result = loopflow::ops::project::project_abandon(
+                project_id,
+                authority.clone(),
+                reason.clone(),
+            )?;
             print_project_control(&result, *json)
         }
         ProjectCommand::Promote { .. } => {
@@ -1041,7 +1069,25 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
     }
 }
 
-fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
+fn resolve_project_command_authority(
+    command: &ProjectCommand,
+    explicit_wave: Option<&loopflow::wave::Wave>,
+) -> anyhow::Result<loopflow::child_session::CallerAuthority> {
+    let command_wave = match command {
+        ProjectCommand::Start {
+            wave: Some(wave), ..
+        } => Some(loopflow::engine::wave_context::resolve_explicit_wave(wave)?),
+        _ => None,
+    };
+    loopflow::ops::resolve_caller_authority(command_wave.as_ref().or(explicit_wave))
+        .map_err(anyhow::Error::from)
+}
+
+fn run_task_command(
+    repo: &Path,
+    command: &TaskCommand,
+    authority: &loopflow::child_session::CallerAuthority,
+) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run {
             issue,
@@ -1055,6 +1101,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let session = loopflow::ops::task::task_run(
                 repo,
                 issue,
+                authority.clone(),
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
                     flow: flow.clone(),
@@ -1079,6 +1126,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 title.clone(),
                 project_id,
+                authority.clone(),
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
                     flow: flow.clone(),
@@ -1158,7 +1206,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             message,
             json,
         } => {
-            let result = loopflow::ops::task::task_follow_up(issue, message.clone())?;
+            let result =
+                loopflow::ops::task::task_follow_up(issue, authority.clone(), message.clone())?;
             print_task_control(&result, *json)
         }
         TaskCommand::Steer {
@@ -1166,7 +1215,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             message,
             json,
         } => {
-            let result = loopflow::ops::task::task_steer(issue, message.clone())?;
+            let result =
+                loopflow::ops::task::task_steer(issue, authority.clone(), message.clone())?;
             print_task_control(&result, *json)
         }
         TaskCommand::Interrupt {
@@ -1174,7 +1224,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             message,
             json,
         } => {
-            let result = loopflow::ops::task::task_interrupt(issue, message.clone())?;
+            let result =
+                loopflow::ops::task::task_interrupt(issue, authority.clone(), message.clone())?;
             print_task_control(&result, *json)
         }
         TaskCommand::Receipt {
@@ -1214,6 +1265,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         } => {
             let result = loopflow::ops::task::task_decide(
                 issue,
+                authority.clone(),
                 decision_id,
                 choice.clone(),
                 message.clone(),
@@ -1318,6 +1370,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         } => {
             let result = loopflow::ops::task::task_resume(
                 issue,
+                authority.clone(),
                 message.clone(),
                 model.clone(),
                 reason.clone(),
@@ -1329,7 +1382,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             reason,
             json,
         } => {
-            let session = loopflow::ops::task::task_recover(issue, reason.clone())?;
+            let session =
+                loopflow::ops::task::task_recover(issue, authority.clone(), reason.clone())?;
             print_task_session(&session, *json)
         }
         TaskCommand::Attach { issue } => {
@@ -1340,7 +1394,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             reason,
             json,
         } => {
-            let result = loopflow::ops::task::task_abandon(issue, reason.clone())?;
+            let result =
+                loopflow::ops::task::task_abandon(issue, authority.clone(), reason.clone())?;
             print_task_control(&result, *json)
         }
     }
@@ -1569,7 +1624,9 @@ fn main() -> anyhow::Result<()> {
                 Ok(())
             }),
             Some(Commands::Project { cmd }) => {
-                in_repo_runtime(&args, |repo| run_project_command(repo, cmd))
+                let authority =
+                    resolve_project_command_authority(cmd, explicit_wave.as_ref())?;
+                in_repo_runtime(&args, |repo| run_project_command(repo, cmd, &authority))
             }
             Some(Commands::Reviews { cmd }) => in_repo_runtime(&args, |repo| {
                 let plan = loopflow::lf::commands::reviews::prepare(cmd, cli.wave.as_deref())?;
@@ -1590,7 +1647,8 @@ fn main() -> anyhow::Result<()> {
                 )
             }),
             Some(Commands::Task { cmd }) => {
-                in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
+                let authority = loopflow::ops::resolve_caller_authority(explicit_wave.as_ref())?;
+                in_repo_runtime(&args, |repo| run_task_command(repo, cmd, &authority))
             }
             Some(Commands::Handoff { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::handoff::run(cmd))

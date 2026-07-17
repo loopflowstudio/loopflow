@@ -763,6 +763,23 @@ impl Store {
         .await
     }
 
+    /// Pre-delivery rejection of a still-`persisted` command (never claimed),
+    /// recording `error`. The supervisor-`Resume` open-PR race uses this to
+    /// terminalize the command it just created without racing a body: unlike
+    /// [`fail_child_command`], whose UPDATE matches only `claimed`/`delivering`,
+    /// this matches only `persisted`.
+    pub async fn reject_persisted_child_command(
+        &self,
+        command_id: &ChildCommandId,
+        error: String,
+    ) -> StoreResult<()> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reject_persisted_child_command(&command_id, &error)
+        })
+        .await
+    }
+
     /// Mark one claimed command superseded because circumstances made it moot.
     /// Unlike failing it, this records no error — nothing went wrong.
     pub(crate) async fn supersede_child_command_for_lease(

@@ -20,6 +20,46 @@ use super::{OpsError, OpsResult};
 const CHILD_STARTUP_GRACE_SECONDS: i64 = 10;
 pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 
+#[cfg(test)]
+struct BeforeLaunchHook {
+    target: ChildRef,
+    callback: Box<dyn FnOnce() -> OpsResult<()> + Send>,
+}
+
+#[cfg(test)]
+fn _before_launch_hook() -> &'static std::sync::Mutex<Option<BeforeLaunchHook>> {
+    static HOOK: std::sync::OnceLock<std::sync::Mutex<Option<BeforeLaunchHook>>> =
+        std::sync::OnceLock::new();
+    HOOK.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[cfg(test)]
+fn _set_before_launch_hook(
+    target: ChildRef,
+    callback: impl FnOnce() -> OpsResult<()> + Send + 'static,
+) {
+    let mut hook = _before_launch_hook()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *hook = Some(BeforeLaunchHook {
+        target,
+        callback: Box::new(callback),
+    });
+}
+
+#[cfg(test)]
+fn _run_before_launch_hook(target: &ChildRef) -> OpsResult<()> {
+    let mut guard = _before_launch_hook()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.as_ref().is_none_or(|hook| hook.target != *target) {
+        return Ok(());
+    }
+    let hook = guard.take().expect("matching test hook is present");
+    drop(guard);
+    (hook.callback)()
+}
+
 pub(crate) fn child_body_reservation_is_fresh(process: &ChildProcessGeneration) -> bool {
     if process.state != crate::child_session::ChildLeaseState::Reserved {
         return false;
@@ -343,6 +383,7 @@ impl ChildSession {
         command_id: ChildCommandId,
         state: ChildCommandState,
         effect: Option<ChildCommandEffect>,
+        error: Option<String>,
     ) -> OpsResult<()> {
         match self {
             Self::Project(session) => store
@@ -352,7 +393,7 @@ impl ChildSession {
                         command_id,
                         state,
                         effect,
-                        error: None,
+                        error,
                     },
                 )
                 .await
@@ -365,7 +406,7 @@ impl ChildSession {
                         command_id,
                         state,
                         effect,
-                        error: None,
+                        error,
                     },
                 )
                 .await
@@ -670,6 +711,21 @@ pub(crate) async fn queue_command(
         _ => LaunchIntent::Supervisor,
     };
 
+    // Move 2 (fast bar): a supervisor `Resume` of a non-active body that is
+    // already barred (open PR / publishing / terminal) refuses *before* any
+    // command row is created, so the steady-state refusal — the common W2-319
+    // case where the PR is already Open — writes nothing to the ledger.
+    // (Operator `ExplicitResume` is abandon-only and answers review; `CiFix`
+    // owns its own persist-then-bar attribution.)
+    if matches!(kind, ChildCommandKind::Resume { .. })
+        && launch_intent == LaunchIntent::Supervisor
+        && !session.is_process_active()
+    {
+        if let Some(bar) = session.supervisor_restart_bar(store).await? {
+            return Err(child_error(bar));
+        }
+    }
+
     let command = ChildCommand::new(session.target(), source, kind);
     // A ci-fix wake is fire-and-forget like a follow-up: the supervision pass
     // that observed the failure must not block on a body's boot.
@@ -786,7 +842,7 @@ pub(crate) async fn queue_command(
 
     for command_id in superseded {
         session
-            .append_command_event(store, command_id, ChildCommandState::Superseded, None)
+            .append_command_event(store, command_id, ChildCommandState::Superseded, None, None)
             .await?;
     }
     if let Some(directive) = &directive {
@@ -798,8 +854,14 @@ pub(crate) async fn queue_command(
             command.id.clone(),
             ChildCommandState::Persisted,
             command.effect,
+            None,
         )
         .await?;
+
+    // The unit fixture interposes here to make the real post-persist/pre-launch
+    // PR race deterministic. Production builds contain no hook.
+    #[cfg(test)]
+    _run_before_launch_hook(&command.target)?;
 
     if let ChildCommandKind::Abandon { reason } = &command.kind {
         if !session.is_process_active() {
@@ -808,7 +870,13 @@ pub(crate) async fn queue_command(
                 .await
                 .map_err(child_error)?;
             session
-                .append_command_event(store, command.id.clone(), ChildCommandState::Accepted, None)
+                .append_command_event(
+                    store,
+                    command.id.clone(),
+                    ChildCommandState::Accepted,
+                    None,
+                    None,
+                )
                 .await?;
             session.abandon(store, reason).await?;
             let receipt = read_receipt(store, &command.id).await?;
@@ -828,7 +896,13 @@ pub(crate) async fn queue_command(
             .await
             .map_err(child_error)?;
         session
-            .append_command_event(store, command.id.clone(), ChildCommandState::Accepted, None)
+            .append_command_event(
+                store,
+                command.id.clone(),
+                ChildCommandState::Accepted,
+                None,
+                None,
+            )
             .await?;
         session.record_interrupt_of_inactive_process(store).await?;
         let receipt = read_receipt(store, &command.id).await?;
@@ -836,7 +910,31 @@ pub(crate) async fn queue_command(
     }
 
     if !session.is_process_active() {
-        session.launch(store, launch_intent).await?;
+        if let Err(bar) = session.launch(store, launch_intent).await {
+            // Move 2 (terminalize on race): the fast bar and `launch`'s own bar
+            // read the PR at different instants, so a `Working → Open` flip after
+            // creation can leave this just-created supervisor `Resume` barred and
+            // `Persisted`. `launch` bars *before* reserving a generation, so the
+            // generation is unchanged; terminalize the still-`Persisted` command
+            // to `Failed` (pre-delivery rejection — `fail_child_command` matches
+            // only `claimed`/`delivering` and cannot) so no orphan remains.
+            if matches!(&command.kind, ChildCommandKind::Resume { .. }) {
+                store
+                    .reject_persisted_child_command(&command.id, bar.to_string())
+                    .await
+                    .map_err(child_error)?;
+                session
+                    .append_command_event(
+                        store,
+                        command.id.clone(),
+                        ChildCommandState::Failed,
+                        command.effect,
+                        Some(bar.to_string()),
+                    )
+                    .await?;
+            }
+            return Err(bar);
+        }
     }
     let mut receipt = resolve_receipt(store, &command.id, wait_for_resolution).await?;
     if matches!(
@@ -986,12 +1084,14 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::store::{open_store, StorageConfig};
-    use crate::task::{GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
+    use crate::task::{
+        GithubPr, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSessionStatus,
+    };
     use crate::wave::Wave;
 
     use super::{
-        child_body_reservation_is_fresh, handoff_request, queue_command, relaunch_on_duplicate,
-        resume_session, revoke_and_reap_child_body, ChildSession,
+        _set_before_launch_hook, child_body_reservation_is_fresh, handoff_request, queue_command,
+        relaunch_on_duplicate, resume_session, revoke_and_reap_child_body, ChildSession,
     };
 
     #[test]
@@ -1381,6 +1481,153 @@ mod tests {
         let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
         assert_eq!(persisted.status, TaskSessionStatus::Waiting);
         assert_eq!(persisted.latest_process, None);
+    }
+
+    /// Move 2 (fast bar): a supervisor `Resume` of a submitted Task refuses
+    /// *before* creating any command, so the steady-state open-PR case — the
+    /// exact W2-319 shape — leaves the command ledger empty rather than stranding
+    /// an inert `Persisted` row. Sabotage that deletes the fast bar would create
+    /// the command, then `launch` would bar, leaving it `Persisted` and failing
+    /// the `is_empty` assertion.
+    #[tokio::test]
+    async fn a_supervisor_resume_of_an_open_pr_refuses_before_creating_a_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+
+        let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let mut pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: pr.updated_at,
+            after_merge: crate::task::AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 1077,
+                url: "https://github.com/loopflow/loopflow/pull/1077".to_string(),
+                head_sha: None,
+            }),
+        });
+        store.update_task_pr(&pr).await.unwrap();
+        let target = ChildRef::Task(task.id.clone());
+        let task_id = task.id.clone();
+
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task)),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Resume { message: None },
+        )
+        .await
+        .expect_err("a supervisor cannot restart a submitted Task");
+        assert!(
+            error.to_string().contains("#1077") && error.to_string().contains("reviewer"),
+            "the refusal names the open PR and the real owner: {error}"
+        );
+
+        // Nothing was queued: no command row, and no generation started.
+        assert!(
+            store.list_child_commands(&target).await.unwrap().is_empty(),
+            "the barred supervisor Resume left no command in the ledger"
+        );
+        let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
+        assert_eq!(persisted.latest_process, None);
+    }
+
+    #[tokio::test]
+    async fn a_working_to_open_race_rejects_the_persisted_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave(dir.path().to_str().unwrap());
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave, ProjectSessionStatus::Running);
+        store.create_project_session(&project).await.unwrap();
+
+        let task = make_task(&wave, &project, TaskSessionStatus::Waiting);
+        let generation_before = task.latest_process.as_ref().map(|body| body.generation);
+        let pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+        let target = ChildRef::Task(task.id.clone());
+        let task_id = task.id.clone();
+        let flip_store = store.clone();
+        let mut open_pr = pr;
+
+        _set_before_launch_hook(target.clone(), move || {
+            std::thread::spawn(move || {
+                let runtime = tokio::runtime::Runtime::new().unwrap();
+                runtime.block_on(async move {
+                    open_pr.publication = Some(PrPublication {
+                        requested_at: open_pr.updated_at,
+                        after_merge: crate::task::AfterMerge::Review,
+                        next_slug: None,
+                        github: Some(GithubPr {
+                            number: 1080,
+                            url: "https://github.com/loopflow/loopflow/pull/1080".to_string(),
+                            head_sha: None,
+                        }),
+                    });
+                    flip_store.update_task_pr(&open_pr).await.unwrap();
+                });
+            })
+            .join()
+            .unwrap();
+            Ok(())
+        });
+
+        let error = queue_command(
+            &store,
+            ChildSession::Task(Box::new(task)),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Resume { message: None },
+        )
+        .await
+        .expect_err("the launch re-read must observe the newly open PR");
+        let bar = error.to_string();
+        assert!(bar.contains("#1080") && bar.contains("reviewer"), "{bar}");
+
+        let commands = store.list_child_commands(&target).await.unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].state, ChildCommandState::Failed);
+        assert_eq!(commands[0].error.as_deref(), Some(bar.as_str()));
+        assert!(
+            commands.iter().all(|command| !matches!(
+                command.state,
+                ChildCommandState::Persisted
+                    | ChildCommandState::Claimed
+                    | ChildCommandState::Uncertain
+            )),
+            "the raced Resume must leave no live or uncertain orphan: {commands:?}"
+        );
+
+        let persisted = store.get_task_session(&task_id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted
+                .latest_process
+                .as_ref()
+                .map(|body| body.generation),
+            generation_before,
+            "launch bars before reserving a generation"
+        );
+        let events = store.task_events_after(&task_id, 0).await.unwrap();
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            TaskEventKind::CommandChanged {
+                state: ChildCommandState::Failed,
+                error: Some(recorded),
+                ..
+            } if recorded == &bar
+        )));
     }
 
     #[tokio::test]

@@ -845,12 +845,21 @@ impl TaskSession {
         )
     }
 
+    /// The open-PR restart refusal. Only a *supervisor* (`supervisor_restart_bar`
+    /// / a non-wake-legal `ci_fix_restart_bar`) ever reads this — an operator
+    /// resume takes the abandon-only `ExplicitResume` bar and answers review — so
+    /// the text names the real next owner (the reviewer/operator) instead of
+    /// recommending `lf task resume`, which a supervisor re-running would only
+    /// self-loop on.
     fn open_pr_bar(&self, pr: &TaskPr) -> String {
         let number = pr.github().expect("open Task PR passed validation").number;
         format!(
-            "Task {} submitted pull request #{} and is awaiting review; \
-             resume it explicitly with `lf task resume {}` to answer review",
-            self.launch.issue.identifier, number, self.launch.issue.identifier,
+            "Task {} submitted pull request #{} and is in review. A supervisor \
+             cannot restart a submitted Task — an open PR is not an invitation to \
+             start over. This is the reviewer's to advance: an operator answering \
+             review resumes from a clean operator shell; if review is blocked, \
+             escalate to the owner.",
+            self.launch.issue.identifier, number,
         )
     }
 

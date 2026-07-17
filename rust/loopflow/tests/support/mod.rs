@@ -17,12 +17,14 @@ use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CON
 /// at the wrong (real) session's store, and `command_source` classification at the
 /// ambient Wave. Every `EnvGuard` clears them so task-aware tests resolve by
 /// worktree path, restoring them on drop.
-const AMBIENT_TASK_ENV: [&str; 5] = [
+const AMBIENT_TASK_ENV: [&str; 6] = [
     "LF_TASK_SESSION_ID",
     "LF_TASK_GENERATION",
     "LF_TASK_LEASE_TOKEN",
     "LF_WAVE_ID",
     "LF_PROJECT_SESSION_ID",
+    // Managed marker in `resolve_caller_authority`'s fail-closed set.
+    "LF_CHANNEL",
 ];
 use loopflow::task::{
     PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,

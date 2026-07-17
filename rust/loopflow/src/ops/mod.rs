@@ -44,4 +44,4 @@ pub use release::{
     release_status, release_tag, MergedPr, ReleaseRunResult, ReleaseStatusResult,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
-pub use util::normalize_wave_name;
+pub use util::{normalize_wave_name, resolve_caller_authority};

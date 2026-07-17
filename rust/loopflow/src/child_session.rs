@@ -480,6 +480,32 @@ pub enum ChildCommandSource {
     Linear,
 }
 
+/// Who is issuing a Task/Project control command, resolved **once** at the
+/// invocation boundary from ambient context and then passed down — never
+/// re-derived from the environment deeper in the stack. It maps 1:1 onto the
+/// stored [`ChildCommandSource`]; the separate type exists so the resolution
+/// rule (fail-closed on an inconsistent managed session, live-route validation
+/// for a Project caller) has one home and cannot drift between the Task and
+/// Project control paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallerAuthority {
+    /// A human at the CLI, or any process carrying no managed-session marker.
+    Operator,
+    Wave(WaveId),
+    Project(ProjectSessionId),
+}
+
+impl CallerAuthority {
+    /// The stored provenance this authority records on the command.
+    pub fn into_source(self) -> ChildCommandSource {
+        match self {
+            Self::Operator => ChildCommandSource::Human,
+            Self::Wave(id) => ChildCommandSource::Wave(id),
+            Self::Project(id) => ChildCommandSource::Project(id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum ChildRef {

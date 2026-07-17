@@ -4019,6 +4019,65 @@ mod tests {
         );
     }
 
+    /// The pre-delivery rejection primitive Move 2 uses to terminalize a
+    /// supervisor `Resume` barred by a post-creation PR flip. It matches only
+    /// `persisted`, so it clears a never-claimed command and refuses anything a
+    /// body has since taken — this is exactly what `fail_child_command` (which
+    /// matches only `claimed`/`delivering`) cannot do.
+    #[tokio::test]
+    async fn reject_persisted_terminalizes_only_a_persisted_command() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let target = ChildRef::Task(task.id.clone());
+
+        // A still-`persisted` Resume: rejection terminalizes it to Failed and
+        // records the bar text as its error.
+        let resume = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Resume { message: None },
+        );
+        store.create_child_command(&resume).await.unwrap();
+        store
+            .reject_persisted_child_command(&resume.id, "open PR; nothing queued".to_string())
+            .await
+            .expect("a persisted command is rejectable");
+        let rejected = store.get_child_command(&resume.id).await.unwrap().unwrap();
+        assert_eq!(rejected.state, ChildCommandState::Failed);
+        assert!(rejected.state.is_terminal());
+        assert_eq!(rejected.error.as_deref(), Some("open PR; nothing queued"));
+
+        // A claimed command is past the pre-delivery window: rejection refuses
+        // rather than racing the body that owns it.
+        let claimed = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Wave(wave.id().clone()),
+            ChildCommandKind::Resume { message: None },
+        );
+        store.create_child_command(&claimed).await.unwrap();
+        store.claim_child_commands(&target, 1).await.unwrap();
+        let error = store
+            .reject_persisted_child_command(&claimed.id, "too late".to_string())
+            .await
+            .expect_err("a claimed command is not persisted");
+        assert!(
+            error.to_string().contains("not persisted"),
+            "the refusal names why, got: {error}"
+        );
+    }
+
     #[tokio::test]
     async fn task_boundary_atomically_claims_work_or_stops_the_generation() {
         let dir = tempfile::tempdir().unwrap();

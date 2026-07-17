@@ -549,6 +549,13 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
         return Outcome::StaleIdentity;
     }
 
+    // Project start now resolves caller authority at the CLI surface before
+    // creating anything. An inherited hand-set name without a registry row is
+    // stale transport evidence, not an explicit target selection.
+    if cmd.id == "project start" && env.id == "stale-name" {
+        return Outcome::StaleIdentity;
+    }
+
     if env.id == "absent" {
         if cmd.special.silent_drop {
             return Outcome::Drop;

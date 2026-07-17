@@ -7,9 +7,10 @@ use std::time::{Duration, Instant};
 use crate::child_session::{
     body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
     plan_stranded_recovery, task_write_lease_from_env, BodyEvidence, BodyRecoveryPlan,
-    ChildBodyOutcome, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState, ChildProcessGeneration,
-    ChildRef, ChildWriteLease, StrandedPlan, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
+    CallerAuthority, ChildBodyOutcome, ChildCommandEffect, ChildCommandId, ChildCommandKind,
+    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState,
+    ChildProcessGeneration, ChildRef, ChildWriteLease, StrandedPlan, DEFAULT_STALL_AFTER,
+    MAX_RECOVERY_ATTEMPTS,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -381,34 +382,34 @@ async fn owning_wave(store: &SharedStore, session: &TaskSession) -> OpsResult<Wa
         .ok_or_else(|| task_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
-async fn command_source(
+async fn validate_task_caller_authority(
     store: &SharedStore,
     session: &TaskSession,
+    authority: &CallerAuthority,
 ) -> OpsResult<ChildCommandSource> {
-    match std::env::var("LF_PROJECT_SESSION_ID") {
-        Ok(value) => {
-            let project_id =
-                crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
-                    task_error(format!("invalid ambient Project Session id: {error}"))
-                })?;
-            return if session.project_session_id == project_id {
-                Ok(ChildCommandSource::Project(project_id))
-            } else {
-                Err(task_error(format!(
-                    "Project Session {project_id} cannot control Task {}; its Project Session is {}",
-                    session.launch.issue.identifier, session.project_session_id
-                )))
-            };
-        }
-        Err(std::env::VarError::NotPresent) => {}
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(task_error("ambient Project Session id is not valid UTF-8"))
-        }
-    }
-    super::util::resolve_child_command_source(
+    let subject = format!("Task {}", session.launch.issue.identifier);
+    let target = crate::child_session::ChildRef::Task(session.id.clone());
+    // A Project caller is validated against the *live* routing target, not the
+    // historical `project_session_id` (W2-243 routes supervision to a live
+    // successor). Resolve the route only when a Project caller is actually
+    // present: a Wave or operator command must not fail merely because the
+    // parent Project chain is dead.
+    let route_current = if matches!(authority, CallerAuthority::Project(_)) {
+        Some(
+            super::project::resolve_task_project_route(store.as_ref(), session)
+                .await?
+                .current,
+        )
+    } else {
+        None
+    };
+    super::util::validate_caller_authority(
         store,
         &session.wave_id,
-        &format!("Task {}", session.launch.issue.identifier),
+        &target,
+        route_current.as_ref(),
+        &subject,
+        authority,
     )
     .await
 }
@@ -450,7 +451,12 @@ fn _refuse_current_human_review(
     Ok(())
 }
 
-pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSession> {
+pub fn task_run(
+    repo: &Path,
+    issue: &str,
+    authority: CallerAuthority,
+    options: TaskLaunchOptions,
+) -> OpsResult<TaskSession> {
     let TaskLaunchOptions {
         name,
         flow,
@@ -664,6 +670,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             snapshot: resolved.snapshot.clone(),
             project: resolved.project.clone(),
         },
+        &authority,
     )?;
     let project_session_id = task_project_session_id(&project_session)?;
     let wave_id = project_session.wave_id.clone();
@@ -766,7 +773,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         let initial = ChildDirective::initial(
             ChildRef::Task(session.id.clone()),
             directive,
-            command_source(&store, &session).await?,
+            validate_task_caller_authority(&store, &session, &authority).await?,
         );
         let succession = if let Some(predecessor) = &predecessor {
             store
@@ -890,6 +897,7 @@ pub fn task_start(
     repo: &Path,
     title: String,
     project_id: &str,
+    authority: CallerAuthority,
     options: TaskLaunchOptions,
 ) -> OpsResult<TaskSession> {
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
@@ -911,7 +919,7 @@ pub fn task_start(
         &title,
         &marker,
     )?;
-    task_run(&main, &created.item.id, options)
+    task_run(&main, &created.item.id, authority, options)
 }
 
 fn resolve_task_flow(repo: &Path, requested: Option<&str>) -> OpsResult<String> {
@@ -4964,7 +4972,11 @@ fn git_output_owned(worktree: &Path, args: &[String]) -> OpsResult<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlResult> {
+fn queue_command(
+    issue: &str,
+    authority: CallerAuthority,
+    kind: ChildCommandKind,
+) -> OpsResult<TaskControlResult> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut session = store
@@ -4976,7 +4988,7 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
         reconcile_process_liveness(&store, &mut session).await?;
         let issue_id = session.launch.issue.identifier.clone();
         let observation = session.observation.clone();
-        let source = command_source(&store, &session).await?;
+        let source = validate_task_caller_authority(&store, &session, &authority).await?;
         let result = super::child::queue_command(
             &store,
             super::child::ChildSession::Task(Box::new(session)),
@@ -4988,31 +5000,56 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
     })
 }
 
-pub fn task_follow_up(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::FollowUp { text: message })
+pub fn task_follow_up(
+    issue: &str,
+    authority: CallerAuthority,
+    message: String,
+) -> OpsResult<TaskControlResult> {
+    queue_command(
+        issue,
+        authority,
+        ChildCommandKind::FollowUp { text: message },
+    )
 }
 
-pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::Steer { text: message })
+pub fn task_steer(
+    issue: &str,
+    authority: CallerAuthority,
+    message: String,
+) -> OpsResult<TaskControlResult> {
+    queue_command(issue, authority, ChildCommandKind::Steer { text: message })
 }
 
-pub fn task_interrupt(issue: &str, replacement: Option<String>) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::Interrupt { replacement })
+pub fn task_interrupt(
+    issue: &str,
+    authority: CallerAuthority,
+    replacement: Option<String>,
+) -> OpsResult<TaskControlResult> {
+    queue_command(
+        issue,
+        authority,
+        ChildCommandKind::Interrupt { replacement },
+    )
 }
 
 /// Recover an abandoned Task as one linked successor that adopts its worktree,
 /// serial PR history, and current directive.
-pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<TaskSession> {
+pub fn task_recover(
+    issue: &str,
+    authority: CallerAuthority,
+    reason: Option<String>,
+) -> OpsResult<TaskSession> {
     let issue = issue.to_string();
     block_on_task(async move {
         let store = task_store().await?;
-        _recover_abandoned_task(&store, &issue, reason).await
+        _recover_abandoned_task(&store, &issue, &authority, reason).await
     })
 }
 
 async fn _recover_abandoned_task(
     store: &SharedStore,
     issue: &str,
+    authority: &CallerAuthority,
     reason: Option<String>,
 ) -> OpsResult<TaskSession> {
     let reason = reason
@@ -5030,7 +5067,7 @@ async fn _recover_abandoned_task(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-    command_source(store, &predecessor).await?;
+    validate_task_caller_authority(store, &predecessor, authority).await?;
 
     if predecessor.status != TaskSessionStatus::Abandoned {
         if predecessor.status == TaskSessionStatus::Completed {
@@ -5132,18 +5169,20 @@ async fn _recover_abandoned_task(
 
 pub fn task_resume(
     issue: &str,
+    authority: CallerAuthority,
     message: Option<String>,
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<TaskControlResult> {
     let issue = issue.to_string();
-    block_on_task(async move { resume_task_async(&issue, message, model, reason).await })
+    block_on_task(async move { resume_task_async(&issue, authority, message, model, reason).await })
 }
 
 /// Async core of [`task_resume`], reusable from callers already inside a runtime
 /// (e.g. `lf handoff complete` waking the parent it just resolved).
 pub(crate) async fn resume_task_async(
     issue: &str,
+    authority: CallerAuthority,
     message: Option<String>,
     model: Option<String>,
     reason: Option<String>,
@@ -5177,7 +5216,7 @@ pub(crate) async fn resume_task_async(
     reconcile_process_liveness(&store, &mut session).await?;
     let issue_id = session.launch.issue.identifier.clone();
     let observation = session.observation.clone();
-    let source = command_source(&store, &session).await?;
+    let source = validate_task_caller_authority(&store, &session, &authority).await?;
     let result = super::child::resume_session(
         &store,
         super::child::ChildSession::Task(Box::new(session)),
@@ -5231,6 +5270,7 @@ pub fn task_receipt(
 
 pub fn task_decide(
     issue: &str,
+    authority: CallerAuthority,
     decision_id: &str,
     choice: String,
     message: Option<String>,
@@ -5272,6 +5312,7 @@ pub fn task_decide(
     }
     queue_command(
         issue,
+        authority,
         ChildCommandKind::Decide {
             decision_id,
             choice,
@@ -5509,13 +5550,18 @@ pub fn task_acknowledge(issue: &str, version: u32, summary: String) -> OpsResult
     })
 }
 
-pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult> {
+pub fn task_abandon(
+    issue: &str,
+    authority: CallerAuthority,
+    reason: String,
+) -> OpsResult<TaskControlResult> {
     let reason = reason.trim();
     if reason.is_empty() {
         return Err(task_error("`lf task abandon --reason` cannot be empty"));
     }
     queue_command(
         issue,
+        authority,
         ChildCommandKind::Abandon {
             reason: reason.to_string(),
         },
@@ -5594,8 +5640,8 @@ mod tests {
         TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
-        observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
+        observe, BodyEvidence, BodyIntent, CallerAuthority, ChildBodyOutcome, ChildCommand,
+        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
         ChildProcessGeneration, ChildRef, ChildWriteLease, MAX_RECOVERY_ATTEMPTS,
     };
     use crate::engine::git::is_ancestor;
@@ -6154,6 +6200,7 @@ mod tests {
             .latest_process;
         let error = resume_task_async(
             &session.launch.issue.identifier,
+            CallerAuthority::Operator,
             None,
             None,
             Some("status recommended Resume".to_string()),
@@ -8899,9 +8946,11 @@ mod tests {
         repo.create_branch(branch);
         let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
 
-        let error = _recover_abandoned_task(&store, &session.launch.issue.identifier, None)
-            .await
-            .expect_err("a waiting Task resumes instead of recovering");
+        let authority = CallerAuthority::Operator;
+        let error =
+            _recover_abandoned_task(&store, &session.launch.issue.identifier, &authority, None)
+                .await
+                .expect_err("a waiting Task resumes instead of recovering");
         assert!(error.to_string().contains("lf task resume"), "{error}");
         assert_eq!(
             store
@@ -8951,6 +9000,7 @@ mod tests {
         let successor = _recover_abandoned_task(
             &store,
             &abandoned.launch.issue.identifier,
+            &CallerAuthority::Operator,
             Some("the work is still valid".to_string()),
         )
         .await
@@ -8981,6 +9031,7 @@ mod tests {
         let repeated = _recover_abandoned_task(
             &store,
             &successor.launch.issue.identifier,
+            &CallerAuthority::Operator,
             Some("the work is still valid".to_string()),
         )
         .await
@@ -8993,6 +9044,7 @@ mod tests {
         let error = _recover_abandoned_task(
             &store,
             &completed.launch.issue.identifier,
+            &CallerAuthority::Operator,
             Some("try again".to_string()),
         )
         .await

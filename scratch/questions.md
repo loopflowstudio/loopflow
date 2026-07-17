@@ -46,7 +46,37 @@ path is not where it is stuck, and the mint fix makes cause (a) unrepresentable
 going forward. Worth a follow-up task for the diagnostic message. Noted rather
 than filed — filing from a Task session is not this Task's job.
 
-## 3. Whether any other live Task carries an incoherent base
+## 3. RESOLVED (ir_0c7865d9): "no replacement row" was unsatisfiable — assertion corrected
+
+The reviewer asked whether the fix can deliver Done-when #1's "no replacement row
+is minted", given event 10293 minted a successor while the Task was terminal.
+Answered from the code; full evidence in the design doc's "Does the fix deliver
+'no replacement row'?" section.
+
+- **(a) false.** Three terminal fences exist (2172, 2187, 3499) — but all read an
+  in-memory `session.status` snapshot loaded at 2165, and nothing re-reads it
+  (`reconcile_task_pr_with_authority` refreshes only `observation`;
+  `reconcile_task_completion` only writes). The store doesn't fence it either:
+  `validate_task_pr_settlement:3982` validates PR shape only, never session
+  status — unlike `complete_task_session_with_lease:585`, which *does* assert
+  `status == Completed` for its `skipped_pr`.
+- **(b) true.** The fix changes what the row *contains*, not whether the mint
+  fires. Assertion corrected to "no **incoherent** row; completes exactly once and
+  **stays** completed". The stray coherent row is provably inert: `ProvenEmpty` +
+  merged predecessor → `discardable_successor` with **no blocker** (4198-4200) →
+  `gate.satisfied` (4216) → `repair_premature_completion` returns at 4315 without
+  reopening. **The reopen, not the mint, was the loop.**
+- **(c) true and separate.** Terminal-must-dominate-rotation is a real second
+  defect (stale-read fences + unfenced store write). Natural home is the store,
+  which already fences the symmetric `skipped_pr` transition. Not chased; scope
+  unchanged, per the reviewer's explicit instruction.
+
+Worth filing as a follow-up Task alongside item 2. Wave memory already records the
+event chain (10291-10294) as a W2-300 finding, so the evidence survives this
+session — but a review finding dies with the Task it was delivered to, so it
+needs a Linear task, not just memory.
+
+## 4. Whether any other live Task carries an incoherent base
 
 Not yet measured fleet-wide. The `Measure` section names the query. If others
 exist, they are freed by the same adopt-time heal with no extra work — but the

@@ -174,6 +174,15 @@ genuinely sits on. There is no case where it converts real work into "empty" —
 the range is computed from the true fork point, so carried commits still read
 `Range`.
 
+## Review log
+
+| # | Finding | Resolution | sha |
+|---|---|---|---|
+| ir_0c7865d9 | Can the fix deliver Done-when #1's "no replacement row"? | **No.** Answered (a)/(b)/(c) from the code: fences exist but are stale-read (2172/2187/3499), the store fences PR shape only (3982), so the mint is unfenced. Assertion corrected to "no *incoherent* row + no reopen"; stray coherent row proven inert (4216 → 4315). (c) named as separate, not chased. | see *"Does the fix deliver…"* below |
+
+*If you are reading a revision where the section named above is absent, you are
+reading a stale head — the finding is answered, not ignored.*
+
 ## De-risking
 
 | Question | Finding | Impact on design |
@@ -243,13 +252,96 @@ only a broken row pays the network cost. Healthy Tasks are untouched.
   origin/main). Real but separate; noted in `scratch/questions.md`.
 - Store surgery on W2-300, and abandoning its successor.
 
+## Does the fix deliver "no replacement row"? No — the assertion is corrected
+
+The reviewer asked whether Done-when #1's "no replacement row is minted" is
+satisfiable, given that event **10293 minted a successor while the Task was
+already terminal**. Answered from the code. The short version: **(a) is false,
+(b) is true and I have corrected the assertion, and (c) is a real separate
+defect I am not chasing.**
+
+### (a) is false — fences exist, but they cannot see this
+
+Three terminal fences sit on the rotation path, so it is not true that nothing
+fences it:
+
+| Site | Guard |
+|---|---|
+| `reconcile_project_tasks:2172` | `if task.status.is_terminal() { continue }` |
+| `reconcile_project_tasks:2187` | same, after `reconcile_task_completion` |
+| `ensure_working_pr_with_authority:3499` | `if session.status.is_terminal() { return Ok(None) }` |
+
+All three read the **in-memory `session.status`** from the snapshot the caller
+loaded — `list_task_sessions` at 2165 — and **nothing re-reads it**:
+
+- `reconcile_task_pr_with_authority:2876` refreshes only `session.observation`;
+  it never touches `status`.
+- `reconcile_task_completion:4358` reads `session.status` and only ever *writes*
+  (`update_task_session`); it performs no re-read.
+
+And the **store does not fence the write either**:
+`validate_task_pr_settlement:3982` validates PR *shape* only — settled-ness,
+`sequence + 1`, `phase() == Working`, matching `task_session_id`. It never
+consults the Session's status. (Contrast `complete_task_session_with_lease:585`,
+which *does* assert `status == Completed` for its `skipped_pr` — so the store
+fences that transition and not this one.)
+
+So a completion committed by **any other actor** between the snapshot load and
+the mint is invisible to all three fences and to the write. That is exactly
+10291→10293: completed 08:18:25, minted 08:18:29, four seconds later.
+
+### (b) is true — "no replacement row" is unsatisfiable, and the honest assertion
+
+The reviewer's walkthrough is correct. My fix changes what the minted row
+*contains*, not *whether* the mint fires. A stray coherent Working row can
+survive, because W2-304's discard only runs inside a terminal write and there is
+no second one.
+
+**The stray row is harmless, and provably so** — this is the reason (b) requires:
+
+With a coherent base the cut reads `ProvenEmpty`, and the gate classifies
+`ProvenEmpty` + merged predecessor as `discardable_successor` (4198-4200) and
+pushes **no blocker**. So `gate.satisfied` is true (4216), and
+`repair_premature_completion` returns at **4315** (`if gate.satisfied { return
+Ok(false) }`) *without reopening*. Line 4321 is the exact line that emitted
+10294's `reopened: completion outran its gates`; with a coherent row it never
+fires.
+
+**The burn loop is broken because the reopen is what drove it, not the mint.** A
+mint alone is inert; a mint that reopens a terminal Task is the loop.
+
+The stray row also cannot restart a body: an unsettled Working row makes
+`settled` false at 2199, so the `ensure_working_pr` + `relaunch_inactive_process`
+arm at 2207-2210 is not taken, and any sweep loading a **fresh** snapshot sees
+terminal and `continue`s at 2172. Net: at most one stray row, no relaunch, no
+reopen, no burn.
+
+### (c) is true and separate — not chased, per the reviewer
+
+"Terminal completion must dominate serial rotation" is a real second defect: the
+fences are stale-read and the store does not enforce terminal authority at the
+write. Fixing it means re-reading or CAS-ing terminal authority at the mint (the
+store is the natural home — it already fences the symmetric `skipped_pr`
+transition). That is a different change with a different regression, and my
+scope is unchanged.
+
 ## Done when
 
 1. **Regression fails on today's code.** In `ops/task.rs` tests: mint a successor
    at base `B1`, advance `origin/main` to `B2`, force a **re-mint** (worktree left
-   on the successor branch, row discarded — mirroring the live sequence), assert
-   the cut reads `ProvenEmpty` (not `Unprovable`), the Task completes **exactly
-   once**, and **no replacement row** is minted.
+   on the successor branch, row discarded — mirroring the live sequence), then
+   assert:
+   - the cut reads `ProvenEmpty`, **not** `Unprovable`;
+   - the Task completes **exactly once** and **stays completed** — no
+     `StatusChanged { to: Waiting }` reopen event;
+   - **every row the mint writes is coherent**: `is_ancestor(base_commit, branch)`
+     holds.
+
+   *Corrected from "no replacement row is minted", which this fix cannot deliver
+   and which no code path guarantees — see the section above. The assertion now
+   names what the fix actually owns: no **incoherent** row, and no reopen. A
+   stray **coherent** row may exist and is provably inert (gate satisfied at
+   4216 → no reopen at 4315 → no relaunch at 2199).*
 2. **Sabotage proof.** Reverting the mint to `resolve_upstream_base`'s
    `base_commit` turns the regression red. A first-mint-only test passes with the
    bug fully present — that is what hid this from both W2-300 and W2-304 — so the

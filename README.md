@@ -6,12 +6,9 @@ Tasks, remembers what it learns, and keeps one steerable conversation beside
 the live work map.
 
 Everything is one binary. `lf` is the command humans type *and* the API agents
-call to launch, steer, and observe other agents. There is no server: state
+call to launch, steer, and observe other agents. There is no centralized server: state
 lives in a local SQLite store and append-only journals, shared truth lives in
 Linear and GitHub, and remote machines are reached over plain SSH.
-
-Loopflow is built by one person and develops itself daily —
-[the story](https://loopflow.studio/story).
 
 ## Install
 
@@ -87,7 +84,6 @@ lf usage               # subscription state and spend, per account and repo
 | **Wave** | Durable operating context: memory, cadence, chat, project selection | `wave/<name>/` |
 | **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
 | **Task** | Concrete work; its Session owns the only delivery worktree | Linear, via `lf pm` |
-| **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Home** | Where a wave's work executes — owner plus location, local or `ssh://` | `GOAL.md` frontmatter |
 
 ## Docs

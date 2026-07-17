@@ -1,9 +1,8 @@
 # The Story
 
-Loopflow is built by one person and runs on itself all day. Its waves plan its
-projects, write most of its code, repair its CI, and cut its releases. That
-loop is the product's test bed and its proof: nothing ships to the docs that
-isn't survived daily at home.
+Loopflow's waves plan its projects, write most of its code, repair its CI, and
+cut its releases. That loop is the product's test bed and its proof: nothing
+ships to the docs that hasn't survived daily use at home.
 
 ## How it got here
 
@@ -39,11 +38,10 @@ carry the full chronology, decision by decision.
 
 ## The posture
 
-Loopflow is not chasing distribution. It is one person's daily instrument,
-sharpened against real work and documented well enough that you can pick it
-up. The bet: a tool honed relentlessly on its maker's own fleet beats a tool
-shaped by a sales funnel — and the story of that honing is worth telling
-either way.
+Loopflow is not chasing distribution. It is a daily instrument, sharpened
+against real work and documented well enough that you can pick it up. The
+bet: a tool honed on the work it does every day beats a tool shaped by a
+sales funnel — and the story of that honing is worth telling either way.
 
 It is free and open source. If it fits your hand too, even better.
 

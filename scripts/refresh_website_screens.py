@@ -4,7 +4,7 @@
     uv run python scripts/refresh_website_screens.py            # capture in place
     uv run python scripts/refresh_website_screens.py --publish  # commit real changes
 
-Publishes only what perceptibly changed, and only from a clean default branch.
+Publishes only what perceptibly changed, from a clean tree on the current branch.
 """
 
 from __future__ import annotations
@@ -47,15 +47,13 @@ def _worktree_paths() -> set[str]:
     return {line[3:].split(" -> ")[-1] for line in output.splitlines() if len(line) > 3}
 
 
-def _require_publishable_branch() -> None:
+def _require_publishable_worktree() -> None:
+    """Publish rides whatever branch is checked out; it only demands a clean
+    tree so the capture commit contains captures and nothing else."""
     if _worktree_paths():
         raise CaptureUnavailable("publish requires a clean worktree")
-    # origin/HEAD is unset on a fresh clone; main is the fallback, not an error.
-    default = _git_stdout(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], check=False)
-    default = default.removeprefix("origin/") or "main"
-    branch = _git_stdout(["branch", "--show-current"]) or "detached HEAD"
-    if branch != default:
-        raise CaptureUnavailable(f"publish runs only on {default}; current branch is {branch}")
+    if not _git_stdout(["branch", "--show-current"]):
+        raise CaptureUnavailable("publish requires a checked-out branch, not detached HEAD")
 
 
 def _publish(lf_binary: Path, targets: list[Path]) -> None:
@@ -123,7 +121,7 @@ def _install(candidate: Path, target: Path) -> None:
 
 def refresh(executable: Path, lf_binary: Path, publish: bool) -> int:
     if publish:
-        _require_publishable_branch()
+        _require_publishable_worktree()
 
     shots = load_captures()
     wave = captured_wave(shots)
@@ -180,7 +178,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-unavailable",
         action="store_true",
-        help="Exit successfully when live state or a clean default branch is unavailable",
+        help="Exit successfully when live state or a clean worktree is unavailable",
     )
     args = parser.parse_args()
     try:

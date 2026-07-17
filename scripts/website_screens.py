@@ -128,6 +128,9 @@ def live_status(lf_binary: Path, repo_path: Path, wave: str) -> dict[str, Any]:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise CaptureUnavailable(f"lf status returned invalid JSON: {exc}") from exc
+    # `lf status` prints `null` for a wave with no registry state.
+    if not isinstance(payload, dict):
+        raise CaptureUnavailable(f"lf status has no registry state for {wave!r}")
     require_live_wave(payload, wave)
     return payload
 

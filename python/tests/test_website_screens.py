@@ -87,6 +87,20 @@ def test_roadmap_capture_does_not_auto_select_a_wave(tmp_path: Path) -> None:
     assert context_lab["LOOPFLOW_UI_TEST_SELECT_BRANCH"] == "product"
 
 
+def test_live_status_with_no_registry_state_is_unavailable_not_a_crash(monkeypatch) -> None:
+    # `lf status <wave> --json` prints `null` when the wave has no registry
+    # state; that must read as CaptureUnavailable, not AttributeError.
+    class _NullStatus:
+        returncode = 0
+        stdout = "null"
+        stderr = ""
+
+    monkeypatch.setattr(website_screens.subprocess, "run", lambda *a, **k: _NullStatus())
+
+    with pytest.raises(CaptureUnavailable, match="no registry state"):
+        live_status(Path("lf"), Path("."), "product")
+
+
 def test_live_capture_requires_a_served_wave() -> None:
     """Served is the bar; red or failed task states are still publishable."""
     require_live_wave(_live_status(), "product")

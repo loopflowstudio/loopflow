@@ -2102,20 +2102,97 @@ pub(crate) async fn reconcile_process_liveness(
 /// Task's full event log.
 const RECOVERY_ATTEMPT_WINDOW: u32 = 64;
 
+pub(crate) async fn reconcile_project_tasks(
+    store: &SharedStore,
+    project: &crate::project_session::ProjectSession,
+) -> OpsResult<Vec<TaskSession>> {
+    let project_tasks = |tasks: Vec<TaskSession>| {
+        tasks
+            .into_iter()
+            .filter(|task| task.launch.project.id == project.launch.project.id)
+            .collect::<Vec<_>>()
+    };
+    let mut tasks = project_tasks(
+        store
+            .list_task_sessions(Some(&project.wave_id))
+            .await
+            .map_err(|error| task_error(format!("failed to list supervised Tasks: {error}")))?,
+    );
+    for task in &mut tasks {
+        if task.status.is_terminal() {
+            continue;
+        }
+        if let Err(error) = task_recovery_adoption(store, task).await {
+            tracing::warn!(
+                task = %task.launch.issue.identifier,
+                %error,
+                "supervisor skipped Task recovery: unsafe worktree/branch state"
+            );
+            continue;
+        }
+        let observed = reconcile_task_pr(store, task).await?;
+        refuse_dirty_between_prs(store, task).await?;
+        reconcile_process_liveness(store, task).await?;
+        reconcile_task_completion(store, task, None).await?;
+        if task.status.is_terminal() {
+            continue;
+        }
+        let no_active_pr = if observed.is_none() {
+            store
+                .active_task_pr(&task.id)
+                .await
+                .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+                .is_none()
+        } else {
+            false
+        };
+        let settled = observed.as_ref().is_some_and(TaskPr::is_settled) || no_active_pr;
+        let completing = observed.as_ref().is_some_and(|pr| {
+            pr.is_settled()
+                && pr
+                    .publication
+                    .as_ref()
+                    .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+        });
+        if settled && !completing {
+            ensure_working_pr(store, task).await?;
+            if !task.status.is_process_active() {
+                relaunch_inactive_process(store, task).await?;
+            }
+        } else if !task.status.is_process_active() {
+            let Some(pr) = observed.as_ref() else {
+                continue;
+            };
+            if pr.review_ready()
+                && task.lifecycle_phase == crate::task::TaskLifecyclePhase::Gate
+                && task.phase_cursor == 0
+                && task.phase_iteration == 0
+            {
+                relaunch_inactive_process(store, task).await?;
+            } else {
+                queue_ci_fix_command(store, task, pr).await?;
+            }
+        }
+    }
+
+    let refreshed = store
+        .list_task_sessions(Some(&project.wave_id))
+        .await
+        .map_err(|error| task_error(format!("failed to reread supervised Tasks: {error}")))?;
+    Ok(project_tasks(refreshed))
+}
+
 pub(crate) async fn supervise_project_task_bodies(
     store: &SharedStore,
     project: &crate::project_session::ProjectSession,
 ) -> OpsResult<usize> {
+    let tasks = reconcile_project_tasks(store, project).await?;
     if !tmux_installed() {
         return Ok(0);
     }
     let live_sessions = tmux_live_sessions()
         .await
         .map_err(|error| task_error(format!("failed to observe Task bodies: {error}")))?;
-    let tasks = store
-        .list_task_sessions(Some(&project.wave_id))
-        .await
-        .map_err(|error| task_error(format!("failed to list supervised Tasks: {error}")))?;
     let now = time::OffsetDateTime::now_utc();
     let mut recovered = 0;
     let mine = tasks

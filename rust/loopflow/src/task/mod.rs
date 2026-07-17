@@ -534,6 +534,14 @@ impl TaskPr {
         }
     }
 
+    /// Whether semantic Task review may begin for this published head.
+    pub fn review_ready(&self) -> bool {
+        self.phase() == PrPhase::Open
+            && self
+                .fresh_ci()
+                .is_some_and(|observation| observation.state == CiState::Passing)
+    }
+
     pub fn is_active(&self) -> bool {
         self.phase().is_active()
     }
@@ -1497,6 +1505,31 @@ mod tests {
         // Head has moved on: the stale reading never surfaces (and never wakes work).
         let moved = open_pr("new-head", Some(observation));
         assert!(moved.fresh_ci().is_none());
+    }
+
+    #[test]
+    fn review_ready_requires_current_head_passing_checks() {
+        let observation = |head: &str, state| super::CiObservation {
+            head_sha: head.to_string(),
+            state,
+            failing_checks: Vec::new(),
+            observed_at: time::OffsetDateTime::now_utc(),
+        };
+
+        assert!(open_pr(
+            "current",
+            Some(observation("current", super::CiState::Passing))
+        )
+        .review_ready());
+        assert!(!open_pr(
+            "current",
+            Some(observation("current", super::CiState::Pending))
+        )
+        .review_ready());
+        assert!(
+            !open_pr("current", Some(observation("old", super::CiState::Passing))).review_ready()
+        );
+        assert!(!open_pr("current", None).review_ready());
     }
 
     fn failing(head: &str, checks: &[&str]) -> super::CiObservation {

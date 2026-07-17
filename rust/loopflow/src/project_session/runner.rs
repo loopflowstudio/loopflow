@@ -802,80 +802,9 @@ async fn inspect_outcome(
     })
     .await
     .map_err(|error| anyhow!(error.to_string()))??;
-    let mut tasks = store
-        .list_task_sessions(Some(&session.wave_id))
-        .await?
-        .into_iter()
-        .filter(|task| {
-            // Route status-triggered reconciliation to the current successor:
-            // a Task born under a terminal predecessor is supervised by the
-            // live successor for the same Linear project, not stranded on the
-            // dead session it was created under.
-            task.launch.project.id.as_str() == session.launch.project.id.as_str()
-        })
-        .collect::<Vec<_>>();
-    for task in &mut tasks {
-        if task.status.is_terminal() {
-            continue;
-        }
-        // Refuse unsafe worktree/branch state before moving any durable
-        // ownership. One bad branch no longer aborts the whole project
-        // observation: the Task is left untouched and the rest keep moving.
-        if let Err(error) = crate::ops::task::task_recovery_adoption(store, task).await {
-            tracing::warn!(
-                task = %task.launch.issue.identifier,
-                %error,
-                "supervisor skipped Task recovery: unsafe worktree/branch state"
-            );
-            continue;
-        }
-        let observed = crate::ops::task::reconcile_task_pr(store, task)
-            .await
-            .map_err(|error| anyhow!(error.to_string()))?;
-        crate::ops::task::refuse_dirty_between_prs(store, task)
-            .await
-            .map_err(|error| anyhow!(error.to_string()))?;
-        crate::ops::task::reconcile_process_liveness(store, task)
-            .await
-            .map_err(|error| anyhow!(error.to_string()))?;
-        crate::ops::task::reconcile_task_completion(store, task, None)
-            .await
-            .map_err(|error| anyhow!(error.to_string()))?;
-        if task.status.is_terminal() {
-            continue;
-        }
-        let settled = observed.as_ref().is_some_and(|pr| pr.is_settled())
-            || (observed.is_none() && store.active_task_pr(&task.id).await?.is_none());
-        // A settled completing PR is pending on the review gate, not on a
-        // follow-up PR: do not rotate or relaunch while it waits.
-        let completing = observed.as_ref().is_some_and(|pr| {
-            pr.is_settled()
-                && pr.publication.as_ref().is_some_and(|publication| {
-                    publication.after_merge == crate::task::AfterMerge::CompleteTask
-                })
-        });
-        if settled && !completing && !task.status.is_terminal() {
-            crate::ops::task::ensure_working_pr(store, task)
-                .await
-                .map_err(|error| anyhow!(error.to_string()))?;
-            if !task.status.is_process_active() {
-                crate::ops::task::relaunch_inactive_process(store, task)
-                    .await
-                    .map_err(|error| anyhow!(error.to_string()))?;
-            }
-        } else if !task.status.is_process_active() {
-            // The PR is still open and the Task is asleep. A required-check failure
-            // on the current head enqueues one durable ci-fix wake; a healthy
-            // (pending/green) head enqueues nothing. This observer only reports
-            // what it saw — the ledger decides whether that failure already has a
-            // wake, and owns the launch. It must not reach for a body itself.
-            if let Some(pr) = observed.as_ref() {
-                crate::ops::task::queue_ci_fix_command(store, task, pr)
-                    .await
-                    .map_err(|error| anyhow!(error.to_string()))?;
-            }
-        }
-    }
+    let tasks = crate::ops::task::reconcile_project_tasks(store, session)
+        .await
+        .map_err(|error| anyhow!(error.to_string()))?;
     let pm_tasks = resolved
         .snapshot
         .items

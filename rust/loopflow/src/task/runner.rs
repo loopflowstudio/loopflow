@@ -85,12 +85,21 @@ async fn run_task_session_inner(
     lease: &ChildWriteLease,
     create_harness: crate::harness::CreateHarness,
 ) -> Result<()> {
-    let generation = lease.generation;
     let store: SharedStore = Arc::new(
         open_existing_store()
             .await
             .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
     );
+    run_task_session_with(store, session_id, lease, create_harness).await
+}
+
+async fn run_task_session_with(
+    store: SharedStore,
+    session_id: TaskSessionId,
+    lease: &ChildWriteLease,
+    create_harness: crate::harness::CreateHarness,
+) -> Result<()> {
+    let generation = lease.generation;
     let mut session = store
         .get_task_session(&session_id)
         .await?
@@ -529,7 +538,9 @@ The durable reviewer outcome is:\n{}",
                                     anyhow!("Task Session {} disappeared", session.id)
                                 })?;
                             sync_terminal_task_state(&mut session, &latest);
-                            record_task_flow_position(&mut session, &flow)?;
+                            if ci_fix_wake.is_none() {
+                                record_task_flow_position(&mut session, &flow)?;
+                            }
                             store.update_task_session_for_lease(&session, lease).await?;
                         }
                         if session.status == TaskSessionStatus::Abandoned {
@@ -882,10 +893,43 @@ The durable reviewer outcome is:\n{}",
                             if session.lifecycle_phase == TaskLifecyclePhase::Iterate
                                 && status != Lifecycle::Interrupted
                             {
+                                let waiting_for_ci = observed_pr.as_ref().is_some_and(|pr| {
+                                    pr.phase() == PrPhase::Open && !pr.review_ready()
+                                });
                                 session.enter_gate(TaskGateProposal {
                                     status: stopped_status,
                                     reason: stopped_reason,
                                 })?;
+                                if waiting_for_ci {
+                                    let number = observed_pr
+                                        .as_ref()
+                                        .and_then(|pr| pr.github())
+                                        .map(|github| github.number);
+                                    let reason = match number {
+                                        Some(number) => format!(
+                                            "pull request #{number} is waiting for fresh passing required checks before Task review"
+                                        ),
+                                        None => "pull request is waiting for fresh passing required checks before Task review"
+                                            .to_string(),
+                                    };
+                                    set_and_record_status(
+                                        &store,
+                                        &mut session,
+                                        lease,
+                                        TaskSessionStatus::Waiting,
+                                        reason,
+                                    )
+                                    .await?;
+                                    return finish_parked(
+                                        &store,
+                                        &mut session,
+                                        lease,
+                                        Some(harness.as_mut()),
+                                        ChildBodyOutcome::Completed,
+                                        capture.as_ref(),
+                                    )
+                                    .await;
+                                }
                                 session.set_status(
                                     TaskSessionStatus::Running,
                                     format!(

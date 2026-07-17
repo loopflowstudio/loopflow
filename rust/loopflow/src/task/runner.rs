@@ -2541,7 +2541,6 @@ pub(crate) struct CiFixTurnEnd<'a> {
 /// reclaimed by the Task's next body — the same contract a crash mid-turn has
 /// (see [`arm_ci_fix_wake`]). A bounded repair turn is not the body a Task
 /// instruction is for.
-#[allow(clippy::too_many_arguments)] // the runner's turn state, not a knob set
 async fn exit_bounded_ci_fix_turn(
     store: &SharedStore,
     session: &mut TaskSession,

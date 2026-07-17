@@ -1,6 +1,47 @@
 # Open questions — W2-308
 
-## Blocking — needs a Project sequencing decision
+## Hold v3 (incorporated) — waiting on W2-294
+
+Directive v3 replaces v2: no publish, land, or arm until **W2-294** completes its
+Project review and its named reusable ci-fix settlement boundary is on the
+integration base; then rebase or adapt onto it. Incorporated, verified by re-read
+(`current=3, incorporated=3` — v2 stays uningested, correctly, since v3 replaces
+it). No PR-state mutation has occurred: this branch has never been published.
+
+**W2-309 is done and this design's central claim is now confirmed on main, not
+inferred.** #1062 merged as `15e441e69` carrying the implementation (it shed its
+`scratch/` files at land, which is why an earlier read saw only a design). This
+branch is rebased onto it; `git merge-base --is-ancestor 15e441e69 HEAD` passes.
+The landed `wake_legal` (`task/mod.rs:361`) returns false when every failing check
+is a `land_time_precondition`, exactly inside `current_ci_incident` — so
+`holds_current_ci_fix_wake` inherits the exclusion with no name list here.
+
+### The W2-294 collision is real, and it cuts both ways
+
+W2-294 ("Keep ci-fix subflow playheads out of the durable Task cursor") owns
+`settle_ci_fix_turn` as its boundary **and** owns both fixtures this Task touches:
+its Done-When requires "a deterministic Iterate fixture" (the W2-303 shape) and "a
+deterministic Gate fixture" (the W2-280/W2-298 shape). My R4 change moves
+`a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle` from Gate to
+Iterate and adds a Gate review fixture — same file, same coordinates. Adapting
+onto W2-294 rather than racing it is right, and is what the hold instructs.
+
+**A finding W2-294 needs, which I cannot deliver directly (tier boundary — routing
+it through this doc, which the Project reads).** W2-294's Gate fixture will land on
+the same trap this Task just found: **Gate `phase_cursor = 0` is not a plain
+waitpoint — it is a live human interaction review.** `make_task` uses
+`TaskLifecyclePlan::standard`, whose Gate policy is `Require`; gate step 0 is
+`demo`; `demo` is `interactive: true`; so `prepare_task_flow_step` opens a `Human`
+review and `start_prepared_task_step` leaves `provider_turn_active = true`. A
+"deterministic Gate ci-fix fixture" built at those coordinates is therefore
+exercising a *parked review*, not a Gate waitpoint — and once this Task's preempt
+lands, that fixture's turn gets interrupted, which will read as a spurious failure
+in W2-294's diff rather than as the interaction it is. W2-294 should either move
+its Gate fixture to a non-interactive gate step (`code-review` is also
+interactive; `gate` is the candidate) or set `gate_interaction_policy = Defer`,
+which makes the reviewer `Project` and leaves the turn idle.
+
+## Superseded — the W2-309 sequencing decision (resolved)
 
 **This PR must not merge before W2-309** (`232b91b5`, "A ci-fix wake arms on
 scratch-clear"). Landing first makes every preemption a `scratch-clear`

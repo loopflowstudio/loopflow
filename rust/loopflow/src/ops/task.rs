@@ -3956,6 +3956,11 @@ pub(crate) async fn task_completion_gate(
                 CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
                     "follow-up work is committed past merged pull request #{number}"
                 )),
+                // Missing later evidence blocks entry into completion, but it
+                // cannot reverse a terminal fact. Repair still reopens on a
+                // proven range or any other concrete gate blocker.
+                CommittedFollowUp::Unprovable { .. }
+                    if session.status == TaskSessionStatus::Completed => {}
                 CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
                     "cannot prove merged pull request #{number} has no committed follow-up: {reason}"
                 )),

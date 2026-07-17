@@ -6,17 +6,48 @@
 scratch-clear"). Landing first makes every preemption a `scratch-clear`
 preemption: 9 of 10 wakes ever minted are `scratch-clear`-only.
 
-**W2-309 is open, unassigned, with no branch and no PR.** So this Task can build
-and publish but cannot land, and nothing inside my PR can enforce that — see
-below. This is the one decision I cannot take myself:
+**W2-309 is now live: PR #1062, design published, Project review open.** It is a
+kickoff/design PR, so the classifier is not implemented yet. This Task can build
+and publish but must not land until #1062's implementation merges. That order is
+the Project's to sequence; my PR states it and I will not land.
 
-- I cannot implement W2-309 here. It is a separate Linear Task, and `task_clarify`
-  forbids selecting backlog work or starting another Session. Its Done-When names
-  a classifier change in `ops/pr.rs` plus its own regression — a real slice, not a
-  line I can borrow.
-- So the merge order is the Project's to sequence. My PR states the dependency and
-  I will not land it. If W2-309 is dispatched and lands, this needs no change: the
-  currency check inherits its classification through `current_ci_incident`.
+- I cannot implement W2-309 here. It is a separate Linear Task with its own live
+  Session and PR, and `task_clarify` forbids selecting backlog work. Racing it
+  would duplicate an in-flight design (the exact #1030 trap in wave memory).
+
+### The inheritance claim is now VERIFIED, not assumed
+
+Read from #1062's design rather than inferred, and it lands exactly where this
+design needs it:
+
+- **W2-309 puts the fix in `wake_legal()`** (`task/mod.rs:326`), calling it "the
+  single legality question". `current_ci_incident` is
+  `fresh_ci().filter(|r| r.wake_legal()).and_then(ci_incident)`
+  (`ops/task.rs:2685-2688`) — so a `scratch-clear`-only head yields **no current
+  incident**, `holds_current_ci_fix_wake` returns false, and this PR's preempt
+  never fires. Inherited with zero coordination, as designed.
+- **It explicitly rejects the enqueue site** (`queue_ci_fix_command`) — "answering
+  it in one caller leaves `ci_fix_restart_bar` believing a scratch-clear head
+  warrants an automated restart". That was assumption 1's risk branch below, and
+  it is now closed: the fix cannot land somewhere my check does not read.
+- **It also rejects filtering `MergeGateReading::failing_leaves`** (it would delete
+  the failure from the *observation*, reporting a red head with no named checks).
+  So `failing_leaves` keeps naming `scratch-clear` and the suppression happens at
+  legality — which is the layer my check consults.
+- Corroboration that we are reading the same seam: #1062's own de-risking cites
+  "`runner.rs:2396` re-derives through `current_ci_incident`, which respects
+  `wake_legal`" — that is the exact line `current_ci_incident_identity` extracts.
+
+**Consequence for the two stranded commands** (`cc_fe73f4ed`, `cc_35e8409e`),
+cleaner than R3 stated: once W2-309 lands, `current_ci_incident` is `None` for
+their head, so `arm_ci_fix_wake` supersedes them as stale at its next run and my
+preempt ignores them. Neither Task needs a sweeper.
+
+**One inherited behavior worth naming:** W2-309 keeps `failing_checks.is_empty()`
+legal — "fail toward waking; a filter that suppresses unknown failures is a mute
+button". So an unnamed failing head still wakes, and this preempt will fire for it
+during a review. That is correct and deliberate on both sides: an unnameable
+failure is not a proven non-actionable one.
 
 **R2's enforcement idea was removed because it was harmful, not merely clumsy.** A
 regression that "fails until W2-309 lands" fails via `rust-test` — an *actionable*
@@ -32,14 +63,10 @@ reusing W2-309's predicate at the preempt.
 
 ## Assumptions, proceeding
 
-1. **`232b91b5` fixes actionability inside the `current_ci_incident` chain** —
-   `MergeGateReading` (`ops/pr.rs:550`), `wake_legal` (`task/mod.rs:326`), or
-   `ci_incident` (`ops/task.rs:2781`). All three are read through
-   `current_ci_incident` (`ops/task.rs:2685`), which my currency check calls, so
-   any of them gives the inheritance. If it instead filters at the *enqueue* site
-   only (`ci_fix_wake_kind`), the mint stops but a previously-minted wake could
-   still read current — in that case I add the leaf check at the preempt after
-   all, reusing `232b91b5`'s predicate rather than writing a second one.
+1. ~~**`232b91b5` fixes actionability inside the `current_ci_incident` chain.**~~
+   **RESOLVED** by reading #1062: it lands in `wake_legal`, inside the chain, and
+   explicitly rejects the enqueue-site variant that would have broken this. See
+   the verification above. No fallback to option (b) is needed.
 
 2. **A failed `harness.interrupt()` fails the body.** Chose `?` over `let _ = ...`
    to match the control path (`runner.rs:3876-3889`); swallowing it leaves

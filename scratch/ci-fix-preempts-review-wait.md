@@ -165,19 +165,37 @@ in a new place. The residue (c) genuinely targets — the already-stranded
 is real, but it is `232b91b5`'s to settle: they exist because they were minted, and
 that is the defect being fixed. I am not widening to take them.
 
-### The dependency is real, filed, and unstarted
+R3 update, now that #1062 is readable: they need no settling by anyone. Once
+`wake_legal` refuses their head, `current_ci_incident` is `None`, so
+`arm_ci_fix_wake` supersedes them as stale at its next run and this preempt
+ignores them. No sweeper on either side — which is also #1062's own conclusion
+("a recorded scratch-clear incident closes on its own").
+
+### The dependency is real, live, and confirms the inheritance
 
 `232b91b5` is **W2-309**, "A ci-fix wake arms on scratch-clear, a check no Task
-action can ever green". Verified in Linear: open, unassigned, no branch, no PR.
-Its Done-When already owns the regression I proposed to write —
-"a head whose ONLY failing check is scratch-clear arms NO ci-fix wake, and a head
-where a real leaf (e.g. rust-test) fails still arms one" — and its candidate fix
-is the `ops/pr.rs` `failing_leaves` category, i.e. inside the
-`current_ci_incident` chain. That confirms R2's inheritance argument against the
-real task rather than against my reading of a hash.
+action can ever green" — now **PR #1062**, design published, Project review open.
+Its Done-When already owns the regression R2 proposed to write here ("a head whose
+ONLY failing check is scratch-clear arms NO ci-fix wake, and a head where a real
+leaf still arms one").
 
-**This PR must not merge before W2-309.** Landing first makes every preemption a
-`scratch-clear` preemption — the exact harm the review found.
+**Read from #1062 rather than assumed, its fix lands exactly where this design
+needs it:**
+
+| #1062's choice | Consequence here |
+|---|---|
+| Fix goes in **`wake_legal()`** (`task/mod.rs:326`), "the single legality question" | `current_ci_incident` = `fresh_ci().filter(wake_legal).and_then(ci_incident)`, so a `scratch-clear`-only head yields **no current incident** → `holds_current_ci_fix_wake` false → no preempt. Inherited, zero coordination. |
+| **Rejects** the enqueue site (`queue_ci_fix_command`) — it would leave `ci_fix_restart_bar` with a divergent legality answer | Closes R2's one open risk: the fix cannot land somewhere this check does not read. |
+| **Rejects** filtering `MergeGateReading::failing_leaves` — it would delete the failure from the *observation* | `failing_leaves` keeps naming `scratch-clear`; suppression happens at legality, the layer this check consults. |
+| Keeps `failing_checks.is_empty()` legal — "fail toward waking" | An unnamed failing head still wakes, and this preempt fires for it during a review. Correct on both sides: unnameable ≠ proven non-actionable. |
+
+#1062's own de-risking cites "`runner.rs:2396` re-derives through
+`current_ci_incident`, which respects `wake_legal`" — the exact line
+`current_ci_incident_identity` extracts. Both designs are reading one seam.
+
+**This PR must not merge before W2-309's implementation.** Landing first makes
+every preemption a `scratch-clear` preemption — the exact harm the review found.
+#1062 is still a design PR, so the classifier does not exist yet.
 
 ### Why the merge-order gate is not a test (R2's error)
 
@@ -463,3 +481,4 @@ Companion signal owned by `232b91b5`, worth watching together: wakes minted for
 | — (R3, self-found) | The defect's reachable surface: `review_ready()` parks Iterate on any red head, so only **Kickoff** reviews open red — which is why both measured incidents are kickoff PRs failing `scratch-clear` by construction. After W2-309 the live shape is "head goes red *during* an open review", and **W2-310 widens it** by letting reviews open on design-carrying PRs. Also bounded honestly: a Project review delays the wake; only a **human** review strands it. |
 | Find one real actionable-during-review instance, or say plainly there is none | **There is none.** Stated in "What the evidence actually says", with the ~07:04Z cutover that explains why, and both honest readings of what "zero" means. |
 | Do not widen scope to `scratch-clear` or `scratch/` handling | Both listed under out-of-scope, including the two already-stranded commands. |
+| — (R3, verification) | The inheritance claim is no longer an assumption. W2-309 is live as **PR #1062**, and its design puts the fix in **`wake_legal`** — inside `current_ci_incident`, the exact function this preempt reads. It explicitly *rejects* the enqueue-site variant that was this design's one open risk, and cites `runner.rs:2396` (the line the new helper extracts) in its own de-risking. Option (a) is confirmed correct against the dependency's real design, not against a guess. |

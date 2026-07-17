@@ -1,5 +1,101 @@
 # Open questions — W2-308
 
+## R6 — yielded again; the sibling is progressing and is doing the right thing
+
+Second consecutive wave-seed turn to yield. My predecessor (3916) ended, the
+runner spawned me (52609) under the *same* generation-3 `lf __task`, and sibling
+**3816 is still alive at 4:28** holding the review prompt. So the yield is not a
+one-off: the runner starts a new flow-step turn every time the previous one ends,
+while the long review turn keeps running, and each new turn must stand down.
+**That is one body burned per spawn** until 3816 finishes — the real cost of the
+concurrent-turn defect, and the reason it is worth fixing rather than tolerating.
+
+Measured this turn, read-only (no code touched, no commit):
+
+- The sibling **already fixed the blocker**: duplicates gone (2731 → 2544 lines,
+  one definition each), `runner.rs` comments collapsed to the seam (44 lines
+  touched, net −12), and `holds_current_ci_fix_wake`'s rustdoc now states the
+  invariant in two lines instead of arguing. That is review items 1 and 2.
+- It is **not stuck**: it last wrote at 10:35:59Z and immediately started
+  `cargo check -p loopflow --lib --tests` (pid 19434) — notably *with* `--tests`,
+  the invocation whose absence let the duplicates through. Three `rustc` are live,
+  so it is compiling, not hung.
+- The build lock is contended but not by an ownerless corpse: pid 42954
+  (`loopflow.a-ci-fix-wake-arms`, 1:07:24) still has a **live zsh parent**, so my
+  earlier "orphan in a completed Task's worktree" read was wrong about *that* pid
+  and I did not kill it. A third cargo (76155) is a `--release` build of `lf` in
+  the main repo — the fleet-staleness work, unrelated to this branch.
+
+**Nothing here changes the plan.** The sibling owns items 1–4; both dependencies
+are on main (W2-309 `15e441e69`, W2-294 `062bd1e4c`); the hold's condition is met.
+One fact the sibling cannot know from its own prompt: its review text says #1063 is
+"queued at position 1, AWAITING_CHECKS", but **#1063 merged at 10:37:23Z**. That
+does not misdirect it — the review told it to confirm the merge before rebasing,
+and a rebase onto main now picks up `062bd1e4c` regardless.
+
+## R5 — this turn yielded: a sibling provider turn owns the worktree
+
+**The review's blocker is real and correctly diagnosed.** At `HEAD` (`be94394e2`)
+`ci_fix_lifecycle_tests.rs` is 2731 lines and defines
+`a_parked_review_wait_is_preempted_once_by_an_actionable_wake` **twice** (2317 and
+2557) and `a_scratch_clear_only_wake_never_preempts_a_review_wait` twice (2454 and
+2703). Cause: a `cat >> … <<'RUST'` heredoc that ran twice. Why nothing caught it —
+and this sharpens a rule already in MEMORY for clippy, now confirmed for `check`:
+**`cargo check -p loopflow --lib` does not compile `#[cfg(test)]` modules**, so its
+green result said nothing about the tests, and every actual `cargo test` run died
+on the shared cross-worktree build lock. The branch has never been compiled with
+its tests. The review is right that the publication hold hid this.
+
+**I did not fix it this turn, deliberately.** Mid-turn the worktree changed under
+me: `git status` was clean at turn start, then both `runner.rs` and
+`ci_fix_lifecycle_tests.rs` went ` M` with the duplicates already deleted (−187)
+and `runner.rs` reduced. No rebase was in flight (`git reflog` clean, no
+`.git/rebase-merge`), so this was not the known mid-rebase false alarm — it was
+**another writer**:
+
+```
+91402  lf __task ts_26312c2689d741c0b1e27a1afd57d009 --generation 3
+ ├─ 3816  claude -p <interaction_review_completed …>   cwd = this worktree, alive
+ └─ 3916  claude -p <lf:wave …> + task_clarify seed    cwd = this worktree  ← me
+```
+
+Both are children of **one generation**, spawned one second apart, both writing
+this worktree. My sibling holds the review prompt and is already performing the
+reduction the review asked for. Editing or committing now would corrupt or capture
+its in-flight state under my message, so this turn touched no code and made no
+commit — only this note and a wave-memory entry. That is the "concurrent editing
+corrupts a file" hazard from MEMORY, occurring *inside* a single generation, where
+no dispatch discipline can prevent it.
+
+**The reduction work is therefore owned by turn 3816, not by this note.** What it
+must still satisfy, from the review, is recorded here only so it survives if that
+turn dies:
+
+1. delete the duplicate definitions (E0428 ×2) — in progress, −187 already;
+2. cut `runner.rs` to the minimal seam (partition, currency check, one interrupt,
+   reset on `TurnCompleted`) and collapse the authority comments;
+   `holds_current_ci_fix_wake`'s rustdoc must state the invariant, not argue;
+3. two behavior proofs on **one** compact harness — reuse the existing harness
+   rather than minting `ReviewWaitHarness` beside it;
+4. sequence: wait for **#1063 to MERGE** (read `mergeQueueEntry`, not
+   `autoMergeRequest` — null there means queued, per MEMORY; confirm `merged=true`
+   with a `mergeCommit`), then rebase, preserving W2-294's settlement ordering —
+   grep for the **hoisted `if let Some(wake) = ci_fix_wake.as_ref()` branch
+   position** above the parent lifecycle loop, *not* for `settle_ci_fix_turn`,
+   which already exists on main and is therefore not evidence W2-294 landed.
+   Resolve any conflict by hand; no rebase agent. Then publish and land.
+
+### The hold's release condition is now MET (verified, not inferred)
+
+**W2-294 / PR #1063 is MERGED**: `state=MERGED`, `mergedAt=2026-07-17T10:37:23Z`,
+`mergeCommit=062bd1e4cfd78f0354dcdfe1d5955adcc6e86784`. Read from `state` +
+`mergeCommit` directly, which is what the review asked for and what MEMORY
+requires — `autoMergeRequest` reading null would have meant *queued*, not
+disarmed. So directive v3's bar ("do not publish, land, or arm merge until W2-294
+completes … and its boundary is on the integration base") is satisfied, and the
+next step is the rebase onto `062bd1e4c` — owned by the sibling turn, not this
+note. Both dependencies are now on main: W2-309 `15e441e69`, W2-294 `062bd1e4c`.
+
 ## Hold v3 (incorporated) — waiting on W2-294
 
 Directive v3 replaces v2: no publish, land, or arm until **W2-294** completes its

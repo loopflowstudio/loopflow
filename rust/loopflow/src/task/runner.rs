@@ -350,9 +350,7 @@ The durable reviewer outcome is:\n{}",
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
-    // Scoped to one provider turn: cleared wherever `TurnCompleted` clears
-    // `provider_turn_active`, so a review that resumes and later meets a new
-    // failing head can be preempted again.
+    // One preempt per provider turn; cleared with `provider_turn_active`.
     let mut review_preempted = false;
     'runner: loop {
         tokio::select! {
@@ -377,15 +375,11 @@ The durable reviewer outcome is:\n{}",
                     for command in &ci_fix {
                         seen_commands.remove(&command.id);
                     }
-                    // An interactive review turn is not ordinary work: it is the
-                    // agent waiting, so no `TurnCompleted` is coming to release
-                    // the repair the way one does for a turn that is doing
-                    // something. Take that boundary once — but only for a wake
-                    // the PR's *current* reading still names. That check is what
-                    // keeps a failure no repair can green (a land-time
-                    // precondition, which `wake_legal` refuses) from spending a
-                    // review turn: it yields no current incident, so it never
-                    // reaches here.
+                    // A review turn is the agent waiting, so no `TurnCompleted`
+                    // is coming to release the repair. Take that boundary once,
+                    // and only for a wake the PR's current reading still names —
+                    // a failure no repair can green is not `wake_legal`, so it
+                    // yields no current incident and never reaches here.
                     if !review_preempted
                         && interaction_review.is_some()
                         && !ci_fix.is_empty()
@@ -2417,15 +2411,9 @@ pub(crate) struct CiFixWake {
 /// `persisted`/`claimed` rows, so a crash mid-turn hands this same command to the
 /// next generation, which lands right back here and re-selects the ci-fix flow.
 ///
-/// The failure to repair is whatever the PR reads as *now*, minted through the
-/// same path the enqueue used. `None` means the head went green, moved on, the PR
-/// is gone, or the reading warrants no wake at all — every claimed wake is then
-/// stale.
-///
-/// This is the one authority for "what is this PR failing now", shared with
-/// [`holds_current_ci_fix_wake`]. Two derivations of the same fact would agree
-/// only in the common case, which is exactly the drift `ci_fix_wake_kind`'s doc
-/// warns about between the mint and the match.
+/// The identity of the failure this PR reads as *now*. `None` means no wake is
+/// warranted: green, moved on, gone, or not `wake_legal`. One authority, shared
+/// with [`holds_current_ci_fix_wake`], so the mint and the match cannot drift.
 async fn current_ci_incident_identity(
     store: &SharedStore,
     session: &TaskSession,
@@ -2438,18 +2426,10 @@ async fn current_ci_incident_identity(
         .map(|incident| incident.identity))
 }
 
-/// Whether any of these claimed wakes names the PR's *current* failure.
+/// Whether any claimed wake names the PR's current failure.
 ///
-/// The read-only half of [`arm_ci_fix_wake`]'s selection, and the only question a
-/// live provider turn may ask about a deferred wake. The arm itself cannot answer
-/// it mid-turn: it supersedes non-matching wakes and stamps
-/// `mark_ci_incident_responded`, so asking would commit to repairing. Splitting
-/// the read out is what makes "would preempting actually reach a repair"
-/// decidable without touching the ledger.
-///
-/// Because it routes through [`current_ci_incident_identity`], it inherits
-/// `wake_legal`'s answer: a head whose failure warrants no automatic repair names
-/// no current incident and can never justify interrupting a review.
+/// The read-only half of [`arm_ci_fix_wake`]'s selection: the arm supersedes and
+/// stamps, so it cannot answer this mid-turn without committing to a repair.
 async fn holds_current_ci_fix_wake(
     store: &SharedStore,
     session: &TaskSession,

@@ -26,3 +26,4 @@ pub mod top;
 pub mod usage;
 pub mod util;
 pub mod waves;
+pub mod work;

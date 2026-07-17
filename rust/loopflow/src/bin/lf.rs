@@ -1344,6 +1344,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Launch { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::launch::run(cmd))
             }
+            Some(Commands::Work { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::work::run(cmd))
+            }
             Some(Commands::TaskRunner {
                 session_id,
                 generation,

@@ -9,7 +9,25 @@ use crate::durable::{
 
 use super::{run_sqlite, Store, StoreResult};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskWriterState {
+    pub work: WorkRef,
+    pub identifier: String,
+    pub run: Option<Run>,
+}
+
 impl Store {
+    pub(crate) async fn task_writer_state(
+        &self,
+        external_issue_id: &str,
+    ) -> StoreResult<Option<TaskWriterState>> {
+        let external_issue_id = external_issue_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_writer_state(&external_issue_id)
+        })
+        .await
+    }
+
     pub async fn home(&self, route: &str) -> StoreResult<Home> {
         let route = route.to_string();
         run_sqlite(&self.sqlite, move |store| store.home(&route)).await
@@ -240,11 +258,17 @@ impl Store {
         text: &str,
         if_basis: Option<&Basis>,
     ) -> StoreResult<SteerReceipt> {
-        let author = match context {
-            ControlCtx::User(_) => Author::User,
-            ControlCtx::Run(lease) => Author::Run(lease.run_id.clone()),
+        let caller = match context {
+            ControlCtx::User(_) => None,
+            ControlCtx::Run(lease) => Some((*lease).clone()),
         };
-        self.append_steer(work, author, text, if_basis).await
+        let work = work.clone();
+        let text = text.to_string();
+        let if_basis = if_basis.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.steer(caller.as_ref(), &work, &text, if_basis.as_ref())
+        })
+        .await
     }
 
     pub(crate) async fn append_steer(

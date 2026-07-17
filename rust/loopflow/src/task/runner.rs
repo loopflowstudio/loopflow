@@ -564,8 +564,7 @@ async fn run_task_session_with(
                             }
                         }
                         flow_turn_active = false;
-                        loop {
-                            if flow_iteration_completed
+                        if flow_iteration_completed
                                 && session.lifecycle_phase == TaskLifecyclePhase::Kickoff
                             {
                                 let reason =
@@ -967,8 +966,7 @@ async fn run_task_session_with(
                                 });
                             }
                             store.finish_task_process(&session, lease).await?;
-                            return Ok(());
-                        }
+                        return Ok(());
                     }
                     ConversationEvent::Error { code, message } => {
                         let reason = format!("{code}: {message}");
@@ -1033,10 +1031,9 @@ async fn prepare_task_flow_step(
         .active_task_pr(&session.id)
         .await?
         .ok_or_else(|| anyhow!("Task Session {} has no active PR", session.id))?;
-    // The `ci-fix` step gets the failure seed from the wake command that selected
-    // it; every other Task-flow step gets the standard task seed. The flow and the
-    // wake are chosen together at birth, so a `ci-fix` step without a wake would
-    // mean the runner selected the flow from something other than the ledger.
+    // The `ci-fix` step gets the failure seed from the typed incident claimed by
+    // this Run; every other Task-flow step gets the standard task seed. The flow
+    // and incident are chosen together, so a `ci-fix` step without one is invalid.
     let seed = match (step.step.as_str(), ci_fix) {
         ("ci-fix", Some(wake)) => format!(
             "{}\n\n{}",
@@ -1847,7 +1844,7 @@ async fn settle_ci_fix_turn(
 
     set_and_record_status(store, session, lease, settled_status, &reason).await?;
     // The head the body shipped is durable attribution on the incident, tied to
-    // its wake command and generation. First-write in the store, so a retry or a
+    // its claiming Run. First-write in the store, so a retry or a
     // later push never rewrites which head settled it.
     if let Some(head) = &repaired_head {
         store
@@ -2544,10 +2541,9 @@ mod tests {
             "seed points at the ci-fix skill"
         );
 
-        // The seed follows the wake command, not the observation row. The command
-        // is the immutable record of the failure this body was born for; the row
-        // is mutable and moves on. When they disagree the command wins, or a body
-        // repairs a failure other than the one that woke it.
+        // The seed follows the claimed incident, not the mutable observation row.
+        // When they disagree the incident wins, or a body repairs a failure other
+        // than the one that woke it.
         assert!(
             !seed.contains("movedhead"),
             "seed must not carry the observation's newer head"

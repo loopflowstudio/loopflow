@@ -11,7 +11,6 @@ use std::path::Path;
 
 use futures_util::future::try_join_all;
 
-use crate::child_session::ChildLeaseState;
 use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::ops::error::{OpsError, OpsResult};
@@ -25,7 +24,8 @@ use crate::pm::{
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
-use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
+use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store, TaskWriterState};
+#[cfg(test)]
 use crate::task::{TaskSession, TaskSessionStatus};
 
 // ── Options and results ─────────────────────────────────────────────
@@ -152,7 +152,7 @@ pub struct PmReteamMove {
     pub new_identifier: Option<String>,
 }
 
-/// One issue left in place while a Task body can still write its old id.
+/// One issue left in place while a Task Run can still write its old id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamDeferral {
     pub identifier: String,
@@ -184,8 +184,8 @@ pub struct PmReteamResult {
     pub deferrals: Vec<PmReteamDeferral>,
     /// Issues already carrying the target team key (skipped — idempotency).
     pub already: usize,
-    /// Durable Task Sessions whose cached display identifier was reconciled.
-    pub session_updates: usize,
+    /// Durable Tasks whose cached display identifier was reconciled.
+    pub task_updates: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -1672,63 +1672,51 @@ async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<Pm
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReteamClass {
     /// Already carries the target team key → skip the move; only reconcile a
-    /// stale cached Session identifier.
+    /// stale cached Task identifier.
     Already,
-    /// A writing Task body owns it → defer until that process generation exits.
+    /// An active Task Run owns it → defer until the Run stops.
     Defer(String),
     /// On the legacy team and not being written → move onto the wave's team.
     Move,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ReteamSessionState<'a> {
+struct ReteamWriterState<'a> {
     identifier: &'a str,
-    status: TaskSessionStatus,
-    lease_state: Option<ChildLeaseState>,
+    run_id: Option<&'a str>,
 }
 
-impl<'a> From<&'a TaskSession> for ReteamSessionState<'a> {
-    fn from(session: &'a TaskSession) -> Self {
+impl<'a> From<&'a TaskWriterState> for ReteamWriterState<'a> {
+    fn from(state: &'a TaskWriterState) -> Self {
         Self {
-            identifier: &session.launch.issue.identifier,
-            status: session.status,
-            lease_state: session.latest_process.as_ref().map(|process| process.state),
+            identifier: &state.identifier,
+            run_id: state.run.as_ref().map(|run| run.id.as_str()),
         }
     }
 }
 
-impl ReteamSessionState<'_> {
+impl ReteamWriterState<'_> {
     fn protection_reason(self) -> Option<String> {
-        if self.status.is_process_active()
-            || matches!(
-                self.lease_state,
-                Some(ChildLeaseState::Reserved | ChildLeaseState::Active)
-            )
-        {
-            Some(format!("{} body", self.status.as_str()))
-        } else {
-            None
-        }
+        self.run_id.map(|run_id| format!("active Run {run_id}"))
     }
 }
 
-/// Every foreign-team issue moves — completed included — unless a Task body can
+/// Every foreign-team issue moves — completed included — unless a Task Run can
 /// still write the old identifier back. Completion is not a shield: a Project
 /// cannot narrow to one team while any of its issues (completed or not) stay on
 /// the legacy team, so completed issues migrate like the rest. Protection keys on
-/// *session state* (a live writing lease), not on Linear completion; waiting,
-/// blocked, and failed Sessions are durable intent without a lease, so renumbering
-/// them is safe once their cached identifier is reconciled.
+/// an active Run, not on Linear completion. Open Work without a Run is safe to
+/// renumber once its cached identifier is reconciled.
 fn classify_reteam_item(
     item: &PmItem,
     team_key: &str,
-    session: Option<ReteamSessionState<'_>>,
+    writer: Option<ReteamWriterState<'_>>,
 ) -> ReteamClass {
     let already = identifier_has_team_prefix(&item.identifier, team_key);
-    let session_needs_update = session.is_some_and(|session| session.identifier != item.identifier);
-    if let Some(reason) = session
-        .filter(|_| !already || session_needs_update)
-        .and_then(ReteamSessionState::protection_reason)
+    let identifier_needs_update = writer.is_some_and(|writer| writer.identifier != item.identifier);
+    if let Some(reason) = writer
+        .filter(|_| !already || identifier_needs_update)
+        .and_then(ReteamWriterState::protection_reason)
     {
         return ReteamClass::Defer(reason);
     }
@@ -1757,7 +1745,7 @@ fn project_needs_reteam(bound_team: &str, project_team_ids: Option<&[String]>) -
     }
 }
 
-/// Refuse the whole apply when any Task body can still write the old identifier.
+/// Refuse the whole apply when any Task Run can still write the old identifier.
 /// The plan is read-only up to this point, so this preserves the hierarchy rather
 /// than moving its Project and idle siblings around the protected Task.
 fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
@@ -1776,7 +1764,7 @@ fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
         .collect::<Vec<_>>()
         .join("; ");
     Err(OpsError::Message(format!(
-        "cannot apply reteam while {} Task body(s) can still write the old identifier: {protected}. No Projects or Tasks were moved; stop those bodies and rerun the dry-run.",
+        "cannot apply reteam while {} Task Run(s) can still write the old identifier: {protected}. No Projects or Tasks were moved; stop those Runs and rerun the dry-run.",
         deferrals.len()
     )))
 }
@@ -1931,7 +1919,7 @@ async fn apply_or_plan_reteam(
     let mut moving_project_ids = BTreeSet::new();
     let mut identifier_updates = Vec::new();
     let mut already = 0usize;
-    let mut session_updates = 0usize;
+    let mut task_updates = 0usize;
 
     for project in &projects {
         // A Project without exactly the wave's team is moved onto it. A
@@ -1951,24 +1939,24 @@ async fn apply_or_plan_reteam(
             .await
             .map_err(pm_to_ops)?;
         for item in items {
-            // Look up the protecting Session by the issue's stable UUID.
-            let session = store
-                .get_task_session_by_issue(&item.id)
+            // Resolve protection from stable Task Work and its active Run.
+            let writer = store
+                .task_writer_state(&item.id)
                 .await
                 .map_err(|err| OpsError::Message(format!("failed to read task registry: {err}")))?;
             match classify_reteam_item(
                 &item,
                 team_key,
-                session.as_ref().map(ReteamSessionState::from),
+                writer.as_ref().map(ReteamWriterState::from),
             ) {
                 ReteamClass::Already => {
                     already += 1;
-                    if let Some(session) =
-                        session.filter(|session| session.launch.issue.identifier != item.identifier)
+                    if let Some(writer) =
+                        writer.filter(|writer| writer.identifier != item.identifier)
                     {
                         identifier_updates.push(ReteamIdentifierUpdate {
                             issue_id: item.id,
-                            old_identifier: session.launch.issue.identifier,
+                            old_identifier: writer.identifier,
                             new_identifier: item.identifier,
                         });
                     }
@@ -1996,7 +1984,7 @@ async fn apply_or_plan_reteam(
         ensure_move_projects_carry_target_team(&projects, &moving_project_ids, team_id)?;
 
         for update in identifier_updates {
-            session_updates += usize::from(
+            task_updates += usize::from(
                 store
                     .rebind_task_issue_identifier(
                         &update.issue_id,
@@ -2006,7 +1994,7 @@ async fn apply_or_plan_reteam(
                     .await
                     .map_err(|err| {
                         OpsError::Message(format!(
-                            "failed to reconcile Task Session for {}: {err}",
+                            "failed to reconcile Task {}: {err}",
                             update.new_identifier
                         ))
                     })?,
@@ -2035,17 +2023,13 @@ async fn apply_or_plan_reteam(
                 .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(pm_to_ops)?;
-            session_updates += usize::from(
+            task_updates += usize::from(
                 store
-                    .rebind_task_issue_identifier(
-                        &mv.id,
-                        &mv.old_identifier,
-                        &new_identifier,
-                    )
+                    .rebind_task_issue_identifier(&mv.id, &mv.old_identifier, &new_identifier)
                     .await
                     .map_err(|err| {
                         OpsError::Message(format!(
-                            "moved {} to {new_identifier}, but failed to reconcile its Task Session: {err}",
+                            "moved {} to {new_identifier}, but failed to reconcile its Task: {err}",
                             mv.old_identifier
                         ))
                     })?,
@@ -2084,7 +2068,7 @@ async fn apply_or_plan_reteam(
         moves,
         deferrals,
         already,
-        session_updates,
+        task_updates,
     })
 }
 
@@ -3124,16 +3108,8 @@ mod tests {
         }
     }
 
-    fn reteam_session(
-        identifier: &str,
-        status: TaskSessionStatus,
-        lease_state: Option<ChildLeaseState>,
-    ) -> ReteamSessionState<'_> {
-        ReteamSessionState {
-            identifier,
-            status,
-            lease_state,
-        }
+    fn reteam_writer<'a>(identifier: &'a str, run_id: Option<&'a str>) -> ReteamWriterState<'a> {
+        ReteamWriterState { identifier, run_id }
     }
 
     #[test]
@@ -3169,24 +3145,24 @@ mod tests {
     }
 
     #[test]
-    fn reteam_apply_stops_before_mutation_when_any_task_body_is_writing() {
+    fn reteam_apply_stops_before_mutation_when_any_task_run_is_active() {
         let deferrals = vec![
             PmReteamDeferral {
                 identifier: "W2-157".to_string(),
                 title: "Unify practice targets".to_string(),
-                reason: "running body".to_string(),
+                reason: "active Run run-one".to_string(),
             },
             PmReteamDeferral {
                 identifier: "W2-166".to_string(),
                 title: "Resolve team ownership".to_string(),
-                reason: "starting body".to_string(),
+                reason: "active Run run-two".to_string(),
             },
         ];
 
         let error = ensure_reteam_apply_safe(&deferrals).expect_err("apply must stop");
         let message = error.to_string();
-        assert!(message.contains("W2-157 `Unify practice targets` (running body)"));
-        assert!(message.contains("W2-166 `Resolve team ownership` (starting body)"));
+        assert!(message.contains("W2-157 `Unify practice targets` (active Run run-one)"));
+        assert!(message.contains("W2-166 `Resolve team ownership` (active Run run-two)"));
         assert!(message.contains("No Projects or Tasks were moved"));
     }
 
@@ -3197,16 +3173,12 @@ mod tests {
             classify_reteam_item(&reteam_item("W2-1", true), "PRD", None),
             ReteamClass::Move
         );
-        // A completed issue with a writing lease remains protected.
+        // A completed issue with an active Run remains protected.
         assert!(matches!(
             classify_reteam_item(
                 &reteam_item("W2-5", true),
                 "PRD",
-                Some(reteam_session(
-                    "W2-5",
-                    TaskSessionStatus::Running,
-                    Some(ChildLeaseState::Active)
-                ))
+                Some(reteam_writer("W2-5", Some("run-one")))
             ),
             ReteamClass::Defer(_)
         ));
@@ -3215,29 +3187,21 @@ mod tests {
             classify_reteam_item(&reteam_item("PRD-7", false), "PRD", None),
             ReteamClass::Already
         );
-        // Open with a running Session → defer with the status as reason.
+        // Open with an active Run → defer with the Run as reason.
         assert_eq!(
             classify_reteam_item(
                 &reteam_item("W2-2", false),
                 "PRD",
-                Some(reteam_session(
-                    "W2-2",
-                    TaskSessionStatus::Running,
-                    Some(ChildLeaseState::Active)
-                ))
+                Some(reteam_writer("W2-2", Some("run-two")))
             ),
-            ReteamClass::Defer("running body".to_string())
+            ReteamClass::Defer("active Run run-two".to_string())
         );
-        // Open with a review-waiting Session → move and reconcile its display id.
+        // Open Work without a Run → move and reconcile its display id.
         assert_eq!(
             classify_reteam_item(
                 &reteam_item("W2-3", false),
                 "PRD",
-                Some(reteam_session(
-                    "W2-3",
-                    TaskSessionStatus::Waiting,
-                    Some(ChildLeaseState::Finished)
-                ))
+                Some(reteam_writer("W2-3", None))
             ),
             ReteamClass::Move
         );
@@ -3411,7 +3375,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reteam_apply_refuses_completed_issue_with_a_writing_body() {
+    async fn reteam_apply_refuses_completed_issue_with_an_active_run() {
         let (_directory, store) = reteam_test_store().await;
         let session_id = seed_reteam_task_session(&store, "issue-live", "W2-42").await;
         let mut session = store
@@ -3421,9 +3385,10 @@ mod tests {
             .expect("session exists");
         session.begin_generation("lf-task-test".to_string());
         store
-            .update_task_session(&session)
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
             .await
-            .expect("reserve writing body");
+            .expect("reserve active Run")
+            .expect("Run reserved");
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([reteam_project_node(
                 "project-1",
@@ -3446,7 +3411,7 @@ mod tests {
             &NullProgress,
         )
         .await
-        .expect_err("writing body refuses the whole apply");
+        .expect_err("active Run refuses the whole apply");
 
         assert!(error.to_string().contains("W2-42"));
         assert!(error
@@ -3538,7 +3503,7 @@ mod tests {
         .await
         .expect("retry succeeds");
 
-        assert_eq!(result.session_updates, 1);
+        assert_eq!(result.task_updates, 1);
         assert_eq!(
             store
                 .get_task_session(&session_id)
@@ -3610,7 +3575,7 @@ mod tests {
         .expect("already-moved reconciliation succeeds");
 
         assert_eq!(result.already, 2);
-        assert_eq!(result.session_updates, 1);
+        assert_eq!(result.task_updates, 1);
         assert!(result.moves.is_empty());
         assert_eq!(
             store
@@ -3631,62 +3596,32 @@ mod tests {
     }
 
     #[test]
-    fn reteam_protects_only_sessions_with_a_writing_body() {
-        for status in [
-            TaskSessionStatus::Created,
-            TaskSessionStatus::Waiting,
-            TaskSessionStatus::Blocked,
-            TaskSessionStatus::Failed,
-        ] {
-            assert_eq!(
-                classify_reteam_item(
-                    &reteam_item("W2-9", false),
-                    "PRD",
-                    Some(reteam_session("W2-9", status, None))
-                ),
-                ReteamClass::Move,
-                "{status:?} has no writing body"
-            );
-        }
-        for status in [TaskSessionStatus::Starting, TaskSessionStatus::Running] {
-            assert!(matches!(
-                classify_reteam_item(
-                    &reteam_item("W2-9", false),
-                    "PRD",
-                    Some(reteam_session(
-                        "W2-9",
-                        status,
-                        Some(ChildLeaseState::Active)
-                    ))
-                ),
-                ReteamClass::Defer(_)
-            ));
-        }
-        assert!(matches!(
+    fn reteam_protects_only_tasks_with_an_active_run() {
+        assert_eq!(
             classify_reteam_item(
                 &reteam_item("W2-9", false),
                 "PRD",
-                Some(reteam_session(
-                    "W2-9",
-                    TaskSessionStatus::Waiting,
-                    Some(ChildLeaseState::Reserved)
-                ))
+                Some(reteam_writer("W2-9", None))
             ),
-            ReteamClass::Defer(_)
-        ));
+            ReteamClass::Move
+        );
+        assert_eq!(
+            classify_reteam_item(
+                &reteam_item("W2-9", false),
+                "PRD",
+                Some(reteam_writer("W2-9", Some("run-active")))
+            ),
+            ReteamClass::Defer("active Run run-active".to_string())
+        );
     }
 
     #[test]
-    fn reteam_reconciles_only_when_an_already_moved_session_is_idle() {
+    fn reteam_reconciles_only_when_already_moved_work_has_no_run() {
         assert_eq!(
             classify_reteam_item(
                 &reteam_item("PRD-8", false),
                 "PRD",
-                Some(reteam_session(
-                    "W2-9",
-                    TaskSessionStatus::Waiting,
-                    Some(ChildLeaseState::Finished)
-                ))
+                Some(reteam_writer("W2-9", None))
             ),
             ReteamClass::Already
         );
@@ -3694,11 +3629,7 @@ mod tests {
             classify_reteam_item(
                 &reteam_item("PRD-8", false),
                 "PRD",
-                Some(reteam_session(
-                    "W2-9",
-                    TaskSessionStatus::Running,
-                    Some(ChildLeaseState::Active)
-                ))
+                Some(reteam_writer("W2-9", Some("run-active")))
             ),
             ReteamClass::Defer(_)
         ));

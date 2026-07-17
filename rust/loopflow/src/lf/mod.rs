@@ -282,6 +282,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: LaunchCommand,
     },
+    /// Inspect and control stable Wave, Project, or Task Work
+    Work {
+        #[command(subcommand)]
+        cmd: WorkCommand,
+    },
     /// Internal: run one durable Task Session process generation
     #[command(name = "__task", hide = true)]
     TaskRunner {
@@ -667,6 +672,53 @@ pub enum LaunchCommand {
     },
     /// Exec the Launch's generic attach route
     Present { launch_id: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorkCommand {
+    /// Show current Epoch, Basis, Run, Wait, and Review projection
+    Status {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Append authored direction through User or active parent Run authority
+    Steer {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Advance the current interactive flow step without recording a disposition
+    Close {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Interrupt the current Turn or opaque Launch boundary
+    Interrupt {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Abandon the current Epoch from an authenticated User surface
+    Abandon {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn reject_retired_sub(_: &str) -> Result<String, String> {
@@ -2412,6 +2464,40 @@ mod tests {
                     json: true,
                 }
             }) if launch_id == "launch_1" && outcome == "unknown"
+        ));
+    }
+
+    #[test]
+    fn cli_parses_stable_work_controls() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "work",
+            "steer",
+            "task",
+            "task_1",
+            "inspect the failure",
+            "--json",
+        ])
+        .expect("parse Work steer");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Steer {
+                    kind,
+                    id,
+                    message,
+                    json: true,
+                }
+            }) if kind == "task" && id == "task_1" && message == "inspect the failure"
+        ));
+
+        let close = Cli::try_parse_from(["lf", "work", "close", "project", "project_1"])
+            .expect("parse Work close");
+        assert!(matches!(
+            close.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Close { kind, id, json: false }
+            }) if kind == "project" && id == "project_1"
         ));
     }
 

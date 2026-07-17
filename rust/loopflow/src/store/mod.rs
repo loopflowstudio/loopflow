@@ -13,6 +13,7 @@ use crate::wave::Wave;
 mod child_sessions;
 pub(crate) mod ci_incidents;
 mod durable;
+pub(crate) use durable::TaskWriterState;
 pub mod migrations;
 pub mod provider_deliveries;
 pub mod rows;
@@ -1029,7 +1030,10 @@ mod tests {
         BinaryProvenance, ChildBodyOutcome, ChildLeaseState, ChildProcessGeneration, ChildRef,
         ObservationRecipient,
     };
-    use crate::durable::{Author, SendState};
+    use crate::durable::{
+        AttentionRoute, Author, Containment, ContainmentObservation, ControlCtx, FlowPosition,
+        LaunchRoute, RunAdvance, SendState, StopCause,
+    };
     use crate::id::WaveId;
     use crate::profile::EmailAddress;
     use crate::project_session::{
@@ -1429,6 +1433,164 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["inspect the failing test", "preserve the public behavior"]
         );
+    }
+
+    #[tokio::test]
+    async fn only_the_active_parent_run_can_steer_child_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        project.begin_generation("parent-run".to_string());
+        let child_lease = store
+            .reserve_project_process(&project, ProjectSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        project.latest_process.as_mut().unwrap().state = ChildLeaseState::Active;
+        project.set_status(ProjectSessionStatus::Running, "active");
+        store
+            .activate_project_process(&project, &child_lease)
+            .await
+            .unwrap();
+        let parent_lease = store
+            .run_lease_for_child(&ChildRef::Project(project.id.clone()), &child_lease)
+            .await
+            .unwrap();
+        let task_work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+
+        task.begin_generation("child-run".to_string());
+        let task_child_lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        task.latest_process.as_mut().unwrap().state = ChildLeaseState::Active;
+        task.set_status(TaskSessionStatus::Running, "active");
+        store
+            .activate_task_process(&task, &task_child_lease)
+            .await
+            .unwrap();
+        let task_run_lease = store
+            .run_lease_for_child(&ChildRef::Task(task.id.clone()), &task_child_lease)
+            .await
+            .unwrap();
+        let launch = store
+            .advance_run(
+                &task_run_lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "task-child".to_string(),
+                    },
+                    cwd: PathBuf::from("/repo.inf-123"),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Launch(launch) = launch else {
+            panic!("expected child Launch")
+        };
+        store
+            .advance_run(
+                &task_run_lease,
+                RunAdvance::LaunchLive {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
+        store
+            .set_flow_position(
+                &task_run_lease,
+                FlowPosition {
+                    work: task_work.clone(),
+                    epoch_id: task_basis.epoch_id,
+                    flow: "task".to_string(),
+                    step: "review".to_string(),
+                    step_index: 1,
+                    iteration: 0,
+                    interactive: true,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .route_review(
+                &task_run_lease,
+                &launch.id,
+                AttentionRoute::Parent(parent_lease.work.clone()),
+            )
+            .await
+            .unwrap();
+        assert!(store.review(&task_work).await.unwrap().is_some());
+
+        let receipt = store
+            .steer(
+                &ControlCtx::Run(&parent_lease),
+                &task_work,
+                "inspect the child result",
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            receipt.steer.author,
+            Author::Run(parent_lease.run_id.clone())
+        );
+        let review = store
+            .review(&task_work)
+            .await
+            .unwrap()
+            .expect("steering does not close Review attention");
+        store
+            .close_review(&ControlCtx::Run(&parent_lease), &task_work, &review.basis)
+            .await
+            .unwrap();
+        assert!(store.review(&task_work).await.unwrap().is_none());
+
+        store
+            .stop_run(
+                &parent_lease,
+                StopCause::Requested,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+        let error = store
+            .steer(
+                &ControlCtx::Run(&parent_lease),
+                &task_work,
+                "stale parent",
+                None,
+            )
+            .await
+            .expect_err("a stopped parent Run cannot steer");
+        assert!(matches!(error, super::StoreError::InvalidAuthority(_)));
     }
 
     #[tokio::test]

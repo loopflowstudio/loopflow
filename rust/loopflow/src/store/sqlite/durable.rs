@@ -21,6 +21,31 @@ use super::child_sessions::require_child_write_lease;
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub(crate) fn task_writer_state(
+        &self,
+        external_issue_id: &str,
+    ) -> StoreResult<Option<crate::store::durable::TaskWriterState>> {
+        let task = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.query_row(
+                "SELECT id, issue_identifier FROM tasks WHERE external_issue_id=?1",
+                [external_issue_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        };
+        let Some((id, identifier)) = task else {
+            return Ok(None);
+        };
+        let work = WorkRef::Task(TaskId::parse(&id).map_err(invalid_durable)?);
+        let run = self.current_run(&work)?;
+        Ok(Some(crate::store::durable::TaskWriterState {
+            work,
+            identifier,
+            run,
+        }))
+    }
+
     pub fn home(&self, route: &str) -> StoreResult<Home> {
         let route = route.trim();
         if route.is_empty() {
@@ -818,6 +843,32 @@ impl SqliteStore {
         Ok(receipt)
     }
 
+    pub fn steer(
+        &self,
+        caller: Option<&RunLease>,
+        work: &WorkRef,
+        text: &str,
+        if_basis: Option<&Basis>,
+    ) -> StoreResult<SteerReceipt> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(StoreError::InvalidData(
+                "Steer text cannot be empty".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let epoch = current_epoch_in(&tx, work)?;
+        if let Some(expected) = if_basis {
+            validate_basis(&epoch.current_basis, expected)?;
+        }
+        validate_control_caller(&tx, caller, work)?;
+        let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
+        let receipt = Self::append_steer_in(&tx, work, &author, text)?;
+        tx.commit()?;
+        Ok(receipt)
+    }
+
     pub(crate) fn append_steer_in(
         tx: &Transaction<'_>,
         work: &WorkRef,
@@ -1279,7 +1330,7 @@ fn run_by_id_in(conn: &Connection, run_id: &RunId) -> StoreResult<Run> {
 }
 
 fn insert_control_launch(tx: &Transaction<'_>, run: &Run, launch: &Launch) -> StoreResult<()> {
-    let (wave, project, task, repo) = work_labels(tx, &run.work)?;
+    let labels = work_labels(tx, &run.work)?;
     let cwd = launch.cwd.display().to_string();
     let (containment_kind, containment_id) = launch.containment.parts();
     let (opaque_epoch_id, opaque_basis_rev) = launch
@@ -1306,11 +1357,11 @@ fn insert_control_launch(tx: &Transaction<'_>, run: &Run, launch: &Launch) -> St
             run.id.as_str(),
             containment_id,
             launch.started_at.unix_timestamp(),
-            repo,
+            labels.repo,
             cwd,
-            wave,
-            project,
-            task,
+            labels.wave,
+            labels.project,
+            labels.task,
             launch.route.provider,
             launch.route.model,
             launch.surface,
@@ -1326,16 +1377,27 @@ fn insert_control_launch(tx: &Transaction<'_>, run: &Run, launch: &Launch) -> St
     Ok(())
 }
 
-fn work_labels(
-    conn: &Connection,
-    work: &WorkRef,
-) -> StoreResult<(Option<String>, Option<String>, Option<String>, String)> {
+struct WorkLabels {
+    wave: Option<String>,
+    project: Option<String>,
+    task: Option<String>,
+    repo: String,
+}
+
+fn work_labels(conn: &Connection, work: &WorkRef) -> StoreResult<WorkLabels> {
     match work {
         WorkRef::Wave(id) => conn
             .query_row(
                 "SELECT name, repo FROM waves WHERE id=?1",
                 [id.as_str()],
-                |row| Ok((Some(row.get::<_, String>(0)?), None, None, row.get(1)?)),
+                |row| {
+                    Ok(WorkLabels {
+                        wave: Some(row.get(0)?),
+                        project: None,
+                        task: None,
+                        repo: row.get(1)?,
+                    })
+                },
             )
             .map_err(StoreError::from),
         WorkRef::Project(id) => conn
@@ -1344,12 +1406,12 @@ fn work_labels(
                  FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
                 [id.as_str()],
                 |row| {
-                    Ok((
-                        Some(row.get::<_, String>(0)?),
-                        Some(row.get::<_, String>(1)?),
-                        None,
-                        row.get(2)?,
-                    ))
+                    Ok(WorkLabels {
+                        wave: Some(row.get(0)?),
+                        project: Some(row.get(1)?),
+                        task: None,
+                        repo: row.get(2)?,
+                    })
                 },
             )
             .map_err(StoreError::from),
@@ -1362,12 +1424,12 @@ fn work_labels(
                  WHERE t.id=?1",
                 [id.as_str()],
                 |row| {
-                    Ok((
-                        Some(row.get::<_, String>(0)?),
-                        Some(row.get::<_, String>(1)?),
-                        Some(row.get::<_, String>(2)?),
-                        row.get(3)?,
-                    ))
+                    Ok(WorkLabels {
+                        wave: Some(row.get(0)?),
+                        project: Some(row.get(1)?),
+                        task: Some(row.get(2)?),
+                        repo: row.get(3)?,
+                    })
                 },
             )
             .map_err(StoreError::from),

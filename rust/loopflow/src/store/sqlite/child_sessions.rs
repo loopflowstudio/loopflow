@@ -248,57 +248,56 @@ impl SqliteStore {
         old_identifier: &str,
         new_identifier: &str,
     ) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        // A team migration rebinds the *current* successor for an issue, not a
-        // terminal predecessor kept as history. `issue_id` can now match several
-        // rows (one live successor plus completed/abandoned predecessors), so
-        // resolve the current one through the same rule as the operational
-        // lookups rather than `query_row`, which errors on the second row.
-        let query = format!("{TASK_SESSION_COLUMNS} WHERE issue_id=?1");
-        let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params![issue_id], map_task_session_row)?;
-        let mut sessions = Vec::new();
-        for row in rows {
-            sessions.push(row?);
-        }
-        let Some(current) = resolve_current_task_session(issue_id, sessions)? else {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let Some((task_id, current_identifier)) = tx
+            .query_row(
+                "SELECT id, issue_identifier FROM tasks WHERE external_issue_id=?1",
+                [issue_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        else {
             return Ok(false);
         };
-        let session_id = current.id.as_str().to_string();
-        let current_identifier = current.launch.issue.identifier.as_str();
-        let status = current.status.as_str();
-        let lease_state = current.latest_process.as_ref().map(|process| process.state);
         if current_identifier == new_identifier {
             return Ok(false);
         }
         if current_identifier != old_identifier {
             return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} identifies issue {issue_id} as {current_identifier}, not {old_identifier}"
+                "Task {task_id} identifies issue {issue_id} as {current_identifier}, not {old_identifier}"
             )));
         }
-        if matches!(status, "starting" | "running")
-            || matches!(
-                lease_state,
-                Some(ChildLeaseState::Reserved) | Some(ChildLeaseState::Active)
+        let active_run: Option<String> = tx
+            .query_row(
+                "SELECT r.id
+                 FROM epochs e JOIN runs r ON r.epoch_id=e.id
+                 WHERE e.task_id=?1 AND e.state='open' AND r.state != 'ended'
+                 ORDER BY r.created_at DESC LIMIT 1",
+                [&task_id],
+                |row| row.get(0),
             )
-        {
+            .optional()?;
+        if let Some(run_id) = active_run {
             return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} has an active body; stop it before changing {old_identifier} to {new_identifier}"
+                "Task {task_id} has active Run {run_id}; stop it before changing {old_identifier} to {new_identifier}"
             )));
         }
-        let changed = conn.execute(
-            "UPDATE task_sessions
-             SET issue_identifier=?3, updated_at=?4
-             WHERE id=?1 AND issue_identifier=?2
-               AND status NOT IN ('starting', 'running')
-               AND COALESCE(process_lease_state, 'finished') NOT IN ('reserved', 'active')",
-            params![session_id, old_identifier, new_identifier, now_unix()],
+        let changed = tx.execute(
+            "UPDATE tasks SET issue_identifier=?3 WHERE id=?1 AND issue_identifier=?2",
+            params![task_id, old_identifier, new_identifier],
         )?;
         if changed == 0 {
             return Err(StoreError::InvalidData(format!(
-                "Task Session for {old_identifier} became active during its team migration"
+                "Task {task_id} changed during its team migration"
             )));
         }
+        tx.execute(
+            "UPDATE task_sessions SET issue_identifier=?2, updated_at=?3
+             WHERE epoch_id IN (SELECT id FROM epochs WHERE task_id=?1)",
+            params![task_id, new_identifier, now_unix()],
+        )?;
+        tx.commit()?;
         Ok(true)
     }
 

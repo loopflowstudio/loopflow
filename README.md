@@ -89,7 +89,9 @@ lf usage               # subscription state and spend, per account and repo
 ## Docs
 
 Rendered at [loopflow.studio/docs](https://loopflow.studio/docs), served from
-this repo:
+this repo. For agents: every page is raw markdown at its `.md` URL, indexed
+at [loopflow.studio/llms.txt](https://loopflow.studio/llms.txt) with the full
+corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 
 | Page | Covers |
 |------|--------|

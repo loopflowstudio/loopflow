@@ -134,6 +134,15 @@ wave/                     # Wave goals and memory (persists)
 `scratch/` dies with the PR; `wave/` lives forever. Design docs go in
 `scratch/`, forward-looking plans in `wave/`.
 
+## For agents
+
+Every page here is raw markdown: append `.md` to the URL
+(`/docs/waves.md`) or request the canonical URL with `Accept: text/markdown`.
+The curated index is [/llms.txt](/llms.txt); the complete corpus in one file
+is [/llms-full.txt](/llms-full.txt). Inside a loopflow-launched run you
+already carry the operating contract (`LOOPFLOW.md`) — these pages are the
+long form.
+
 ## Next
 
 [Get Started →](getting-started.md) · [Waves →](waves.md) · [The Agent API →](agent-api.md) · [Conducting →](conducting.md)

@@ -1,15 +1,20 @@
 # Troubleshooting
 
-Common issues and solutions.
+Each section: symptom, cause, fix. Commands are complete and runnable as
+written.
 
 ## A Wave is not running
 
-The Loopflow app invokes its bundled `lf` and talks directly to each Wave.
-Inspect the selected Wave, then start it in the foreground:
+**Symptom:** The app or `lf ls` shows the Wave stopped; `lf chat` reports no
+listener.
+
+**Cause:** No resident process is serving the Wave — nothing starts one
+automatically except the app, `lf home start`, or a cron wake.
 
 ```bash
-lf status <wave> --json
-lf wave <wave>
+lf status <wave> --json    # current registry + runtime evidence
+lf home probe <wave>       # reachable? stopped? running? — with the next action
+lf home start <wave>       # idempotently start the Wave on its Home
 ```
 
 ## Task Session stops advancing
@@ -68,16 +73,12 @@ Other options:
 
 **Symptom:** Git worktree commands fail or show stale data.
 
-List all worktrees:
+List all worktrees, then clean up stale entries:
 
 ```bash
 lf wt list
-```
-
-Clean up stale entries:
-
-```bash
-lf wt prune
+lf wt prune --dry-run    # show what would be removed
+lf wt prune              # force-remove unprotected worktrees and their branches
 ```
 
 If the default branch looks stale after a PR operation you ran from a sibling worktree, rebase the current branch:

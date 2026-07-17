@@ -135,14 +135,29 @@ shrink it:
   with an h1, homepage images must resolve, redirects and `llms.txt` pinned;
   copy edits in `content.yaml`/docs no longer break tests. 60 passed.
 
+## Agent-first docs (added 2026-07-17)
+
+99% of readers are agents. Following Vercel/Stripe/Cloudflare practice, the
+site serves: `/docs/<slug>.md` raw markdown (frontmatter: title,
+canonical_url, last_updated), `Accept: text/markdown` negotiation, markdown
+404s with nearest-match suggestions, spec-shaped `/llms.txt`,
+`/llms-full.txt`, `/sitemap.xml`, and a View-as-Markdown link per page.
+Writing rules adopted: sections stand alone, exact strings verbatim, nothing
+conveyed only visually, examples carry the weight.
+
+**No MCP, ever** — Jack's posture is CLI-only. The distribution channel for
+teaching outside agents is a published skill: `skills/loopflow/SKILL.md`
+(the LOOPFLOW.md contract reframed for agents not launched by lf, installable
+via `npx skills add loopflowstudio/loopflow`). Keep it aligned with
+`rust/loopflow/src/engine/builtins/LOOPFLOW.md`.
+
 ## Deferred
 
-- Root `README.md` still tells the full story in parallel with docs/; next
-  step is trimming it to a pointer into `docs/` (kept for now — it's
-  accurate and the GitHub landing surface).
 - Fresh screenshots/demo capture of the current Mac app (all prior assets
   were Maestro/Concerto-era and were deleted rather than shown stale).
 - The hero has no visual; add one when a current capture exists.
+- Verify `npx skills add loopflowstudio/loopflow` resolves the new
+  `skills/loopflow/SKILL.md` once it lands on the public default branch.
 
 ## Not doing
 

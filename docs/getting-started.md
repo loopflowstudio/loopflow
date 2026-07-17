@@ -251,4 +251,4 @@ Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf` operations](ops.md) · [Configuration](config.md) · [Waves](waves.md) · [The Agent API](agent-api.md)
+[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Waves](waves.md) · [The Agent API](agent-api.md)

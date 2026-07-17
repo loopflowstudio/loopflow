@@ -33,6 +33,7 @@ lf status engbot          # its live Project → Task hierarchy
 |---|---|
 | Just installed, want to try it | [Get Started](getting-started.md) |
 | Automating with a persistent agent | [Waves](waves.md) |
+| Writing skills, flows, and goals | [Authoring](authoring.md) |
 | Writing an agent that drives other agents | [The Agent API](agent-api.md) |
 | Watching and steering many agents | [The Fleet](fleet.md) |
 | Understanding how it works with no server | [Architecture](architecture.md) |
@@ -97,7 +98,8 @@ lf gate --direction ux,clarity    # stack intents
 
 Built-ins cover the common ground: `debug`, `design`, `implement`, `gate`,
 `qa`, `lint`, the `build` flow, and more. Repo skills in `.lf/skills/`
-override and extend them.
+override and extend them. [Authoring](authoring.md) covers writing each of
+these well.
 
 ## Context
 
@@ -134,4 +136,4 @@ wave/                     # Wave goals and memory (persists)
 
 ## Reference
 
-[`lf` commands](lf.md) · [Operations](ops.md) · [Configuration](config.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)

@@ -73,15 +73,8 @@ as `s1`…`s5`:
 lf wave s3            # the s3 (control) charter
 ```
 
-### Frontmatter
-
-| Field | What it does |
-|-------|-------------|
-| `agent` | Preferred agent harness/model |
-| `crons` | Supplementary flow schedules, fired by the wave's resident loop |
-| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
-| `pm.linear_team` | Linear team id owning the Wave's Project and Task prefixes |
-| `home` | The Wave's execution Home — owner plus location, local or `ssh://` |
+Writing a goal well — the weight of each section, frontmatter fields, KR
+craft — is covered in [Authoring → Goals](authoring.md#goals).
 
 ### Memory
 
@@ -130,21 +123,9 @@ lf pm project create --wave infra --title "Technical Architecture" \
 ```
 
 KRs should read as **proof under duration**: observable end states
-demonstrated on real work over a stated window, not capability checkboxes that
-pass once on a demo.
-
-- **Endurance over capability.** Not "the loop can fix a failing build" but
-  "over one week, every dispatched loop lands or stops with an actionable
-  record — zero silent stalls."
-- **Counted.** Streaks, N/N trials: "four consecutive weekly releases with
-  zero manual repair," "5/5 restarts lose nothing."
-- **Unattended.** The window counts only if no human repaired anything inside
-  it. A rescue resets the streak.
-- **Falsifiable on real load.** Measured against the living workspace, never a
-  fresh demo state.
-
-Avoid backlog bullets, implementation receipts, and issue ids in KRs; put
-concrete work in tasks.
+demonstrated on real work over a stated window, not capability checkboxes
+that pass once on a demo. [Authoring → Writing KRs](authoring.md#writing-krs)
+carries the craft and examples.
 
 ## Linear
 
@@ -215,16 +196,10 @@ missed, not replayed.
 
 ## Drafting wave content
 
-Use `lf design` to explore and draft — it can produce a wave's `GOAL.md` and
-`MEMORY.md` without registering or running anything. Or write the files by
-hand. Once they exist, `lf wave <name>` runs them and the Mac app picks them
-up.
-
-```bash
-lf design: plan infrastructure hardening for the runtime
-```
-
-To remove a wave, stop it, then delete `wave/<name>/`.
+Draft with `lf design` or write the files by hand — see
+[Authoring → Drafting](authoring.md#drafting). Once `wave/<name>/` exists,
+`lf wave <name>` runs it and the Mac app picks it up. To remove a wave, stop
+it, then delete `wave/<name>/`.
 
 ## Worked example
 

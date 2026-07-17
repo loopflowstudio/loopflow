@@ -195,12 +195,12 @@ DOCS_NAV = [
     ("Home", "index"),
     ("Get Started", "getting-started"),
     ("Waves", "waves"),
+    ("Authoring", "authoring"),
     ("The Agent API", "agent-api"),
     ("The Fleet", "fleet"),
     ("Architecture", "architecture"),
     # Reference
     ("lf", "lf"),
-    ("lf ops", "ops"),
     ("Config", "config"),
     ("Troubleshooting", "troubleshooting"),
 ]

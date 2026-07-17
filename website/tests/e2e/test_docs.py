@@ -4,11 +4,11 @@ from playwright.sync_api import Page
 NAV_SLUGS = [
     "getting-started",
     "waves",
+    "authoring",
     "agent-api",
     "fleet",
     "architecture",
     "lf",
-    "ops",
     "config",
     "troubleshooting",
 ]
@@ -51,6 +51,7 @@ def test_docs_nonexistent_redirects(page: Page, base_url: str):
 
 
 def test_retired_docs_redirect(page: Page, base_url: str):
-    # wave-authoring merged into waves; the slug must not 500
-    page.goto(f"{base_url}/docs/wave-authoring")
-    assert page.url == f"{base_url}/docs"
+    # wave-authoring merged into waves, ops merged into lf; neither slug may 500
+    for retired in ("wave-authoring", "ops"):
+        page.goto(f"{base_url}/docs/{retired}")
+        assert page.url == f"{base_url}/docs"

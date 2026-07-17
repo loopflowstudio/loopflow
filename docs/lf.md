@@ -234,14 +234,6 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 | `release` | op: release run patch |
 | `sync` | rebase → integrate-upstream |
 
-Flows can include mechanical ops items directly:
-
-```yaml
-- implement
-- gate
-- op: pr land --create-pr
-```
-
 `sync` rebases the current branch and refreshes the default branch. The
 default-branch refresh is safe from sibling worktrees: it stashes dirty edits
 on the checked-out default branch, syncs, then restores them — unless they
@@ -249,30 +241,8 @@ collide with paths the sync rewrote, in which case they stay in a
 `sync_main: auto-stash` stash so a sync can never silently revert just-landed
 work.
 
-### Branches (xor)
-
-Branches route a flow based on an agent's assessment of the current state.
-Exactly one path runs.
-
-```yaml
-# flow: garden
-- scan
-- assess
-- xor:
-    router: assess
-    paths:
-      act:
-        flow: garden-act
-        description: "Adjustments needed — mutate waves, then review"
-      silence:
-        description: "Everything is healthy"
-```
-
-The `xor` construct runs a router skill that reads scratch/ and chooses a
-path; routing instructions are appended to the router's prompt automatically.
-A path with no `flow:` or `skill:` (like `silence`) is a clean no-op exit.
-If no `router:` is specified, a generic routing agent picks a path from
-scratch/ contents.
+Flow authoring — `op:` steps, `xor` branching, routers — is covered in
+[Authoring](authoring.md).
 
 ## Running Waves, Projects, and Tasks
 
@@ -640,6 +610,210 @@ lf npx/explain-code                # already-cached skill (no network)
 
 `npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The bundled `gstack/` namespace and core `build/` / `govern/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
 
+## PR Operations
+
+### lf pr publish
+
+Push and create or refresh a PR, then print its state and URL. Opens no
+browser — this is the headless publication command agents use.
+
+```bash
+lf pr publish
+lf pr publish --title "area: short title" --body "## Summary ..."
+lf -m codex pr publish        # one-off agent override for copy generation
+```
+
+When `-m` is omitted, copy generation uses `agent:` from `.lf/config.yaml` or
+`~/.lf/config.yaml`. Use the `pr` ops skill to generate `--title`/`--body`
+with agent judgment. Before publishing, Loopflow syncs the default branch in
+the main repo so the PR is based on current upstream state even from a
+sibling worktree. Push or GitHub failure returns an error and presents
+nothing.
+
+### lf pr open
+
+Publish (same as `lf pr publish`), then open the PR for review — the GitHub
+page in the browser. The explicit, human-initiated review action; agents use
+`publish`, `submit`, or `land`. If launching the browser fails, only `open`
+fails — the PR is already published and its URL printed.
+
+### lf pr land
+
+Submit the PR to the merge queue: enables auto-merge, GitHub merges when CI
+passes and the queue clears.
+
+```bash
+lf pr land                    # land one PR; the Task stays open
+lf pr land -c                 # land, then complete the owning Task
+lf pr land --next parser-proof  # name the next serial Task PR
+```
+
+### lf pr abandon
+
+Close the PR, remove the worktree, delete the branch.
+
+```bash
+lf pr abandon feature-branch
+lf pr abandon feature-branch --force   # skip confirmation, allow dirty
+```
+
+## lf commit
+
+```bash
+lf commit                     # stage all changes, generate a message, commit
+lf commit -m "message"        # override the generated message
+lf commit -p                  # commit and push
+lf commit --no-add            # commit only what is already staged
+```
+
+## lf rebase
+
+Plan or update the current branch against the right base.
+
+```bash
+lf rebase          # update the branch
+lf rebase --plan   # show the strategy without changing git
+lf rebase origin/main          # explicit target
+```
+
+Classifies the branch before mutating git: disposable branches can reset to
+their base, authored work uses a normal rebase path. If `scratch/` needs to
+survive a reset, Loopflow stashes it under `.lf/scratch-stash/` and restores
+it afterward.
+
+Keep conflict resolution local when the branch is too large or sensitive to
+hand to another agent:
+
+```bash
+lf rebase --manual
+# edit the conflict paths printed by lf
+lf rebase --continue   # stages only the current conflict paths; repeat
+lf rebase --abort      # restore the pre-rebase branch
+```
+
+Manual recovery stays local and never pushes.
+
+## lf wt
+
+Inspect, switch, and clean worktrees. Normal roadmap work starts with
+`lf task run <issue-id>`; `lf wt` remains a low-level Git primitive. Place
+dependent roadmap work through `lf task run CHILD --stack-on PARENT`, not
+`lf wt`.
+
+```bash
+lf wt switch bugs             # by directory name, identity leaf, or full branch
+lf wt list                    # worktrees as a tree; --format json
+lf wt ci                      # CI status for the current branch
+lf wt prune --dry-run         # show every unprotected worktree
+lf wt prune                   # force-remove them and their local branches
+```
+
+`prune` is intentionally destructive: it preserves main, the current
+worktree, nonterminal Task Sessions, and worktrees owned by live processes —
+everything else goes, including dirty and unpushed work. Run `--dry-run`
+first when the repository contains work created outside Loopflow.
+
+`lfd` runs a lossless sweep on startup and every 15 minutes: only clean
+landed, remotely deleted, or terminal Task worktrees are removed. Disable
+with `autoprune: false` in config. Subscribe the daemon to GitHub merge and
+branch-deletion webhooks by defining `LF_GITHUB_WEBHOOK_URL` and
+`LF_GITHUB_WEBHOOK_SECRET` in Doppler; the secret travels over stdin and
+never appears in process arguments or the service file.
+
+## lf cron
+
+Install local launchd jobs that run `lf` commands on a schedule. (Wave crons
+in `GOAL.md` frontmatter are separate — the resident fires those; see
+[Waves](waves.md#crons).)
+
+```bash
+lf cron add --wave memory --flow export-memory --schedule daily
+lf cron list
+lf cron remove --wave memory --flow export-memory
+```
+
+`add` writes `~/Library/LaunchAgents/loopflow.cron.<wave>.<flow>.plist` and
+loads it with launchd; the job runs `lf <flow> --wave <wave>` from the
+current repo.
+
+## lf pm
+
+Read and edit a wave's Linear planning state. Each wave is backed by one
+Linear Initiative, projects are Linear Projects, tasks are Issues. `sync`
+refreshes the local SQLite read model used by every other read surface.
+
+```bash
+lf pm status                                # linked waves and task counts
+lf pm init --wave designer --team-key DSG   # connect or rebind Initiative + team
+lf pm sync --wave designer                  # refresh SQLite from Linear
+lf pm sync --plan                           # report drift without writing
+lf pm show --wave designer                  # read; refresh when stale
+lf pm show --wave designer --no-sync        # cache-only agent/app read
+lf pm show --wave designer --project ui     # filter to one project
+lf pm project create --wave designer --title "..." --definition "..." --kr "..."
+lf pm project update --wave designer --project ui --definition "..." --kr "..."
+lf pm project archive --wave designer --project retired-bet
+lf pm task create --wave designer --project ui --title "Dark mode"
+lf pm task update --id 1207... --title "Refine dark mode"
+lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
+lf pm task move --id 1207... --wave designer --project api
+lf pm rename --wave designer --title "Designer"   # rename the Initiative
+lf pm reteam --wave designer --apply    # move the hierarchy when no body is writing
+lf pm doctor                            # flag issues stranded in the old team
+```
+
+Connect Linear first with `lf auth linear`. `lf pm init` pins the Initiative
+and a Wave-owned team into `GOAL.md` frontmatter; the team key becomes each
+Task's prefix (`PRD-1`, `INF-1`) so every wave owns its identifiers. When no
+id is pinned, init links one exact Initiative-title match, creates one when
+absent, and fails on duplicates. Creation fails closed: `project create` and
+`task create` require a bound team and error with the `lf pm init` recovery
+rather than silently attaching work to a shared team. Reads stay
+team-agnostic.
+
+Linear's Projects view is flat, so provider titles use `<Wave> — <Project>`;
+Loopflow strips that display prefix and keeps the canonical slug
+(`Product — Loopflow API` remains `project:loopflow-api`). `show` serves
+snapshots younger than an hour without a network request, tries a
+five-second refresh for older ones, and refuses to silently serve a snapshot
+older than a week. Use `--no-sync` in agents and UI paths so rendering never
+waits on Linear.
+
+`lf pm reteam` migrates a wave's existing issues into its own team. It
+**defaults to a dry run** and only mutates with `--apply`; it defers an issue
+only while a Task body can write to its Session, and leaves completed issues
+in the shared team as historical — a team move renumbers the issue, and
+shipped PR references are immutable. Each moved issue gets a comment
+recording its prior identifier; re-running is a no-op.
+
+## lf release
+
+Mechanical release subcommands; `lf release run` is the full workflow.
+
+```bash
+lf release run patch          # full release workflow
+lf release check              # PRs merged since last tag?
+lf release notes 1.2.3        # narrative RELEASE_NOTES.md from decisions + PRs
+lf release bump 1.2.3         # bump manifests
+lf release tag 1.2.3          # create + push git tag
+lf release status             # workflow + GitHub Release status
+```
+
+| Path | What it holds |
+|------|--------------|
+| `release/unreleased/DECISIONS.md` | Append-only ledger of release-worthy decisions during the current cycle |
+| `release/vX.Y.Z/DECISIONS.md` | Archived decision ledger for a shipped version |
+| `release/vX.Y.Z/NOTES.md` | Snapshot of that version's release notes |
+| `RELEASE_NOTES.md` | Always-latest release notes at the repo root |
+
+Interactive runs append durable product and process decisions to the
+unreleased ledger; headless runs do not. The release workflow promotes
+`release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` as the
+intent source and merged PRs as the shipped-behavior source, and archives
+the generated notes. If the ledger is absent, notes fall back to merged PR
+history. Headless release automation needs no runner-local agent CLI — if no
+harness can start, Loopflow writes deterministic notes from the same context.
+
 ## See Also
 
-[The Agent API](agent-api.md) · [The Fleet](fleet.md) · [Get Started](getting-started.md) · [Configuration](config.md)
+[The Agent API](agent-api.md) · [The Fleet](fleet.md) · [Authoring](authoring.md) · [Get Started](getting-started.md) · [Configuration](config.md)

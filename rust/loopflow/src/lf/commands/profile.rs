@@ -8,7 +8,7 @@ use crate::lf::{DefaultRouteCommand, ProfileCommand, RouteCommand};
 use crate::profile::{
     resolve_local_chrome_profile, AccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
-use crate::provider_account::open_account_store;
+use crate::provider_account::{active_account_strain, open_account_store};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
@@ -180,6 +180,8 @@ async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&st
             )
         })
         .collect::<HashMap<_, _>>();
+    let limits = store.provider_account_limits(None).await?;
+    let now = now_unix();
     for provider in [Provider::Claude, Provider::Codex] {
         let repo_scope = RouteScope::Repo(repo_id.clone());
         let (route, fallback) = match store.provider_route(&repo_scope, provider).await? {
@@ -207,12 +209,21 @@ async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&st
             let state = account
                 .map(|account| account.credential_state.as_str())
                 .unwrap_or("missing row");
+            // Declared order is intent; this marks where health currently overrides it.
+            let demotion = match active_account_strain(provider.as_str(), account_id, &limits, now)
+            {
+                Some(strain) => {
+                    format!("  demoted: {} {}% used", strain.window, strain.used_percent)
+                }
+                None => String::new(),
+            };
             println!(
-                "  {}. {:<20} {:<32} {}",
+                "  {}. {:<20} {:<32} {}{}",
                 position + 1,
                 account_id,
                 login,
-                state
+                state,
+                demotion
             );
         }
     }

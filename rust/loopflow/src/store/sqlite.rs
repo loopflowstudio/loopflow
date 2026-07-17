@@ -11,8 +11,9 @@ use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    BusMessage, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult,
+    AccountLimitRow, BusMessage, CredentialState, PmSnapshotRow, ProviderAccount,
+    ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
+    StoreResult,
 };
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
@@ -226,6 +227,24 @@ fn read_provider_account(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<Pr
             updated_at,
         })
     })())
+}
+
+fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccountLimitRow>> {
+    let account_id = row.get::<_, String>(1)?;
+    let account_id = match ProviderAccountId::parse(&account_id) {
+        Ok(account_id) => account_id,
+        Err(error) => return Ok(Err(StoreError::InvalidData(error))),
+    };
+    Ok(Ok(AccountLimitRow {
+        provider: row.get(0)?,
+        account_id,
+        window: row.get(2)?,
+        used_percent: row.get(3)?,
+        resets_at: row.get(4)?,
+        plan: row.get(5)?,
+        observed_at: row.get(6)?,
+        source: row.get(7)?,
+    }))
 }
 
 fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccessProfile>> {
@@ -765,34 +784,10 @@ impl SqliteStore {
              WHERE ?1 IS NULL OR provider = ?1
              ORDER BY provider, account_id, window",
         )?;
-        let rows = statement.query_map([provider], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, u8>(3)?,
-                row.get::<_, Option<i64>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, i64>(6)?,
-                row.get::<_, String>(7)?,
-            ))
-        })?;
+        let rows = statement.query_map([provider], read_account_limit_row)?;
         let mut limits = Vec::new();
         for row in rows {
-            let (provider, account_id, window, used_percent, resets_at, plan, observed_at, source) =
-                row?;
-            let account_id =
-                ProviderAccountId::parse(&account_id).map_err(StoreError::InvalidData)?;
-            limits.push(crate::store::AccountLimitRow {
-                provider,
-                account_id,
-                window,
-                used_percent,
-                resets_at,
-                plan,
-                observed_at,
-                source,
-            });
+            limits.push(row??);
         }
         Ok(limits)
     }
@@ -1042,6 +1037,20 @@ impl SqliteStore {
                 .optional()?,
             None => None,
         };
+        let limits = {
+            let mut statement = transaction.prepare(
+                "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source
+                 FROM provider_account_limits
+                 WHERE provider = ?1
+                 ORDER BY account_id, window",
+            )?;
+            let rows = statement.query_map([provider.as_str()], read_account_limit_row)?;
+            let mut limits = Vec::new();
+            for row in rows {
+                limits.push(row??);
+            }
+            limits
+        };
         let mut account_statement = transaction.prepare(
             "SELECT provider, account_id, home, login_email, credential_state,
                     routing_state, plan, paid_through, utilization_percent,
@@ -1075,13 +1084,16 @@ impl SqliteStore {
         });
         let (mut account, resume_requested_session) = match resumed {
             Some(index) => (available.remove(index), true),
-            None => match available.into_iter().next() {
-                Some(selection) => (selection, false),
-                None => {
-                    transaction.commit()?;
-                    return Ok(None);
+            None => {
+                crate::provider_account::order_accounts_by_strain(&mut available, &limits, now);
+                match available.into_iter().next() {
+                    Some(selection) => (selection, false),
+                    None => {
+                        transaction.commit()?;
+                        return Ok(None);
+                    }
                 }
-            },
+            }
         };
         transaction.execute(
             "UPDATE provider_accounts

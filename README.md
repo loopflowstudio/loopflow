@@ -572,6 +572,23 @@ lf auth disconnect claude --account account-id
 These names are placeholders. Accounts, access venues, and per-provider routes
 live in the local Loopflow database; Loopflow ships no account topology.
 
+Route order records intent. An account with a provider-observed limit window at
+least 75% used and not yet reset falls behind unstrained accounts for automatic
+selection, and `lf route show` marks it where the order lives:
+
+```
+codex  (loopflowstudio/loopflow)
+  1. engineering          engineering@example.com          connected  demoted: weekly 80% used
+  2. personal             personal@example.com             connected
+```
+
+So `personal` goes first until that window resets. `lf usage` reports the
+windows behind the mark. Strained accounts stay eligible when they are the only
+choice; session pins and explicit `--account` selection keep precedence.
+Forwarded runs inherit this order: `lf ssh` resolves health on the host and
+sends the resulting route, so a remote agent with no local observations still
+tries the healthy account first.
+
 `auth connect <provider> <account>` tries that account's access profiles in
 order. A profile records a Chrome directory and the login expected there. The
 cached Chrome login only chooses a browser window; the credential produced by

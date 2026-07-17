@@ -311,19 +311,33 @@ release itself when it can.
     reservation is refused;
   - prove `EPERM` does not release: probe a group we may not signal (pid 1's
     group, owned by root) and assert `Present`, not `Gone`;
-  - **fail-closed, signal identity:** a recorded group id that does not fit
-    `i32`, and one that converts to `0`, each probe `Unprovable` and do not
-    release. This is the case `process_target_exists` answers `false` to; the
-    test is written to go red against that function, so reusing it later cannot
-    pass silently;
-  - **fail-closed, tmux:** a tmux probe that cannot be spawned, and one that
-    exits non-zero with unrecognized stderr, each probe `Unprovable` and do not
-    release; a positively recognized no-server stderr probes `Absent`; a live
-    recorded session probes `Present`. Per the wave's 2026-07-16 finding, the
-    outage is modelled by *replacing* the fake `tmux` with a failing script —
-    never by deleting it, since `AmbientGuard` prepends its temp bin dir to the
-    real `PATH` and a deleted fake falls through to the host's real tmux;
   - prove the refusal names the lease, not the status.
+- **The fail-closed guards.** These are the executable proof of the two
+  corrected absence claims, and neither is covered by the `EPERM` test above:
+  `EPERM` exercises the one errno `process_target_exists` *does* model, so it
+  passes with both collapses fully present. Each of these names a case that
+  function answers `false` — i.e. "absent" — to, and each asserts `Unprovable`
+  and **no release**:
+
+  | test | identity under probe | asserts |
+  |------|---------------------|---------|
+  | `an_unrepresentable_signal_identity_is_unprovable_and_does_not_release` | group id that does not fit `i32` | `Unprovable`, lease stays `revoked` |
+  | `a_zero_converting_signal_identity_is_unprovable_and_does_not_release` | id converting to `raw == 0` | `Unprovable`, lease stays `revoked` |
+  | `an_unspawnable_tmux_probe_is_unprovable_and_does_not_release` | `tmux` not runnable | `Unprovable`, lease stays `revoked` |
+  | `an_unrecognized_tmux_error_is_unprovable_and_does_not_release` | non-zero exit, unrecognized stderr | `Unprovable`, lease stays `revoked` |
+  | `a_recognized_no_server_tmux_probe_reads_absent` | non-zero exit, no-server stderr | `Absent` |
+  | `a_live_recorded_tmux_session_reads_present` | recorded session in the live set | `Present` |
+
+  The four `Unprovable` tests are written to go red against
+  `process_target_exists` and `tmux_session_exists` respectively, so a later
+  refactor that reaches back for either helper cannot pass silently — that
+  reuse is the exact mistake this design made in v1.
+
+  Per the wave's 2026-07-16 finding, both tmux outages are modelled by
+  *replacing* the fake `tmux` with a failing script — never by deleting it,
+  since `AmbientGuard` prepends its temp bin dir to the real `PATH` and a
+  deleted fake falls through to the host's real tmux, which answers about real
+  sessions and lands in a different branch than the one under test.
 - Each test is sabotage-checked: reverting the release makes it red. A test that
   passes with the fix removed is pinning the fixture.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` pass.

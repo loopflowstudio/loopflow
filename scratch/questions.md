@@ -27,19 +27,48 @@ Iterate and adds a Gate review fixture — same file, same coordinates. Adapting
 onto W2-294 rather than racing it is right, and is what the hold instructs.
 
 **A finding W2-294 needs, which I cannot deliver directly (tier boundary — routing
-it through this doc, which the Project reads).** W2-294's Gate fixture will land on
-the same trap this Task just found: **Gate `phase_cursor = 0` is not a plain
-waitpoint — it is a live human interaction review.** `make_task` uses
-`TaskLifecyclePlan::standard`, whose Gate policy is `Require`; gate step 0 is
-`demo`; `demo` is `interactive: true`; so `prepare_task_flow_step` opens a `Human`
-review and `start_prepared_task_step` leaves `provider_turn_active = true`. A
-"deterministic Gate ci-fix fixture" built at those coordinates is therefore
-exercising a *parked review*, not a Gate waitpoint — and once this Task's preempt
-lands, that fixture's turn gets interrupted, which will read as a spurious failure
-in W2-294's diff rather than as the interaction it is. W2-294 should either move
-its Gate fixture to a non-interactive gate step (`code-review` is also
-interactive; `gate` is the candidate) or set `gate_interaction_policy = Defer`,
-which makes the reviewer `Project` and leaves the turn idle.
+it through this doc, which the Project reads).** Checked against **PR #1063** as
+published, not against the Task description. It touches `runner.rs` and
+`ci_fix_lifecycle_tests.rs` — both files this branch edits — so a textual conflict
+is expected and fine. The substantive part is which coordinates its fixtures chose.
+
+**Interactivity of every lifecycle step, measured from the flow YAML and the skill
+frontmatter** (the table this Task had to build anyway):
+
+| Flow | 0 | 1 | 2 |
+|---|---|---|---|
+| `task` (Iterate) | `task_clarify` — ordinary | `task_pursue` — ordinary | `task_mutate` — ordinary |
+| `task-kickoff` | `kickoff` — ordinary | **`review-design` — INTERACTIVE** | — |
+| `task-gate` | **`demo` — INTERACTIVE** | **`code-review` — INTERACTIVE** | `gate` — ordinary |
+
+Under `TaskLifecyclePlan::standard` (what `make_task` uses) Kickoff and Gate are
+both `Require`, so any interactive step there opens a **Human** review and leaves
+`provider_turn_active = true`.
+
+Applying that to #1063's two new fixtures:
+
+- `a_real_ci_fix_turn_preserves_the_iterate_cursor_and_settles_its_wake` — Iterate
+  `phase_cursor = 1` → `task_pursue` → **ordinary. No interaction with this
+  Task's preempt.** Correct as written.
+- `a_kickoff_ci_fix_turn_settles_before_iterate_and_spends_no_lifecycle_turn` —
+  Kickoff `phase_cursor = 1` → **`review-design`, interactive** → Human review with
+  an active turn. **That fixture is parked in a review**, which is precisely the
+  state this Task's preempt fires on.
+
+What that means, stated at the confidence it deserves: #1063's new tests do not
+appear to assert `interrupts == 0` (unlike W2-303's, which does), so the Kickoff
+fixture may well stay green — the preempt would interrupt its review turn, the arm
+would run, and the repair would still settle, which is roughly what it asserts
+anyway. But its harness may also drive its own `TurnCompleted`, and a preempt plus
+a self-driven completion on one turn is an interaction neither Task has run. I am
+not claiming it breaks; I am claiming it is **unverified and cheap to verify** —
+which is exactly what the hold's "rebase or adapt onto that boundary" buys.
+
+**Adaptation plan once #1063 lands** (no action needed from W2-294): rebase, run
+its two fixtures against this preempt, and if the Kickoff one is disturbed, move it
+to `phase_cursor = 0` (`kickoff`, ordinary) — which preserves its intent exactly,
+since its subject is the *cursor*, not the review. That mirrors this Task's own R4
+correction of W2-303's fixture and costs W2-294 nothing.
 
 ## Superseded — the W2-309 sequencing decision (resolved)
 

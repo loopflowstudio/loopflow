@@ -6,11 +6,9 @@ use std::sync::Arc;
 
 use crate::id::WaveId;
 use crate::profile::{
-    ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
-    ProviderProfileCandidate, RepoProfileRoute,
+    AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
 use crate::provider_auth::Provider;
-use crate::repository::RepoId;
 use crate::wave::Wave;
 mod child_sessions;
 pub(crate) mod ci_incidents;
@@ -590,93 +588,68 @@ impl Store {
         .await
     }
 
-    pub async fn upsert_profile(&self, profile: &Profile) -> StoreResult<()> {
+    pub async fn upsert_access_profile(&self, profile: &AccessProfile) -> StoreResult<()> {
         let profile = profile.clone();
-        run_sqlite(&self.sqlite, move |store| store.upsert_profile(&profile)).await
-    }
-
-    pub async fn get_profile(&self, profile_id: &ProfileId) -> StoreResult<Option<Profile>> {
-        let profile_id = profile_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.get_profile(&profile_id)).await
-    }
-
-    pub async fn list_profiles(&self) -> StoreResult<Vec<Profile>> {
-        run_sqlite(&self.sqlite, |store| store.list_profiles()).await
-    }
-
-    pub async fn set_profile_provider_account(
-        &self,
-        mapping: &ProfileProviderAccount,
-    ) -> StoreResult<()> {
-        let mapping = mapping.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.set_profile_provider_account(&mapping)
+            store.upsert_access_profile(&profile)
         })
         .await
     }
 
-    pub async fn profile_provider_account(
+    pub async fn get_access_profile(
         &self,
         profile_id: &ProfileId,
+    ) -> StoreResult<Option<AccessProfile>> {
+        let profile_id = profile_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_access_profile(&profile_id)
+        })
+        .await
+    }
+
+    pub async fn list_access_profiles(&self) -> StoreResult<Vec<AccessProfile>> {
+        run_sqlite(&self.sqlite, |store| store.list_access_profiles()).await
+    }
+
+    pub async fn set_account_access_profiles(
+        &self,
         provider: Provider,
-    ) -> StoreResult<Option<ProfileProviderAccount>> {
-        let profile_id = profile_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.profile_provider_account(&profile_id, provider)
-        })
-        .await
-    }
-
-    pub async fn list_profile_provider_accounts(
-        &self,
-        profile_id: Option<&ProfileId>,
-    ) -> StoreResult<Vec<ProfileProviderAccount>> {
-        let profile_id = profile_id.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_profile_provider_accounts(profile_id.as_ref())
-        })
-        .await
-    }
-
-    pub async fn upsert_chrome_profile_binding(
-        &self,
-        binding: &ChromeProfileBinding,
+        account_id: &ProviderAccountId,
+        profile_ids: &[ProfileId],
     ) -> StoreResult<()> {
-        let binding = binding.clone();
+        let account_id = account_id.clone();
+        let profile_ids = profile_ids.to_vec();
         run_sqlite(&self.sqlite, move |store| {
-            store.upsert_chrome_profile_binding(&binding)
+            store.set_account_access_profiles(provider, &account_id, &profile_ids)
         })
         .await
     }
 
-    pub async fn chrome_profile_binding(
+    pub async fn list_account_access_profiles(
         &self,
-        profile_id: &ProfileId,
-        host_id: &HostId,
-    ) -> StoreResult<Option<ChromeProfileBinding>> {
-        let profile_id = profile_id.clone();
-        let host_id = host_id.clone();
+        provider: Option<Provider>,
+        account_id: Option<&ProviderAccountId>,
+    ) -> StoreResult<Vec<AccountAccessProfile>> {
+        let account_id = account_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.chrome_profile_binding(&profile_id, &host_id)
+            store.list_account_access_profiles(provider, account_id.as_ref())
         })
         .await
     }
 
-    pub async fn set_repo_profile_route(&self, route: &RepoProfileRoute) -> StoreResult<()> {
+    pub async fn set_provider_route(&self, route: &ProviderRoute) -> StoreResult<()> {
         let route = route.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_repo_profile_route(&route)
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.set_provider_route(&route)).await
     }
 
-    pub async fn repo_profile_route(
+    pub async fn provider_route(
         &self,
-        repo_id: &RepoId,
-    ) -> StoreResult<Option<RepoProfileRoute>> {
-        let repo_id = repo_id.clone();
+        scope: &RouteScope,
+        provider: Provider,
+    ) -> StoreResult<Option<ProviderRoute>> {
+        let scope = scope.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.repo_profile_route(&repo_id)
+            store.provider_route(&scope, provider)
         })
         .await
     }
@@ -685,33 +658,26 @@ impl Store {
         &self,
         provider: Provider,
         provider_session_id: &str,
-        profile_id: &ProfileId,
         account_id: &ProviderAccountId,
     ) -> StoreResult<()> {
         let provider_session_id = provider_session_id.to_string();
-        let profile_id = profile_id.clone();
         let account_id = account_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pin_provider_session_route(
-                provider,
-                &provider_session_id,
-                &profile_id,
-                &account_id,
-            )
+            store.pin_provider_session_route(provider, &provider_session_id, &account_id)
         })
         .await
     }
 
-    pub async fn select_provider_profile(
+    pub async fn select_provider_account(
         &self,
         provider: Provider,
-        candidates: &[ProviderProfileCandidate],
+        candidates: &[ProviderAccountId],
         provider_session_id: Option<&str>,
-    ) -> StoreResult<Option<ProviderProfileSelection>> {
+    ) -> StoreResult<Option<ProviderAccountSelection>> {
         let candidates = candidates.to_vec();
         let provider_session_id = provider_session_id.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.select_provider_profile(provider, &candidates, provider_session_id.as_deref())
+            store.select_provider_account(provider, &candidates, provider_session_id.as_deref())
         })
         .await
     }
@@ -890,8 +856,7 @@ impl RoutingState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderProfileSelection {
-    pub profile_id: ProfileId,
+pub struct ProviderAccountSelection {
     pub account: ProviderAccount,
     pub resume_requested_session: bool,
 }
@@ -1007,15 +972,10 @@ mod tests {
         InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
         InteractionReviewId, InteractionReviewStatus, InteractionReviewer,
     };
-    use crate::profile::{
-        ChromeProfileBinding, EmailAddress, HostId, Profile, ProfileId, ProfileProviderAccount,
-        ProviderProfileCandidate, RepoProfileRoute,
-    };
+    use crate::profile::EmailAddress;
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
-    use crate::provider_auth::Provider;
-    use crate::repository::RepoId;
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         ProjectLaunchReceipt, TaskLaunchReceipt,
@@ -4842,338 +4802,6 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         }
-    }
-
-    #[tokio::test]
-    async fn profiles_bind_accounts_and_preserve_repo_backup_order() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let shared = provider_account("claude", "shared", 0);
-        store.upsert_provider_account(&shared).await.unwrap();
-
-        for id in [
-            "primary@example.com",
-            "engineering@example.com",
-            "personal@example.com",
-        ] {
-            let profile = Profile {
-                id: ProfileId::parse(id).unwrap(),
-                created_at: 1,
-                updated_at: 1,
-            };
-            store.upsert_profile(&profile).await.unwrap();
-        }
-        for id in ["engineering@example.com", "personal@example.com"] {
-            store
-                .set_profile_provider_account(&ProfileProviderAccount {
-                    profile_id: ProfileId::parse(id).unwrap(),
-                    provider: Provider::Claude,
-                    account_id: shared.account_id.clone(),
-                    created_at: 1,
-                    updated_at: 1,
-                })
-                .await
-                .unwrap();
-        }
-        store
-            .upsert_chrome_profile_binding(&ChromeProfileBinding {
-                profile_id: ProfileId::parse("primary@example.com").unwrap(),
-                host_id: HostId::parse("studio-mac").unwrap(),
-                chrome_directory: "Profile 7".to_string(),
-                created_at: 1,
-                updated_at: 1,
-            })
-            .await
-            .unwrap();
-        store
-            .upsert_chrome_profile_binding(&ChromeProfileBinding {
-                profile_id: ProfileId::parse("primary@example.com").unwrap(),
-                host_id: HostId::parse("mini-heart").unwrap(),
-                chrome_directory: "Default".to_string(),
-                created_at: 1,
-                updated_at: 1,
-            })
-            .await
-            .unwrap();
-        let route = RepoProfileRoute {
-            repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            default_profile: ProfileId::parse("primary@example.com").unwrap(),
-            backup_profiles: vec![
-                ProfileId::parse("engineering@example.com").unwrap(),
-                ProfileId::parse("personal@example.com").unwrap(),
-            ],
-            created_at: 1,
-            updated_at: 1,
-        };
-        store.set_repo_profile_route(&route).await.unwrap();
-
-        assert_eq!(
-            store
-                .repo_profile_route(&route.repo_id)
-                .await
-                .unwrap()
-                .unwrap(),
-            route
-        );
-        assert_eq!(
-            store
-                .profile_provider_account(
-                    &ProfileId::parse("engineering@example.com").unwrap(),
-                    Provider::Claude,
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .account_id,
-            shared.account_id
-        );
-        assert_eq!(
-            store
-                .chrome_profile_binding(
-                    &ProfileId::parse("primary@example.com").unwrap(),
-                    &HostId::parse("studio-mac").unwrap(),
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .chrome_directory,
-            "Profile 7"
-        );
-        assert_eq!(
-            store
-                .chrome_profile_binding(
-                    &ProfileId::parse("primary@example.com").unwrap(),
-                    &HostId::parse("mini-heart").unwrap(),
-                )
-                .await
-                .unwrap()
-                .unwrap()
-                .chrome_directory,
-            "Default"
-        );
-    }
-
-    #[tokio::test]
-    async fn provider_mappings_transition_independently_without_changing_the_repo_route() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let profile_id = ProfileId::parse("engineering@example.com").unwrap();
-        store
-            .upsert_profile(&Profile {
-                id: profile_id.clone(),
-                created_at: 1,
-                updated_at: 1,
-            })
-            .await
-            .unwrap();
-        let claude_personal = provider_account("claude", "personal", 0);
-        let claude_engineering = provider_account("claude", "engineering", 0);
-        let codex_engineering = provider_account("codex", "engineering", 0);
-        for account in [&claude_personal, &claude_engineering, &codex_engineering] {
-            store.upsert_provider_account(account).await.unwrap();
-        }
-        for (provider, account_id) in [
-            (Provider::Claude, claude_personal.account_id.clone()),
-            (Provider::Codex, codex_engineering.account_id.clone()),
-        ] {
-            store
-                .set_profile_provider_account(&ProfileProviderAccount {
-                    profile_id: profile_id.clone(),
-                    provider,
-                    account_id,
-                    created_at: 1,
-                    updated_at: 1,
-                })
-                .await
-                .unwrap();
-        }
-        let route = RepoProfileRoute {
-            repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            default_profile: profile_id.clone(),
-            backup_profiles: Vec::new(),
-            created_at: 1,
-            updated_at: 1,
-        };
-        store.set_repo_profile_route(&route).await.unwrap();
-
-        store
-            .set_profile_provider_account(&ProfileProviderAccount {
-                profile_id: profile_id.clone(),
-                provider: Provider::Claude,
-                account_id: claude_engineering.account_id.clone(),
-                created_at: 1,
-                updated_at: 2,
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(
-            store
-                .profile_provider_account(&profile_id, Provider::Claude)
-                .await
-                .unwrap()
-                .unwrap()
-                .account_id,
-            claude_engineering.account_id
-        );
-        assert_eq!(
-            store
-                .profile_provider_account(&profile_id, Provider::Codex)
-                .await
-                .unwrap()
-                .unwrap()
-                .account_id,
-            codex_engineering.account_id
-        );
-        assert_eq!(
-            store.repo_profile_route(&route.repo_id).await.unwrap(),
-            Some(route)
-        );
-    }
-
-    #[tokio::test]
-    async fn profile_selection_deduplicates_shared_accounts_and_follows_route_order() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let shared = provider_account("claude", "shared", 90);
-        let reserve = provider_account("claude", "reserve", 0);
-        store.upsert_provider_account(&shared).await.unwrap();
-        store.upsert_provider_account(&reserve).await.unwrap();
-        for id in [
-            "default@example.com",
-            "alias@example.com",
-            "backup@example.com",
-        ] {
-            store
-                .upsert_profile(&Profile {
-                    id: ProfileId::parse(id).unwrap(),
-                    created_at: 1,
-                    updated_at: 1,
-                })
-                .await
-                .unwrap();
-        }
-        let candidates = vec![
-            ProviderProfileCandidate {
-                profile_id: ProfileId::parse("default@example.com").unwrap(),
-                account_id: shared.account_id.clone(),
-            },
-            ProviderProfileCandidate {
-                profile_id: ProfileId::parse("alias@example.com").unwrap(),
-                account_id: shared.account_id.clone(),
-            },
-            ProviderProfileCandidate {
-                profile_id: ProfileId::parse("backup@example.com").unwrap(),
-                account_id: reserve.account_id.clone(),
-            },
-        ];
-
-        let selected = store
-            .select_provider_profile(Provider::Claude, &candidates, None)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(selected.profile_id.as_str(), "default@example.com");
-        assert_eq!(selected.account.account_id, shared.account_id);
-
-        store
-            .pin_provider_session_route(
-                Provider::Claude,
-                "session-alias",
-                &ProfileId::parse("alias@example.com").unwrap(),
-                &shared.account_id,
-            )
-            .await
-            .unwrap();
-        let resumed = store
-            .select_provider_profile(Provider::Claude, &candidates, Some("session-alias"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(resumed.profile_id.as_str(), "alias@example.com");
-        assert!(resumed.resume_requested_session);
-
-        store
-            .record_provider_account_health(
-                "claude",
-                &shared.account_id,
-                Some(100),
-                Some(OffsetDateTime::now_utc().unix_timestamp() + 3600),
-                Some("rate limited"),
-            )
-            .await
-            .unwrap();
-        let failed_over = store
-            .select_provider_profile(Provider::Claude, &candidates, Some("session-alias"))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(failed_over.profile_id.as_str(), "backup@example.com");
-        assert_eq!(failed_over.account.account_id, reserve.account_id);
-        assert!(!failed_over.resume_requested_session);
-    }
-
-    #[tokio::test]
-    async fn profile_selection_respects_credential_routing_and_billing_state() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let yesterday = OffsetDateTime::now_utc().date() - time::Duration::days(1);
-        let cases = [
-            (
-                "explicit",
-                CredentialState::Connected,
-                RoutingState::ExplicitOnly,
-                None,
-            ),
-            (
-                "missing",
-                CredentialState::Missing,
-                RoutingState::Automatic,
-                None,
-            ),
-            (
-                "expired",
-                CredentialState::Connected,
-                RoutingState::Automatic,
-                Some(yesterday),
-            ),
-            (
-                "ready",
-                CredentialState::Connected,
-                RoutingState::Automatic,
-                None,
-            ),
-        ];
-        let mut candidates = Vec::new();
-        for (account_id, credential_state, routing_state, paid_through) in cases {
-            let mut account = provider_account("codex", account_id, 0);
-            account.credential_state = credential_state;
-            account.routing_state = routing_state;
-            account.plan = Some("max".to_string());
-            account.paid_through = paid_through;
-            store.upsert_provider_account(&account).await.unwrap();
-            candidates.push(ProviderProfileCandidate {
-                profile_id: ProfileId::parse(&format!("{account_id}@example.com")).unwrap(),
-                account_id: account.account_id,
-            });
-        }
-
-        let selected = store
-            .select_provider_profile(Provider::Codex, &candidates, None)
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(selected.account.account_id.as_str(), "ready");
-        assert_eq!(selected.account.plan.as_deref(), Some("max"));
     }
 
     #[tokio::test]

@@ -944,7 +944,7 @@ pub fn launch_agent(
         .map_err(|error| {
             CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))
         })?
-        .flatten();
+        .and_then(crate::provider_account::ProviderAccountResolution::into_route);
     if account_route
         .as_ref()
         .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)

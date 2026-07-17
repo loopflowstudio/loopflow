@@ -543,29 +543,25 @@ lf auth disconnect github
 Linear refreshes OAuth automatically before expiry. Connections created before
 this release may need one `lf auth linear` reconnect to record their PKCE client ID.
 
-Register provider accounts, then route each repository through personal
-profiles:
+Import provider accounts, record their Chrome access venues, then route each
+provider directly to the accounts that may spend:
 
 ```bash
-lf profile create primary@example.com --chrome-profile primary@example.com
-lf profile create engineering@example.com --chrome-profile engineering@example.com
-lf profile create personal@example.com --chrome-profile personal@example.com
+lf auth import claude --account primary --chrome-profile "Profile 3"
+lf auth import codex --account engineering --chrome-profile "Profile 8"
 
-lf auth connect claude --profile primary@example.com
-lf auth connect claude --profile personal@example.com
-
-lf auth connect codex --profile primary@example.com
-lf auth connect codex --profile engineering@example.com
-lf auth connect codex --profile personal@example.com
+lf profile create --chrome-profile "Default" --as personal
+lf auth access set claude primary --profile "Profile 3" --profile personal
+lf auth access add codex engineering --profile "Profile 8"
 lf auth accounts claude
 
-lf profile account set engineering@example.com claude personal@example.com
+lf route set claude primary loopflow
+lf route set codex engineering personal reserve
+lf route default set claude loopflow primary
+lf route show
 
-lf profile route set \
-  --default primary@example.com \
-  --backup engineering@example.com \
-  --backup personal@example.com
-lf profile route show
+lf auth connect claude primary
+lf auth connect codex engineering --chrome-profile "Profile 8"
 
 lf auth set claude account-id --paid-through 2026-08-14
 lf auth set claude account-id --routing explicit-only
@@ -573,15 +569,14 @@ lf auth reset claude account-id
 lf auth disconnect claude --account account-id
 ```
 
-These addresses are placeholders. Profiles, account bindings, and repository
-routes live in the local Loopflow database; Loopflow ships no account topology.
+These names are placeholders. Accounts, access venues, and per-provider routes
+live in the local Loopflow database; Loopflow ships no account topology.
 
-`auth connect --profile` reuses a matching account or creates one, opens the
-profile's bound Chrome directory, and binds the account to the profile. Codex
-verifies the login email from its ID token. Claude Code does not expose an
-account email after OAuth, so Loopflow uses the selected Chrome profile email;
-if Claude reports an email, it must match. Reconnect through the same profile;
-Loopflow follows shared mappings to the owning browser identity.
+`auth connect <provider> <account>` tries that account's access profiles in
+order. A profile records a Chrome directory and the login expected there. The
+cached Chrome login only chooses a browser window; the credential produced by
+Claude or Codex must report the account's email before Loopflow installs it.
+A missing or mismatched identity is discarded without changing the account.
 
 Codex account connection uses Codex's native local OAuth callback. Loopflow
 waits for the human to approve it and verifies the login email from Codex's ID
@@ -592,22 +587,23 @@ does not drive the OpenAI page or use device-code auth. Authenticate on the
 local host before `lf ssh`; SSH forwards the selected credential for the
 process lifetime.
 
-Claude authorization preselects the profile email and opens one browser window
+Claude authorization preselects the venue email and opens one browser window
 in the matching Chrome profile. After you click Authorize, Loopflow reads the
 resulting handoff from the visible page on macOS while restoring the clipboard.
 A hidden terminal prompt is the final fallback. `profile create
 --chrome-profile` binds the profile directory, name, or signed-in email on this
-host; `auth connect --profile` reuses that binding. `auth import` adopts an
+machine into the local store; `auth access` orders those venues per account.
+`auth import` adopts an
 existing isolated Claude credential—or the current macOS Keychain login when
 the account home is empty—without another OAuth flow. Import migrates an
-existing grant; use `auth connect --profile` to create an independent grant.
+existing grant. Import and connect both require the provider-reported identity;
+neither infers it from Chrome.
 
 Each provider account keeps independent auth and session state under
-`~/.lf/accounts/`. Profiles reuse those accounts and give each repository a
-default plus ordered backups. Shared accounts are tried once and share one
-cooldown. Shared Claude/Codex configuration and compiled skills stay in their
-canonical host-level trees. A provider child remains pinned to its selected
-profile and account for its lifetime.
+`~/.lf/accounts/`. Repository and store-wide routes order accounts separately
+for each provider. Shared Chrome venues are ceremony-only; a provider child is
+pinned to the selected account alone for its lifetime. Shared Claude/Codex
+configuration and compiled skills stay in their canonical host-level trees.
 
 `paid-through` is provider-specific. Once that date passes, automatic routing
 treats the account as `explicit-only`; clear the date and set `automatic` if a
@@ -617,13 +613,13 @@ downgraded account should remain a normal fallback.
 lf ssh mini -- lf pr open
 ```
 
-`lf ssh` forwards the current repository's ordered profile route and each
-referenced Claude or Codex credential once, even when profiles share an
-account. It writes no credential files on the remote host. Before connecting,
+`lf ssh` forwards the current repository's ordered account routes and each
+referenced Claude or Codex credential once. It forwards no Chrome venue data
+and writes no credential files on the remote host. Before connecting,
 Loopflow validates each automatically eligible routed login and refreshes Codex
 when due; `lf ssh` fails instead of sending an incomplete route.
 
-Forwarded profile auth lasts only for the foreground SSH command. Loopflow
+Forwarded account auth lasts only for the foreground SSH command. Loopflow
 rejects its own detached Wave, Project, and Task sessions, plus direct remote
 tmux commands, because their credentials would disappear when SSH exits. Other
 shell or daemon detachment is unsupported. Authenticate on the remote host for

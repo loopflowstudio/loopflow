@@ -1,4 +1,4 @@
-//! Host-local provider profiles, account selection, and process-lifetime SSH
+//! Host-local provider accounts, selection, and process-lifetime SSH
 //! credential leases for Claude and Codex.
 
 use std::collections::{HashMap, HashSet};
@@ -12,18 +12,15 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::profile::{
-    ChromeProfileBinding, HostId, Profile, ProfileId, ProfileProviderAccount,
-    ProviderProfileCandidate, RepoProfileRoute,
-};
+use crate::profile::{ProviderRoute, RouteScope};
 use crate::provider_auth::{provider_account_auth_status, AuthStatus, Provider};
 use crate::repository::RepoId;
 use crate::store::{open_store, ProviderAccount, ProviderAccountId, SharedStore, StoreError};
 use crate::store::{CredentialState, RoutingState};
 
-pub const FORWARDED_PROFILE_BUNDLE_ENV: &str = "LF_FORWARDED_PROFILE_BUNDLE";
-pub const FORWARDED_PROFILE_STORE_ENV: &str = "LF_FORWARDED_PROFILE_STORE";
-pub const PROFILE_REPO_ID_ENV: &str = "LF_PROFILE_REPO_ID";
+pub const FORWARDED_ACCOUNT_BUNDLE_ENV: &str = "LF_FORWARDED_ACCOUNT_BUNDLE";
+pub const FORWARDED_ACCOUNT_STORE_ENV: &str = "LF_FORWARDED_ACCOUNT_STORE";
+pub const ACCOUNT_REPO_ID_ENV: &str = "LF_ACCOUNT_REPO_ID";
 /// Explicit account selection (`lf --account <email|id>`, or exported as
 /// `LF_ACCOUNT=<email|id>`): every provider resolution in this process and
 /// its children uses the named account, bypassing the repo route and health
@@ -31,13 +28,6 @@ pub const PROFILE_REPO_ID_ENV: &str = "LF_PROFILE_REPO_ID";
 pub const PROVIDER_ACCOUNT_ENV: &str = "LF_ACCOUNT";
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
-const LEGACY_CHROME_PROFILE_FILE: &str = ".loopflow-chrome-profile.json";
-
-#[derive(Debug, Deserialize)]
-struct LegacyChromeProfileBinding {
-    directory: String,
-    label: String,
-}
 
 #[derive(Debug, Error)]
 pub enum ProviderAccountError {
@@ -59,15 +49,16 @@ pub enum ProviderAccountError {
     },
     #[error("provider account runtime failed: {0}")]
     Runtime(String),
-    #[error("all {provider} accounts are unavailable{reset}")]
-    NoHealthyAccount { provider: Provider, reset: String },
     #[error("no authenticated {provider} account remains; reconnect {accounts}")]
     NoAuthenticatedAccount {
         provider: Provider,
         accounts: String,
     },
-    #[error("repository {repo_id} has no {provider} account in its profile route")]
-    NoMappedAccount { provider: Provider, repo_id: RepoId },
+    #[error("configured {provider} route has no eligible account: {accounts}")]
+    NoEligibleAccount {
+        provider: Provider,
+        accounts: String,
+    },
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,36 +107,29 @@ pub struct ForwardedProviderAccount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForwardedProfileProviderAccount {
-    pub profile_id: ProfileId,
+pub struct ForwardedProviderRoute {
     pub provider: Provider,
-    pub account_id: ProviderAccountId,
+    pub accounts: Vec<ProviderAccountId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForwardedProfileBundle {
+pub struct ForwardedAccountBundle {
     pub repo_id: RepoId,
-    pub default_profile: ProfileId,
-    pub backup_profiles: Vec<ProfileId>,
-    pub mappings: Vec<ForwardedProfileProviderAccount>,
+    pub routes: Vec<ForwardedProviderRoute>,
     pub accounts: Vec<ForwardedProviderAccount>,
     credentials: Vec<ForwardedProviderCredential>,
 }
 
-impl ForwardedProfileBundle {
+impl ForwardedAccountBundle {
     pub fn new(
         repo_id: RepoId,
-        default_profile: ProfileId,
-        backup_profiles: Vec<ProfileId>,
-        mappings: Vec<ForwardedProfileProviderAccount>,
+        routes: Vec<ForwardedProviderRoute>,
         accounts: Vec<ForwardedProviderAccount>,
         credentials: Vec<ForwardedProviderCredential>,
     ) -> Self {
         Self {
             repo_id,
-            default_profile,
-            backup_profiles,
-            mappings,
+            routes,
             accounts,
             credentials,
         }
@@ -172,7 +156,6 @@ enum AccountCredential {
 #[derive(Clone)]
 pub struct ProviderAccountRoute {
     provider: Provider,
-    profile_id: ProfileId,
     account_id: ProviderAccountId,
     credential: AccountCredential,
     resume_requested_session: bool,
@@ -187,7 +170,6 @@ impl std::fmt::Debug for ProviderAccountRoute {
         };
         f.debug_struct("ProviderAccountRoute")
             .field("provider", &self.provider)
-            .field("profile_id", &self.profile_id)
             .field("account_id", &self.account_id)
             .field("credential", &credential)
             .field("resume_requested_session", &self.resume_requested_session)
@@ -196,10 +178,6 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
-    pub fn profile_id(&self) -> &ProfileId {
-        &self.profile_id
-    }
-
     pub fn account_id(&self) -> &ProviderAccountId {
         &self.account_id
     }
@@ -213,7 +191,7 @@ impl ProviderAccountRoute {
     }
 
     pub fn apply(&self, command: &mut Command) {
-        command.env_remove(FORWARDED_PROFILE_BUNDLE_ENV);
+        command.env_remove(FORWARDED_ACCOUNT_BUNDLE_ENV);
         match (&self.provider, &self.credential) {
             (Provider::Claude, AccountCredential::NativeHome(home)) => {
                 command.env("CLAUDE_CONFIG_DIR", home);
@@ -240,7 +218,7 @@ impl ProviderAccountRoute {
     }
 
     pub fn apply_tokio(&self, command: &mut tokio::process::Command) {
-        command.env_remove(FORWARDED_PROFILE_BUNDLE_ENV);
+        command.env_remove(FORWARDED_ACCOUNT_BUNDLE_ENV);
         match (&self.provider, &self.credential) {
             (Provider::Claude, AccountCredential::NativeHome(home)) => {
                 command.env("CLAUDE_CONFIG_DIR", home);
@@ -268,12 +246,7 @@ impl ProviderAccountRoute {
 
     pub async fn pin_session(&self, provider_session_id: &str) -> Result<(), ProviderAccountError> {
         self.store
-            .pin_provider_session_route(
-                self.provider,
-                provider_session_id,
-                &self.profile_id,
-                &self.account_id,
-            )
+            .pin_provider_session_route(self.provider, provider_session_id, &self.account_id)
             .await?;
         Ok(())
     }
@@ -313,11 +286,32 @@ impl ProviderAccountRoute {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AmbientReason {
+    StoreUnavailable,
+    NoRoutes { repo_id: Option<RepoId> },
+}
+
+#[derive(Debug, Clone)]
+pub enum ProviderAccountResolution {
+    Managed(ProviderAccountRoute),
+    Ambient(AmbientReason),
+}
+
+impl ProviderAccountResolution {
+    pub fn into_route(self) -> Option<ProviderAccountRoute> {
+        match self {
+            Self::Managed(route) => Some(route),
+            Self::Ambient(_) => None,
+        }
+    }
+}
+
 pub fn parse_account_id(value: &str) -> Result<ProviderAccountId, ProviderAccountError> {
     ProviderAccountId::parse(value).map_err(ProviderAccountError::InvalidAccountId)
 }
 
-pub fn account_profile_path(
+pub fn account_home_path(
     provider: Provider,
     account_id: &ProviderAccountId,
 ) -> Result<PathBuf, ProviderAccountError> {
@@ -328,43 +322,43 @@ pub fn account_profile_path(
         .join(account_id.as_str()))
 }
 
-pub fn ensure_account_profile(
+pub fn ensure_account_home(
     provider: Provider,
     account_id: &ProviderAccountId,
 ) -> Result<PathBuf, ProviderAccountError> {
     let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let profile = account_profile_path(provider, account_id)?;
-    ensure_account_profile_at(&operator_home, &profile, provider)?;
-    Ok(profile)
+    let home = account_home_path(provider, account_id)?;
+    ensure_account_home_at(&operator_home, &home, provider)?;
+    Ok(home)
 }
 
-pub fn remove_account_profile(profile: &Path) -> Result<(), ProviderAccountError> {
-    if profile.exists() {
-        fs::remove_dir_all(profile).map_err(|error| {
-            ProviderAccountError::Filesystem(format!("remove {}: {error}", profile.display()))
+pub fn remove_account_home(home: &Path) -> Result<(), ProviderAccountError> {
+    if home.exists() {
+        fs::remove_dir_all(home).map_err(|error| {
+            ProviderAccountError::Filesystem(format!("remove {}: {error}", home.display()))
         })?;
     }
     Ok(())
 }
 
-fn ensure_account_profile_at(
+fn ensure_account_home_at(
     operator_home: &Path,
-    profile: &Path,
+    home: &Path,
     provider: Provider,
 ) -> Result<(), ProviderAccountError> {
     ensure_supported(provider)?;
-    if let Ok(metadata) = fs::symlink_metadata(profile) {
+    if let Ok(metadata) = fs::symlink_metadata(home) {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(ProviderAccountError::Filesystem(format!(
-                "provider profile {} is not a real directory",
-                profile.display()
+                "provider account home {} is not a real directory",
+                home.display()
             )));
         }
     }
-    fs::create_dir_all(profile).map_err(|error| {
-        ProviderAccountError::Filesystem(format!("create {}: {error}", profile.display()))
+    fs::create_dir_all(home).map_err(|error| {
+        ProviderAccountError::Filesystem(format!("create {}: {error}", home.display()))
     })?;
-    set_private_directory(profile)?;
+    set_private_directory(home)?;
 
     let (canonical, shared_names): (PathBuf, &[&str]) = match provider {
         Provider::Claude => (
@@ -379,7 +373,7 @@ fn ensure_account_profile_at(
     };
     for name in shared_names {
         let source = canonical.join(name);
-        let target = profile.join(name);
+        let target = home.join(name);
         link_shared_path(&source, &target)?;
     }
     Ok(())
@@ -418,17 +412,17 @@ fn link_shared_path(_source: &Path, _target: &Path) -> Result<(), ProviderAccoun
     Ok(())
 }
 
-pub fn encode_forwarded_profile_bundle(
-    bundle: &ForwardedProfileBundle,
+pub fn encode_forwarded_account_bundle(
+    bundle: &ForwardedAccountBundle,
 ) -> Result<String, ProviderAccountError> {
     let json = serde_json::to_vec(bundle)
         .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))?;
     Ok(URL_SAFE_NO_PAD.encode(json))
 }
 
-pub fn decode_forwarded_profile_bundle(
+pub fn decode_forwarded_account_bundle(
     encoded: &str,
-) -> Result<ForwardedProfileBundle, ProviderAccountError> {
+) -> Result<ForwardedAccountBundle, ProviderAccountError> {
     let bytes = URL_SAFE_NO_PAD
         .decode(encoded.trim())
         .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))?;
@@ -436,16 +430,32 @@ pub fn decode_forwarded_profile_bundle(
         .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))
 }
 
-pub async fn local_forwarded_profile_bundle(
+pub async fn local_forwarded_account_bundle(
     store: &SharedStore,
-) -> Result<Option<ForwardedProfileBundle>, ProviderAccountError> {
+) -> Result<Option<ForwardedAccountBundle>, ProviderAccountError> {
     let Some(repo_id) = current_repo_id()? else {
         return Ok(None);
     };
-    let Some(route) = store.repo_profile_route(&repo_id).await? else {
+    let mut routes = Vec::new();
+    for provider in [Provider::Claude, Provider::Codex] {
+        let route = match store
+            .provider_route(&RouteScope::Repo(repo_id.clone()), provider)
+            .await?
+        {
+            Some(route) => Some(route),
+            None => store.provider_route(&RouteScope::Default, provider).await?,
+        };
+        if let Some(route) = route {
+            routes.push(ForwardedProviderRoute {
+                provider,
+                accounts: route.accounts,
+            });
+        }
+    }
+    if routes.is_empty() {
         return Ok(None);
-    };
-    let (mappings, routed_accounts) = referenced_provider_accounts(store, &route).await?;
+    }
+    let routed_accounts = referenced_provider_accounts(store, &routes).await?;
     let mut accounts = Vec::new();
     let mut credentials = Vec::new();
     for (provider, account) in routed_accounts {
@@ -492,11 +502,9 @@ pub async fn local_forwarded_profile_bundle(
             access_token,
         ));
     }
-    Ok(Some(ForwardedProfileBundle::new(
+    Ok(Some(ForwardedAccountBundle::new(
         repo_id,
-        route.default_profile,
-        route.backup_profiles,
-        mappings,
+        routes,
         accounts,
         credentials,
     )))
@@ -504,73 +512,56 @@ pub async fn local_forwarded_profile_bundle(
 
 async fn referenced_provider_accounts(
     store: &SharedStore,
-    route: &RepoProfileRoute,
-) -> Result<
-    (
-        Vec<ForwardedProfileProviderAccount>,
-        Vec<(Provider, ProviderAccount)>,
-    ),
-    ProviderAccountError,
-> {
-    let mut profile_ids = Vec::with_capacity(route.backup_profiles.len() + 1);
-    profile_ids.push(route.default_profile.clone());
-    profile_ids.extend(route.backup_profiles.iter().cloned());
-    let mut mappings = Vec::new();
+    routes: &[ForwardedProviderRoute],
+) -> Result<Vec<(Provider, ProviderAccount)>, ProviderAccountError> {
     let mut accounts = Vec::new();
     let mut seen_accounts = HashSet::new();
-    for profile_id in profile_ids {
-        for provider in [Provider::Claude, Provider::Codex] {
-            let Some(mapping) = store
-                .profile_provider_account(&profile_id, provider)
-                .await?
-            else {
-                continue;
-            };
-            mappings.push(ForwardedProfileProviderAccount {
-                profile_id: profile_id.clone(),
-                provider,
-                account_id: mapping.account_id.clone(),
-            });
-            if !seen_accounts.insert((provider, mapping.account_id.clone())) {
+    for route in routes {
+        for account_id in &route.accounts {
+            if !seen_accounts.insert((route.provider, account_id.clone())) {
                 continue;
             }
             let account = store
-                .get_provider_account(provider.as_str(), &mapping.account_id)
+                .get_provider_account(route.provider.as_str(), account_id)
                 .await?
                 .ok_or_else(|| {
                     ProviderAccountError::ForwardedBundle(format!(
-                        "profile {profile_id} references missing {provider}/{}",
-                        mapping.account_id
+                        "route references missing {}/{}",
+                        route.provider, account_id
                     ))
                 })?;
-            accounts.push((provider, account));
+            accounts.push((route.provider, account));
         }
     }
-    Ok((mappings, accounts))
+    Ok(accounts)
 }
 
 pub async fn resolve_provider_account(
     provider: Provider,
     provider_session_id: Option<&str>,
-) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+) -> Result<ProviderAccountResolution, ProviderAccountError> {
     ensure_supported(provider)?;
     if let Ok(selector) = std::env::var(PROVIDER_ACCOUNT_ENV) {
         if !selector.trim().is_empty() {
-            return resolve_explicit_account(provider, selector.trim()).await;
+            return resolve_explicit_account(provider, selector.trim())
+                .await
+                .map(ProviderAccountResolution::Managed);
         }
     }
-    let forwarded_bundle = match std::env::var(FORWARDED_PROFILE_BUNDLE_ENV) {
-        Ok(value) if !value.trim().is_empty() => Some(decode_forwarded_profile_bundle(&value)?),
+    let forwarded_bundle = match std::env::var(FORWARDED_ACCOUNT_BUNDLE_ENV) {
+        Ok(value) if !value.trim().is_empty() => Some(decode_forwarded_account_bundle(&value)?),
         _ => None,
     };
     let store = route_store(forwarded_bundle.is_some()).await?;
     let Some(store) = store else {
-        return Ok(None);
+        return Ok(ProviderAccountResolution::Ambient(
+            AmbientReason::StoreUnavailable,
+        ));
     };
 
     let mut access_tokens = HashMap::new();
     let (candidates, routed_repo_id) = if let Some(bundle) = &forwarded_bundle {
-        let candidates = hydrate_forwarded_profile_bundle(&store, bundle, provider).await?;
+        let candidates = hydrate_forwarded_account_bundle(&store, bundle, provider).await?;
         for credential in bundle
             .credentials
             .iter()
@@ -581,42 +572,40 @@ pub async fn resolve_provider_account(
                 credential.access_token().to_string(),
             );
         }
-        (candidates, bundle.repo_id.clone())
+        (candidates, Some(bundle.repo_id.clone()))
     } else {
-        let Some(repo_id) = current_repo_id()? else {
-            return Ok(None);
-        };
-        let Some(route) = store.repo_profile_route(&repo_id).await? else {
-            return Ok(None);
-        };
-        let mut profile_ids = Vec::with_capacity(route.backup_profiles.len() + 1);
-        profile_ids.push(route.default_profile);
-        profile_ids.extend(route.backup_profiles);
-        let mut candidates = Vec::new();
-        for profile_id in profile_ids {
-            if let Some(mapping) = store
-                .profile_provider_account(&profile_id, provider)
-                .await?
-            {
-                candidates.push(ProviderProfileCandidate {
-                    profile_id,
-                    account_id: mapping.account_id,
-                });
+        let repo_id = current_repo_id()?;
+        let route = match &repo_id {
+            Some(repo_id) => {
+                store
+                    .provider_route(&RouteScope::Repo(repo_id.clone()), provider)
+                    .await?
             }
-        }
-        (candidates, repo_id)
+            None => None,
+        };
+        let route = match route {
+            Some(route) => Some(route),
+            None => store.provider_route(&RouteScope::Default, provider).await?,
+        };
+        let Some(route) = route else {
+            return Ok(ProviderAccountResolution::Ambient(
+                AmbientReason::NoRoutes { repo_id },
+            ));
+        };
+        (route.accounts, repo_id)
     };
 
     if candidates.is_empty() {
-        return Err(ProviderAccountError::NoMappedAccount {
-            provider,
-            repo_id: routed_repo_id,
-        });
+        return Ok(ProviderAccountResolution::Ambient(
+            AmbientReason::NoRoutes {
+                repo_id: routed_repo_id,
+            },
+        ));
     }
     let mut unauthenticated = Vec::new();
     loop {
         let selection = store
-            .select_provider_profile(provider, &candidates, provider_session_id)
+            .select_provider_account(provider, &candidates, provider_session_id)
             .await?;
         let Some(selection) = selection else {
             if !unauthenticated.is_empty() {
@@ -628,29 +617,29 @@ pub async fn resolve_provider_account(
             let accounts = store
                 .list_provider_accounts(Some(provider.as_str()))
                 .await?;
-            let now = now_unix();
-            let reset = accounts
+            let reasons = candidates
                 .iter()
-                .filter(|account| {
-                    account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date())
-                        && candidates
-                            .iter()
-                            .any(|candidate| candidate.account_id == account.account_id)
+                .map(|account_id| {
+                    accounts
+                        .iter()
+                        .find(|account| account.account_id == *account_id)
+                        .map(account_unavailable_reason)
+                        .unwrap_or_else(|| format!("'{account_id}' missing"))
                 })
-                .filter_map(|account| account.cooldown_until.filter(|until| *until > now))
-                .min()
-                .map(format_reset_time)
-                .unwrap_or_default();
-            return Err(ProviderAccountError::NoHealthyAccount { provider, reset });
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(ProviderAccountError::NoEligibleAccount {
+                provider,
+                accounts: reasons,
+            });
         };
-        let profile_id = selection.profile_id;
         let account_id = selection.account.account_id.clone();
         let credential = match access_tokens.remove(&account_id) {
             Some(access_token) => AccountCredential::AccessToken(access_token),
             None => match selection.account.home.as_deref() {
                 Some(home) => {
                     let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                    ensure_account_profile_at(&operator_home, home, provider)?;
+                    ensure_account_home_at(&operator_home, home, provider)?;
                     let status = provider_account_auth_status(provider, home.to_path_buf())
                         .await
                         .map_err(|error| {
@@ -660,7 +649,7 @@ pub async fn resolve_provider_account(
                         })?;
                     if !retain_authenticated_account(&store, &selection.account, &status).await? {
                         unauthenticated.push(format!(
-                            "'{account_id}' with `lf auth connect {provider} --profile {profile_id}`"
+                            "'{account_id}' with `lf auth connect {provider} {account_id}`"
                         ));
                         continue;
                     }
@@ -673,15 +662,33 @@ pub async fn resolve_provider_account(
                 }
             },
         };
-        return Ok(Some(ProviderAccountRoute {
+        return Ok(ProviderAccountResolution::Managed(ProviderAccountRoute {
             provider,
-            profile_id,
             account_id,
             credential,
             resume_requested_session: selection.resume_requested_session,
             store,
         }));
     }
+}
+
+fn account_unavailable_reason(account: &ProviderAccount) -> String {
+    let now = now_unix();
+    if account.credential_state != CredentialState::Connected {
+        return format!("'{}' credential is missing", account.account_id);
+    }
+    let routing = account.effective_routing_state(time::OffsetDateTime::now_utc().date());
+    if routing != RoutingState::Automatic {
+        return format!("'{}' routing is {}", account.account_id, routing.as_str());
+    }
+    if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
+        return format!(
+            "'{}' cooling{}",
+            account.account_id,
+            format_reset_time(until)
+        );
+    }
+    format!("'{}' is unavailable", account.account_id)
 }
 
 #[derive(Debug)]
@@ -734,7 +741,7 @@ fn match_account<'a>(accounts: &'a [ProviderAccount], selector: &str) -> Account
 async fn resolve_explicit_account(
     provider: Provider,
     selector: &str,
-) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+) -> Result<ProviderAccountRoute, ProviderAccountError> {
     let store = route_store(true).await?.ok_or_else(|| {
         ProviderAccountError::Runtime("account store unavailable for --account".to_string())
     })?;
@@ -766,7 +773,7 @@ async fn resolve_explicit_account(
         ))
     })?;
     let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    ensure_account_profile_at(&operator_home, &home, provider)?;
+    ensure_account_home_at(&operator_home, &home, provider)?;
     let status = provider_account_auth_status(provider, home.clone())
         .await
         .map_err(|error| {
@@ -778,35 +785,19 @@ async fn resolve_explicit_account(
     if !retain_authenticated_account(&store, account, &status).await? {
         return Err(ProviderAccountError::NoAuthenticatedAccount {
             provider,
-            accounts: format!("'{}' with `lf auth connect {provider}`", account.account_id),
+            accounts: format!(
+                "'{}' with `lf auth connect {provider} {}`",
+                account.account_id, account.account_id
+            ),
         });
     }
-    let profile_id = store
-        .list_profile_provider_accounts(None)
-        .await?
-        .into_iter()
-        .find(|mapping| mapping.provider == provider && mapping.account_id == account.account_id)
-        .map(|mapping| mapping.profile_id)
-        .or_else(|| {
-            account
-                .login_email
-                .as_ref()
-                .and_then(|email| ProfileId::parse(email.as_str()).ok())
-        })
-        .ok_or_else(|| {
-            ProviderAccountError::Runtime(format!(
-                "{provider} account '{}' has no profile or login email to record the session under",
-                account.account_id
-            ))
-        })?;
-    Ok(Some(ProviderAccountRoute {
+    Ok(ProviderAccountRoute {
         provider,
-        profile_id,
         account_id: account.account_id.clone(),
         credential: AccountCredential::NativeHome(home),
         resume_requested_session: false,
         store,
-    }))
+    })
 }
 
 async fn retain_authenticated_account(
@@ -824,29 +815,25 @@ async fn retain_authenticated_account(
     Ok(false)
 }
 
-async fn hydrate_forwarded_profile_bundle(
+async fn hydrate_forwarded_account_bundle(
     store: &SharedStore,
-    bundle: &ForwardedProfileBundle,
+    bundle: &ForwardedAccountBundle,
     provider: Provider,
-) -> Result<Vec<ProviderProfileCandidate>, ProviderAccountError> {
-    let mut profile_ids = Vec::with_capacity(bundle.backup_profiles.len() + 1);
-    profile_ids.push(bundle.default_profile.clone());
-    profile_ids.extend(bundle.backup_profiles.iter().cloned());
+) -> Result<Vec<ProviderAccountId>, ProviderAccountError> {
+    let Some(route) = bundle
+        .routes
+        .iter()
+        .find(|route| route.provider == provider)
+    else {
+        return Ok(Vec::new());
+    };
 
     // The route is written last and serves as the initialization marker. A
     // restarted provider process reuses health accrued in this SSH lease
     // instead of resetting it from the original local snapshot.
-    if store.repo_profile_route(&bundle.repo_id).await?.is_none() {
+    let scope = RouteScope::Repo(bundle.repo_id.clone());
+    if store.provider_route(&scope, provider).await?.is_none() {
         let now = now_unix();
-        for profile_id in &profile_ids {
-            store
-                .upsert_profile(&Profile {
-                    id: profile_id.clone(),
-                    created_at: now,
-                    updated_at: now,
-                })
-                .await?;
-        }
         for account in &bundle.accounts {
             store
                 .upsert_provider_account(&ProviderAccount {
@@ -867,45 +854,22 @@ async fn hydrate_forwarded_profile_bundle(
                 })
                 .await?;
         }
-        for mapping in &bundle.mappings {
-            store
-                .set_profile_provider_account(&ProfileProviderAccount {
-                    profile_id: mapping.profile_id.clone(),
-                    provider: mapping.provider,
-                    account_id: mapping.account_id.clone(),
-                    created_at: now,
-                    updated_at: now,
-                })
-                .await?;
-        }
         store
-            .set_repo_profile_route(&crate::profile::RepoProfileRoute {
-                repo_id: bundle.repo_id.clone(),
-                default_profile: bundle.default_profile.clone(),
-                backup_profiles: bundle.backup_profiles.clone(),
+            .set_provider_route(&ProviderRoute {
+                scope,
+                provider,
+                accounts: route.accounts.clone(),
                 created_at: now,
                 updated_at: now,
             })
             .await?;
     }
 
-    Ok(profile_ids
-        .into_iter()
-        .filter_map(|profile_id| {
-            bundle
-                .mappings
-                .iter()
-                .find(|mapping| mapping.profile_id == profile_id && mapping.provider == provider)
-                .map(|mapping| ProviderProfileCandidate {
-                    profile_id,
-                    account_id: mapping.account_id.clone(),
-                })
-        })
-        .collect())
+    Ok(route.accounts.clone())
 }
 
 fn current_repo_id() -> Result<Option<RepoId>, ProviderAccountError> {
-    if let Ok(value) = std::env::var(PROFILE_REPO_ID_ENV) {
+    if let Ok(value) = std::env::var(ACCOUNT_REPO_ID_ENV) {
         return RepoId::parse(&value)
             .map(Some)
             .map_err(|error| ProviderAccountError::Runtime(error.to_string()));
@@ -918,7 +882,7 @@ fn current_repo_id() -> Result<Option<RepoId>, ProviderAccountError> {
 pub fn resolve_provider_account_blocking(
     provider: Provider,
     provider_session_id: Option<String>,
-) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+) -> Result<ProviderAccountResolution, ProviderAccountError> {
     std::thread::Builder::new()
         .name(format!("lf-{}-account-route", provider.as_str()))
         .spawn(move || {
@@ -938,9 +902,15 @@ pub fn resolve_provider_account_blocking(
 
 async fn route_store(create: bool) -> Result<Option<SharedStore>, ProviderAccountError> {
     if !create {
-        return Ok(crate::store::open_existing_store().await.map(Arc::new));
+        return match crate::store::open_registry_for_authority().await {
+            Ok(store) => Ok(Some(Arc::new(store))),
+            Err(crate::store::RegistryUnavailable::MissingFile { .. }) => Ok(None),
+            Err(error) => Err(ProviderAccountError::Runtime(format!(
+                "open provider account store: {error:?}"
+            ))),
+        };
     }
-    let config = match std::env::var_os(FORWARDED_PROFILE_STORE_ENV) {
+    let config = match std::env::var_os(FORWARDED_ACCOUNT_STORE_ENV) {
         Some(path) => crate::store::StorageConfig::sqlite(PathBuf::from(path)),
         None => crate::store::storage_config_from_env().map_err(|error| {
             ProviderAccountError::Filesystem(format!("resolve provider account store: {error}"))
@@ -954,74 +924,7 @@ pub async fn open_account_store() -> Result<SharedStore, ProviderAccountError> {
         ProviderAccountError::Filesystem(format!("resolve provider account store: {error}"))
     })?;
     let store = Arc::new(open_store(&config).await?);
-    migrate_legacy_chrome_bindings(&store).await?;
     Ok(store)
-}
-
-async fn migrate_legacy_chrome_bindings(store: &SharedStore) -> Result<(), ProviderAccountError> {
-    let host_id = HostId::local().map_err(ProviderAccountError::Filesystem)?;
-    let mappings = store.list_profile_provider_accounts(None).await?;
-    for mapping in mappings
-        .into_iter()
-        .filter(|mapping| mapping.provider == Provider::Claude)
-    {
-        if store
-            .chrome_profile_binding(&mapping.profile_id, &host_id)
-            .await?
-            .is_some()
-        {
-            continue;
-        }
-        let Some(account) = store
-            .get_provider_account(Provider::Claude.as_str(), &mapping.account_id)
-            .await?
-        else {
-            continue;
-        };
-        let Some(home) = account.home else {
-            continue;
-        };
-        let legacy_path = home.join(LEGACY_CHROME_PROFILE_FILE);
-        if !legacy_path.is_file() {
-            continue;
-        }
-        let bytes = fs::read(&legacy_path).map_err(|error| {
-            ProviderAccountError::Filesystem(format!(
-                "read legacy Chrome binding {}: {error}",
-                legacy_path.display()
-            ))
-        })?;
-        let legacy =
-            serde_json::from_slice::<LegacyChromeProfileBinding>(&bytes).map_err(|error| {
-                ProviderAccountError::Filesystem(format!(
-                    "parse legacy Chrome binding {}: {error}",
-                    legacy_path.display()
-                ))
-            })?;
-        if !legacy
-            .label
-            .eq_ignore_ascii_case(mapping.profile_id.as_str())
-        {
-            continue;
-        }
-        let now = now_unix();
-        store
-            .upsert_chrome_profile_binding(&ChromeProfileBinding {
-                profile_id: mapping.profile_id,
-                host_id: host_id.clone(),
-                chrome_directory: legacy.directory,
-                created_at: now,
-                updated_at: now,
-            })
-            .await?;
-        fs::remove_file(&legacy_path).map_err(|error| {
-            ProviderAccountError::Filesystem(format!(
-                "remove migrated Chrome binding {}: {error}",
-                legacy_path.display()
-            ))
-        })?;
-    }
-    Ok(())
 }
 
 pub fn new_account(
@@ -1135,86 +1038,86 @@ mod tests {
     }
 
     #[test]
-    fn profiles_are_private_and_link_shared_configuration() {
+    fn account_homes_are_private_and_link_shared_configuration() {
         let temp = tempdir().unwrap();
         let operator_home = temp.path().join("operator");
         let claude_home = operator_home.join(".claude");
         fs::create_dir_all(claude_home.join("skills")).unwrap();
         fs::write(claude_home.join("settings.json"), "{}").unwrap();
-        let profile = temp.path().join("accounts/claude/primary");
+        let account_home = temp.path().join("accounts/claude/primary");
 
-        ensure_account_profile_at(&operator_home, &profile, Provider::Claude).unwrap();
+        ensure_account_home_at(&operator_home, &account_home, Provider::Claude).unwrap();
 
         assert_eq!(
-            fs::metadata(&profile).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&account_home).unwrap().permissions().mode() & 0o777,
             0o700
         );
         assert_eq!(
-            fs::read_link(profile.join("skills")).unwrap(),
+            fs::read_link(account_home.join("skills")).unwrap(),
             claude_home.join("skills")
         );
         assert_eq!(
-            fs::read_link(profile.join("settings.json")).unwrap(),
+            fs::read_link(account_home.join("settings.json")).unwrap(),
             claude_home.join("settings.json")
         );
-        assert!(!profile.join(".credentials.json").exists());
+        assert!(!account_home.join(".credentials.json").exists());
 
-        remove_account_profile(&profile).unwrap();
-        assert!(!profile.exists());
+        remove_account_home(&account_home).unwrap();
+        assert!(!account_home.exists());
         assert!(claude_home.join("skills").exists());
         assert!(claude_home.join("settings.json").exists());
     }
 
     #[test]
-    fn codex_profile_links_config_but_not_auth() {
+    fn codex_account_home_links_config_but_not_auth() {
         let temp = tempdir().unwrap();
         let operator_home = temp.path().join("operator");
         let codex_home = operator_home.join(".codex");
         fs::create_dir_all(&codex_home).unwrap();
         fs::write(codex_home.join("config.toml"), "model = \"gpt-5\"").unwrap();
-        let profile = temp.path().join("accounts/codex/reserve");
+        let account_home = temp.path().join("accounts/codex/reserve");
 
-        ensure_account_profile_at(&operator_home, &profile, Provider::Codex).unwrap();
+        ensure_account_home_at(&operator_home, &account_home, Provider::Codex).unwrap();
 
         assert_eq!(
-            fs::read_link(profile.join("config.toml")).unwrap(),
+            fs::read_link(account_home.join("config.toml")).unwrap(),
             codex_home.join("config.toml")
         );
-        assert!(!profile.join("auth.json").exists());
+        assert!(!account_home.join("auth.json").exists());
     }
 
     #[test]
-    fn profile_relinks_shared_configuration_created_after_login() {
+    fn account_home_relinks_shared_configuration_created_after_login() {
         let temp = tempdir().unwrap();
         let operator_home = temp.path().join("operator");
         let claude_home = operator_home.join(".claude");
         fs::create_dir_all(&claude_home).unwrap();
-        let profile = temp.path().join("accounts/claude/primary");
+        let account_home = temp.path().join("accounts/claude/primary");
 
-        ensure_account_profile_at(&operator_home, &profile, Provider::Claude).unwrap();
-        assert!(!profile.join("skills").exists());
+        ensure_account_home_at(&operator_home, &account_home, Provider::Claude).unwrap();
+        assert!(!account_home.join("skills").exists());
 
         fs::create_dir_all(claude_home.join("skills")).unwrap();
-        ensure_account_profile_at(&operator_home, &profile, Provider::Claude).unwrap();
+        ensure_account_home_at(&operator_home, &account_home, Provider::Claude).unwrap();
 
         assert_eq!(
-            fs::read_link(profile.join("skills")).unwrap(),
+            fs::read_link(account_home.join("skills")).unwrap(),
             claude_home.join("skills")
         );
     }
 
     #[test]
-    fn profile_creation_rejects_a_symlinked_account_home() {
+    fn account_home_creation_rejects_a_symlink() {
         let temp = tempdir().unwrap();
         let operator_home = temp.path().join("operator");
         let outside = temp.path().join("outside");
         fs::create_dir_all(&outside).unwrap();
-        let profile = temp.path().join("accounts/claude/primary");
-        fs::create_dir_all(profile.parent().unwrap()).unwrap();
-        std::os::unix::fs::symlink(&outside, &profile).unwrap();
+        let account_home = temp.path().join("accounts/claude/primary");
+        fs::create_dir_all(account_home.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &account_home).unwrap();
 
-        let error = ensure_account_profile_at(&operator_home, &profile, Provider::Claude)
-            .expect_err("symlinked profile must be rejected");
+        let error = ensure_account_home_at(&operator_home, &account_home, Provider::Claude)
+            .expect_err("symlinked account home must be rejected");
 
         assert!(error.to_string().contains("not a real directory"));
     }
@@ -1231,7 +1134,6 @@ mod tests {
         );
         let route = ProviderAccountRoute {
             provider: Provider::Codex,
-            profile_id: ProfileId::parse("reserve@example.com").unwrap(),
             account_id: parse_account_id("reserve").unwrap(),
             credential: AccountCredential::AccessToken("codex-secret".to_string()),
             resume_requested_session: false,
@@ -1257,7 +1159,7 @@ mod tests {
         );
         assert_eq!(environment.get("OPENAI_API_KEY"), Some(&None));
         assert_eq!(environment.get("CODEX_HOME"), Some(&None));
-        assert_eq!(environment.get(FORWARDED_PROFILE_BUNDLE_ENV), Some(&None));
+        assert_eq!(environment.get(FORWARDED_ACCOUNT_BUNDLE_ENV), Some(&None));
         assert!(!environment.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
 
         let mut async_command = tokio::process::Command::new("codex");
@@ -1265,7 +1167,7 @@ mod tests {
         assert!(async_command
             .as_std()
             .get_envs()
-            .any(|(name, value)| name == FORWARDED_PROFILE_BUNDLE_ENV && value.is_none()));
+            .any(|(name, value)| name == FORWARDED_ACCOUNT_BUNDLE_ENV && value.is_none()));
     }
 
     #[tokio::test]
@@ -1284,7 +1186,6 @@ mod tests {
             (
                 ProviderAccountRoute {
                     provider: Provider::Claude,
-                    profile_id: ProfileId::parse("primary@example.com").unwrap(),
                     account_id: parse_account_id("primary").unwrap(),
                     credential: AccountCredential::NativeHome(claude_home.clone()),
                     resume_requested_session: false,
@@ -1296,7 +1197,6 @@ mod tests {
             (
                 ProviderAccountRoute {
                     provider: Provider::Codex,
-                    profile_id: ProfileId::parse("reserve@example.com").unwrap(),
                     account_id: parse_account_id("reserve").unwrap(),
                     credential: AccountCredential::NativeHome(codex_home.clone()),
                     resume_requested_session: false,
@@ -1371,7 +1271,6 @@ mod tests {
         store.upsert_provider_account(&account).await.unwrap();
         let route = ProviderAccountRoute {
             provider: Provider::Claude,
-            profile_id: ProfileId::parse("primary@example.com").unwrap(),
             account_id: account_id.clone(),
             credential: AccountCredential::AccessToken("claude-secret".to_string()),
             resume_requested_session: false,
@@ -1405,277 +1304,233 @@ mod tests {
             .is_some_and(|until| until > now_unix()));
         assert_eq!(account.cooldown_reason.as_deref(), Some("five_hour"));
     }
+}
 
+#[cfg(test)]
+mod account_first_tests {
+    use std::ffi::OsString;
+    use std::sync::Arc;
+
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::profile::{ProviderRoute, RouteScope};
+    use crate::store::{open_store, StorageConfig};
+
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn capture(names: &[&'static str]) -> Self {
+            Self(
+                names
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in &self.0 {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    fn account(provider: Provider, account_id: &str, home: &Path) -> ProviderAccount {
+        new_account(
+            provider,
+            parse_account_id(account_id).unwrap(),
+            home.join(account_id),
+            Some(
+                crate::profile::EmailAddress::parse(&format!("{account_id}@example.com")).unwrap(),
+            ),
+        )
+    }
+
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn legacy_account_chrome_pairing_moves_to_the_profile_binding() {
+    async fn default_route_selects_an_account_without_a_repo_route() {
+        let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let store = Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(
-                temp.path().join("loopflow.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let account_id = parse_account_id("primary").unwrap();
-        let account_home = temp.path().join("accounts/claude/primary");
-        fs::create_dir_all(&account_home).unwrap();
-        let legacy_path = account_home.join(LEGACY_CHROME_PROFILE_FILE);
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let claude = bin.join("claude");
         fs::write(
-            &legacy_path,
-            r#"{"directory":"Profile 3","label":"jack@example.com"}"#,
+            &claude,
+            "#!/bin/sh\nprintf '%s\\n' '{\"loggedIn\":true,\"email\":\"selected@example.com\"}'\n",
         )
         .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = fs::metadata(&claude).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&claude, permissions).unwrap();
+        }
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "PATH",
+            PROVIDER_ACCOUNT_ENV,
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            FORWARDED_ACCOUNT_STORE_ENV,
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        std::env::remove_var(PROVIDER_ACCOUNT_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let selected = account(Provider::Claude, "selected", temp.path());
+        store.upsert_provider_account(&selected).await.unwrap();
         store
-            .upsert_provider_account(&new_account(
-                Provider::Claude,
-                account_id.clone(),
-                account_home,
-                Some(crate::profile::EmailAddress::parse("jack@example.com").unwrap()),
-            ))
-            .await
-            .unwrap();
-        let profile_id = ProfileId::parse("jack@example.com").unwrap();
-        store
-            .upsert_profile(&Profile {
-                id: profile_id.clone(),
-                created_at: 1,
-                updated_at: 1,
-            })
-            .await
-            .unwrap();
-        store
-            .set_profile_provider_account(&ProfileProviderAccount {
-                profile_id: profile_id.clone(),
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
                 provider: Provider::Claude,
-                account_id,
-                created_at: 1,
-                updated_at: 1,
+                accounts: vec![selected.account_id.clone()],
+                created_at: now_unix(),
+                updated_at: now_unix(),
             })
             .await
             .unwrap();
 
-        migrate_legacy_chrome_bindings(&store).await.unwrap();
-
-        let binding = store
-            .chrome_profile_binding(&profile_id, &HostId::local().unwrap())
+        let selection = resolve_provider_account(Provider::Claude, None)
             .await
             .unwrap()
-            .unwrap();
-        assert_eq!(binding.chrome_directory, "Profile 3");
-        assert!(!legacy_path.exists());
+            .into_route()
+            .expect("default route should select a managed account");
+
+        assert_eq!(selection.account_id(), &selected.account_id);
+        assert!(store
+            .get_provider_account(Provider::Claude.as_str(), &selected.account_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .last_selected_at
+            .is_some());
     }
 
     #[tokio::test]
-    async fn forwarded_route_keeps_profile_mappings_but_deduplicates_accounts() {
+    async fn session_resume_is_pinned_by_account_only() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(
-                temp.path().join("loopflow.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let primary = ProfileId::parse("primary@example.com").unwrap();
-        let engineering = ProfileId::parse("engineering@example.com").unwrap();
-        let personal = ProfileId::parse("personal@example.com").unwrap();
-        for profile_id in [&primary, &engineering, &personal] {
-            store
-                .upsert_profile(&Profile {
-                    id: profile_id.clone(),
-                    created_at: 1,
-                    updated_at: 1,
-                })
+            open_store(&StorageConfig::sqlite(temp.path().join("store.db")))
                 .await
-                .unwrap();
-        }
-        let claude_account = new_account(
-            Provider::Claude,
-            parse_account_id("personal").unwrap(),
-            temp.path().join("claude-personal"),
-            Some(crate::profile::EmailAddress::parse("personal@example.com").unwrap()),
+                .unwrap(),
         );
-        let codex_account = new_account(
-            Provider::Codex,
-            parse_account_id("engineering").unwrap(),
-            temp.path().join("codex-engineering"),
-            Some(crate::profile::EmailAddress::parse("engineering@example.com").unwrap()),
-        );
+        let first = account(Provider::Codex, "first", temp.path());
+        let second = account(Provider::Codex, "second", temp.path());
+        store.upsert_provider_account(&first).await.unwrap();
+        store.upsert_provider_account(&second).await.unwrap();
         store
-            .upsert_provider_account(&claude_account)
+            .pin_provider_session_route(Provider::Codex, "session", &second.account_id)
             .await
             .unwrap();
-        store.upsert_provider_account(&codex_account).await.unwrap();
-        for profile_id in [&primary, &engineering, &personal] {
-            store
-                .set_profile_provider_account(&ProfileProviderAccount {
-                    profile_id: profile_id.clone(),
-                    provider: Provider::Claude,
-                    account_id: claude_account.account_id.clone(),
-                    created_at: 1,
-                    updated_at: 1,
-                })
+
+        let selection = store
+            .select_provider_account(
+                Provider::Codex,
+                &[first.account_id, second.account_id.clone()],
+                Some("session"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(selection.account.account_id, second.account_id);
+        assert!(selection.resume_requested_session);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn ambient_states_and_an_unusable_configured_route_are_distinct() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            PROVIDER_ACCOUNT_ENV,
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            FORWARDED_ACCOUNT_STORE_ENV,
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::remove_var(PROVIDER_ACCOUNT_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
+
+        assert!(matches!(
+            resolve_provider_account(Provider::Claude, None)
                 .await
-                .unwrap();
-        }
+                .unwrap(),
+            ProviderAccountResolution::Ambient(AmbientReason::StoreUnavailable)
+        ));
+
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        assert!(matches!(
+            resolve_provider_account(Provider::Claude, None)
+                .await
+                .unwrap(),
+            ProviderAccountResolution::Ambient(AmbientReason::NoRoutes { .. })
+        ));
+
+        let mut unavailable = account(Provider::Claude, "missing", temp.path());
+        unavailable.credential_state = CredentialState::Missing;
+        store.upsert_provider_account(&unavailable).await.unwrap();
         store
-            .set_profile_provider_account(&ProfileProviderAccount {
-                profile_id: engineering.clone(),
-                provider: Provider::Codex,
-                account_id: codex_account.account_id.clone(),
-                created_at: 1,
-                updated_at: 1,
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Claude,
+                accounts: vec![unavailable.account_id],
+                created_at: now_unix(),
+                updated_at: now_unix(),
             })
             .await
             .unwrap();
-        let route = RepoProfileRoute {
-            repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            default_profile: primary,
-            backup_profiles: vec![engineering, personal],
-            created_at: 1,
-            updated_at: 1,
-        };
 
-        let (mappings, accounts) = referenced_provider_accounts(&store, &route).await.unwrap();
-
-        assert_eq!(mappings.len(), 4);
-        assert_eq!(accounts.len(), 2);
         assert_eq!(
-            accounts
-                .iter()
-                .filter(|(provider, _)| *provider == Provider::Claude)
-                .count(),
-            1
+            resolve_provider_account(Provider::Claude, None)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "configured claude route has no eligible account: 'missing' credential is missing"
         );
     }
 
     #[test]
-    fn forwarded_bundle_round_trips_without_debugging_tokens() {
-        let primary = ProfileId::parse("primary@example.com").unwrap();
-        let engineering = ProfileId::parse("engineering@example.com").unwrap();
-        let claude = parse_account_id("primary").unwrap();
-        let codex = parse_account_id("reserve").unwrap();
-        let bundle = ForwardedProfileBundle::new(
-            RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            primary.clone(),
-            vec![engineering.clone()],
-            vec![
-                ForwardedProfileProviderAccount {
-                    profile_id: primary,
-                    provider: Provider::Claude,
-                    account_id: claude.clone(),
-                },
-                ForwardedProfileProviderAccount {
-                    profile_id: engineering,
-                    provider: Provider::Claude,
-                    account_id: claude.clone(),
-                },
-            ],
-            vec![ForwardedProviderAccount {
-                provider: Provider::Claude,
-                account_id: claude.clone(),
-                login_email: Some(
-                    crate::profile::EmailAddress::parse("personal@example.com").unwrap(),
-                ),
-                credential_state: CredentialState::Connected,
-                routing_state: RoutingState::Automatic,
-                plan: Some("max".to_string()),
-                paid_through: None,
-                utilization_percent: None,
-                cooldown_until: None,
-                cooldown_reason: None,
-            }],
-            vec![
-                ForwardedProviderCredential::new(
-                    Provider::Claude,
-                    claude,
-                    "secret-claude-access-token".to_string(),
-                ),
-                ForwardedProviderCredential::new(
-                    Provider::Codex,
-                    codex,
-                    "secret-codex-access-token".to_string(),
-                ),
-            ],
-        );
-        let encoded = encode_forwarded_profile_bundle(&bundle).unwrap();
-        assert!(!encoded.contains("secret-claude-access-token"));
-        assert!(!encoded.contains("secret-codex-access-token"));
-        let decoded = decode_forwarded_profile_bundle(&encoded).unwrap();
-        assert_eq!(decoded, bundle);
-        assert_eq!(decoded.credentials.len(), 2);
-        assert!(!format!("{decoded:?}").contains("secret-claude-access-token"));
-        assert!(!format!("{decoded:?}").contains("secret-codex-access-token"));
-    }
-
-    #[tokio::test]
-    async fn restarted_provider_reuses_health_from_the_process_lease() {
-        let temp = tempdir().unwrap();
-        let store = Arc::new(
-            open_store(&crate::store::StorageConfig::sqlite(
-                temp.path().join("lease.db"),
-            ))
-            .await
-            .unwrap(),
-        );
-        let profile_id = ProfileId::parse("engineering@example.com").unwrap();
+    fn forwarded_account_bundle_round_trips_without_exposing_tokens() {
         let account_id = parse_account_id("engineering").unwrap();
-        let bundle = ForwardedProfileBundle::new(
+        let bundle = ForwardedAccountBundle::new(
             RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            profile_id.clone(),
-            Vec::new(),
-            vec![ForwardedProfileProviderAccount {
-                profile_id,
+            vec![ForwardedProviderRoute {
                 provider: Provider::Codex,
-                account_id: account_id.clone(),
+                accounts: vec![account_id.clone()],
             }],
-            vec![ForwardedProviderAccount {
-                provider: Provider::Codex,
-                account_id: account_id.clone(),
-                login_email: Some(
-                    crate::profile::EmailAddress::parse("engineering@example.com").unwrap(),
-                ),
-                credential_state: CredentialState::Connected,
-                routing_state: RoutingState::Automatic,
-                plan: Some("max".to_string()),
-                paid_through: None,
-                utilization_percent: None,
-                cooldown_until: None,
-                cooldown_reason: None,
-            }],
+            vec![],
             vec![ForwardedProviderCredential::new(
                 Provider::Codex,
-                account_id.clone(),
-                "codex-access-token".to_string(),
+                account_id,
+                "secret-token".to_string(),
             )],
         );
 
-        let candidates = hydrate_forwarded_profile_bundle(&store, &bundle, Provider::Codex)
-            .await
-            .unwrap();
-        assert_eq!(candidates.len(), 1);
-        let cooldown_until = now_unix() + 300;
-        store
-            .record_provider_account_health(
-                Provider::Codex.as_str(),
-                &account_id,
-                Some(100),
-                Some(cooldown_until),
-                Some("remote-limit"),
-            )
-            .await
-            .unwrap();
-
-        hydrate_forwarded_profile_bundle(&store, &bundle, Provider::Codex)
-            .await
-            .unwrap();
-
-        let account = store
-            .get_provider_account(Provider::Codex.as_str(), &account_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(account.utilization_percent, Some(100));
-        assert_eq!(account.cooldown_until, Some(cooldown_until));
-        assert_eq!(account.cooldown_reason.as_deref(), Some("remote-limit"));
+        let encoded = encode_forwarded_account_bundle(&bundle).unwrap();
+        assert_eq!(decode_forwarded_account_bundle(&encoded).unwrap(), bundle);
+        assert!(!format!("{bundle:?}").contains("secret-token"));
     }
 }

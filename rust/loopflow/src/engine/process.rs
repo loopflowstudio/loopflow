@@ -677,8 +677,8 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    reject_detached_forwarded_profile(
-        std::env::var_os(crate::provider_account::FORWARDED_PROFILE_BUNDLE_ENV)
+    reject_detached_forwarded_account(
+        std::env::var_os(crate::provider_account::FORWARDED_ACCOUNT_BUNDLE_ENV)
             .is_some_and(|value| !value.is_empty()),
     )?;
     let context = pinned_execution_context()?;
@@ -705,10 +705,10 @@ pub(crate) async fn start_lf_session_with_env(
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
-fn reject_detached_forwarded_profile(forwarded: bool) -> Result<()> {
+fn reject_detached_forwarded_account(forwarded: bool) -> Result<()> {
     if forwarded {
         return Err(anyhow!(
-            "cannot launch a detached session from an ephemeral forwarded provider profile; \
+            "cannot launch a detached session from an ephemeral forwarded provider account; \
              keep the remote command in the foreground or authenticate on the remote host"
         ));
     }
@@ -829,7 +829,7 @@ mod tests {
     use super::{
         classify_signal_probe, classify_tmux_probe_failure, extend_session_control_context,
         lf_session_shell_command, probe_child_body_presence, reap_child_process,
-        reject_detached_forwarded_profile, select_binary_override, select_current_home_binary,
+        reject_detached_forwarded_account, select_binary_override, select_current_home_binary,
         signal_probe_id, tmux_installed, FakeTmux, Presence, ProcessSignalTarget,
     };
     use crate::build_info::BuildProvenance;
@@ -968,9 +968,9 @@ mod tests {
     }
 
     #[test]
-    fn detached_session_rejects_an_ephemeral_forwarded_profile() {
-        assert!(reject_detached_forwarded_profile(false).is_ok());
-        assert!(reject_detached_forwarded_profile(true)
+    fn detached_session_rejects_an_ephemeral_forwarded_account() {
+        assert!(reject_detached_forwarded_account(false).is_ok());
+        assert!(reject_detached_forwarded_account(true)
             .unwrap_err()
             .to_string()
             .contains("cannot launch a detached session"));

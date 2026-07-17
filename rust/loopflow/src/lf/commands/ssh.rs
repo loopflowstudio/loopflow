@@ -5,7 +5,7 @@
 //! machine, forwarded into the remote process environment as a stdin preamble
 //! (never in argv, `ps`, or logs), and are NOT persisted on the remote — they
 //! die with the process. The remote host stays a stateless compute surface.
-//! Detached work is rejected when a profile bundle is forwarded because it
+//! Detached work is rejected when an account bundle is forwarded because it
 //! would outlive that credential lease.
 //!
 //! Forwarded bundle: GitHub (`gh`), Claude/Codex agent OAuth, and — the
@@ -29,8 +29,8 @@ use anyhow::{anyhow, Context};
 
 use crate::pm::PmProviderKind;
 use crate::provider_account::{
-    encode_forwarded_profile_bundle, local_forwarded_profile_bundle, ForwardedProfileBundle,
-    FORWARDED_PROFILE_BUNDLE_ENV, FORWARDED_PROFILE_STORE_ENV,
+    encode_forwarded_account_bundle, local_forwarded_account_bundle, ForwardedAccountBundle,
+    FORWARDED_ACCOUNT_BUNDLE_ENV, FORWARDED_ACCOUNT_STORE_ENV,
 };
 use crate::provider_auth::{extract_claude_token, extract_codex_access_token};
 
@@ -44,7 +44,7 @@ pub struct Credentials {
     pub gh_token: Option<String>,
     pub claude_token: Option<String>,
     pub codex_token: Option<String>,
-    pub profile_bundle: Option<ForwardedProfileBundle>,
+    pub account_bundle: Option<ForwardedAccountBundle>,
     pub pm_token: Option<String>,
     /// PM provider the token belongs to (e.g. `linear`).
     pub pm_provider: Option<String>,
@@ -115,7 +115,7 @@ pub fn capture_routed(
     let credentials = runtime
         .block_on(resolve_credentials(&[]))
         .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    reject_detached_profile_forwarding(credentials.profile_bundle.is_some(), cmd)
+    reject_detached_account_forwarding(credentials.account_bundle.is_some(), cmd)
         .map_err(|error| SshCaptureError::Local(error.to_string()))?;
     let preamble = build_preamble(
         &credentials,
@@ -150,18 +150,18 @@ fn run_with_env(
     let repo = repo.unwrap_or(DEFAULT_REPO);
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     let credentials = runtime.block_on(resolve_credentials(secret_names))?;
-    reject_detached_profile_forwarding(credentials.profile_bundle.is_some(), cmd)?;
+    reject_detached_account_forwarding(credentials.account_bundle.is_some(), cmd)?;
     let preamble = build_preamble(&credentials, dest, repo, cmd, extra_env);
     run_ssh(dest, port, forward_agent, &preamble)
 }
 
-fn reject_detached_profile_forwarding(
-    has_profile_bundle: bool,
+fn reject_detached_account_forwarding(
+    has_account_bundle: bool,
     cmd: &[String],
 ) -> anyhow::Result<()> {
-    if has_profile_bundle && cmd.first().is_some_and(|program| program == "tmux") {
+    if has_account_bundle && cmd.first().is_some_and(|program| program == "tmux") {
         return Err(anyhow!(
-            "cannot forward ephemeral provider profiles into a remote tmux command; \
+            "cannot forward ephemeral provider accounts into a remote tmux command; \
              run the remote command in the foreground or authenticate on the remote host"
         ));
     }
@@ -177,11 +177,11 @@ async fn resolve_credentials(secret_names: &[String]) -> anyhow::Result<Credenti
     for name in secret_names {
         secrets.push((name.clone(), resolve_doppler_secret(name)?));
     }
-    let profile_bundle = match crate::store::open_existing_store().await {
-        Some(store) => local_forwarded_profile_bundle(&std::sync::Arc::new(store)).await?,
+    let account_bundle = match crate::store::open_existing_store().await {
+        Some(store) => local_forwarded_account_bundle(&std::sync::Arc::new(store)).await?,
         None => None,
     };
-    let (claude_token, codex_token) = if profile_bundle.is_some() {
+    let (claude_token, codex_token) = if account_bundle.is_some() {
         (None, None)
     } else {
         (
@@ -193,7 +193,7 @@ async fn resolve_credentials(secret_names: &[String]) -> anyhow::Result<Credenti
         gh_token: resolve_gh_token(),
         claude_token,
         codex_token,
-        profile_bundle,
+        account_bundle,
         pm_token: resolve_pm_token().await,
         pm_provider: Some(PmProviderKind::Linear.as_str().to_string()),
         secrets,
@@ -323,10 +323,10 @@ fn build_preamble(
     if let Some(token) = nonempty(&credentials.codex_token) {
         lines.push(format!("export CODEX_ACCESS_TOKEN={}", sh_quote(token)));
     }
-    if let Some(profile_bundle) = &credentials.profile_bundle {
-        match encode_forwarded_profile_bundle(profile_bundle) {
+    if let Some(account_bundle) = &credentials.account_bundle {
+        match encode_forwarded_account_bundle(account_bundle) {
             Ok(bundle) => lines.push(format!(
-                "export {FORWARDED_PROFILE_BUNDLE_ENV}={}",
+                "export {FORWARDED_ACCOUNT_BUNDLE_ENV}={}",
                 sh_quote(&bundle)
             )),
             Err(error) => lines.push(format!(
@@ -335,15 +335,15 @@ fn build_preamble(
             )),
         }
         lines.push(
-            "LF_PROFILE_LEASE_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/lf-profile.XXXXXX\") || exit 1"
+            "LF_ACCOUNT_LEASE_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/lf-account.XXXXXX\") || exit 1"
                 .to_string(),
         );
-        lines.push("export LF_PROFILE_LEASE_DIR".to_string());
+        lines.push("export LF_ACCOUNT_LEASE_DIR".to_string());
         lines.push(format!(
-            "export {FORWARDED_PROFILE_STORE_ENV}=\"$LF_PROFILE_LEASE_DIR/router.db\""
+            "export {FORWARDED_ACCOUNT_STORE_ENV}=\"$LF_ACCOUNT_LEASE_DIR/router.db\""
         ));
         lines.push(
-            "trap 'status=$?; trap - EXIT; rm -rf -- \"$LF_PROFILE_LEASE_DIR\"; exit \"$status\"' EXIT"
+            "trap 'status=$?; trap - EXIT; rm -rf -- \"$LF_ACCOUNT_LEASE_DIR\"; exit \"$status\"' EXIT"
                 .to_string(),
         );
         lines.push("trap 'exit 129' HUP".to_string());
@@ -376,7 +376,7 @@ fn build_preamble(
         .map(|arg| sh_quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
-    lines.push(if credentials.profile_bundle.is_some() {
+    lines.push(if credentials.account_bundle.is_some() {
         remote_cmd
     } else {
         format!("exec {remote_cmd}")
@@ -551,39 +551,22 @@ mod tests {
     use super::*;
 
     fn full_bundle() -> Credentials {
-        let primary = crate::profile::ProfileId::parse("primary@example.com").unwrap();
-        let engineering = crate::profile::ProfileId::parse("engineering@example.com").unwrap();
-        let personal = crate::profile::ProfileId::parse("personal@example.com").unwrap();
         let claude = crate::provider_account::parse_account_id("primary").unwrap();
         let codex = crate::provider_account::parse_account_id("reserve").unwrap();
         Credentials {
             gh_token: Some("gh-secret".to_string()),
             claude_token: None,
             codex_token: None,
-            profile_bundle: Some(ForwardedProfileBundle::new(
+            account_bundle: Some(ForwardedAccountBundle::new(
                 crate::repository::RepoId::parse("loopflowstudio/loopflow").unwrap(),
-                primary.clone(),
-                vec![engineering.clone(), personal.clone()],
                 vec![
-                    crate::provider_account::ForwardedProfileProviderAccount {
-                        profile_id: primary,
+                    crate::provider_account::ForwardedProviderRoute {
                         provider: crate::provider_auth::Provider::Claude,
-                        account_id: claude.clone(),
+                        accounts: vec![claude.clone()],
                     },
-                    crate::provider_account::ForwardedProfileProviderAccount {
-                        profile_id: engineering.clone(),
-                        provider: crate::provider_auth::Provider::Claude,
-                        account_id: claude.clone(),
-                    },
-                    crate::provider_account::ForwardedProfileProviderAccount {
-                        profile_id: engineering,
+                    crate::provider_account::ForwardedProviderRoute {
                         provider: crate::provider_auth::Provider::Codex,
-                        account_id: codex.clone(),
-                    },
-                    crate::provider_account::ForwardedProfileProviderAccount {
-                        profile_id: personal,
-                        provider: crate::provider_auth::Provider::Claude,
-                        account_id: claude.clone(),
+                        accounts: vec![codex.clone()],
                     },
                 ],
                 vec![
@@ -636,11 +619,11 @@ mod tests {
     }
 
     #[test]
-    fn remote_tmux_rejects_ephemeral_profile_forwarding() {
+    fn remote_tmux_rejects_ephemeral_account_forwarding() {
         let cmd = vec!["tmux".to_string(), "list-sessions".to_string()];
 
-        assert!(reject_detached_profile_forwarding(false, &cmd).is_ok());
-        assert!(reject_detached_profile_forwarding(true, &cmd)
+        assert!(reject_detached_account_forwarding(false, &cmd).is_ok());
+        assert!(reject_detached_account_forwarding(true, &cmd)
             .unwrap_err()
             .to_string()
             .contains("remote tmux"));
@@ -655,18 +638,18 @@ mod tests {
         assert!(!preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN="));
         assert!(!preamble.contains("export CODEX_ACCESS_TOKEN="));
         let encoded =
-            encode_forwarded_profile_bundle(full_bundle().profile_bundle.as_ref().unwrap())
+            encode_forwarded_account_bundle(full_bundle().account_bundle.as_ref().unwrap())
                 .unwrap();
         assert!(preamble.contains(&format!(
-            "export {FORWARDED_PROFILE_BUNDLE_ENV}='{}'",
+            "export {FORWARDED_ACCOUNT_BUNDLE_ENV}='{}'",
             encoded
         )));
         assert!(!preamble.contains("claude-primary"));
         assert!(!preamble.contains("codex-reserve"));
         assert!(!preamble.contains("refresh_token"));
         assert!(!preamble.contains("/accounts/"));
-        assert!(preamble.contains("LF_PROFILE_LEASE_DIR=$(mktemp -d"));
-        assert!(preamble.contains(&format!("export {FORWARDED_PROFILE_STORE_ENV}=")));
+        assert!(preamble.contains("LF_ACCOUNT_LEASE_DIR=$(mktemp -d"));
+        assert!(preamble.contains(&format!("export {FORWARDED_ACCOUNT_STORE_ENV}=")));
         assert!(preamble.contains("trap - EXIT; rm -rf --"));
         assert!(preamble.contains("export LF_FORWARDED_PM_TOKEN='linear-secret'"));
         assert!(preamble.contains("export LF_FORWARDED_PM_PROVIDER='linear'"));

@@ -9,10 +9,10 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILES = (
-    "primary@example.com",
-    "engineering@example.com",
-    "personal@example.com",
+ACCESS_PROFILES = (
+    ("personal", "Profile 3", "primary@example.com"),
+    ("engineering", "Profile 8", "engineering@example.com"),
+    ("loopflow", "Default", "personal@example.com"),
 )
 
 
@@ -40,7 +40,7 @@ def _run(binary: Path, env: dict[str, str], *args: str) -> str:
     return result.stdout.rstrip()
 
 
-def _seed_accounts(database: Path, demo_home: Path) -> None:
+def _seed_topology(database: Path, demo_home: Path) -> None:
     now = int(time.time())
     accounts = (
         ("claude", "primary-claude", "primary@example.com", "max"),
@@ -78,6 +78,17 @@ def _seed_accounts(database: Path, demo_home: Path) -> None:
                 for provider, account_id, email, plan in accounts
             ],
         )
+        connection.executemany(
+            """
+            INSERT INTO access_profiles (
+                profile_id, chrome_directory, expected_login, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (profile, directory, login, now, now)
+                for profile, directory, login in ACCESS_PROFILES
+            ],
+        )
 
 
 def _print_step(title: str, output: str) -> None:
@@ -87,67 +98,66 @@ def _print_step(title: str, output: str) -> None:
 
 def main() -> int:
     binary = _lf_binary()
-    with tempfile.TemporaryDirectory(prefix="lf-profile-demo-") as directory:
+    with tempfile.TemporaryDirectory(prefix="lf-account-demo-") as directory:
         demo_home = Path(directory)
         env = os.environ.copy()
         env["LF_HOME"] = str(demo_home)
 
-        print("Isolated profile-routing demo — fake metadata, no credentials")
-        for profile in PROFILES:
-            _run(binary, env, "profile", "create", profile)
-
+        print("Isolated account-routing demo — fake metadata, no credentials")
+        _run(binary, env, "auth", "accounts")
         database = demo_home / "loopflow.db"
-        _seed_accounts(database, demo_home)
+        _seed_topology(database, demo_home)
 
-        mappings = (
-            ("primary@example.com", "claude", "primary-claude"),
-            ("primary@example.com", "codex", "primary-codex"),
-            ("engineering@example.com", "claude", "personal-claude"),
-            (
-                "engineering@example.com",
-                "codex",
-                "engineering-codex",
-            ),
-            ("personal@example.com", "claude", "personal-claude"),
-            ("personal@example.com", "codex", "personal-codex"),
+        access = (
+            ("claude", "primary-claude", ("personal",)),
+            ("claude", "personal-claude", ("engineering", "loopflow")),
+            ("codex", "primary-codex", ("personal",)),
+            ("codex", "engineering-codex", ("engineering",)),
+            ("codex", "personal-codex", ("loopflow",)),
         )
-        for profile, provider, account in mappings:
+        for provider, account, profiles in access:
             _run(
                 binary,
                 env,
-                "profile",
-                "account",
+                "auth",
+                "access",
                 "set",
-                profile,
                 provider,
                 account,
+                *[item for profile in profiles for item in ("--profile", profile)],
             )
 
         _run(
             binary,
             env,
-            "profile",
             "route",
             "set",
-            "--default",
-            "primary@example.com",
-            "--backup",
-            "engineering@example.com",
-            "--backup",
-            "personal@example.com",
+            "claude",
+            "primary-claude",
+            "personal-claude",
+        )
+        _run(
+            binary,
+            env,
+            "route",
+            "set",
+            "codex",
+            "primary-codex",
+            "engineering-codex",
+            "personal-codex",
         )
 
-        _print_step("Profiles", _run(binary, env, "profile", "list"))
+        _print_step("Access profiles", _run(binary, env, "profile", "list"))
         _print_step(
-            "Repository route",
-            _run(binary, env, "profile", "route", "show"),
+            "Provider routes",
+            _run(binary, env, "route", "show"),
         )
         _print_step("Account lifecycle", _run(binary, env, "auth", "accounts"))
 
         print("\nLook for:")
-        print("  1. Profiles are the Google/Chrome login emails.")
-        print("  2. Claude and Codex map independently per profile.")
-        print("  3. personal@example.com Claude is shared with engineering@example.com.")
+        print("  1. Claude and Codex have independent account orders.")
+        print("  2. Accounts list ordered Chrome access venues.")
+        print("  3. A venue may be shared without becoming account identity.")
         print("  4. The demo home is deleted on exit; live Loopflow is untouched.")
     return 0
 

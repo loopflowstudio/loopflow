@@ -99,7 +99,9 @@ impl Harness for ClaudeHarness {
             .expect("claude provider session id lock poisoned")
             .clone();
         let account_route =
-            resolve_provider_account(Provider::Claude, requested_session.as_deref()).await?;
+            resolve_provider_account(Provider::Claude, requested_session.as_deref())
+                .await?
+                .into_route();
         if account_route
             .as_ref()
             .is_some_and(|route| !route.resume_requested_session())

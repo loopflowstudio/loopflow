@@ -323,6 +323,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "lineage_boundary",
         sql: include_str!("migrations/0.11.026_lineage_boundary.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 27,
+        },
+        name: "accounts_first",
+        sql: include_str!("migrations/0.11.027_accounts_first.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1428,7 +1437,8 @@ mod tests {
                 "0.11.023_capture_pruned_state".to_string(),
                 "0.11.024_ci_incidents".to_string(),
                 "0.11.025_usage_deltas".to_string(),
-                "0.11.026_lineage_boundary".to_string()
+                "0.11.026_lineage_boundary".to_string(),
+                "0.11.027_accounts_first".to_string()
             ]
         );
     }
@@ -1436,7 +1446,7 @@ mod tests {
     #[test]
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
         // Bait for the withheld tail (`0.11.026_lineage_boundary`): a parent no
         // row records. Its survival is what proves the tail stayed withheld.
         conn.execute_batch(
@@ -1469,7 +1479,7 @@ mod tests {
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
@@ -1516,7 +1526,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 4]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 5]).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"
@@ -1741,94 +1751,153 @@ mod tests {
     }
 
     #[test]
-    fn profile_migration_preserves_accounts_and_session_pins() {
+    fn accounts_first_migration_preserves_asymmetric_routes_venues_and_session_pins() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..8]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
         conn.execute_batch(
             "INSERT INTO provider_accounts (
-                provider, account_id, home, login, enabled, preferred,
-                utilization_percent, cooldown_until, cooldown_reason,
-                last_selected_at, created_at, updated_at
+                provider, account_id, home, login_email, credential_state,
+                routing_state, plan, paid_through, utilization_percent,
+                cooldown_until, cooldown_reason, last_selected_at, created_at, updated_at
              ) VALUES
-                ('claude', 'primary', '/accounts/claude/primary',
-                 'jack@example.com', 1, 1, 80, NULL, NULL, 5, 1, 5),
-                ('claude', 'duplicate', '/accounts/claude/duplicate',
-                 'jack@example.com', 1, 0, 0, NULL, NULL, NULL, 2, 2),
-                ('codex', 'primary', '/accounts/codex/primary',
-                 'jack@example.com', 1, 1, 20, NULL, NULL, 6, 1, 6);
+                ('claude', 'primary', '/accounts/claude/primary', 'jackstah@gmail.com',
+                 'connected', 'automatic', 'max', NULL, 0, NULL, NULL, 5, 1, 5),
+                ('claude', 'loopflow', '/accounts/claude/loopflow', 'jack@loopflow.studio',
+                 'connected', 'automatic', 'max', NULL, 0, NULL, NULL, 6, 1, 6),
+                ('codex', 'jackstah-1066', '/accounts/codex/jackstah-1066', 'jackstah@gmail.com',
+                 'connected', 'automatic', 'plus', NULL, 0, NULL, NULL, 6, 1, 6),
+                ('codex', 'engineering', '/accounts/codex/engineering', 'loopflow-eng@loopflow.studio',
+                 'connected', 'automatic', 'team', NULL, 0, NULL, NULL, 5, 1, 5),
+                ('codex', 'jack-42', '/accounts/codex/jack-42', 'jack@loopflow.studio',
+                 'connected', 'automatic', 'plus', NULL, 0, NULL, NULL, 4, 1, 4),
+                ('codex', 'manabot-eng', '/accounts/codex/manabot-eng', 'manabot-eng@loopflow.studio',
+                 'connected', 'automatic', 'team', NULL, 80, NULL, NULL, NULL, 1, 1);
+
+             INSERT INTO profiles (profile_id, created_at, updated_at) VALUES
+                ('jackstah@gmail.com', 1, 1),
+                ('loopflow-eng@loopflow.studio', 1, 2),
+                ('jack@loopflow.studio', 1, 3),
+                ('manabot-eng@loopflow.studio', 1, 4);
+             INSERT INTO chrome_profile_bindings (
+                profile_id, host_id, chrome_directory, created_at, updated_at
+             ) VALUES
+                ('jackstah@gmail.com', 'mini', 'Profile 3', 1, 1),
+                ('loopflow-eng@loopflow.studio', 'mini', 'Profile 8', 1, 2),
+                ('jack@loopflow.studio', 'mini', 'Default', 1, 3);
+             INSERT INTO profile_provider_accounts (
+                profile_id, provider, account_id, created_at, updated_at
+             ) VALUES
+                ('jackstah@gmail.com', 'claude', 'primary', 1, 1),
+                ('loopflow-eng@loopflow.studio', 'claude', 'primary', 1, 2),
+                ('jack@loopflow.studio', 'claude', 'loopflow', 1, 3),
+                ('jackstah@gmail.com', 'codex', 'jackstah-1066', 1, 1),
+                ('loopflow-eng@loopflow.studio', 'codex', 'engineering', 1, 2),
+                ('jack@loopflow.studio', 'codex', 'jack-42', 1, 3),
+                ('manabot-eng@loopflow.studio', 'codex', 'manabot-eng', 1, 4);
+             INSERT INTO repo_profile_routes (
+                repo_id, default_profile, created_at, updated_at
+             ) VALUES ('loopflowstudio/loopflow', 'jackstah@gmail.com', 1, 4);
+             INSERT INTO repo_backup_profiles (repo_id, position, profile_id) VALUES
+                ('loopflowstudio/loopflow', 0, 'loopflow-eng@loopflow.studio'),
+                ('loopflowstudio/loopflow', 1, 'jack@loopflow.studio');
              INSERT INTO provider_session_accounts (
-                provider, provider_session_id, account_id, created_at
-             ) VALUES ('claude', 'session-1', 'primary', 7);",
+                provider, provider_session_id, account_id, created_at, profile_id
+             ) VALUES (
+                'claude', 'session-1', 'primary', 7, 'loopflow-eng@loopflow.studio'
+             );",
         )
         .unwrap();
 
         apply_sqlite(&conn).unwrap();
 
         assert_eq!(
-            conn.query_row(
-                "SELECT COUNT(*) FROM profiles WHERE profile_id = 'jack@example.com'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            1
+            conn.query_row("SELECT COUNT(*) FROM access_profiles", [], |row| row
+                .get::<_, i64>(0),)
+                .unwrap(),
+            3
         );
         assert_eq!(
             conn.query_row(
-                "SELECT COUNT(*) FROM profile_provider_accounts
-                 WHERE profile_id = 'jack@example.com'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            2
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT profile_id FROM provider_session_accounts
-                 WHERE provider_session_id = 'session-1'",
+                "SELECT group_concat(profile_id, ',') FROM (
+                    SELECT profile_id FROM account_access_profiles
+                    WHERE provider = 'claude' AND account_id = 'primary'
+                    ORDER BY position
+                 )",
                 [],
                 |row| row.get::<_, String>(0),
             )
             .unwrap(),
-            "jack@example.com"
+            "jackstah@gmail.com,loopflow-eng@loopflow.studio"
         );
         assert_eq!(
             conn.query_row(
-                "SELECT utilization_percent FROM provider_accounts
-                 WHERE provider = 'claude' AND account_id = 'primary'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            80
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT login_email || ':' || credential_state || ':' || routing_state
-                 FROM provider_accounts
-                 WHERE provider = 'claude' AND account_id = 'primary'",
+                "SELECT group_concat(account_id, ',') FROM (
+                    SELECT account_id FROM provider_routes
+                    WHERE scope = 'repo' AND scope_id = 'loopflowstudio/loopflow'
+                      AND provider = 'claude'
+                    ORDER BY position
+                 )",
                 [],
                 |row| row.get::<_, String>(0),
             )
             .unwrap(),
-            "jack@example.com:connected:automatic"
+            "primary,loopflow"
         );
         assert_eq!(
             conn.query_row(
-                "SELECT COUNT(*) FROM provider_accounts
-                 WHERE provider = 'claude' AND login_email = 'jack@example.com'",
+                "SELECT group_concat(account_id, ',') FROM (
+                    SELECT account_id FROM provider_routes
+                    WHERE scope = 'repo' AND scope_id = 'loopflowstudio/loopflow'
+                      AND provider = 'codex'
+                    ORDER BY position
+                 )",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "jackstah-1066,engineering,jack-42"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT group_concat(account_id, ',') FROM (
+                    SELECT account_id FROM provider_routes
+                    WHERE scope = 'default' AND provider = 'codex'
+                    ORDER BY position
+                 )",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "jackstah-1066,engineering,jack-42,manabot-eng"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT account_id FROM provider_session_accounts
+                 WHERE provider = 'claude' AND provider_session_id = 'session-1'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "primary"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('provider_session_accounts')
+                 WHERE name = 'profile_id'",
                 [],
                 |row| row.get::<_, i64>(0),
             )
             .unwrap(),
-            1
+            0
         );
         assert_eq!(
             conn.query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('provider_accounts')
-                 WHERE name IN ('enabled', 'preferred')",
+                "SELECT COUNT(*) FROM sqlite_schema
+                 WHERE type = 'table' AND name IN (
+                    'profiles', 'chrome_profile_bindings', 'profile_provider_accounts',
+                    'repo_profile_routes', 'repo_backup_profiles'
+                 )",
                 [],
                 |row| row.get::<_, i64>(0),
             )

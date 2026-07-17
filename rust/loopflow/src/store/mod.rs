@@ -577,6 +577,17 @@ impl Store {
         .await
     }
 
+    pub async fn upsert_provider_account_limit_rows(
+        &self,
+        limits: &[AccountLimitRow],
+    ) -> StoreResult<()> {
+        let limits = limits.to_vec();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_provider_account_limit_rows(&limits)
+        })
+        .await
+    }
+
     pub async fn provider_account_limits(
         &self,
         provider: Option<&str>,
@@ -872,7 +883,7 @@ pub struct AccountLimitWindow {
 }
 
 /// A stored window observation for one managed account.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountLimitRow {
     pub provider: String,
     pub account_id: ProviderAccountId,

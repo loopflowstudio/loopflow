@@ -15,7 +15,9 @@ use thiserror::Error;
 use crate::profile::{ProviderRoute, RouteScope};
 use crate::provider_auth::{provider_account_auth_status, AuthStatus, Provider};
 use crate::repository::RepoId;
-use crate::store::{open_store, ProviderAccount, ProviderAccountId, SharedStore, StoreError};
+use crate::store::{
+    open_store, AccountLimitRow, ProviderAccount, ProviderAccountId, SharedStore, StoreError,
+};
 use crate::store::{CredentialState, RoutingState};
 
 pub const FORWARDED_ACCOUNT_BUNDLE_ENV: &str = "LF_FORWARDED_ACCOUNT_BUNDLE";
@@ -28,6 +30,81 @@ pub const ACCOUNT_REPO_ID_ENV: &str = "LF_ACCOUNT_REPO_ID";
 pub const PROVIDER_ACCOUNT_ENV: &str = "LF_ACCOUNT";
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
+pub(crate) const STRAINED_UTILIZATION_PERCENT: u8 = 75;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccountStrain {
+    pub window: String,
+    pub used_percent: u8,
+    pub resets_at: i64,
+}
+
+fn strongest_active_strain<'a>(
+    windows: impl Iterator<Item = (&'a str, u8, Option<i64>)>,
+    now: i64,
+) -> Option<AccountStrain> {
+    let mut strongest: Option<AccountStrain> = None;
+    for (window, used_percent, resets_at) in windows {
+        let Some(resets_at) = resets_at.filter(|reset| *reset > now) else {
+            continue;
+        };
+        if used_percent < STRAINED_UTILIZATION_PERCENT {
+            continue;
+        }
+        if strongest.as_ref().is_none_or(|current| {
+            used_percent > current.used_percent
+                || (used_percent == current.used_percent && window < current.window.as_str())
+        }) {
+            strongest = Some(AccountStrain {
+                window: window.to_string(),
+                used_percent,
+                resets_at,
+            });
+        }
+    }
+    strongest
+}
+
+pub(crate) fn active_account_strain(
+    provider: &str,
+    account_id: &ProviderAccountId,
+    limits: &[AccountLimitRow],
+    now: i64,
+) -> Option<AccountStrain> {
+    strongest_active_strain(
+        limits
+            .iter()
+            .filter(|limit| limit.provider == provider && limit.account_id == *account_id)
+            .map(|limit| (limit.window.as_str(), limit.used_percent, limit.resets_at)),
+        now,
+    )
+}
+
+pub(crate) fn active_window_strain(
+    windows: &[crate::store::AccountLimitWindow],
+    now: i64,
+) -> Option<AccountStrain> {
+    strongest_active_strain(
+        windows.iter().map(|window| {
+            (
+                window.window.as_str(),
+                window.used_percent,
+                window.resets_at,
+            )
+        }),
+        now,
+    )
+}
+
+pub(crate) fn order_accounts_by_strain(
+    accounts: &mut [ProviderAccount],
+    limits: &[AccountLimitRow],
+    now: i64,
+) {
+    accounts.sort_by_key(|account| {
+        active_account_strain(&account.provider, &account.account_id, limits, now).is_some()
+    });
+}
 
 #[derive(Debug, Error)]
 pub enum ProviderAccountError {
@@ -133,6 +210,7 @@ pub enum ForwardedAccountSelection {
 pub struct ForwardedAccountBundle {
     pub selection: ForwardedAccountSelection,
     pub accounts: Vec<ForwardedProviderAccount>,
+    pub limits: Vec<AccountLimitRow>,
     credentials: Vec<ForwardedProviderCredential>,
 }
 
@@ -140,11 +218,13 @@ impl ForwardedAccountBundle {
     pub fn new(
         selection: ForwardedAccountSelection,
         accounts: Vec<ForwardedProviderAccount>,
+        limits: Vec<AccountLimitRow>,
         credentials: Vec<ForwardedProviderCredential>,
     ) -> Self {
         Self {
             selection,
             accounts,
+            limits,
             credentials,
         }
     }
@@ -440,8 +520,59 @@ pub fn decode_forwarded_account_bundle(
     let bytes = URL_SAFE_NO_PAD
         .decode(encoded.trim())
         .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))
+    let bundle: ForwardedAccountBundle = serde_json::from_slice(&bytes)
+        .map_err(|error| ProviderAccountError::ForwardedBundle(error.to_string()))?;
+    validate_forwarded_account_limits(&bundle)?;
+    Ok(bundle)
+}
+
+fn validate_forwarded_account_limits(
+    bundle: &ForwardedAccountBundle,
+) -> Result<(), ProviderAccountError> {
+    let ForwardedAccountSelection::Routed { routes, .. } = &bundle.selection else {
+        if bundle.limits.is_empty() {
+            return Ok(());
+        }
+        return Err(ProviderAccountError::ForwardedBundle(
+            "explicit pinned bundle carries routed limit observations".to_string(),
+        ));
+    };
+    let accounts = bundle
+        .accounts
+        .iter()
+        .map(|account| (account.provider.as_str(), account.account_id.clone()))
+        .collect::<HashSet<_>>();
+    let routed = routes
+        .iter()
+        .flat_map(|route| {
+            route
+                .accounts
+                .iter()
+                .cloned()
+                .map(move |account_id| (route.provider.as_str(), account_id))
+        })
+        .collect::<HashSet<_>>();
+    let mut seen = HashSet::new();
+    for limit in &bundle.limits {
+        let key = (limit.provider.as_str(), limit.account_id.clone());
+        if !accounts.contains(&key) || !routed.contains(&key) {
+            return Err(ProviderAccountError::ForwardedBundle(format!(
+                "limit row references {}/{} outside its routed account snapshot",
+                limit.provider, limit.account_id
+            )));
+        }
+        if !seen.insert((
+            limit.provider.as_str(),
+            limit.account_id.clone(),
+            limit.window.as_str(),
+        )) {
+            return Err(ProviderAccountError::ForwardedBundle(format!(
+                "duplicate limit row for {}/{} window '{}'",
+                limit.provider, limit.account_id, limit.window
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub async fn local_forwarded_account_bundle(
@@ -474,6 +605,18 @@ pub async fn local_forwarded_account_bundle(
         return Ok(None);
     }
     let routed_accounts = referenced_provider_accounts(store, &routes).await?;
+    let routed_account_ids = routed_accounts
+        .iter()
+        .map(|(provider, account)| (provider.as_str(), account.account_id.clone()))
+        .collect::<HashSet<_>>();
+    let limits = store
+        .provider_account_limits(None)
+        .await?
+        .into_iter()
+        .filter(|limit| {
+            routed_account_ids.contains(&(limit.provider.as_str(), limit.account_id.clone()))
+        })
+        .collect();
     let mut accounts = Vec::new();
     let mut credentials = Vec::new();
     for (provider, account) in routed_accounts {
@@ -486,6 +629,7 @@ pub async fn local_forwarded_account_bundle(
     Ok(Some(ForwardedAccountBundle::new(
         ForwardedAccountSelection::Routed { repo_id, routes },
         accounts,
+        limits,
         credentials,
     )))
 }
@@ -538,6 +682,7 @@ async fn explicit_forwarded_account_bundle(
     Ok(Some(ForwardedAccountBundle::new(
         ForwardedAccountSelection::Pinned(pins),
         accounts,
+        Vec::new(),
         credentials,
     )))
 }
@@ -729,13 +874,15 @@ pub async fn resolve_provider_account(
         let accounts = store
             .list_provider_accounts(Some(provider.as_str()))
             .await?;
+        let now = now_unix();
+        let today = time::OffsetDateTime::now_utc().date();
         let reasons = candidates
             .iter()
             .map(|account_id| {
                 accounts
                     .iter()
                     .find(|account| account.account_id == *account_id)
-                    .map(account_unavailable_reason)
+                    .map(|account| account_unavailable_reason(account, now, today))
                     .unwrap_or_else(|| format!("'{account_id}' missing"))
             })
             .collect::<Vec<_>>()
@@ -851,12 +998,24 @@ async fn resolve_forwarded_pin(
     }))
 }
 
-fn account_unavailable_reason(account: &ProviderAccount) -> String {
-    let now = now_unix();
+pub(crate) fn account_is_automatic_candidate(
+    account: &ProviderAccount,
+    now: i64,
+    today: time::Date,
+) -> bool {
+    account.eligible_for_automatic_routing(today)
+        && account.cooldown_until.is_none_or(|until| until <= now)
+}
+
+pub(crate) fn account_unavailable_reason(
+    account: &ProviderAccount,
+    now: i64,
+    today: time::Date,
+) -> String {
     if account.credential_state != CredentialState::Connected {
         return format!("'{}' credential is missing", account.account_id);
     }
-    let routing = account.effective_routing_state(time::OffsetDateTime::now_utc().date());
+    let routing = account.effective_routing_state(today);
     if routing != RoutingState::Automatic {
         return format!("'{}' routing is {}", account.account_id, routing.as_str());
     }
@@ -1016,6 +1175,22 @@ async fn hydrate_forwarded_route(
                 .upsert_provider_account(&provider_account_from_forwarded(account))
                 .await?;
         }
+        let limits = bundle
+            .limits
+            .iter()
+            .filter(|limit| limit.provider == provider.as_str())
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(limit) = limits
+            .iter()
+            .find(|limit| !route.accounts.contains(&limit.account_id))
+        {
+            return Err(ProviderAccountError::ForwardedBundle(format!(
+                "limit row references {provider}/{} outside its routed account snapshot",
+                limit.account_id
+            )));
+        }
+        store.upsert_provider_account_limit_rows(&limits).await?;
         store
             .set_provider_route(&ProviderRoute {
                 scope,
@@ -1676,6 +1851,20 @@ mod account_first_tests {
         store.upsert_provider_account(&first).await.unwrap();
         store.upsert_provider_account(&second).await.unwrap();
         store
+            .upsert_provider_account_limits(
+                Provider::Codex.as_str(),
+                &second.account_id,
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly".to_string(),
+                    used_percent: 80,
+                    resets_at: Some(now_unix() + 3600),
+                    plan: None,
+                }],
+                "poll",
+            )
+            .await
+            .unwrap();
+        store
             .pin_provider_session_route(Provider::Codex, "session", &second.account_id)
             .await
             .unwrap();
@@ -1692,6 +1881,79 @@ mod account_first_tests {
 
         assert_eq!(selection.account.account_id, second.account_id);
         assert!(selection.resume_requested_session);
+    }
+
+    #[tokio::test]
+    async fn automatic_selection_demotes_only_active_strain() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("store.db")))
+                .await
+                .unwrap(),
+        );
+        let first = account(Provider::Codex, "first", temp.path());
+        let second = account(Provider::Codex, "second", temp.path());
+        store.upsert_provider_account(&first).await.unwrap();
+        store.upsert_provider_account(&second).await.unwrap();
+        let window = |resets_at| crate::store::AccountLimitWindow {
+            window: "weekly".to_string(),
+            used_percent: 80,
+            resets_at,
+            plan: None,
+        };
+        store
+            .upsert_provider_account_limits(
+                Provider::Codex.as_str(),
+                &first.account_id,
+                &[window(Some(now_unix() + 3600))],
+                "poll",
+            )
+            .await
+            .unwrap();
+
+        let selection = store
+            .select_provider_account(
+                Provider::Codex,
+                &[first.account_id.clone(), second.account_id.clone()],
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(selection.account.account_id, second.account_id);
+
+        let only = store
+            .select_provider_account(
+                Provider::Codex,
+                std::slice::from_ref(&first.account_id),
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(only.account.account_id, first.account_id);
+
+        for resets_at in [Some(now_unix() - 1), None] {
+            store
+                .upsert_provider_account_limits(
+                    Provider::Codex.as_str(),
+                    &first.account_id,
+                    &[window(resets_at)],
+                    "poll",
+                )
+                .await
+                .unwrap();
+            let selection = store
+                .select_provider_account(
+                    Provider::Codex,
+                    &[first.account_id.clone(), second.account_id.clone()],
+                    None,
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(selection.account.account_id, first.account_id);
+        }
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1887,15 +2149,15 @@ printf '{"id":2,"result":{"account":null}}\n'
             vec![
                 ForwardedProviderAccount {
                     provider: Provider::Codex,
-                    account_id: first,
+                    account_id: first.clone(),
                     login_email: None,
                     credential_state: CredentialState::Connected,
                     routing_state: RoutingState::Automatic,
                     plan: None,
                     paid_through: None,
                     utilization_percent: None,
-                    cooldown_until: Some(now_unix() + 3600),
-                    cooldown_reason: Some("rate limit".to_string()),
+                    cooldown_until: None,
+                    cooldown_reason: None,
                 },
                 ForwardedProviderAccount {
                     provider: Provider::Codex,
@@ -1910,6 +2172,16 @@ printf '{"id":2,"result":{"account":null}}\n'
                     cooldown_reason: None,
                 },
             ],
+            vec![AccountLimitRow {
+                provider: Provider::Codex.as_str().to_string(),
+                account_id: first,
+                window: "weekly".to_string(),
+                used_percent: 80,
+                resets_at: Some(now_unix() + 3600),
+                plan: None,
+                observed_at: 123,
+                source: "poll".to_string(),
+            }],
             vec![ForwardedProviderCredential::new(
                 Provider::Codex,
                 second.clone(),
@@ -1934,6 +2206,13 @@ printf '{"id":2,"result":{"account":null}}\n'
 
         assert_eq!(route.account_id(), &second);
         assert!(!route.uses_native_home());
+        let remote = open_store(&StorageConfig::sqlite(temp.path().join("forwarded.db")))
+            .await
+            .unwrap();
+        assert_eq!(
+            remote.provider_account_limits(None).await.unwrap()[0].observed_at,
+            123
+        );
     }
 
     #[test]
@@ -1944,6 +2223,7 @@ printf '{"id":2,"result":{"account":null}}\n'
                 provider: Provider::Codex,
                 account_id: account_id.clone(),
             }]),
+            vec![],
             vec![],
             vec![ForwardedProviderCredential::new(
                 Provider::Codex,
@@ -1961,6 +2241,9 @@ printf '{"id":2,"result":{"account":null}}\n'
             .unwrap()
             .remove("selection");
         assert!(serde_json::from_value::<ForwardedAccountBundle>(missing_selection).is_err());
+        let mut missing_limits = serde_json::to_value(&bundle).unwrap();
+        missing_limits.as_object_mut().unwrap().remove("limits");
+        assert!(serde_json::from_value::<ForwardedAccountBundle>(missing_limits).is_err());
     }
 
     #[test]
@@ -1976,6 +2259,7 @@ printf '{"id":2,"result":{"account":null}}\n'
             },
             vec![],
             vec![],
+            vec![],
         );
         let mut value = serde_json::to_value(bundle).unwrap();
         value["selection"]["routed"]
@@ -1984,5 +2268,39 @@ printf '{"id":2,"result":{"account":null}}\n'
             .remove("repo_id");
 
         assert!(serde_json::from_value::<ForwardedAccountBundle>(value).is_err());
+    }
+
+    #[test]
+    fn forwarded_limits_must_belong_to_the_routed_account_snapshot() {
+        let account_id = parse_account_id("engineering").unwrap();
+        let bundle = ForwardedAccountBundle::new(
+            ForwardedAccountSelection::Routed {
+                repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
+                routes: vec![ForwardedProviderRoute {
+                    provider: Provider::Codex,
+                    accounts: vec![],
+                }],
+            },
+            vec![],
+            vec![AccountLimitRow {
+                provider: Provider::Codex.as_str().to_string(),
+                account_id,
+                window: "weekly".to_string(),
+                used_percent: 80,
+                resets_at: Some(now_unix() + 3600),
+                plan: None,
+                observed_at: now_unix(),
+                source: "poll".to_string(),
+            }],
+            vec![],
+        );
+
+        let error =
+            decode_forwarded_account_bundle(&encode_forwarded_account_bundle(&bundle).unwrap())
+                .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("outside its routed account snapshot"));
     }
 }

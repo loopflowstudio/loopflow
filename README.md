@@ -559,6 +559,7 @@ lf route set claude primary loopflow
 lf route set codex engineering personal reserve
 lf route default set claude loopflow primary
 lf route show
+lf route show --explain   # declared order, health demotion, next unpinned account
 
 lf auth connect claude primary
 lf auth connect codex engineering --chrome-profile "Profile 8"
@@ -571,6 +572,12 @@ lf auth disconnect claude --account account-id
 
 These names are placeholders. Accounts, access venues, and per-provider routes
 live in the local Loopflow database; Loopflow ships no account topology.
+
+Route order records intent. An account with a provider-observed limit window at
+least 75% used and not yet reset moves behind unstrained accounts for automatic
+selection. `lf route show --explain` previews that effective order without
+selecting anything. Strained accounts remain eligible when they are the only
+choice; session pins and explicit `--account` selection keep precedence.
 
 `auth connect <provider> <account>` tries that account's access profiles in
 order. A profile records a Chrome directory and the login expected there. The

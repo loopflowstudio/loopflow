@@ -229,7 +229,7 @@ different correctness and retention semantics, so it gets one narrowly named
 
 | Review | Reviewed head | Resolution |
 |--------|---------------|------------|
-| `ir_c6dd3e6649334e3fb59d33bb364296c5` | `15908a4ec` | `56c75f80c` scopes load-bearing persistence to `full`; `changed` and `required_host` now warn once and preserve their test result. |
+| `ir_c6dd3e6649334e3fb59d33bb364296c5` | `15908a4ec` (rebased as `589552e54`) | `56c75f80c` (rebased as `e01f937f8`) scopes load-bearing persistence to `full`; `changed` and `required_host` now warn once and preserve their test result. |
 
 ## De-risking
 

@@ -1,8 +1,132 @@
 use clap::{Parser, Subcommand};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::lfd;
 use loopflow::store;
+
+const MAX_LOG_BYTES: u64 = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+struct RotatingLog {
+    state: Arc<Mutex<RotatingLogState>>,
+}
+
+#[derive(Debug)]
+struct RotatingLogState {
+    path: PathBuf,
+    file: Option<File>,
+    bytes: u64,
+    max_bytes: u64,
+}
+
+#[derive(Debug)]
+struct RotatingLogWriter {
+    state: Arc<Mutex<RotatingLogState>>,
+}
+
+impl RotatingLog {
+    fn open(path: PathBuf, max_bytes: u64) -> io::Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let bytes = file.metadata()?.len();
+        Ok(Self {
+            state: Arc::new(Mutex::new(RotatingLogState {
+                path,
+                file: Some(file),
+                bytes,
+                max_bytes,
+            })),
+        })
+    }
+}
+
+impl RotatingLogState {
+    fn rotate_before(&mut self, incoming_bytes: usize) -> io::Result<()> {
+        if self.bytes == 0 || self.bytes.saturating_add(incoming_bytes as u64) <= self.max_bytes {
+            return Ok(());
+        }
+
+        self.file.take();
+        let previous = self.path.with_extension("log.previous");
+        if previous.exists() {
+            std::fs::remove_file(&previous)?;
+        }
+        if self.path.exists() {
+            std::fs::rename(&self.path, previous)?;
+        }
+        self.file = Some(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)?,
+        );
+        self.bytes = 0;
+        Ok(())
+    }
+}
+
+impl Write for RotatingLogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| io::Error::other("lfd log lock poisoned"))?;
+        state.rotate_before(buf.len())?;
+        let written = state
+            .file
+            .as_mut()
+            .expect("rotating log always owns an open file")
+            .write(buf)?;
+        state.bytes = state.bytes.saturating_add(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.state
+            .lock()
+            .map_err(|_| io::Error::other("lfd log lock poisoned"))?
+            .file
+            .as_mut()
+            .expect("rotating log always owns an open file")
+            .flush()
+    }
+}
+
+impl<'a> MakeWriter<'a> for RotatingLog {
+    type Writer = RotatingLogWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        RotatingLogWriter {
+            state: Arc::clone(&self.state),
+        }
+    }
+}
+
+fn daemon_log_path() -> anyhow::Result<PathBuf> {
+    let home = std::env::var_os("LF_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|path| path.join(".lf")))
+        .ok_or_else(|| anyhow::anyhow!("cannot resolve Loopflow home for lfd logs"))?;
+    Ok(home.join("logs/lfd.log"))
+}
+
+fn init_tracing() -> anyhow::Result<()> {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("lfd=info,loopflow=info"));
+    let writer = RotatingLog::open(daemon_log_path()?, MAX_LOG_BYTES)?;
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(writer)
+        .init();
+    Ok(())
+}
 
 #[derive(Parser)]
 #[command(name = "lfd")]
@@ -48,13 +172,7 @@ enum Commands {
 }
 
 fn main() -> anyhow::Result<()> {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("lfd=info,loopflow=info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .without_time()
-        .init();
+    init_tracing()?;
 
     let cli = Cli::parse();
     let rt = tokio::runtime::Runtime::new()?;
@@ -140,4 +258,29 @@ fn read_linear_config() -> Option<lfd::LinearConfig> {
         secret: std::sync::Arc::new(secret.into_bytes()),
         viewer_id: std::sync::Arc::new(viewer_id),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MakeWriter, RotatingLog};
+    use std::io::Write;
+
+    #[test]
+    fn daemon_log_keeps_only_one_bounded_predecessor() {
+        let directory = tempfile::tempdir().expect("create temp directory");
+        let path = directory.path().join("lfd.log");
+        let log = RotatingLog::open(path.clone(), 8).expect("open log");
+
+        log.make_writer().write_all(b"12345678").expect("write log");
+        log.make_writer().write_all(b"next").expect("rotate log");
+        log.make_writer()
+            .write_all(b"56789")
+            .expect("rotate log again");
+
+        assert_eq!(std::fs::read(&path).expect("read current log"), b"56789");
+        assert_eq!(
+            std::fs::read(path.with_extension("log.previous")).expect("read previous log"),
+            b"next"
+        );
+    }
 }

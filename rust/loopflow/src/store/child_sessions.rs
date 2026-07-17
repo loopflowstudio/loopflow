@@ -20,6 +20,17 @@ use time::OffsetDateTime;
 
 use super::{run_sqlite, Store, StoreResult};
 
+async fn _acquire_promotion_reservation_lock() -> StoreResult<crate::promotion_lock::PromotionLock>
+{
+    crate::promotion_lock::acquire_shared()
+        .await
+        .map_err(|error| {
+            super::StoreError::InvalidData(format!(
+                "acquire shared promotion lock before body reservation: {error}"
+            ))
+        })
+}
+
 impl Store {
     pub async fn create_task_session(&self, session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
         let session = session.clone();
@@ -223,6 +234,7 @@ impl Store {
         session: &TaskSession,
         expected_status: TaskSessionStatus,
     ) -> StoreResult<Option<ChildWriteLease>> {
+        let _promotion_lock = _acquire_promotion_reservation_lock().await?;
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_task_process(&session, expected_status)
@@ -1030,6 +1042,7 @@ impl Store {
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
     ) -> StoreResult<Option<ChildWriteLease>> {
+        let _promotion_lock = _acquire_promotion_reservation_lock().await?;
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_project_process(&session, expected_status)

@@ -1218,6 +1218,18 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Promote this build to the global CLI: content-address it into ~/.lf/bin
+    /// and atomically repoint the target symlink, under the exclusive promotion
+    /// lock. Refuses — leaving every target unchanged — on incompatible or
+    /// live-body evidence.
+    Promote {
+        /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
+        #[arg(long)]
+        cli_target: PathBuf,
+        /// Validate and print the preview but change nothing.
+        #[arg(long)]
+        preview: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

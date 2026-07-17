@@ -60,16 +60,26 @@ pub enum DurableDataError {
     InvalidEpochState(String),
     #[error("invalid send state: {0}")]
     InvalidSendState(String),
+    #[error("invalid run state: {0}")]
+    InvalidRunState(String),
+    #[error("invalid launch state: {0}")]
+    InvalidLaunchState(String),
+    #[error("invalid boundary state: {0}")]
+    InvalidBoundaryState(String),
 }
 
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 durable_id!(EpochId, "epoch_");
 durable_id!(RunId, "run_");
+durable_id!(LaunchId, "launch_");
+durable_id!(TurnId, "turn_");
+durable_id!(WaitId, "wait_");
+durable_id!(HomeId, "home_");
 durable_id!(SteerId, "steer_");
 durable_id!(SendId, "send_");
-durable_id!(DecisionId, "decision_");
-durable_id!(ApprovalId, "approval_");
+durable_id!(ToolResponseId, "response_");
+durable_id!(DoneProposalId, "done_");
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
@@ -139,6 +149,259 @@ pub struct Epoch {
     pub current_basis: Basis,
     pub created_at: OffsetDateTime,
     pub terminal_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunState {
+    Reserved,
+    Active,
+    Stopping,
+    Ended,
+}
+
+impl RunState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Reserved => "reserved",
+            Self::Active => "active",
+            Self::Stopping => "stopping",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "reserved" => Ok(Self::Reserved),
+            "active" => Ok(Self::Active),
+            "stopping" => Ok(Self::Stopping),
+            "ended" => Ok(Self::Ended),
+            value => Err(DurableDataError::InvalidRunState(value.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RunTrigger {
+    Input { basis: Basis },
+    Time { scheduled_at: OffsetDateTime },
+    Event { event: EventRef },
+    Child { work: WorkRef },
+    CiIncident { incident_id: String },
+    Recovery { prior_run_id: RunId },
+    User,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Run {
+    pub id: RunId,
+    pub work: WorkRef,
+    pub epoch_id: EpochId,
+    pub home_id: HomeId,
+    pub state: RunState,
+    pub trigger: RunTrigger,
+    pub retry_of: Option<RunId>,
+    pub created_at: OffsetDateTime,
+    pub ended_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Home {
+    pub id: HomeId,
+    pub route: String,
+    pub created_at: OffsetDateTime,
+    pub observed_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WaitOn {
+    Input { after: Basis },
+    Time { not_before: OffsetDateTime },
+    Event { event: EventRef },
+    Child { work: WorkRef },
+    Capability { capability: CapabilityRef },
+    Effect { effect: EffectRef },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventRef {
+    pub source: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityRef {
+    pub kind: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EffectRef {
+    pub kind: String,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wait {
+    pub id: WaitId,
+    pub work: WorkRef,
+    pub epoch_id: EpochId,
+    pub on: WaitOn,
+    pub created_at: OffsetDateTime,
+    pub resolved_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaunchRoute {
+    pub provider: String,
+    pub model: Option<String>,
+    pub account_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Containment {
+    ProcessGroup { id: i64 },
+    Tmux { name: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchState {
+    Starting,
+    Live,
+    Stopping,
+    Ended,
+}
+
+impl LaunchState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Live => "live",
+            Self::Stopping => "stopping",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "starting" => Ok(Self::Starting),
+            "live" => Ok(Self::Live),
+            "stopping" => Ok(Self::Stopping),
+            "ended" => Ok(Self::Ended),
+            value => Err(DurableDataError::InvalidLaunchState(value.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Launch {
+    pub id: LaunchId,
+    pub run_id: RunId,
+    pub home_id: HomeId,
+    pub route: LaunchRoute,
+    pub state: LaunchState,
+    pub containment: Containment,
+    pub opaque_basis: Option<Basis>,
+    pub resume_token: Option<String>,
+    pub started_at: OffsetDateTime,
+    pub ended_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryState {
+    Starting,
+    Active,
+    Succeeded,
+    Failed,
+    Interrupted,
+    Unknown,
+}
+
+impl BoundaryState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Active => "active",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "starting" => Ok(Self::Starting),
+            "active" => Ok(Self::Active),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
+            "unknown" => Ok(Self::Unknown),
+            value => Err(DurableDataError::InvalidBoundaryState(value.to_string())),
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Interrupted | Self::Unknown
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Turn {
+    pub id: TurnId,
+    pub launch_id: LaunchId,
+    pub basis: Basis,
+    pub state: BoundaryState,
+    pub provider_turn_id: Option<String>,
+    pub started_at: OffsetDateTime,
+    pub ended_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunAdvance {
+    LaunchStarting {
+        route: LaunchRoute,
+        containment: Containment,
+        opaque: bool,
+        resume_token: Option<String>,
+    },
+    LaunchLive {
+        launch_id: LaunchId,
+    },
+    LaunchEnded {
+        launch_id: LaunchId,
+        outcome: BoundaryState,
+    },
+    TurnStarting {
+        launch_id: LaunchId,
+    },
+    TurnActive {
+        turn_id: TurnId,
+        provider_turn_id: Option<String>,
+    },
+    TurnEnded {
+        turn_id: TurnId,
+        outcome: BoundaryState,
+    },
+    Wait {
+        on: WaitOn,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdvanceReceipt {
+    Run(Run),
+    Launch(Launch),
+    Turn(Turn),
+    Wait(Wait),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,19 +512,19 @@ impl BoundarySeed {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DecisionWrite {
+pub struct ToolResponseWrite {
     pub request_id: String,
     pub choice: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DecisionReceipt {
-    pub id: DecisionId,
+pub struct ToolResponseReceipt {
+    pub id: ToolResponseId,
     pub work: WorkRef,
     pub basis: Basis,
     pub request_id: String,
     pub choice: String,
-    pub decided_at: OffsetDateTime,
+    pub responded_at: OffsetDateTime,
 }
 
 /// Authenticated Home-local entrypoint. It is deliberately not serializable.
@@ -282,6 +545,66 @@ pub struct RunLease {
     pub run_id: RunId,
     pub work: WorkRef,
     pub basis: Basis,
+    token: RunLeaseToken,
+}
+
+impl RunLease {
+    pub(crate) fn new(run_id: RunId, work: WorkRef, basis: Basis, token: RunLeaseToken) -> Self {
+        Self {
+            run_id,
+            work,
+            basis,
+            token,
+        }
+    }
+
+    pub(crate) fn token(&self) -> &RunLeaseToken {
+        &self.token
+    }
+}
+
+/// Opaque capability for the one active Run. It is never serialized or shown.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct RunLeaseToken(String);
+
+impl RunLeaseToken {
+    pub(crate) fn new() -> Self {
+        Self(format!("rl_{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    pub(crate) fn from_child(value: &str) -> Self {
+        Self(format!("rl_child_{value}"))
+    }
+
+    pub(crate) fn hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+
+        format!("{:x}", Sha256::digest(self.0.as_bytes()))
+    }
+}
+
+impl std::fmt::Debug for RunLeaseToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RunLeaseToken([REDACTED])")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DoneProposal {
+    pub id: DoneProposalId,
+    pub run_id: RunId,
+    pub basis: Basis,
+    pub proposed_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkStatus {
+    Ready,
+    Running { run_id: RunId },
+    Waiting { wait: Wait },
+    Done,
+    Abandoned,
 }
 
 #[derive(Debug)]

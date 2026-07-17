@@ -164,7 +164,7 @@ CREATE TABLE epoch_revisions (
     epoch_id TEXT NOT NULL REFERENCES epochs(id) ON DELETE CASCADE,
     rev INTEGER NOT NULL CHECK (rev >= 0),
     kind TEXT NOT NULL CHECK (kind IN (
-        'truth', 'steer', 'decision', 'approval', 'evidence'
+        'truth', 'steer', 'tool_response', 'evidence'
     )),
     source_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -222,15 +222,32 @@ SELECT
     task_sessions.created_at
 FROM task_sessions;
 
+CREATE TABLE homes (
+    id TEXT PRIMARY KEY,
+    route TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    observed_at INTEGER NOT NULL
+);
+
+INSERT INTO homes (id, route, created_at, observed_at)
+VALUES ('home_' || lower(hex(randomblob(16))), 'local', unixepoch(), unixepoch());
+
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,
     epoch_id TEXT NOT NULL REFERENCES epochs(id) ON DELETE RESTRICT,
+    home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE RESTRICT,
     state TEXT NOT NULL CHECK (state IN ('reserved', 'active', 'stopping', 'ended')),
+    trigger_json TEXT NOT NULL CHECK (json_valid(trigger_json)),
+    retry_of TEXT REFERENCES runs(id) ON DELETE RESTRICT,
+    lease_hash TEXT,
     lease_generation INTEGER,
     source_kind TEXT NOT NULL CHECK (source_kind IN ('wave', 'project', 'task', 'migration')),
     source_id TEXT,
     created_at INTEGER NOT NULL,
-    ended_at INTEGER
+    ended_at INTEGER,
+    stop_reason TEXT,
+    CHECK ((state = 'ended') = (ended_at IS NOT NULL)),
+    CHECK (state = 'ended' OR lease_hash IS NOT NULL)
 );
 CREATE UNIQUE INDEX idx_runs_one_active_epoch
     ON runs(epoch_id) WHERE state != 'ended';
@@ -241,19 +258,86 @@ CREATE UNIQUE INDEX idx_runs_source_generation
 -- Historical author provenance needs a Run, but migration does not resurrect
 -- execution authority. Every imported Run is terminal.
 INSERT INTO runs (
-    id, epoch_id, state, lease_generation, source_kind, source_id,
-    created_at, ended_at
+    id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
+    lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
 )
 SELECT
     'run_' || lower(hex(randomblob(16))),
     epochs.id,
+    (SELECT id FROM homes LIMIT 1),
     'ended',
+    json_object('kind', 'migration'),
+    NULL,
+    NULL,
     NULL,
     'migration',
     NULL,
     epochs.created_at,
-    COALESCE(epochs.terminal_at, unixepoch())
+    COALESCE(epochs.terminal_at, unixepoch()),
+    'historical import'
 FROM epochs;
+
+CREATE TABLE waits (
+    id TEXT PRIMARY KEY,
+    epoch_id TEXT NOT NULL REFERENCES epochs(id) ON DELETE RESTRICT,
+    on_json TEXT NOT NULL CHECK (json_valid(on_json)),
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+CREATE UNIQUE INDEX idx_waits_one_unresolved_epoch
+    ON waits(epoch_id) WHERE resolved_at IS NULL;
+
+CREATE TABLE launches (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE RESTRICT,
+    home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE RESTRICT,
+    provider TEXT NOT NULL,
+    model TEXT,
+    account_id TEXT,
+    state TEXT NOT NULL CHECK (state IN ('starting', 'live', 'stopping', 'ended')),
+    containment_json TEXT NOT NULL CHECK (json_valid(containment_json)),
+    opaque_epoch_id TEXT,
+    opaque_basis_rev INTEGER,
+    resume_token TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    outcome TEXT,
+    CHECK ((opaque_epoch_id IS NULL) = (opaque_basis_rev IS NULL)),
+    CHECK ((state = 'ended') = (ended_at IS NOT NULL)),
+    FOREIGN KEY (opaque_epoch_id, opaque_basis_rev)
+        REFERENCES epoch_revisions(epoch_id, rev) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX idx_launches_one_root
+    ON launches(run_id) WHERE state != 'ended';
+
+CREATE TABLE turns (
+    id TEXT PRIMARY KEY,
+    launch_id TEXT NOT NULL REFERENCES launches(id) ON DELETE RESTRICT,
+    epoch_id TEXT NOT NULL,
+    basis_rev INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN (
+        'starting', 'active', 'succeeded', 'failed', 'interrupted', 'unknown'
+    )),
+    provider_turn_id TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    CHECK ((state IN ('starting', 'active')) = (ended_at IS NULL)),
+    FOREIGN KEY (epoch_id, basis_rev)
+        REFERENCES epoch_revisions(epoch_id, rev) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX idx_turns_one_active_launch
+    ON turns(launch_id) WHERE state IN ('starting', 'active');
+
+CREATE TABLE done_proposals (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE RESTRICT,
+    epoch_id TEXT NOT NULL,
+    basis_rev INTEGER NOT NULL,
+    proposed_at INTEGER NOT NULL,
+    UNIQUE (run_id, epoch_id, basis_rev),
+    FOREIGN KEY (epoch_id, basis_rev)
+        REFERENCES epoch_revisions(epoch_id, rev) ON DELETE RESTRICT
+);
 
 CREATE TABLE steers (
     id TEXT PRIMARY KEY,
@@ -270,26 +354,13 @@ CREATE TABLE steers (
 );
 CREATE INDEX idx_steers_epoch_revision ON steers(epoch_id, rev);
 
-CREATE TABLE decisions (
+CREATE TABLE tool_responses (
     id TEXT PRIMARY KEY,
     epoch_id TEXT NOT NULL,
     rev INTEGER NOT NULL,
     request_id TEXT NOT NULL,
     choice TEXT NOT NULL CHECK (length(trim(choice)) > 0),
-    decided_at INTEGER NOT NULL,
-    UNIQUE (epoch_id, request_id),
-    UNIQUE (epoch_id, rev),
-    FOREIGN KEY (epoch_id, rev)
-        REFERENCES epoch_revisions(epoch_id, rev) ON DELETE CASCADE
-);
-
-CREATE TABLE approvals (
-    id TEXT PRIMARY KEY,
-    epoch_id TEXT NOT NULL,
-    rev INTEGER NOT NULL,
-    request_id TEXT NOT NULL,
-    approved INTEGER NOT NULL CHECK (approved IN (0, 1)),
-    decided_at INTEGER NOT NULL,
+    responded_at INTEGER NOT NULL,
     UNIQUE (epoch_id, request_id),
     UNIQUE (epoch_id, rev),
     FOREIGN KEY (epoch_id, rev)
@@ -358,18 +429,18 @@ INSERT INTO legacy_inputs (
     id, epoch_id, kind, source_json, text, request_id, choice, created_at, sort_key
 )
 SELECT
-    'decision_' || lower(hex(randomblob(16))),
+    'response_' || lower(hex(randomblob(16))),
     CASE child_commands.target_kind
         WHEN 'project' THEN (SELECT epoch_id FROM project_sessions WHERE id = child_commands.session_id)
         WHEN 'task' THEN (SELECT epoch_id FROM task_sessions WHERE id = child_commands.session_id)
     END,
-    'decision',
+    'tool_response',
     child_commands.source_json,
     NULL,
     json_extract(child_commands.kind_json, '$.decision_id'),
     json_extract(child_commands.kind_json, '$.choice'),
     child_commands.created_at,
-    'decision:' || child_commands.id
+    'tool-response:' || child_commands.id
 FROM child_commands
 WHERE json_extract(child_commands.kind_json, '$.kind') = 'decide';
 
@@ -443,12 +514,12 @@ SELECT
 FROM numbered_legacy_inputs AS numbered
 WHERE numbered.kind = 'steer';
 
-INSERT INTO decisions (
-    id, epoch_id, rev, request_id, choice, decided_at
+INSERT INTO tool_responses (
+    id, epoch_id, rev, request_id, choice, responded_at
 )
 SELECT id, epoch_id, rev, request_id, choice, created_at
 FROM numbered_legacy_inputs
-WHERE kind = 'decision';
+WHERE kind = 'tool_response';
 
 UPDATE epochs
 SET current_rev = COALESCE((

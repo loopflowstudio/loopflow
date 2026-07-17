@@ -103,6 +103,10 @@ That is adapter groundwork, not the core cutover. Current state against the phas
     Live delivery or interrupt-and-seed preempts the durable background
     playhead; no reviewer Launch, secondary agent, Review inbox, or end-of-flow
     wait may stand between a child and its parent.
+17. **Turn and Launch already have authorities.** `agent_turns` is the sole
+    observed Turn and usage store and `agent_launches` is its Launch lineage.
+    Extend or replace those tables in place. A second `turns` or shadow Launch
+    ledger recreates the normalization debt this architecture exists to remove.
 
 No more behavior should be adapted around `ChildCommand`, `InteractionReview`,
 or Handoff. The next checkpoint is the large core-control cutover specified in

@@ -3,9 +3,9 @@ use time::OffsetDateTime;
 
 use crate::child_session::{ChildRef, ChildWriteLease};
 use crate::durable::{
-    Author, Basis, BoundarySeed, DecisionId, DecisionReceipt, DecisionWrite, Epoch, EpochId,
-    EpochState, ProjectId, RunId, Send, SendId, SendState, SendVia, Steer, SteerId, SteerReceipt,
-    TaskId, WorkRef,
+    Author, Basis, BoundarySeed, Epoch, EpochId, EpochState, ProjectId, RunId, Send, SendId,
+    SendState, SendVia, Steer, SteerId, SteerReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSession;
@@ -135,16 +135,16 @@ impl SqliteStore {
         })
     }
 
-    pub fn write_decision(
+    pub fn write_tool_response(
         &self,
         work: &WorkRef,
-        write: &DecisionWrite,
+        write: &ToolResponseWrite,
         if_basis: Option<&Basis>,
-    ) -> StoreResult<(DecisionReceipt, bool)> {
+    ) -> StoreResult<(ToolResponseReceipt, bool)> {
         let choice = write.choice.trim();
         if choice.is_empty() {
             return Err(StoreError::InvalidData(
-                "decision choice cannot be empty".to_string(),
+                "tool response choice cannot be empty".to_string(),
             ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -153,18 +153,18 @@ impl SqliteStore {
         if let Some(expected) = if_basis {
             validate_basis(&epoch.current_basis, expected)?;
         }
-        if let Some(existing) = decision_in(&tx, &epoch.id, &write.request_id)? {
+        if let Some(existing) = tool_response_in(&tx, &epoch.id, &write.request_id)? {
             if existing.choice != choice {
                 return Err(StoreError::InvalidData(format!(
-                    "decision {} is already resolved as {:?}",
+                    "tool response {} is already resolved as {:?}",
                     write.request_id, existing.choice
                 )));
             }
             return Ok((existing, false));
         }
         let revision = epoch.current_basis.revision + 1;
-        let receipt = DecisionReceipt {
-            id: DecisionId::new(),
+        let receipt = ToolResponseReceipt {
+            id: ToolResponseId::new(),
             work: work.clone(),
             basis: Basis {
                 epoch_id: epoch.id.clone(),
@@ -172,20 +172,20 @@ impl SqliteStore {
             },
             request_id: write.request_id.clone(),
             choice: choice.to_string(),
-            decided_at: OffsetDateTime::now_utc(),
+            responded_at: OffsetDateTime::now_utc(),
         };
         tx.execute(
             "INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
-             VALUES (?1, ?2, 'decision', ?3, ?4)",
+             VALUES (?1, ?2, 'tool_response', ?3, ?4)",
             params![
                 receipt.basis.epoch_id.as_str(),
                 receipt.basis.revision as i64,
                 receipt.id.as_str(),
-                receipt.decided_at.unix_timestamp(),
+                receipt.responded_at.unix_timestamp(),
             ],
         )?;
         tx.execute(
-            "INSERT INTO decisions (id, epoch_id, rev, request_id, choice, decided_at)
+            "INSERT INTO tool_responses (id, epoch_id, rev, request_id, choice, responded_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 receipt.id.as_str(),
@@ -193,7 +193,7 @@ impl SqliteStore {
                 receipt.basis.revision as i64,
                 receipt.request_id,
                 receipt.choice,
-                receipt.decided_at.unix_timestamp(),
+                receipt.responded_at.unix_timestamp(),
             ],
         )?;
         tx.execute(
@@ -204,14 +204,14 @@ impl SqliteStore {
         Ok((receipt, true))
     }
 
-    pub fn decision(
+    pub fn tool_response(
         &self,
         work: &WorkRef,
         request_id: &str,
-    ) -> StoreResult<Option<DecisionReceipt>> {
+    ) -> StoreResult<Option<ToolResponseReceipt>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let epoch = current_epoch_in(&conn, work)?;
-        decision_in(&conn, &epoch.id, request_id)
+        tool_response_in(&conn, &epoch.id, request_id)
     }
 
     pub fn begin_live_send(&self, steer_id: &SteerId, turn_id: &str) -> StoreResult<Option<Send>> {
@@ -324,13 +324,14 @@ impl SqliteStore {
                     lease.generation
                 ))
             })?;
-        Ok(crate::durable::RunLease {
-            run_id: RunId::parse(&run_id).map_err(|error| {
+        Ok(crate::durable::RunLease::new(
+            RunId::parse(&run_id).map_err(|error| {
                 StoreError::InvalidData(format!("invalid stored Run id: {error}"))
             })?,
             work,
-            basis: epoch.current_basis,
-        })
+            epoch.current_basis,
+            crate::durable::RunLeaseToken::from_child(lease.token.as_str()),
+        ))
     }
 }
 
@@ -856,14 +857,14 @@ fn boundary_seed_in(conn: &Connection, work: &WorkRef) -> StoreResult<BoundarySe
     })
 }
 
-fn decision_in(
+fn tool_response_in(
     conn: &Connection,
     epoch_id: &EpochId,
     request_id: &str,
-) -> StoreResult<Option<DecisionReceipt>> {
+) -> StoreResult<Option<ToolResponseReceipt>> {
     let row = conn
         .query_row(
-            "SELECT id, rev, choice, decided_at FROM decisions
+            "SELECT id, rev, choice, responded_at FROM tool_responses
              WHERE epoch_id=?1 AND request_id=?2",
             params![epoch_id.as_str(), request_id],
             |row| {
@@ -876,13 +877,13 @@ fn decision_in(
             },
         )
         .optional()?;
-    let Some((id, revision, choice, decided_at)) = row else {
+    let Some((id, revision, choice, responded_at)) = row else {
         return Ok(None);
     };
     let work = work_for_epoch(conn, epoch_id)?;
-    Ok(Some(DecisionReceipt {
-        id: DecisionId::parse(&id).map_err(|error| {
-            StoreError::InvalidData(format!("invalid stored Decision id: {error}"))
+    Ok(Some(ToolResponseReceipt {
+        id: ToolResponseId::parse(&id).map_err(|error| {
+            StoreError::InvalidData(format!("invalid stored ToolResponse id: {error}"))
         })?,
         work,
         basis: Basis {
@@ -891,7 +892,7 @@ fn decision_in(
         },
         request_id: request_id.to_string(),
         choice,
-        decided_at: OffsetDateTime::from_unix_timestamp(decided_at).map_err(|error| {
+        responded_at: OffsetDateTime::from_unix_timestamp(responded_at).map_err(|error| {
             StoreError::InvalidData(format!("invalid Decision timestamp: {error}"))
         })?,
     }))
@@ -934,7 +935,7 @@ fn insert_send(conn: &Connection, send: &Send) -> StoreResult<()> {
         params![
             send.id.as_str(),
             send.steer_id.as_str(),
-            send.turn_id,
+            send.turn_id.as_str(),
             send.via.as_str(),
             send.state.as_str(),
             send.provider_turn_id,

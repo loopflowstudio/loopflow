@@ -1,7 +1,7 @@
 use crate::child_session::{ChildRef, ChildWriteLease};
 use crate::durable::{
-    Author, Basis, BoundarySeed, ControlCtx, DecisionReceipt, DecisionWrite, RunLease, Send,
-    SendId, SendState, SteerId, SteerReceipt, WorkRef,
+    Author, Basis, BoundarySeed, ControlCtx, RunLease, Send, SendId, SendState, SteerId,
+    SteerReceipt, ToolResponseReceipt, ToolResponseWrite, WorkRef,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -52,29 +52,29 @@ impl Store {
         .await
     }
 
-    pub async fn write_decision(
+    pub async fn write_tool_response(
         &self,
         work: &WorkRef,
-        write: DecisionWrite,
+        write: ToolResponseWrite,
         if_basis: Option<&Basis>,
-    ) -> StoreResult<(DecisionReceipt, bool)> {
+    ) -> StoreResult<(ToolResponseReceipt, bool)> {
         let work = work.clone();
         let if_basis = if_basis.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.write_decision(&work, &write, if_basis.as_ref())
+            store.write_tool_response(&work, &write, if_basis.as_ref())
         })
         .await
     }
 
-    pub async fn decision(
+    pub async fn tool_response(
         &self,
         work: &WorkRef,
         request_id: &str,
-    ) -> StoreResult<Option<DecisionReceipt>> {
+    ) -> StoreResult<Option<ToolResponseReceipt>> {
         let work = work.clone();
         let request_id = request_id.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.decision(&work, &request_id)
+            store.tool_response(&work, &request_id)
         })
         .await
     }

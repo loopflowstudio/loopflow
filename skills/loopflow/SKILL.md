@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Operate a repository through loopflow (`lf`) — persistent waves, delegated task sessions, PRs, and the agent bus. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
+description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and the agent bus. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
 ---
 
 # Operating Through Loopflow
@@ -22,6 +22,16 @@ Check availability; install only if the human asks:
 lf --version || echo "not installed"
 # install: curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 ```
+
+## Caller Authority
+
+An external harness opened by a person acts as a Loopflow **User**. It may read
+status and use `lf chat` when the human asks it to inspect or steer a Wave. It
+does not become a Wave, Project, or Task worker.
+
+An agent launched by Loopflow is an internal participant. It receives
+`LOOPFLOW.md` automatically, reports through an established `lf radio` channel,
+and never impersonates the User in chat.
 
 ## Git, Worktrees, GitHub → `lf`
 
@@ -70,8 +80,10 @@ last-hour provider throughput and live processes.
 
 ## Speak
 
-`lf chat` is the human surface; agents never post there. Report on the bus
-only when the prompt establishes an exact wave or channel — never guess one:
+`lf chat` is the User surface. An external harness acting for the human may use
+it; Loopflow-launched agents never post there. Internal participants report on
+the bus only when the prompt establishes an exact wave or channel — never guess
+one:
 
 ```bash
 lf radio pub --channel <channel> "landed PR #91, tests green"

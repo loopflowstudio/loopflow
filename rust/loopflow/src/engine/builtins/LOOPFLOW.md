@@ -111,7 +111,7 @@ channel, or when the active skill requires it. Never guess a channel.
 one and a live wave is available. A stopped server must not block the assigned
 work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
 
-`lf chat` is the human surface. Agents use `lf radio pub`.
+`lf chat` is the User surface. Loopflow-launched agents use `lf radio pub`.
 
 ## Where To Write
 

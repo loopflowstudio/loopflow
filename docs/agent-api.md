@@ -6,8 +6,29 @@ surface takes `--json`; and every launched agent receives the operating
 contract (`LOOPFLOW.md`) in its context, so it already knows these verbs when
 it starts.
 
-A wave directing a task looks like this — and the caller here is an agent, not
-a person:
+## Install the external skill
+
+Give an agent harness the same operating contract when it was not launched by
+Loopflow:
+
+```bash
+npx skills add loopflowstudio/loopflow --skill loopflow -g -y
+```
+
+The installed skill teaches the harness to use `lf`; it does not implement a
+second client, store, or transport.
+
+## Two caller authorities
+
+An external harness opened by a person is a Loopflow **User**, the same caller
+kind as the Mac app. It may inspect status and use `lf chat` when the person
+asks it to converse with or steer a Wave.
+
+A Wave, Project, or Task agent launched by Loopflow is an internal participant.
+It receives `LOOPFLOW.md`, reports through `lf radio`, and never impersonates
+the User in chat.
+
+A Wave directing a task is the internal case:
 
 ```bash
 lf task run INF-123                                  # start a durable Task Session
@@ -78,9 +99,10 @@ worktree.
 `lf project` carries the same control verbs one level up: `steer`, `interrupt`,
 `wait`, `resume`, and `attach`.
 
-## Speak: the radio
+## Internal agents: the radio
 
-Agents talk to each other on the bus; chat belongs to humans.
+Loopflow-launched agents talk to each other on the bus; chat belongs to the
+User surface.
 
 ```bash
 lf radio pub --channel goals.build "parser lands green; starting docs"
@@ -94,7 +116,8 @@ Outside any wave, a publish prints a drop note and exits 0, so the verb is safe
 in every prompt. Never guess a channel: publish only where the prompt or skill
 names one.
 
-`lf chat` is reserved for humans; agents never post there.
+An external harness acting for the person may use `lf chat`; a
+Loopflow-launched worker never posts there.
 
 ## Remember, with receipts
 

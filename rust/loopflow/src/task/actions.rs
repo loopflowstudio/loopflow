@@ -101,9 +101,14 @@ pub enum ReviewGateState {
 /// from the wire `PrSnapshot`.
 pub struct TaskActionEvidence<'a> {
     pub status: TaskSessionStatus,
-    pub active_pr_phase: Option<PrPhase>,
-    pub active_pr_after_merge: Option<AfterMerge>,
-    pub active_pr_next_slug: Option<&'a str>,
+    pub latest_pr_phase: Option<PrPhase>,
+    pub latest_pr_after_merge: Option<AfterMerge>,
+    pub latest_pr_next_slug: Option<&'a str>,
+    /// The exact refusal returned by `lf task complete`, when its gate is shut.
+    pub completion_refusal: Option<&'a str>,
+    /// The exact refusal returned by `lf task resume`, when no active PR exists.
+    pub resume_refusal: Option<&'a str>,
+    pub pending_directive: bool,
     pub ci: Option<&'a CiObservation>,
     /// Some(true)=live, Some(false)=dead, None=process not expected for status.
     pub process_alive: Option<bool>,
@@ -139,7 +144,9 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     // Review gate takes precedence over PR phase and body liveness.
     if let Some(gate) = evidence.review_gate {
         match gate {
-            ReviewGateState::Requested | ReviewGateState::Active => {
+            ReviewGateState::Requested | ReviewGateState::Active
+                if evidence.latest_pr_phase != Some(PrPhase::Merged) =>
+            {
                 return one_action(
                     TaskAction::Review,
                     "awaiting review disposition",
@@ -159,7 +166,7 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
                     },
                 );
             }
-            ReviewGateState::ChangesRequested => {
+            ReviewGateState::ChangesRequested if evidence.resume_refusal.is_none() => {
                 return one_action(
                     TaskAction::Resume,
                     "address requested changes",
@@ -177,11 +184,14 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
                     },
                 );
             }
+            ReviewGateState::Requested
+            | ReviewGateState::Active
+            | ReviewGateState::ChangesRequested => {}
             ReviewGateState::Approved => {}
         }
     }
 
-    let model = match evidence.active_pr_phase {
+    let model = match evidence.latest_pr_phase {
         Some(PrPhase::Open) => open_pr_model(evidence),
         Some(PrPhase::Publishing) => {
             one_action(TaskAction::Resume, "retry publication", |a| match a {
@@ -195,18 +205,34 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         }
         Some(PrPhase::Merged) => merged_pr_model(evidence),
         Some(PrPhase::Abandoned) => one_action(
-            TaskAction::Resume,
-            "PR abandoned; resume to re-publish or move on",
+            TaskAction::StartNextPr,
+            "PR abandoned; start the next PR",
             |a| match a {
-                TaskAction::Resume => unreachable!(),
+                TaskAction::StartNextPr => unreachable!(),
                 TaskAction::Review => "PR was abandoned; no open PR to review".into(),
                 TaskAction::Complete => "PR was abandoned; nothing to complete".into(),
-                TaskAction::StartNextPr => "PR was abandoned; nothing to advance from".into(),
-                TaskAction::Recover => "body is not dead; resume to re-publish".into(),
-                TaskAction::NoAction => "action available: resume to re-publish or move on".into(),
+                TaskAction::Resume => evidence
+                    .resume_refusal
+                    .unwrap_or("PR was abandoned; no active PR to resume")
+                    .into(),
+                TaskAction::Recover => "body is not dead; start the next PR".into(),
+                TaskAction::NoAction => "action available: start the next PR".into(),
             },
         ),
-        Some(PrPhase::Working) | None => body_model(evidence),
+        Some(PrPhase::Working) => body_model(evidence),
+        None if evidence.resume_refusal.is_some() => one_action(
+            TaskAction::NoAction,
+            evidence.resume_refusal.expect("checked above"),
+            |a| match a {
+                TaskAction::NoAction => unreachable!(),
+                TaskAction::Resume => evidence.resume_refusal.expect("checked above").into(),
+                TaskAction::Recover => "no Task PR exists to recover".into(),
+                TaskAction::Review => "no open PR to review".into(),
+                TaskAction::Complete => "no merged PR to complete from".into(),
+                TaskAction::StartNextPr => "no settled PR to advance from".into(),
+            },
+        ),
+        None => body_model(evidence),
     };
 
     apply_predecessor_overlay(model, evidence)
@@ -270,7 +296,36 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
 
 /// Merged PR: action depends on the after-merge disposition and review gate.
 fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
-    match evidence.active_pr_after_merge {
+    if let Some(refusal) = evidence.completion_refusal {
+        if evidence.pending_directive
+            || evidence.review_gate == Some(ReviewGateState::ChangesRequested)
+        {
+            return one_action(TaskAction::StartNextPr, refusal, |a| match a {
+                TaskAction::StartNextPr => unreachable!(),
+                TaskAction::Complete => refusal.into(),
+                TaskAction::Review => "merged follow-up belongs in the next PR".into(),
+                TaskAction::Resume => evidence
+                    .resume_refusal
+                    .unwrap_or("PR is merged; no active PR to resume")
+                    .into(),
+                TaskAction::Recover => "body is not dead; start the next PR".into(),
+                TaskAction::NoAction => "action available: start the next PR".into(),
+            });
+        }
+        return one_action(TaskAction::Review, refusal, |a| match a {
+            TaskAction::Review => unreachable!(),
+            TaskAction::Complete => refusal.into(),
+            TaskAction::Resume => evidence
+                .resume_refusal
+                .unwrap_or("PR is merged; no active PR to resume")
+                .into(),
+            TaskAction::StartNextPr => "completion is blocked by a required review".into(),
+            TaskAction::Recover => "body is not dead; a completion gate is open".into(),
+            TaskAction::NoAction => "action available: resolve the completion gate".into(),
+        });
+    }
+
+    match evidence.latest_pr_after_merge {
         Some(AfterMerge::CompleteTask) => one_action(
             TaskAction::Complete,
             "PR merged; complete the Task",
@@ -278,14 +333,17 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                 TaskAction::Complete => unreachable!(),
                 TaskAction::StartNextPr => "PR dispositions the Task complete".into(),
                 TaskAction::Review => "PR is merged; nothing to review".into(),
-                TaskAction::Resume => "PR is merged; complete the Task".into(),
+                TaskAction::Resume => evidence
+                    .resume_refusal
+                    .unwrap_or("PR is merged; no active PR to resume")
+                    .into(),
                 TaskAction::Recover => "body is not dead; complete the Task".into(),
                 TaskAction::NoAction => "action available: complete the Task".into(),
             },
         ),
         Some(AfterMerge::Review) => match evidence.review_gate {
             Some(ReviewGateState::Approved) => {
-                if evidence.active_pr_next_slug.is_some() {
+                if evidence.latest_pr_next_slug.is_some() {
                     one_action(
                         TaskAction::StartNextPr,
                         "merged and reviewed; start the next PR",
@@ -293,7 +351,10 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                             TaskAction::StartNextPr => unreachable!(),
                             TaskAction::Complete => "next PR is queued; start it instead".into(),
                             TaskAction::Review => "post-merge review is approved".into(),
-                            TaskAction::Resume => "PR is merged; start the next PR".into(),
+                            TaskAction::Resume => evidence
+                                .resume_refusal
+                                .unwrap_or("PR is merged; no active PR to resume")
+                                .into(),
                             TaskAction::Recover => "body is not dead; start the next PR".into(),
                             TaskAction::NoAction => "action available: start the next PR".into(),
                         },
@@ -308,7 +369,10 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                                 "no next PR queued; complete the Task".into()
                             }
                             TaskAction::Review => "post-merge review is approved".into(),
-                            TaskAction::Resume => "PR is merged; complete the Task".into(),
+                            TaskAction::Resume => evidence
+                                .resume_refusal
+                                .unwrap_or("PR is merged; no active PR to resume")
+                                .into(),
                             TaskAction::Recover => "body is not dead; complete the Task".into(),
                             TaskAction::NoAction => "action available: complete the Task".into(),
                         },
@@ -320,9 +384,10 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                 "merged; answer the post-merge review",
                 |a| match a {
                     TaskAction::Review => unreachable!(),
-                    TaskAction::Resume => {
-                        "awaiting post-merge review; resume after it resolves".into()
-                    }
+                    TaskAction::Resume => evidence
+                        .resume_refusal
+                        .unwrap_or("PR is merged; no active PR to resume")
+                        .into(),
                     TaskAction::Complete => "post-merge review is not yet approved".into(),
                     TaskAction::StartNextPr => "post-merge review is not yet approved".into(),
                     TaskAction::Recover => "body is not dead; a post-merge review is active".into(),
@@ -543,9 +608,12 @@ mod tests {
     fn evidence(status: TaskSessionStatus) -> TaskActionEvidence<'static> {
         TaskActionEvidence {
             status,
-            active_pr_phase: None,
-            active_pr_after_merge: None,
-            active_pr_next_slug: None,
+            latest_pr_phase: None,
+            latest_pr_after_merge: None,
+            latest_pr_next_slug: None,
+            completion_refusal: None,
+            resume_refusal: None,
+            pending_directive: false,
             ci: None,
             process_alive: None,
             predecessor_phase: None,
@@ -623,11 +691,11 @@ mod tests {
                                 for alive in [None, Some(true), Some(false)] {
                                     let observation = reading.map(ci);
                                     let mut ev = evidence(status);
-                                    ev.active_pr_phase = phase;
+                                    ev.latest_pr_phase = phase;
                                     ev.predecessor_phase = predecessor;
                                     ev.review_gate = gate;
                                     ev.ci = observation.as_ref();
-                                    ev.active_pr_after_merge = after_merge;
+                                    ev.latest_pr_after_merge = after_merge;
                                     ev.process_alive = alive;
                                     let model = derive_task_actions(&ev);
                                     assert_coherent(
@@ -653,7 +721,7 @@ mod tests {
     fn waiting_on_a_passing_open_pr_advertises_review_not_resume() {
         let passing = ci(CiState::Passing);
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&passing);
         let model = derive_task_actions(&ev);
 
@@ -680,7 +748,7 @@ mod tests {
         for (state, expected) in cases {
             let observation = ci(state);
             let mut ev = evidence(TaskSessionStatus::Waiting);
-            ev.active_pr_phase = Some(PrPhase::Open);
+            ev.latest_pr_phase = Some(PrPhase::Open);
             ev.ci = Some(&observation);
             assert_eq!(
                 derive_task_actions(&ev).recommended,
@@ -693,7 +761,7 @@ mod tests {
     #[test]
     fn open_pr_without_ci_evidence_waits_instead_of_advertising_review() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.latest_pr_phase = Some(PrPhase::Open);
         let model = derive_task_actions(&ev);
 
         assert_eq!(model.recommended, Some(TaskAction::NoAction));
@@ -711,7 +779,7 @@ mod tests {
     fn failing_checks_are_named_in_the_resume_reason() {
         let failing = ci(CiState::Failing);
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&failing);
         let model = derive_task_actions(&ev);
         assert_eq!(
@@ -725,7 +793,7 @@ mod tests {
     #[test]
     fn dead_body_without_a_pr_recovers_rather_than_resumes() {
         let mut ev = evidence(TaskSessionStatus::Running);
-        ev.active_pr_phase = Some(PrPhase::Working);
+        ev.latest_pr_phase = Some(PrPhase::Working);
         ev.process_alive = Some(false);
         let model = derive_task_actions(&ev);
 
@@ -740,7 +808,7 @@ mod tests {
     #[test]
     fn a_live_body_is_left_alone() {
         let mut ev = evidence(TaskSessionStatus::Running);
-        ev.active_pr_phase = Some(PrPhase::Working);
+        ev.latest_pr_phase = Some(PrPhase::Working);
         ev.process_alive = Some(true);
         let model = derive_task_actions(&ev);
 
@@ -754,8 +822,8 @@ mod tests {
     #[test]
     fn merged_pr_dispositioned_complete_recommends_completing_the_task() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Merged);
-        ev.active_pr_after_merge = Some(AfterMerge::CompleteTask);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         let model = derive_task_actions(&ev);
 
         assert_eq!(model.recommended, Some(TaskAction::Complete));
@@ -767,19 +835,104 @@ mod tests {
     }
 
     #[test]
+    fn merged_review_blocker_names_the_gate_and_never_resumes() {
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
+        ev.completion_refusal = Some(
+            "Task W2-285 cannot complete until its gates close: required project review ir_proof is completed without approval",
+        );
+        ev.resume_refusal =
+            Some("Task W2-285 has no active PR to resume; pull request #1037 merged");
+
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::Review));
+        assert_eq!(
+            model.status(TaskAction::Complete).unwrap().reason,
+            ev.completion_refusal.unwrap()
+        );
+        assert_eq!(
+            model.status(TaskAction::Resume).unwrap().reason,
+            ev.resume_refusal.unwrap()
+        );
+        assert!(model
+            .actions
+            .iter()
+            .all(|status| status.reason != "implementation not finished"));
+    }
+
+    #[test]
+    fn merged_pending_directive_starts_the_serial_successor() {
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
+        ev.completion_refusal = Some(
+            "Task W2-286 cannot complete until its gates close: directive v2 is not yet incorporated; acknowledge it or re-steer before completing",
+        );
+        ev.resume_refusal =
+            Some("Task W2-286 has no active PR to resume; pull request #1032 merged");
+        ev.pending_directive = true;
+
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::StartNextPr));
+        assert_eq!(
+            model.status(TaskAction::Complete).unwrap().reason,
+            ev.completion_refusal.unwrap()
+        );
+        assert_eq!(
+            model.status(TaskAction::Resume).unwrap().reason,
+            ev.resume_refusal.unwrap()
+        );
+    }
+
+    #[test]
+    fn abandoned_latest_pr_starts_next_and_never_resumes() {
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.latest_pr_phase = Some(PrPhase::Abandoned);
+        ev.resume_refusal =
+            Some("Task W2-283 has no active PR to resume; pull request #1039 abandoned");
+
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::StartNextPr));
+        assert!(!model.status(TaskAction::Resume).unwrap().available);
+        assert_eq!(
+            model.status(TaskAction::Resume).unwrap().reason,
+            ev.resume_refusal.unwrap()
+        );
+    }
+
+    #[test]
+    fn missing_pr_history_never_recommends_resume() {
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.resume_refusal =
+            Some("Task W2-legacy has no active PR to resume; no PR history recorded");
+
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(
+            model.status(TaskAction::Resume).unwrap().reason,
+            ev.resume_refusal.unwrap()
+        );
+    }
+
+    #[test]
     fn merged_and_approved_with_a_next_slug_starts_the_next_pr() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Merged);
-        ev.active_pr_after_merge = Some(AfterMerge::Review);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::Review);
         ev.review_gate = Some(ReviewGateState::Approved);
-        ev.active_pr_next_slug = Some("parser-proof");
+        ev.latest_pr_next_slug = Some("parser-proof");
         assert_eq!(
             derive_task_actions(&ev).recommended,
             Some(TaskAction::StartNextPr)
         );
 
         // Same disposition with nothing queued settles the Task instead.
-        ev.active_pr_next_slug = None;
+        ev.latest_pr_next_slug = None;
         assert_eq!(
             derive_task_actions(&ev).recommended,
             Some(TaskAction::Complete)
@@ -789,8 +942,8 @@ mod tests {
     #[test]
     fn an_unanswered_post_merge_review_gate_outranks_completion() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Merged);
-        ev.active_pr_after_merge = Some(AfterMerge::Review);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::Review);
         let model = derive_task_actions(&ev);
 
         assert_eq!(model.recommended, Some(TaskAction::Review));
@@ -806,7 +959,7 @@ mod tests {
         let passing = ci(CiState::Passing);
         for gate in [ReviewGateState::Requested, ReviewGateState::Active] {
             let mut ev = evidence(TaskSessionStatus::Waiting);
-            ev.active_pr_phase = Some(PrPhase::Open);
+            ev.latest_pr_phase = Some(PrPhase::Open);
             ev.ci = Some(&passing);
             ev.review_gate = Some(gate);
             let model = derive_task_actions(&ev);
@@ -822,7 +975,7 @@ mod tests {
     fn a_changes_requested_gate_sends_the_task_back_to_resume() {
         let passing = ci(CiState::Passing);
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&passing);
         ev.review_gate = Some(ReviewGateState::ChangesRequested);
         let model = derive_task_actions(&ev);
@@ -839,8 +992,8 @@ mod tests {
     #[test]
     fn an_unmerged_stack_parent_blocks_settlement_with_the_stack_fact() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Merged);
-        ev.active_pr_after_merge = Some(AfterMerge::CompleteTask);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         ev.predecessor_phase = Some(PrPhase::Open);
         let model = derive_task_actions(&ev);
 
@@ -857,7 +1010,7 @@ mod tests {
     fn an_unmerged_stack_parent_still_lets_the_child_pr_be_reviewed() {
         let passing = ci(CiState::Passing);
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&passing);
         ev.predecessor_phase = Some(PrPhase::Open);
         assert_eq!(
@@ -869,7 +1022,7 @@ mod tests {
     #[test]
     fn an_abandoned_stack_parent_asks_for_a_rebase() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.latest_pr_phase = Some(PrPhase::Open);
         ev.predecessor_phase = Some(PrPhase::Abandoned);
         let model = derive_task_actions(&ev);
 
@@ -883,8 +1036,8 @@ mod tests {
     #[test]
     fn a_merged_parent_leaves_the_child_untouched() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Merged);
-        ev.active_pr_after_merge = Some(AfterMerge::CompleteTask);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         ev.predecessor_phase = Some(PrPhase::Merged);
         assert_eq!(
             derive_task_actions(&ev).recommended,
@@ -895,7 +1048,7 @@ mod tests {
     #[test]
     fn a_publishing_pr_resumes_to_retry_publication() {
         let mut ev = evidence(TaskSessionStatus::Waiting);
-        ev.active_pr_phase = Some(PrPhase::Publishing);
+        ev.latest_pr_phase = Some(PrPhase::Publishing);
         let model = derive_task_actions(&ev);
 
         assert_eq!(model.recommended, Some(TaskAction::Resume));
@@ -912,7 +1065,7 @@ mod tests {
         let passing = ci(CiState::Passing);
         for status in [TaskSessionStatus::Completed, TaskSessionStatus::Abandoned] {
             let mut ev = evidence(status);
-            ev.active_pr_phase = Some(PrPhase::Open);
+            ev.latest_pr_phase = Some(PrPhase::Open);
             ev.ci = Some(&passing);
             ev.review_gate = Some(ReviewGateState::Requested);
             let model = derive_task_actions(&ev);
@@ -927,7 +1080,7 @@ mod tests {
     #[test]
     fn an_abandoning_task_offers_no_action() {
         let mut ev = evidence(TaskSessionStatus::Running);
-        ev.active_pr_phase = Some(PrPhase::Open);
+        ev.latest_pr_phase = Some(PrPhase::Open);
         ev.abandon_intent = true;
         let model = derive_task_actions(&ev);
         assert_eq!(model.recommended, Some(TaskAction::NoAction));

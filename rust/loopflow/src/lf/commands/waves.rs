@@ -1303,6 +1303,7 @@ async fn snapshot_task_detail(
         Some(session) => store.task_prs(&session.id).await?,
         None => Vec::new(),
     };
+    let latest = prs.last();
     let active = prs.iter().find(|pr| pr.is_active());
     let observed_at = now();
     let runtime = match session {
@@ -1328,6 +1329,19 @@ async fn snapshot_task_detail(
     };
     let process = task_process_evidence(session, runtime.as_ref(), liveness);
     let local_progress = task_local_progress(session, active, &process);
+    let completion_refusal = match session {
+        Some(session) => crate::ops::task::task_completion_gate(store, session)
+            .await?
+            .refusal(&session.launch.issue.identifier),
+        None => None,
+    };
+    let resume_refusal = session.and_then(|session| {
+        crate::ops::task::no_active_pr_resume_refusal(
+            &session.launch.issue.identifier,
+            active,
+            latest,
+        )
+    });
     let action_evidence = match session {
         Some(session) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
@@ -1345,13 +1359,16 @@ async fn snapshot_task_detail(
                 .map(|r| review_gate_from(&r));
             Some(TaskActionEvidence {
                 status: session.status,
-                active_pr_phase: active.map(TaskPr::phase),
-                active_pr_after_merge: active
+                latest_pr_phase: latest.map(TaskPr::phase),
+                latest_pr_after_merge: latest
                     .and_then(|pr| pr.publication.as_ref())
                     .map(|p| p.after_merge),
-                active_pr_next_slug: active
+                latest_pr_next_slug: latest
                     .and_then(|pr| pr.publication.as_ref())
                     .and_then(|p| p.next_slug.as_deref()),
+                completion_refusal: completion_refusal.as_deref(),
+                resume_refusal: resume_refusal.as_deref(),
+                pending_directive: crate::ops::task::has_pending_directive(session),
                 ci: active.and_then(|pr| pr.fresh_ci()),
                 process_alive: process.alive,
                 predecessor_phase,
@@ -1564,7 +1581,9 @@ fn derive_task_attention(
     action_evidence: Option<&TaskActionEvidence>,
     observed_at: time::OffsetDateTime,
 ) -> TaskAttentionSnapshot {
-    let active_pr_phase = action_evidence.map(|e| e.active_pr_phase).unwrap_or(None);
+    let active_pr_phase = action_evidence
+        .and_then(|e| e.latest_pr_phase)
+        .filter(|phase| phase.is_active());
     let live = process.alive == Some(true);
     let human_handoff = matches!(
         next_move.owner,
@@ -3100,9 +3119,12 @@ mod tests {
         };
         let action_evidence = runtime.map(|r| TaskActionEvidence {
             status: r.status,
-            active_pr_phase: None,
-            active_pr_after_merge: None,
-            active_pr_next_slug: None,
+            latest_pr_phase: None,
+            latest_pr_after_merge: None,
+            latest_pr_next_slug: None,
+            completion_refusal: None,
+            resume_refusal: None,
+            pending_directive: false,
             ci: None,
             process_alive: process.alive,
             predecessor_phase: None,
@@ -3163,9 +3185,12 @@ mod tests {
     ) -> TaskAttentionSnapshot {
         let action_evidence = runtime.map(|r| TaskActionEvidence {
             status: r.status,
-            active_pr_phase: phase,
-            active_pr_after_merge: None,
-            active_pr_next_slug: None,
+            latest_pr_phase: phase,
+            latest_pr_after_merge: None,
+            latest_pr_next_slug: None,
+            completion_refusal: None,
+            resume_refusal: None,
+            pending_directive: false,
             ci,
             process_alive: process.alive,
             predecessor_phase: None,

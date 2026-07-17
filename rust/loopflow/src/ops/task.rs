@@ -2868,7 +2868,9 @@ async fn reconcile_task_pr_with_authority(
             })
         }
         "closed" => {
-            pr.abandoned_at = Some(now);
+            // Re-confirming a close is not a second abandonment: a fresh `now` here
+            // settles the row differently on every read, which the store rejects.
+            pr.abandoned_at.get_or_insert(now);
             pr.ci_observation = None;
             if !session.status.is_process_active() {
                 session.set_status(

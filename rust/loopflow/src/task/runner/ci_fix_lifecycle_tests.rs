@@ -1361,6 +1361,42 @@ async fn a_reopened_pr_is_restored_red_woken_once_and_mints_no_successor() {
     assert_eq!(prs[0].id, original.id);
 }
 
+/// Re-reading a PR GitHub still reports closed re-confirms the abandonment it
+/// already recorded; it does not re-abandon it.
+#[tokio::test]
+async fn a_repeat_reconcile_of_a_closed_pr_keeps_its_first_abandonment() {
+    let mut harness = Harness::new().await;
+
+    harness.gh.set_pr(harness.pr_number, "closed", "h1");
+    harness.reconcile().await;
+    let first = harness
+        .store
+        .task_prs(&harness.task.id)
+        .await
+        .expect("read task prs")
+        .pop()
+        .expect("the fixture Task has a PR")
+        .abandoned_at
+        .expect("the closed PR is abandoned");
+
+    // `reconcile` expires the read cache, so this really re-reads the same close.
+    let second = harness.reconcile().await.expect("reconcile still answers");
+
+    assert_eq!(second.phase(), PrPhase::Abandoned);
+    assert_eq!(second.abandoned_at, Some(first));
+    assert_eq!(
+        harness
+            .store
+            .task_prs(&harness.task.id)
+            .await
+            .expect("read task prs")
+            .pop()
+            .expect("the fixture Task has a PR")
+            .abandoned_at,
+        Some(first)
+    );
+}
+
 /// A predecessor GitHub could not be re-read is not a settled predecessor: under
 /// an outage the stale `abandoned_at` stands, and rotating on it would mint the
 /// same empty successor.

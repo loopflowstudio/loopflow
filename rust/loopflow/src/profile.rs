@@ -1,5 +1,4 @@
-//! Personal routing profiles that bind repositories, browser identities, and
-//! reusable provider accounts.
+//! Chrome access venues and account-first provider routing.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -14,15 +13,25 @@ use crate::store::ProviderAccountId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ProfileId(EmailAddress);
+pub struct ProfileId(String);
 
 impl ProfileId {
     pub fn parse(value: &str) -> Result<Self, String> {
-        EmailAddress::parse(value).map(Self)
+        let value = value.trim();
+        if value.is_empty()
+            || value.len() > 128
+            || !value.chars().all(|character| {
+                character.is_ascii_alphanumeric()
+                    || matches!(character, '@' | '.' | '_' | '+' | '-' | ' ')
+            })
+        {
+            return Err("profile id must be 1-128 safe printable characters".to_string());
+        }
+        Ok(Self(value.to_string()))
     }
 
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        &self.0
     }
 }
 
@@ -60,33 +69,6 @@ impl EmailAddress {
 }
 
 impl fmt::Display for EmailAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct HostId(String);
-
-impl HostId {
-    pub fn parse(value: &str) -> Result<Self, String> {
-        let value = value.trim();
-        if value.is_empty() || value.len() > 255 || value.chars().any(char::is_control) {
-            return Err("host id must be 1-255 printable characters".to_string());
-        }
-        Ok(Self(value.to_string()))
-    }
-
-    pub fn local() -> Result<Self, String> {
-        Self::parse(&gethostname::gethostname().to_string_lossy())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for HostId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -179,53 +161,61 @@ fn validate_chrome_profile_identifier(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn chrome_local_state_path() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())?;
     Ok(home.join("Library/Application Support/Google/Chrome/Local State"))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(test)))]
 fn chrome_local_state_path() -> Result<PathBuf, String> {
     Err("Chrome profile discovery is currently supported on macOS only".to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Profile {
+pub struct AccessProfile {
     pub id: ProfileId,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChromeProfileBinding {
-    pub profile_id: ProfileId,
-    pub host_id: HostId,
     pub chrome_directory: String,
+    pub expected_login: EmailAddress,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProfileProviderAccount {
-    pub profile_id: ProfileId,
+pub struct AccountAccessProfile {
     pub provider: Provider,
     pub account_id: ProviderAccountId,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderProfileCandidate {
+    pub position: usize,
     pub profile_id: ProfileId,
-    pub account_id: ProviderAccountId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RouteScope {
+    Repo(RepoId),
+    Default,
+}
+
+impl RouteScope {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Repo(_) => "repo",
+            Self::Default => "default",
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Repo(repo_id) => repo_id.as_str(),
+            Self::Default => "",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepoProfileRoute {
-    pub repo_id: RepoId,
-    pub default_profile: ProfileId,
-    pub backup_profiles: Vec<ProfileId>,
+pub struct ProviderRoute {
+    pub scope: RouteScope,
+    pub provider: Provider,
+    pub accounts: Vec<ProviderAccountId>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -239,14 +229,12 @@ mod tests {
     };
 
     #[test]
-    fn profile_ids_are_normalized_emails() {
+    fn profile_ids_are_safe_printable_slugs() {
         assert_eq!(
-            ProfileId::parse(" Engineering@Example.com ")
-                .unwrap()
-                .as_str(),
-            "engineering@example.com"
+            ProfileId::parse(" Profile 3 ").unwrap().as_str(),
+            "Profile 3"
         );
-        assert!(ProfileId::parse("Loopflow").is_err());
+        assert!(ProfileId::parse("Loopflow").is_ok());
         assert!(ProfileId::parse("../loopflow").is_err());
     }
 

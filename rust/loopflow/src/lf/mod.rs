@@ -185,10 +185,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: AuthCommand,
     },
-    /// Personal browser and provider account routing profiles
+    /// Chrome access venues used during provider login ceremonies
     Profile {
         #[command(subcommand)]
         cmd: ProfileCommand,
+    },
+    /// Route providers through ordered managed accounts
+    Route {
+        #[command(subcommand)]
+        cmd: RouteCommand,
     },
     /// Release operations (run, check, notes, bump, tag, status)
     Release {
@@ -1563,22 +1568,26 @@ pub enum AuthCommand {
     Connect {
         /// Provider name
         provider: String,
-        /// Connect and bind this Loopflow profile
-        #[arg(long)]
-        profile: Option<String>,
+        /// Managed account id or login email
+        account: Option<String>,
+        /// Bootstrap through this Chrome directory, name, or signed-in email
+        #[arg(long, requires = "account")]
+        chrome_profile: Option<String>,
     },
     /// Adopt an existing Claude login into a managed account
     Import {
         provider: String,
-        /// Create or register this isolated OAuth account profile
+        /// Create or register this isolated OAuth account
         #[arg(long)]
         account: String,
         /// Chrome profile directory, name, or signed-in email
-        #[arg(long, conflicts_with = "profile")]
-        chrome_profile: Option<String>,
-        /// Use this Loopflow profile's host-local Chrome binding
         #[arg(long)]
-        profile: Option<String>,
+        chrome_profile: Option<String>,
+    },
+    /// Manage the ordered Chrome venues that can log in an account
+    Access {
+        #[command(subcommand)]
+        cmd: AuthAccessCommand,
     },
     /// List managed Claude and Codex OAuth accounts
     Accounts {
@@ -1613,54 +1622,78 @@ pub enum AuthCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
-    /// Create a personal routing profile
+    /// Record a Chrome access venue
     Create {
-        profile: String,
         /// Chrome profile directory, name, or signed-in email on this host
         #[arg(long)]
-        chrome_profile: Option<String>,
+        chrome_profile: String,
+        /// Stable venue name; defaults to the Chrome directory
+        #[arg(long = "as")]
+        name: Option<String>,
+        /// Expected signed-in email; defaults to Chrome's current login
+        #[arg(long)]
+        expects: Option<String>,
     },
-    /// List personal routing profiles and their provider accounts
+    /// List Chrome venues and the accounts that reference them
     List,
-    /// Bind provider accounts to profiles
-    Account {
-        #[command(subcommand)]
-        cmd: ProfileAccountCommand,
-    },
-    /// Configure this repository's profile order
-    Route {
-        #[command(subcommand)]
-        cmd: ProfileRouteCommand,
-    },
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ProfileAccountCommand {
-    /// Bind a provider account by account id or login email
+pub enum AuthAccessCommand {
+    /// Atomically replace an account's ordered access venues
     Set {
-        profile: String,
         provider: String,
         account: String,
+        #[arg(long = "profile", required = true)]
+        profiles: Vec<String>,
+    },
+    /// Append one access venue
+    Add {
+        provider: String,
+        account: String,
+        #[arg(long = "profile")]
+        profile: String,
+    },
+    /// Remove one access venue
+    Rm {
+        provider: String,
+        account: String,
+        #[arg(long = "profile")]
+        profile: String,
     },
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ProfileRouteCommand {
-    /// Atomically replace the default and ordered backup profiles
+pub enum RouteCommand {
+    /// Atomically replace one provider's route for a repository
     Set {
-        #[arg(long)]
-        default: String,
-        #[arg(long = "backup")]
-        backups: Vec<String>,
+        provider: String,
+        #[arg(required = true)]
+        accounts: Vec<String>,
         /// Repository owner/name; defaults to the current repository
         #[arg(long)]
         repo: Option<String>,
     },
-    /// Show the default and ordered backup profiles
+    /// Configure the store-wide fallback route
+    Default {
+        #[command(subcommand)]
+        cmd: DefaultRouteCommand,
+    },
+    /// Show repo routes or the defaults they fall back to
     Show {
         /// Repository owner/name; defaults to the current repository
         #[arg(long)]
         repo: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DefaultRouteCommand {
+    /// Atomically replace one provider's store-wide route
+    Set {
+        provider: String,
+        #[arg(required = true)]
+        accounts: Vec<String>,
     },
 }
 
@@ -1812,40 +1845,29 @@ mod tests {
             .expect("connect flow exists");
         assert!(connect
             .get_arguments()
-            .any(|argument| argument.get_long() == Some("profile")));
+            .any(|argument| argument.get_id() == "account"));
+        assert!(connect
+            .get_arguments()
+            .any(|argument| argument.get_long() == Some("chrome-profile")));
         assert!(!connect
             .get_arguments()
-            .any(|argument| argument.get_long() == Some("account")));
+            .any(|argument| argument.get_long() == Some("profile")));
     }
 
     #[test]
-    fn profile_route_accepts_ordered_backups() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "profile",
-            "route",
-            "set",
-            "--default",
-            "primary@example.com",
-            "--backup",
-            "engineering@example.com",
-            "--backup",
-            "personal@example.com",
-        ])
-        .expect("parse profile route");
+    fn route_accepts_a_provider_specific_account_order() {
+        let cli = Cli::try_parse_from(["lf", "route", "set", "claude", "loopflow", "primary"])
+            .expect("parse account route");
 
         assert!(matches!(
             cli.command,
-            Some(Commands::Profile {
-                cmd: ProfileCommand::Route {
-                    cmd: ProfileRouteCommand::Set {
-                        default,
-                        backups,
-                        repo: None,
-                    }
+            Some(Commands::Route {
+                cmd: RouteCommand::Set {
+                    provider,
+                    accounts,
+                    repo: None,
                 }
-            }) if default == "primary@example.com"
-                && backups == vec!["engineering@example.com", "personal@example.com"]
+            }) if provider == "claude" && accounts == vec!["loopflow", "primary"]
         ));
     }
 
@@ -1855,8 +1877,11 @@ mod tests {
             "lf",
             "profile",
             "create",
-            "engineering@example.com",
             "--chrome-profile",
+            "Profile 8",
+            "--as",
+            "engineering",
+            "--expects",
             "engineering@example.com",
         ])
         .expect("parse profile Chrome binding");
@@ -1865,109 +1890,72 @@ mod tests {
             cli.command,
             Some(Commands::Profile {
                 cmd: ProfileCommand::Create {
-                    profile,
-                    chrome_profile: Some(chrome_profile),
+                    chrome_profile,
+                    name: Some(name),
+                    expects: Some(expects),
                 }
-            }) if profile == "engineering@example.com"
-                && chrome_profile == "engineering@example.com"
+            }) if chrome_profile == "Profile 8"
+                && name == "engineering"
+                && expects == "engineering@example.com"
         ));
     }
 
     #[test]
-    fn profile_account_set_accepts_a_login_email() {
+    fn auth_access_set_accepts_ordered_profiles() {
         let cli = Cli::try_parse_from([
             "lf",
-            "profile",
-            "account",
+            "auth",
+            "access",
             "set",
-            "primary@example.com",
             "claude",
-            "primary@example.com",
+            "primary",
+            "--profile",
+            "personal",
+            "--profile",
+            "engineering",
         ])
-        .expect("parse profile account mapping");
+        .expect("parse account access order");
 
         assert!(matches!(
             cli.command,
-            Some(Commands::Profile {
-                cmd: ProfileCommand::Account {
-                    cmd: ProfileAccountCommand::Set {
-                        profile,
+            Some(Commands::Auth {
+                cmd: AuthCommand::Access {
+                    cmd: AuthAccessCommand::Set {
                         provider,
                         account,
+                        profiles,
                     }
                 }
-            }) if profile == "primary@example.com"
-                && provider == "claude"
-                && account == "primary@example.com"
+            }) if provider == "claude"
+                && account == "primary"
+                && profiles == vec!["personal", "engineering"]
         ));
     }
 
     #[test]
-    fn auth_connect_rejects_an_account_selector() {
-        assert!(
-            Cli::try_parse_from(["lf", "auth", "connect", "claude", "--account", "primary",])
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn auth_connect_rejects_a_direct_chrome_profile() {
-        assert!(Cli::try_parse_from([
-            "lf",
-            "auth",
-            "connect",
-            "claude",
-            "--chrome-profile",
-            "operator@example.com",
-        ])
-        .is_err());
-    }
-
-    #[test]
-    fn auth_connect_accepts_a_loopflow_profile() {
+    fn auth_connect_addresses_an_account_and_optional_bootstrap_venue() {
         let cli = Cli::try_parse_from([
             "lf",
             "auth",
             "connect",
             "claude",
-            "--profile",
-            "personal@example.com",
+            "primary",
+            "--chrome-profile",
+            "Profile 9",
         ])
-        .expect("parse Loopflow profile binding");
+        .expect("parse account connection");
 
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
                 cmd: AuthCommand::Connect {
                     provider,
-                    profile: Some(profile),
+                    account: Some(account),
+                    chrome_profile: Some(chrome_profile),
                 }
             }) if provider == "claude"
-                && profile == "personal@example.com"
-        ));
-    }
-
-    #[test]
-    fn auth_connect_accepts_a_codex_profile() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "auth",
-            "connect",
-            "codex",
-            "--profile",
-            "engineering@example.com",
-        ])
-        .expect("parse Codex profile binding");
-
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Auth {
-                cmd: AuthCommand::Connect {
-                    provider,
-                    profile: Some(profile),
-                }
-            }) if provider == "codex"
-                && profile == "engineering@example.com"
+                && account == "primary"
+                && chrome_profile == "Profile 9"
         ));
     }
 
@@ -1992,7 +1980,6 @@ mod tests {
                     provider,
                     account,
                     chrome_profile: Some(chrome_profile),
-                    profile: None,
                 }
             }) if provider == "claude"
                 && account == "loopflow"

@@ -74,7 +74,6 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
         .filter(|account| account.home.is_some())
         .collect();
     let stored = store.provider_account_limits(None).await?;
-    let profiles = store.list_profile_provider_accounts(None).await?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
 
     let polls = accounts.iter().map(|account| {
@@ -99,7 +98,7 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
         let stored_windows = windows_for(&stored, account);
         let mut status = AccountStatus {
             provider: account.provider.clone(),
-            label: account_label(account, &profiles),
+            label: account_label(account),
             plan: None,
             windows: stored_windows
                 .iter()
@@ -128,8 +127,8 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
             }
             Some(Err(SubscriptionError::NeedsLogin(_))) => {
                 status.note = Some(format!(
-                    "needs re-login: lf auth connect {}",
-                    account.provider
+                    "needs re-login: lf auth connect {} {}",
+                    account.provider, account.account_id
                 ));
             }
             Some(Err(SubscriptionError::Unavailable(reason))) => {
@@ -168,28 +167,11 @@ fn windows_for<'a>(
         .collect()
 }
 
-/// Profiles are how the rest of loopflow names these accounts, so lead with
-/// the profile when one is bound; fall back to the login, then the raw id.
-fn account_label(
-    account: &ProviderAccount,
-    profiles: &[crate::profile::ProfileProviderAccount],
-) -> String {
-    let bound: Vec<&str> = profiles
-        .iter()
-        .filter(|mapping| {
-            mapping.provider.as_str() == account.provider
-                && mapping.account_id == account.account_id
-        })
-        .map(|mapping| mapping.profile_id.as_str())
-        .collect();
-    if !bound.is_empty() {
-        return bound.join(", ");
+fn account_label(account: &ProviderAccount) -> String {
+    match &account.login_email {
+        Some(login) => format!("{} ({login})", account.account_id),
+        None => account.account_id.to_string(),
     }
-    account
-        .login_email
-        .as_ref()
-        .map(|email| email.to_string())
-        .unwrap_or_else(|| account.account_id.to_string())
 }
 
 fn print_accounts(statuses: &[AccountStatus]) {

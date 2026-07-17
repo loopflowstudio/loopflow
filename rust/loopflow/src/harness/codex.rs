@@ -600,8 +600,9 @@ impl Harness for CodexHarness {
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
         let requested_session = self.resume_provider_session_id.clone();
-        let account_route =
-            resolve_provider_account(Provider::Codex, requested_session.as_deref()).await?;
+        let account_route = resolve_provider_account(Provider::Codex, requested_session.as_deref())
+            .await?
+            .into_route();
         self.resume_provider_session_id = match &account_route {
             Some(route) if route.resume_requested_session() => requested_session,
             Some(_) => None,

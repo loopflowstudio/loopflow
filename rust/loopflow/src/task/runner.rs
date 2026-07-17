@@ -2853,7 +2853,7 @@ mod tests {
         ChildWriteLease,
     };
     use crate::engine::agent::AgentConfig;
-    use crate::harness::{Capabilities, Harness};
+    use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::WaveId;
     use crate::interaction_review::InteractionReviewId;
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
@@ -2870,7 +2870,7 @@ mod tests {
     use crate::wave::Wave;
 
     struct ScriptedHarness {
-        supports_steer: bool,
+        accepts_current_send: bool,
         sent: Vec<String>,
         interrupts: usize,
         fail_send: bool,
@@ -2943,9 +2943,9 @@ mod tests {
     }
 
     impl ScriptedHarness {
-        fn new(supports_steer: bool) -> Self {
+        fn new(accepts_current_send: bool) -> Self {
             Self {
-                supports_steer,
+                accepts_current_send,
                 sent: Vec::new(),
                 interrupts: 0,
                 fail_send: false,
@@ -2968,6 +2968,20 @@ mod tests {
             Ok(())
         }
 
+        async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
+            if !self.accepts_current_send {
+                return SendCurrentOutcome::NotSteerable;
+            }
+            match self.send_input(content).await {
+                Ok(()) => SendCurrentOutcome::Sent {
+                    provider_turn_id: "scripted-turn".to_string(),
+                },
+                Err(error) => SendCurrentOutcome::Failed {
+                    error: error.to_string(),
+                },
+            }
+        }
+
         async fn interrupt(&mut self) -> Result<()> {
             self.interrupts += 1;
             if self.fail_interrupt {
@@ -2978,12 +2992,6 @@ mod tests {
 
         async fn stop(&mut self) -> Result<()> {
             Ok(())
-        }
-
-        fn capabilities(&self) -> Capabilities {
-            Capabilities {
-                supports_steer: self.supports_steer,
-            }
         }
 
         fn provider_session_id(&self) -> Option<String> {
@@ -3643,10 +3651,10 @@ mod tests {
 
     #[tokio::test]
     async fn provider_control_conformance_reports_honest_steer_effects() {
-        for (provider, supports_steer, expected_effect) in [
+        for (provider, accepts_current_send, expected_effect) in [
             ("codex", true, ChildCommandEffect::LiveSteer),
-            ("claude", false, ChildCommandEffect::Replacement),
-            ("opencode", false, ChildCommandEffect::Replacement),
+            ("claude", false, ChildCommandEffect::NextTurn),
+            ("opencode", false, ChildCommandEffect::NextTurn),
         ] {
             let (store, session, lease) = conformance_session(provider).await;
             let command = ChildCommand::new(
@@ -3661,7 +3669,7 @@ mod tests {
                 .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
                 .await
                 .unwrap();
-            let mut harness = ScriptedHarness::new(supports_steer);
+            let mut harness = ScriptedHarness::new(accepts_current_send);
             let mut pending = VecDeque::new();
 
             absorb_commands(
@@ -3692,12 +3700,13 @@ mod tests {
             let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
             assert_eq!(receipt.state, ChildCommandState::Accepted, "{provider}");
             assert_eq!(receipt.effect, Some(expected_effect), "{provider}");
-            assert_eq!(harness.sent, vec!["change direction"], "{provider}");
-            assert_eq!(
-                harness.interrupts,
-                usize::from(!supports_steer),
+            let expected_sends = if accepts_current_send { 2 } else { 1 };
+            assert_eq!(harness.sent.len(), expected_sends, "{provider}");
+            assert!(
+                harness.sent.iter().all(|text| text == "change direction"),
                 "{provider}"
             );
+            assert_eq!(harness.interrupts, 0, "{provider}");
         }
     }
 
@@ -3890,7 +3899,8 @@ mod tests {
 
     #[tokio::test]
     async fn task_decisions_resume_every_provider_without_losing_lineage() {
-        for (provider, supports_steer) in [("codex", true), ("claude", false), ("opencode", false)]
+        for (provider, accepts_current_send) in
+            [("codex", true), ("claude", false), ("opencode", false)]
         {
             let (store, session, lease) = conformance_session(provider).await;
             let decision_id = ChildDecisionId::new();
@@ -3908,7 +3918,7 @@ mod tests {
                 .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
                 .await
                 .unwrap();
-            let mut harness = ScriptedHarness::new(supports_steer);
+            let mut harness = ScriptedHarness::new(accepts_current_send);
             let mut pending = VecDeque::new();
 
             absorb_commands(
@@ -3936,11 +3946,7 @@ mod tests {
                 .unwrap();
             }
 
-            assert_eq!(
-                harness.interrupts,
-                usize::from(!supports_steer),
-                "{provider}"
-            );
+            assert_eq!(harness.interrupts, 0, "{provider}");
             assert_eq!(
                 store
                     .get_child_command(&command.id)
@@ -3973,7 +3979,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_provider_control_failures_settle_the_receipt() {
+    async fn failed_live_task_send_keeps_direction_for_the_next_turn() {
         let (store, session, lease) = conformance_session("claude").await;
         let command = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
@@ -3987,28 +3993,29 @@ mod tests {
             .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
             .await
             .unwrap();
-        let mut harness = ScriptedHarness::new(false);
-        harness.fail_interrupt = true;
+        let mut harness = ScriptedHarness::new(true);
+        harness.fail_send = true;
+        let mut pending = VecDeque::new();
 
-        let error = absorb_commands(
+        absorb_commands(
             &store,
             &session,
             &lease,
             commands,
             &mut harness,
             true,
-            &mut VecDeque::new(),
+            &mut pending,
         )
         .await
-        .expect_err("interrupt failure should fail control");
-        assert!(error.to_string().contains("scripted interrupt failed"));
+        .unwrap();
+        assert_eq!(
+            pending.pop_front().map(|input| input.text),
+            Some("change direction".to_string())
+        );
         let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(receipt.state, ChildCommandState::Failed);
-        assert_eq!(receipt.effect, Some(ChildCommandEffect::Replacement));
-        assert!(receipt
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("scripted interrupt failed")));
+        assert_eq!(receipt.state, ChildCommandState::Delivering);
+        assert_eq!(receipt.effect, Some(ChildCommandEffect::LiveSteer));
+        assert_eq!(harness.interrupts, 0);
     }
 
     fn task_handoff_request(

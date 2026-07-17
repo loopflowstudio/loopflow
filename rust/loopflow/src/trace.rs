@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::engine::prompt::{account_prompt_tokens, count_tokens};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
-use crate::id::{ProcessId, RunId};
+use crate::id::{ExecId, TraceId};
 use crate::store::{StoreError, StoreResult};
 
 pub const TRACE_SCHEMA_VERSION: u32 = 1;
@@ -23,9 +23,9 @@ pub const TOKENIZER: &str = "cl100k_base";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
-pub struct AgentLaunchId(String);
+pub struct LaunchId(String);
 
-impl AgentLaunchId {
+impl LaunchId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
@@ -35,13 +35,13 @@ impl AgentLaunchId {
     }
 }
 
-impl std::fmt::Display for AgentLaunchId {
+impl std::fmt::Display for LaunchId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)
     }
 }
 
-impl Default for AgentLaunchId {
+impl Default for LaunchId {
     fn default() -> Self {
         Self::new()
     }
@@ -49,9 +49,9 @@ impl Default for AgentLaunchId {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
-pub struct AgentTurnId(String);
+pub struct TurnId(String);
 
-impl AgentTurnId {
+impl TurnId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
@@ -61,13 +61,13 @@ impl AgentTurnId {
     }
 }
 
-impl std::fmt::Display for AgentTurnId {
+impl std::fmt::Display for TurnId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)
     }
 }
 
-impl Default for AgentTurnId {
+impl Default for TurnId {
     fn default() -> Self {
         Self::new()
     }
@@ -75,8 +75,8 @@ impl Default for AgentTurnId {
 
 #[derive(Debug, Clone)]
 pub struct TraceCaptureContext {
-    pub run_id: RunId,
-    pub process_id: ProcessId,
+    pub run_id: TraceId,
+    pub process_id: ExecId,
     pub repo: PathBuf,
     pub worktree: PathBuf,
     pub wave: Option<String>,
@@ -684,7 +684,7 @@ pub struct RecordedConversationEvent {
     pub seq: u64,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
-    pub turn_id: Option<AgentTurnId>,
+    pub turn_id: Option<TurnId>,
     pub payload: RecordedConversationPayload,
 }
 
@@ -918,8 +918,8 @@ impl TraceCapture {
     ) -> StoreResult<Self> {
         validate_input_op(&start.input_op)?;
         let persist_start = Instant::now();
-        let launch_id = AgentLaunchId::new();
-        let turn_id = AgentTurnId::new();
+        let launch_id = LaunchId::new();
+        let turn_id = TurnId::new();
         let root = trace_root();
         create_private_dir(&root)?;
         let process_dir = root
@@ -1093,7 +1093,7 @@ impl TraceCapture {
             schema_version: TRACE_SCHEMA_VERSION,
             seq: self.event_seq,
             ts: OffsetDateTime::now_utc(),
-            turn_id: Some(AgentTurnId(self.turn.id.clone())),
+            turn_id: Some(TurnId(self.turn.id.clone())),
             payload,
         };
         let bytes = append_json_line(&self.conversation_path, &event)?;
@@ -1111,7 +1111,7 @@ impl TraceCapture {
 
         let persist_start = Instant::now();
         let ordinal = self.turn.ordinal + 1;
-        let turn_id = AgentTurnId::new();
+        let turn_id = TurnId::new();
         let provider_turn_id = self.turn.provider_turn_id.clone();
         let artifact_dir = resolve_artifact(&self.launch.artifact_dir)?;
         let turns_dir = artifact_dir.join("turns");
@@ -1548,7 +1548,7 @@ mod tests {
         ContextAssetKind, ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext,
         TraceCaptureContext,
     };
-    use crate::id::{ProcessId, RunId};
+    use crate::id::{ExecId, TraceId};
 
     #[test]
     fn prompt_manifest_covers_exact_bytes_and_tokens() {
@@ -1795,10 +1795,10 @@ mod tests {
     #[test]
     fn capture_persists_private_artifacts_and_queryable_rows() {
         let guard = crate::journal::TestLedgerGuard::new();
-        let run_id = RunId::new();
+        let run_id = TraceId::new();
         let context = TraceCaptureContext {
             run_id: run_id.clone(),
-            process_id: ProcessId::new(),
+            process_id: ExecId::new(),
             repo: guard.home().to_path_buf(),
             worktree: guard.home().to_path_buf(),
             wave: Some("intelligence".to_string()),

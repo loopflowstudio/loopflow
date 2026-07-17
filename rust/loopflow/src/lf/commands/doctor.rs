@@ -995,8 +995,8 @@ mod tests {
     ) -> (String, std::path::PathBuf) {
         let capture = crate::trace::CaptureHandle::begin(
             crate::trace::TraceCaptureContext {
-                run_id: crate::id::RunId::new(),
-                process_id: crate::id::ProcessId::new(),
+                run_id: crate::id::TraceId::new(),
+                process_id: crate::id::ExecId::new(),
                 repo: guard.home().to_path_buf(),
                 worktree: guard.home().to_path_buf(),
                 wave: Some("infrastructure".to_string()),

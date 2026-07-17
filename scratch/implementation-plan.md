@@ -105,6 +105,8 @@ enum Author {
 
 Linear, GitHub, timers, attachments, native subagents, and the keeper are not Authors. They append typed evidence or perform their narrowly owned recovery operation.
 
+The core receives a non-serializable `ControlCtx`, not a caller-authored identity field. Home-local Swift/CLI entrypoints construct Human context from their trusted local transport. Agent entrypoints require the opaque current Run lease. An environment variable may transport that lease but its absence never selects Human authority.
+
 ### Internal Run operations
 
 ```rust
@@ -229,6 +231,7 @@ Some failures cannot be made impossible by data shape: a provider can lie, a mac
 - missing provider usage stays unknown;
 - unknown Send stays immutable and falls back to a later seed;
 - unknown external effect creates `WaitOn::Effect`;
+- provider disconnect becomes a failed/unknown Launch observation handled by the shared recovery path (PRD-5);
 - unreachable Home is fresh topology evidence, not copied Work status;
 - executor absence is proved by containment observation, not inferred from a provider response;
 - unobservable provider-native writers make that provider mode unsupported rather than optimistically complete.
@@ -327,6 +330,7 @@ Done when:
 - Human→Wave, Wave Run→Project, and Project Run→Task call the same Steer function;
 - a Task Run cannot target sibling/parent Work and a stale parent lease cannot target a restarted child Epoch;
 - absence of an env var never changes caller identity;
+- the wire request cannot submit `Author` or otherwise claim Human provenance;
 - callers cannot request live, seed, replace, or retry behavior;
 - CI failures enter only through `CiIncident` and reserve one bounded repair Run;
 - `ChildCommandKind`, `ChildDirective`, `Replacement`, `FollowUp`, command `Resume`, and command `Decide` have no production references.
@@ -433,6 +437,7 @@ rust/loopflow/src/lf/commands/reviews.rs
 rust/loopflow/tests/handoff_tests.rs
 rust/loopflow/tests/task_review_authority_tests.rs
 swift/Loopflow/Models/InteractiveHandoff.swift
+swift/Loopflow/Models/HandoffSurface.swift
 swift/LoopflowMac/Services/HandoffSurfaceLauncher.swift
 swift/LoopflowTests/HandoffSurfaceLauncherTests.swift
 swift/LoopflowTests/HandoffSurfaceTests.swift
@@ -503,6 +508,7 @@ TaskSessionStatus
 InteractiveHandoff
 InteractionReview
 InteractionId
+HandoffSurface
 Replacement
 FollowUp
 command Resume

@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 use tracing::{debug, warn};
 
 use crate::engine::worktrees::main_repo_root;
-use crate::id::{ProcessId, RunId};
+use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
 use crate::store::RunEventRow;
 
@@ -114,9 +114,9 @@ thread_local! {
 
 #[derive(Debug, Clone)]
 struct RunContext {
-    run_id: RunId,
-    process_id: ProcessId,
-    parent_process_id: Option<ProcessId>,
+    run_id: TraceId,
+    process_id: ExecId,
+    parent_process_id: Option<ExecId>,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
     /// File-journal directory. Written in any git checkout; None only when the
@@ -259,7 +259,7 @@ pub struct LfEventFields {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LfEvent {
-    pub run_id: RunId,
+    pub run_id: TraceId,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
     pub node: LfNode,
@@ -577,7 +577,7 @@ fn ensure_run_context(
             // Mint and export the run id so prompt logs and child processes
             // carry the same identity as the ledger rows. The export is
             // removed when the run ends (see try_emit).
-            let run_id = RunId::default();
+            let run_id = TraceId::default();
             std::env::set_var(LF_RUN_ID_ENV, run_id.as_str());
             (run_id, true)
         }
@@ -594,11 +594,11 @@ fn ensure_run_context(
         .then(|| {
             std::env::var(LF_PROCESS_ID_ENV)
                 .ok()
-                .and_then(|value| ProcessId::parse(&value).ok())
+                .and_then(|value| ExecId::parse(&value).ok())
         })
         .flatten()
         .filter(parent_is_recorded);
-    let process_id = ProcessId::default();
+    let process_id = ExecId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
     // Write the file journal wherever we can. Fall back to ledger-only when
@@ -666,7 +666,7 @@ fn ensure_run_context(
 /// `false`. Any other read failure answers `true` — never disown a real parent
 /// over a locked store; this process's own row is about to fail the same way,
 /// so there is no ghost to prevent.
-fn parent_is_recorded(parent: &ProcessId) -> bool {
+fn parent_is_recorded(parent: &ExecId) -> bool {
     let path = match ledger_db_path() {
         Ok(path) if path.exists() => path,
         Ok(_) => return false,
@@ -704,7 +704,7 @@ fn next_seq() -> i64 {
     })
 }
 
-fn configured_run_id(repo_root: &Path) -> Option<RunId> {
+fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
     let value = std::env::var(LF_RUN_ID_ENV).ok()?;
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -896,7 +896,7 @@ mod tests {
         TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
-    use crate::id::{ProcessId, RunId, WaveId};
+    use crate::id::{ExecId, TraceId, WaveId};
     use crate::wave::Wave;
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
@@ -1083,7 +1083,7 @@ mod tests {
             .expect("child event count env")
             .parse::<usize>()
             .expect("child event count");
-        let run_id = RunId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
+        let run_id = TraceId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
 
         for index in 0..event_count {
             let event = LfEvent {
@@ -1333,7 +1333,7 @@ mod tests {
         super::clear_context();
 
         // A parent that exported its identity but never reached the ledger.
-        let ghost = ProcessId::new();
+        let ghost = ExecId::new();
         std::env::set_var(super::LF_RUN_ID_ENV, recorded.run_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
 
@@ -1415,7 +1415,7 @@ mod tests {
         // A process id lingers in the environment but no run id does — the
         // `pr land` / `wt switch` / `kickoff` shape that historically stamped a
         // new trace with a parent from the old one.
-        std::env::set_var(super::LF_PROCESS_ID_ENV, ProcessId::new().as_str());
+        std::env::set_var(super::LF_PROCESS_ID_ENV, ExecId::new().as_str());
 
         let context = super::ensure_run_context(repo.path(), &fields)
             .expect("run context")
@@ -1641,7 +1641,7 @@ mod tests {
                 .and_then(|name| name.to_str())
                 .expect("run dir name");
             assert!(
-                RunId::parse(run_id).is_ok(),
+                TraceId::parse(run_id).is_ok(),
                 "expected generated UUID run id"
             );
             assert_ne!(run_id, "not-a-uuid");

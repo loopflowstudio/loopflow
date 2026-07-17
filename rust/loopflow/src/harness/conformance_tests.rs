@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -20,6 +21,58 @@ fn read_trace_lines(file_name: &str) -> Vec<String> {
         .lines()
         .map(ToString::to_string)
         .collect()
+}
+
+#[derive(Debug, Deserialize)]
+struct ControlFixture {
+    name: String,
+    boundary: String,
+    provider_turn_id: Option<String>,
+    current_send: Option<String>,
+    next_boundary_seed: bool,
+    explicit_success: bool,
+}
+
+#[test]
+fn provider_control_shapes_share_one_durable_contract() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/harness/testdata/control_contract.json");
+    let fixtures: Vec<ControlFixture> =
+        serde_json::from_str(&fs::read_to_string(path).expect("control fixtures"))
+            .expect("valid control fixtures");
+
+    assert_eq!(fixtures.len(), 4);
+    assert!(fixtures.iter().all(|fixture| fixture.next_boundary_seed));
+    assert_eq!(
+        fixtures
+            .iter()
+            .map(|fixture| fixture.name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "live_steer_accepted",
+            "live_steer_rejected",
+            "live_steer_response_lost",
+            "opaque_tui",
+        ]
+    );
+    let tui = fixtures.last().expect("opaque TUI fixture");
+    assert_eq!(tui.boundary, "launch");
+    assert!(tui.provider_turn_id.is_none());
+    assert!(tui.current_send.is_none());
+    assert!(tui.explicit_success);
+    assert!(fixtures[..3].iter().all(|fixture| {
+        fixture.boundary == "turn"
+            && fixture.provider_turn_id.is_some()
+            && fixture.current_send.is_some()
+            && !fixture.explicit_success
+    }));
+    assert_eq!(
+        fixtures[..3]
+            .iter()
+            .filter_map(|fixture| fixture.current_send.as_deref())
+            .collect::<Vec<_>>(),
+        vec!["sent", "not_steerable", "unknown"]
+    );
 }
 
 fn drain_events(

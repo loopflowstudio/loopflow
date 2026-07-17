@@ -13,7 +13,7 @@ use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::harness::{claude_mapping, Capabilities, Harness, HarnessError, RawProviderEvent};
+use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent};
 use crate::provider_account::{resolve_provider_account, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 
@@ -336,15 +336,6 @@ impl Harness for ClaudeHarness {
         self.shutdown_requested.store(true, Ordering::SeqCst);
         self.kill_turn_process().await;
         Ok(())
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            // Mid-turn input cannot reach the running `claude -p` process;
-            // send_input fails with TurnAlreadyInProgress and the caller
-            // queues.
-            supports_steer: false,
-        }
     }
 
     fn provider_session_id(&self) -> Option<String> {

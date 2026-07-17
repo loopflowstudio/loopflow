@@ -12,7 +12,7 @@ use crate::child_session::{
     ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
     ChildDecisionId, ChildRef, ChildWriteLease,
 };
-use crate::harness::Harness;
+use crate::harness::{Harness, SendCurrentOutcome};
 use crate::project_session::{ProjectEventKind, ProjectSessionId};
 use crate::store::SharedStore;
 use crate::task::{TaskEventKind, TaskSessionId};
@@ -335,39 +335,24 @@ pub(crate) async fn absorb_commands(
                 effect: ChildCommandEffect::NextTurn,
                 decision: None,
             }),
-            ChildCommandKind::Steer { text }
-                if turn_active && harness.capabilities().supports_steer =>
-            {
-                apply_input(
-                    store,
-                    target,
-                    harness,
-                    PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: ChildCommandEffect::LiveSteer,
-                        decision: None,
-                    },
-                )
-                .await?;
-            }
-            ChildCommandKind::Steer { text } => {
-                interrupt_harness(
-                    store,
-                    target,
-                    harness,
-                    turn_active,
-                    command.id.clone(),
-                    Some(ChildCommandEffect::Replacement),
-                )
-                .await?;
-                pending.push_back(PendingInput {
+            ChildCommandKind::Steer { text } if turn_active => {
+                let input = PendingInput {
                     command_id: Some(command.id),
                     text,
-                    effect: ChildCommandEffect::Replacement,
+                    effect: ChildCommandEffect::LiveSteer,
                     decision: None,
-                });
+                };
+                if let Some(mut input) = send_current_input(store, target, harness, input).await? {
+                    input.effect = ChildCommandEffect::NextTurn;
+                    pending.push_back(input);
+                }
             }
+            ChildCommandKind::Steer { text } => pending.push_back(PendingInput {
+                command_id: Some(command.id),
+                text,
+                effect: ChildCommandEffect::NextTurn,
+                decision: None,
+            }),
             ChildCommandKind::Interrupt { replacement } => {
                 pending.clear();
                 interrupt_harness(
@@ -435,18 +420,11 @@ pub(crate) async fn absorb_commands(
                     effect: ChildCommandEffect::Decision,
                     decision: Some(resolution),
                 };
-                if turn_active && harness.capabilities().supports_steer {
-                    apply_input(store, target, harness, input).await?;
+                if turn_active {
+                    if let Some(input) = send_current_input(store, target, harness, input).await? {
+                        pending.push_back(input);
+                    }
                 } else {
-                    interrupt_harness(
-                        store,
-                        target,
-                        harness,
-                        turn_active,
-                        command.id,
-                        Some(ChildCommandEffect::Decision),
-                    )
-                    .await?;
                     pending.push_back(input);
                 }
             }
@@ -457,6 +435,48 @@ pub(crate) async fn absorb_commands(
         }
     }
     Ok(None)
+}
+
+/// Attempt same-Turn delivery without making provider support a static branch.
+/// Every outcome leaves the input for the next seed because live acceptance
+/// cannot advance the active Turn's Basis. A confirmed Send settles the old
+/// transport command first; rejection or ambiguity keeps that command attached
+/// to the seed. Plain steering never interrupts execution.
+async fn send_current_input(
+    store: &SharedStore,
+    target: ChildTarget<'_>,
+    harness: &mut dyn Harness,
+    input: PendingInput,
+) -> Result<Option<PendingInput>> {
+    target.validate_write_lease(store).await?;
+    if let Some(command_id) = input.command_id.as_ref() {
+        target
+            .begin_delivery(store, command_id.clone(), input.effect)
+            .await?;
+    }
+    match harness.send_current(&input.text).await {
+        SendCurrentOutcome::Sent { .. } => {
+            let seed = PendingInput::system(input.text.clone());
+            if let Some(command_id) = input.command_id {
+                target
+                    .accept_command(store, command_id, Some(input.effect))
+                    .await?;
+            }
+            if let Some(decision) = input.decision {
+                target.record_decision(store, decision).await?;
+            }
+            Ok(Some(seed))
+        }
+        SendCurrentOutcome::NotSteerable => Ok(Some(input)),
+        SendCurrentOutcome::Failed { error } => {
+            tracing::warn!(%error, "same-turn delivery failed; retaining input for next seed");
+            Ok(Some(input))
+        }
+        SendCurrentOutcome::Unknown { error, .. } => {
+            tracing::warn!(%error, "same-turn delivery is ambiguous; retaining input for next seed");
+            Ok(Some(input))
+        }
+    }
 }
 
 pub(crate) async fn apply_input(

@@ -13,7 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,7 +33,9 @@ use crate::engine::agent::{
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
-use crate::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness, RawProviderEvent};
+use crate::harness::{
+    codex_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
+};
 use crate::provider_account::{resolve_provider_account, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 
@@ -85,6 +87,9 @@ enum OutboundRpc {
         result: Value,
     },
 }
+
+type RpcResult = std::result::Result<Value, String>;
+type PendingRequests = Arc<Mutex<HashMap<i64, oneshot::Sender<RpcResult>>>>;
 
 /// Reader-local state threaded through `process_notification`.
 pub(super) struct NotificationState {
@@ -451,6 +456,7 @@ pub struct CodexHarness {
     approval: ApprovalPolicy,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
+    pending_requests: PendingRequests,
     writer_task: Option<JoinHandle<()>>,
     reader_task: Option<JoinHandle<()>>,
     stderr_task: Option<JoinHandle<()>>,
@@ -494,6 +500,7 @@ impl CodexHarness {
             approval,
             child: None,
             outbound_tx: None,
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
             writer_task: None,
             reader_task: None,
             stderr_task: None,
@@ -527,6 +534,39 @@ impl CodexHarness {
         .await
         .map_err(|_| anyhow!("codex writer task unavailable"))?;
         Ok(id)
+    }
+
+    async fn send_observed_request(
+        &mut self,
+        method: &str,
+        params: Value,
+    ) -> Result<(i64, oneshot::Receiver<RpcResult>)> {
+        let Some(outbound) = &self.outbound_tx else {
+            return Err(anyhow!("codex harness not started"));
+        };
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let (reply, reply_rx) = oneshot::channel();
+        self.pending_requests
+            .lock()
+            .expect("codex pending requests lock poisoned")
+            .insert(id, reply);
+        if outbound
+            .send(OutboundRpc::Request {
+                id,
+                method: method.to_string(),
+                params,
+            })
+            .await
+            .is_err()
+        {
+            self.pending_requests
+                .lock()
+                .expect("codex pending requests lock poisoned")
+                .remove(&id);
+            return Err(anyhow!("codex writer task unavailable"));
+        }
+        Ok((id, reply_rx))
     }
 
     async fn send_notification(&mut self, method: &str) -> Result<()> {
@@ -575,6 +615,10 @@ impl CodexHarness {
             handle.abort();
             let _ = handle.await;
         }
+        self.pending_requests
+            .lock()
+            .expect("codex pending requests lock poisoned")
+            .clear();
     }
 }
 
@@ -630,6 +674,9 @@ impl Harness for CodexHarness {
         if text.is_empty() {
             return Ok(());
         }
+        if self.turn_in_progress.load(Ordering::Relaxed) {
+            return Err(HarnessError::TurnAlreadyInProgress.into());
+        }
         let turn_text = if self.should_seed_prompt {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {
@@ -655,35 +702,66 @@ impl Harness for CodexHarness {
             .ok_or_else(|| anyhow!("codex thread not started"))?;
         let input = json!([{ "type": "text", "text": turn_text }]);
 
-        // Steer requires the active turn id as a precondition
-        // (`expectedTurnId`); without one in hand the turn is effectively
-        // over, so start a new turn instead.
-        let steer_turn_id = if self.turn_in_progress.load(Ordering::Relaxed) {
-            self.turn_id()
-        } else {
-            None
-        };
-        match steer_turn_id {
-            Some(turn_id) => {
-                self.send_request(
-                    "turn/steer",
-                    json!({
-                        "threadId": thread_id,
-                        "expectedTurnId": turn_id,
-                        "input": input,
-                    }),
-                )
-                .await?;
-            }
-            None => {
-                self.send_request(
-                    "turn/start",
-                    json!({ "threadId": thread_id, "input": input }),
-                )
-                .await?;
-            }
-        }
+        self.send_request(
+            "turn/start",
+            json!({ "threadId": thread_id, "input": input }),
+        )
+        .await?;
         Ok(())
+    }
+
+    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
+        let text = content.trim();
+        if text.is_empty() {
+            return SendCurrentOutcome::Failed {
+                error: "steer input is empty".to_string(),
+            };
+        }
+        if !self.turn_in_progress.load(Ordering::Relaxed) {
+            return SendCurrentOutcome::NotSteerable;
+        }
+        let (Some(thread_id), Some(turn_id)) = (self.thread_id(), self.turn_id()) else {
+            return SendCurrentOutcome::NotSteerable;
+        };
+        let input = json!([{ "type": "text", "text": text }]);
+        let reply = match self
+            .send_observed_request(
+                "turn/steer",
+                json!({
+                    "threadId": thread_id,
+                    "expectedTurnId": turn_id,
+                    "input": input,
+                }),
+            )
+            .await
+        {
+            Ok((_, reply)) => reply,
+            Err(error) => {
+                return SendCurrentOutcome::Failed {
+                    error: error.to_string(),
+                };
+            }
+        };
+        match tokio::time::timeout(Duration::from_secs(15), reply).await {
+            Ok(Ok(Ok(result))) => match result.get("turnId").and_then(Value::as_str) {
+                Some(received) if received == turn_id => SendCurrentOutcome::Sent {
+                    provider_turn_id: turn_id,
+                },
+                received => SendCurrentOutcome::Unknown {
+                    provider_turn_id: received.map(ToString::to_string),
+                    error: "Codex steer response did not confirm the expected Turn".to_string(),
+                },
+            },
+            Ok(Ok(Err(error))) => SendCurrentOutcome::Failed { error },
+            Ok(Err(_)) => SendCurrentOutcome::Unknown {
+                provider_turn_id: Some(turn_id),
+                error: "Codex steer response channel closed".to_string(),
+            },
+            Err(_) => SendCurrentOutcome::Unknown {
+                provider_turn_id: Some(turn_id),
+                error: "timed out waiting for Codex steer response".to_string(),
+            },
+        }
     }
 
     async fn interrupt(&mut self) -> Result<()> {
@@ -724,12 +802,6 @@ impl Harness for CodexHarness {
         self.shutdown_tasks().await;
 
         Ok(())
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            supports_steer: true,
-        }
     }
 
     fn provider_session_id(&self) -> Option<String> {
@@ -849,6 +921,7 @@ impl CodexHarness {
         let current_turn_id = self.current_turn_id.clone();
         let initialize_request_id = self.initialize_request_id.clone();
         let thread_start_request_id = self.thread_start_request_id.clone();
+        let pending_requests = self.pending_requests.clone();
         let account_route = self.account_route.clone();
         let reader_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
@@ -879,11 +952,29 @@ impl CodexHarness {
 
                 if method.is_empty() {
                     // Response frame.
+                    let id = value.get("id").and_then(Value::as_i64);
+                    let pending = id.and_then(|id| {
+                        pending_requests
+                            .lock()
+                            .expect("codex pending requests lock poisoned")
+                            .remove(&id)
+                    });
+                    if let Some(pending) = pending {
+                        let result = match value.get("error") {
+                            Some(error) => Err(error
+                                .get("message")
+                                .and_then(Value::as_str)
+                                .unwrap_or("codex RPC failed")
+                                .to_string()),
+                            None => Ok(value.get("result").cloned().unwrap_or(Value::Null)),
+                        };
+                        let _ = pending.send(result);
+                        continue;
+                    }
                     if let Some(error) = value.get("error") {
                         process_rpc_error(error, &event_tx);
                         continue;
                     }
-                    let id = value.get("id").and_then(Value::as_i64);
                     // The initialize response completes the handshake; the
                     // harness then sends the client `initialized`
                     // notification (there is no server-side "initialized").
@@ -970,6 +1061,12 @@ impl CodexHarness {
             }
 
             turn_in_progress.store(false, Ordering::Relaxed);
+            let pending = std::mem::take(
+                &mut *pending_requests
+                    .lock()
+                    .expect("codex pending requests lock poisoned"),
+            );
+            drop(pending);
             if !shutdown_requested.load(Ordering::Relaxed) {
                 let _ = event_tx.send(ConversationEvent::Error {
                     code: "codex_disconnected".to_string(),
@@ -1218,6 +1315,43 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn current_send_names_the_exact_codex_turn() {
+        let (events, _event_rx) = mpsc::unbounded_channel();
+        let mut harness = CodexHarness::new(events, ApprovalPolicy::AutoApprove);
+        *harness.provider_session_id.lock().expect("thread id lock") = Some("thread_1".to_string());
+        *harness.current_turn_id.lock().expect("turn id lock") = Some("turn_1".to_string());
+        harness.turn_in_progress.store(true, Ordering::Relaxed);
+        let (outbound, mut outbound_rx) = mpsc::channel(1);
+        harness.outbound_tx = Some(outbound);
+        let pending_requests = harness.pending_requests.clone();
+        let send = tokio::spawn(async move { harness.send_current("change direction").await });
+
+        let OutboundRpc::Request { id, method, params } =
+            outbound_rx.recv().await.expect("steer request")
+        else {
+            panic!("current send must be an RPC request");
+        };
+        assert_eq!(method, "turn/steer");
+        assert_eq!(
+            params.get("expectedTurnId").and_then(Value::as_str),
+            Some("turn_1")
+        );
+        pending_requests
+            .lock()
+            .expect("pending requests lock")
+            .remove(&id)
+            .expect("pending steer response")
+            .send(Ok(json!({ "turnId": "turn_1" })))
+            .expect("steer receiver");
+        assert_eq!(
+            send.await.expect("send task"),
+            SendCurrentOutcome::Sent {
+                provider_turn_id: "turn_1".to_string(),
+            }
+        );
     }
 
     #[test]

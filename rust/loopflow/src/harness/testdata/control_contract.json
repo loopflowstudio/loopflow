@@ -1,0 +1,34 @@
+[
+  {
+    "name": "live_steer_accepted",
+    "boundary": "turn",
+    "provider_turn_id": "turn_live",
+    "current_send": "sent",
+    "next_boundary_seed": true,
+    "explicit_success": false
+  },
+  {
+    "name": "live_steer_rejected",
+    "boundary": "turn",
+    "provider_turn_id": "turn_rejected",
+    "current_send": "not_steerable",
+    "next_boundary_seed": true,
+    "explicit_success": false
+  },
+  {
+    "name": "live_steer_response_lost",
+    "boundary": "turn",
+    "provider_turn_id": "turn_unknown",
+    "current_send": "unknown",
+    "next_boundary_seed": true,
+    "explicit_success": false
+  },
+  {
+    "name": "opaque_tui",
+    "boundary": "launch",
+    "provider_turn_id": null,
+    "current_send": null,
+    "next_boundary_seed": true,
+    "explicit_success": true
+  }
+]

@@ -4,6 +4,56 @@ Screenshots of loopflow, taken by loopflow, from loopflow building loopflow —
 published automatically and never stale. The website stops being a brochure
 that rots and becomes another surface the system keeps alive.
 
+## Revision (2026-07-17): prove the process, don't chase freshness
+
+The first implementation landed (capture module, install hook, deploy gate,
+Swift view knob, showcase rendering). Review against this doc plus Jack's
+direction resets the bar. **The goal this round: one honest end-to-end run
+that works and is replicable.** Always-fresh-per-install and
+per-main-commit reliability are explicitly deferred — Done When 2 (four
+unattended weeks) and the cron backstop are parked, not active.
+
+What must change in the implementation:
+
+1. **Liveness bar: served wave only.** `require_live_wave` currently refuses
+   when no Task process is alive. Live state is currently imperfect and that
+   is fine — red/failed states are honest and publishable ("red dots ok").
+   Require that the wave is real and served; delete the no-live-task
+   refusal and its test. Update the module docstring's claim to match.
+2. **Deploy gate: structural failures block, age warns.** The 14-day age
+   check currently fails the deploy, which couples unrelated docs/website
+   shipping to app promotion. Split `validate_capture` into structural
+   errors (missing/invalid sidecars, wrong wave, non-2x size, unserved
+   status snapshot — still fail) and freshness (stale `captured_at` — print
+   a loud warning in `check_website_screens.py`, exit 0). Keep the
+   future-dated check as a structural error. Adjust tests to pin both
+   behaviors.
+3. **Fix the hollow width legs (review finding, confirmed).**
+   `LOOPFLOW_UI_TEST_WIDTH` is now applied only inside `uiTestSnapshot`,
+   which requires `LOOPFLOW_UI_TEST_SNAPSHOT_PATH` — so
+   `WaveSurfaceStateTests`' 900/1440 legs both render at the default window
+   size and prove nothing about width. Pin the window width whenever the
+   env var is set even without a snapshot path (restore a view-level width
+   pin gated on "no snapshot path"; keep snapshot-time `setContentSize`
+   for capture runs, which also set height).
+4. **Not a product surface.** The `lf website-screens` skill/flow are gone
+   (already removed) and stay gone: this is repo-internal process, invoked
+   by the install hook or by hand —
+   `uv run python scripts/refresh_website_screens.py --publish`. The
+   scripts and their docstrings are the documentation; no repo skill, no
+   docs page.
+5. **scratch/questions.md** — resolve the answered items: straight-to-main
+   publication stands; the freshness/churn tension is resolved by (2); the
+   busted-live-state note is superseded by (1); the backstop question is
+   parked with the revised bar.
+
+Acceptance for this round: `python/tests/test_website_screens.py` and the
+website suite green; `swift build` compiles; then a human-driven capture run
+on the laptop (promote a provenance-stamped build, serve the product wave,
+run refresh with `--publish`) produces committed captures — red dots and
+all — and rerunning it a second time reports "no perceptual changes" or a
+clean update. The Done Whens below are the horizon, not this round's bar.
+
 ## Problem
 
 The site has no product imagery: every prior asset was Maestro/Concerto-era

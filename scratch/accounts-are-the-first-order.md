@@ -104,6 +104,113 @@ account is then over 75%, and the threshold does not move to chase it.
 **One arrow: account → ordered venues.** A venue is consulted only at a
 ceremony, in order, and always verified.
 
+### Implementation contract
+
+**User-visible outcome.** Fleet operators route each provider directly to the
+accounts that may spend, see the declared and effective account order, and can
+connect an account through one of its ordered Chrome venues without Loopflow
+ever treating the venue's cached login as account identity. A repo with no
+provider route uses the store-wide default; a configured route whose accounts
+are all unusable fails with the account-level reasons rather than leaking into
+ambient credentials.
+
+**Source of truth.** `provider_accounts` remains authoritative for credential
+identity, home, routing state, cooldown, and last selection.
+`provider_routes` is the only declared ordering; `account_access_profiles` is
+the only account-to-venue ordering; `provider_session_accounts` is the durable
+runtime pin. `provider_account_limits` remains provider-observed health and
+never rewrites route intent. Chrome `Local State` is only the current venue
+observation. The provider credential produced in the temporary home is the
+only identity evidence. `lf route show`, `lf auth accounts`, `lf usage`, and
+the forwarded bundle are derived views of those records, not additional
+sources of truth.
+
+Replace `Result<Option<ProviderAccountRoute>, ProviderAccountError>` with an
+explicit resolution:
+
+```rust
+enum ProviderAccountResolution {
+    Managed(ProviderAccountRoute),
+    Ambient(AmbientReason),
+}
+
+enum AmbientReason {
+    StoreUnavailable,
+    NoRoutes { repo_id: Option<RepoId> },
+}
+```
+
+`NoRoutes { repo_id: None }` distinguishes no repo context from an unrouted
+repo, while `StoreUnavailable` distinguishes both from a process with no
+managed store. These are explanations of intentional ambient operation, not
+errors. A configured repo or default route with candidates but no eligible
+account is an error naming each excluded account and its credential, routing,
+or cooldown reason. The resolver must use a reason-preserving store opener,
+not today's `open_existing_store`: a missing registry file maps to
+`StoreUnavailable`, while invalid configuration, an incompatible schema, a
+lock, or another open failure is an error. Neither condition falls through to
+ambient credentials. An explicit `--account` that does not exist or cannot
+authenticate remains an error and never consults routes.
+
+**End-to-end proof.** One migration fixture starts with the live topology in
+the migration table below, including the mismatched `claude/primary` venue and
+an existing provider-session pin. After opening it through the real store
+migration path, the proof:
+
+1. reads the exact per-provider account orders through `lf route show` and the
+   exact venue order through `lf auth accounts`;
+2. resolves a local Claude/Codex harness run and preserves the pinned account,
+   recording that account's `last_selected_at` with no profile id involved;
+3. serializes the same repo route through `ForwardedAccountBundle`, hydrates a
+   temporary remote store, and resolves the same account there without venue
+   or Chrome data; and
+4. runs the connect seam with a provider-reported email that contradicts the
+   account, then proves the account row and credential home are byte-identical
+   and the rendered refusal is the full message specified under Done when.
+
+The real-store smoke in **The demo** proves the same source-to-selection path
+outside the fixture. PR 3 extends it by putting a provider-observed strained
+account first in declared order and proving both `--explain` and
+`last_selected_at` choose the healthy follower.
+
+**Affected consumers.** The migration and `SqliteStore` APIs; the profile,
+provider-account, and provider-auth domain models; Claude and Codex harnesses;
+the generic agent resolver; provider-session resume; SSH bundle
+encoding/hydration; CLI parsing and commands for `route`, `profile`, `auth`,
+`usage`, and explicit `--account`; README examples; and
+`scripts/demo_profile_routing.py`. The forwarding environment variable and
+payload become account-named in the same PR; this is Rust-to-Rust internal
+state, so there is no compatibility decoder. There are no Swift/Python DTO or
+fixture consumers to preserve.
+
+**Ceremony failures.** A missing Chrome directory or venue-login mismatch
+skips that venue and records the reason. A completed provider login with no
+reported email, or with an email that differs from the account, discards the
+temporary credential and continues to the next venue. Exhaustion returns one
+error containing every attempted venue and both corrective actions. Bootstrap
+via `--chrome-profile` records neither the venue nor its account link until the
+provider identity check succeeds. Installation into the durable account home
+is the final step, so every earlier failure leaves it unchanged and removes
+the temporary home.
+
+**Operational boundary.** Runtime selection performs local SQLite reads only;
+it does not open Chrome, invoke a provider CLI, or refresh limits. Health is
+the latest persisted provider observation. Auth remains an interactive,
+subprocess-backed ceremony and tries venues serially so only one browser/login
+can mutate temporary state at a time. Migration is one atomic store upgrade:
+duplicate `chrome_directory` values across old host bindings, dangling account
+links, or any failed table rebuild abort the upgrade rather than choosing a
+winner. Forwarding carries credentials through the existing secret-safe SSH
+environment path and writes only to its throwaway remote store.
+
+**Serial PR boundary.** PR 2 owns the complete inversion: schema, migration,
+explicit resolution states, account pinning, forwarding, verified ceremonies,
+account-addressed CLI/runtime behavior, docs, and the migration proof. It must
+leave no profile-shaped runtime or routing path. PR 3 changes only selection
+policy and explanation: persisted limit-window demotion, `route show
+--explain`, and strained presentation in `usage`/`auth accounts`. PR 2 can ship
+without PR 3; PR 3 must not reintroduce or finish any ownership inversion.
+
 ### Schema (migration `0.11.027_accounts_first.sql`)
 
 ```sql
@@ -419,8 +526,9 @@ and on the refusal's message — not on `is_err()`, per wave memory):
 - Migration on a fixture matching the live store yields exactly the four derived
   results in the migration table above, and repo-route derivation reproduces
   today's `select_provider_profile` order for that repo (assert the account ids).
-- An unrouted repo selects via the default route; with both routes empty it falls
-  to ambient — and the three `Ok(None)` conditions are distinguishable.
+- An unrouted repo selects via the default route; with both routes empty it
+  returns `Ambient(NoRoutes { repo_id: Some(...) })`; no repo context and no
+  store return the other two explicit ambient states.
 - `--account` still bypasses route and health gating, and still verifies auth.
 - A strained account (any window ≥ `STRAINED_UTILIZATION_PERCENT`, `resets_at` in
   the future) sorts last but is still selected when it is the only candidate, and

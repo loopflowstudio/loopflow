@@ -1,56 +1,63 @@
 # Open questions — W2-280
 
-## 7. OPEN, BLOCKING PR 3: Done-When #1 has no test seam (found 2026-07-17)
+## 7. Done-When #1's seam (RESOLVED — decision cd_0d66e6a9, and I had it wrong)
 
-I asserted "an automated test proves a Session runner's turn usage reaches
-`agent_turns` with real token values, and goes red when sabotaged" — and the
-reviewer rightly held me to it as the load-bearing proof. **It is not achievable
-as written.** Verified, not inferred:
+**Resolved: Option 1, seam adopted, shipped on PR #1048.** But the way I framed
+the question was wrong, and the correction is the durable part.
 
-- `run_task_session` is called from exactly one place: `bin/lf.rs:1530`. No test
-  drives it, and `grep` over the whole crate finds no other caller.
-- `task/runner/ci_fix_lifecycle_tests.rs` — the one runner-adjacent test module —
-  never touches the event loop; it exercises `child_session`/task lifecycle
-  helpers.
-- The runner builds its provider inline: `default_create_harness(&harness_name,
-  ApprovalPolicy::AutoApprove, event_tx)` (`task/runner.rs:160`) is a free
-  function resolved through `HarnessKind::parse`. There is no fake kind, no
-  closure, no parameter — no seam to inject a scripted harness.
+I reported "there is no seam to inject a scripted harness" after checking
+`task/runner.rs` — where `default_create_harness` is indeed called inline — and
+concluded the *codebase* lacked the capability, so adding one would be
+reshaping production for tests. **The seam already existed in production, one
+file over:** `flowloop/wave.rs:350` holds `create: Box::new(default_create_harness)`
+in `BodyBackend::Harness`, a boxed `Fn` the wave tests already substitute
+(`wave.rs:1610`, `:1695`). I checked one call site and reported a missing
+capability.
 
-So proving the wiring end-to-end requires **adding** that seam, and CLAUDE.md is
-explicit: *"Never reshape production code for tests. If you're adding a factory
-trait, an interface, a constructor overload, or an extra parameter solely
-because tests need it, stop."* plus *"No factory patterns."*
+That is precisely the trap I spent this session recording in wave MEMORY —
+"absence in one projection is evidence about the projection" — run on myself, in
+the same file where I wrote the rule down. Reading `task/runner.rs` proves a
+fact about `task/runner.rs`, not about the codebase.
 
-Testing `TraceCapture` directly instead would be the trap wave MEMORY already
-records twice: it proves the layer below (trace.rs, which `flowloop/wave.rs`
-already exercises in production) and would stay green with the runner's
-`record_conversation` call deleted. That is a fixture pin, not a guard.
+It also dissolves the CLAUDE.md objection I raised: the ban is on factory traits
+and parameters existing *solely* for tests. `wave.rs:350` is already a boxed
+function pointer, so adopting it invents no abstraction — it deletes a
+divergence, which is the keep-one-implementation rule. And the divergence is
+causally what this Task is fixing: wave.rs holds `create` injectable and its
+capture is exercised; the two runners hard-coded it and lost capture silently.
 
-**This is my error, not the reviewer's.** Clarify declared the design computable
-on the strength of a proof I never checked was reachable — the same
-"assert a capability without running the command" shape I have been catching
-elsewhere this session.
+Shipped in #1048: `CreateHarness` moved beside `default_create_harness`,
+wave.rs's private duplicate collapsed onto it, `run_task_session` builds the
+default while `run_task_session_inner` takes it as a value. No trait, no
+factory, no registry, no `HarnessKind` test variant. It never wanted one.
 
-**Three ways out; this needs a decision, not a coin flip:**
+**Still open — this is what blocks #1048:** the test itself. See §8.
 
-1. **Give the runner a harness seam on production grounds.** A runner that
-   hard-codes its own provider factory is a real architectural wart, not just a
-   test obstacle — it is why the Task/Project runners drifted away from
-   `flowloop/wave.rs` and lost capture in the first place. If the seam is
-   justified by production need, the style-guide bar is met and the test follows.
-   Most honest, largest diff.
-2. **Extract the event→capture routing into a unit and test that.** Cheap, but it
-   proves a function, not that the runner calls it. Sabotaging the call site
-   would leave it green — the exact trap above. Weakest.
-3. **Prove by dogfood:** run a Task body, query `agent_turns ⋈ agent_launches`
-   for its process. Real end-to-end evidence, and the design's own demo — but it
-   cannot fail in CI, which is precisely what the reviewer refused.
+## 8. OPEN, BLOCKING PR 3: the test does not exist yet
 
-**My recommendation: (1).** The seam earns its keep independently of testing, and
-it is the same divergence this Task exists to close. PR 3 is left unstarted
-rather than half-refactored — wave MEMORY records what a rushed partial refactor
-of this runner costs.
+The seam makes it possible; nothing yet proves it. Done-When #1 is unmet, so
+#1048 is not landable — a proof that cannot fail in CI is not a guard, and right
+now there is no proof at all.
+
+The remaining fixture work, verified as the actual cost:
+
+- `run_task_session_inner` needs a real worktree with a loadable skill
+  (`load_skill`, runner.rs:1114), an active PR (`prepare_task_flow_step`
+  hard-fails without one, :1096), and a journal run context for
+  `trace_capture_context`.
+- `task/runner/ci_fix_lifecycle_tests.rs` builds store + task + lease (its
+  `Harness` fixture, :384) but never drives the loop, so it is a starting point,
+  not a solution.
+
+**Sabotage target (do not get this wrong):** delete the runner's
+`capture.record_conversation(event.clone())` call and confirm red. Do **not**
+sabotage `TraceCapture` — `flowloop/wave.rs` exercises that layer in production,
+so a TraceCapture-level test stays green through the deletion and pins the layer
+below. Same shape as ENG-7's retry-ladder test that `busy_timeout` absorbed.
+
+Dogfood evidence (run a Task, query `agent_turns ⋈ agent_launches`) is worth
+carrying in the PR body as the end-to-end demo, but it is evidence, not a test,
+and it cannot be Done-When #1.
 
 ## 0. PR boundary after the failed recovery (CLOSED 2026-07-17)
 

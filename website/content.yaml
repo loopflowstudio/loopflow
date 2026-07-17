@@ -3,52 +3,45 @@
 
 homepage:
   hero:
-    tagline: "Conduct an orchestra of coding agents. No server."
+    tagline: "Living software, conducted by you."
+    subline: >-
+      Waves are persistent agents that hold a goal, remember what they learn,
+      and stay steerable — and they launch and steer each other. The
+      organization is recursive: waves conduct projects, projects conduct
+      tasks, and nothing sits at the center.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
-  story:
-    heading: "Why it looks like this"
-    paragraphs:
-      - >-
-        Waves hold a goal, remember what they learn, and stay steerable while
-        they work. Delegation, steering, and memory are receipted — every
-        claim drills to evidence, and the release notes read like a lab
-        notebook because they are one.
-      - >-
-        It has been an agent wrapper, a daemon, a distributed system. Each
-        version got smaller where it mattered — v0.11 deleted the server
-        entirely. What's left is one binary whose verbs humans type and
-        agents call on each other.
-      - >-
-        It isn't chasing installs. It's a daily instrument, sharpened against
-        real work and documented well enough that you can play it too.
-    link_label: "Read the full story"
-    link_href: "/story"
+  screenshot:
+    heading: "The Context Lab"
+    image: "/static/context-lab.png"
+    image_alt: "Context Lab showing what one agent received: contributing assets, prompt-ordered lanes, and trace addresses"
+    caption: "Exactly what each agent was told — every run's context, drillable to evidence."
 
   pillars:
-    heading: "What that pressure produced"
+    heading: "What makes it alive"
     items:
-      - title: "Agents launch agents"
+      - title: "Agents conduct agents"
         description: >-
-          lf is the API. A wave delegates work with `lf task run`, redirects
+          `lf` is the API. A wave delegates work with `lf task run`, redirects
           it mid-turn with `lf task steer`, and proves the redirect landed
-          with a receipt. No SDK — the same binary you type.
-      - title: "No server"
+          with a receipt. The same verbs you type.
+      - title: "The whole lifecycle, not just the code"
         description: >-
-          State is a local SQLite store and append-only journals; shared
-          truth is Linear and GitHub; machines reach each other over SSH with
-          credentials that die with the process. Deployable across a company
-          with nothing central to run.
+          Plans live in Linear. PRs publish, survive review, and land through
+          the merge queue. CI failures get repaired; releases cut on a
+          cadence; worktrees clean themselves up. Waves run the process
+          around the code — building, deploying, and maintaining software,
+          not just writing it.
+      - title: "Self-organizing, all the way down"
+        description: >-
+          Waves supervise projects; projects supervise tasks; every part
+          keeps its own journal, memory, and receipts. Coordination lives in
+          the repo, Linear, and GitHub — there is nothing central to die.
       - title: "The whole orchestra on one screen"
         description: >-
           `lf roadmap` buckets every open task by what it needs from you.
           Trace what any agent was told, what it spent, and what it shipped.
           The Mac app renders the same JSON the CLI reads.
-      - title: "Waves remember"
-        description: >-
-          A goal you write once, in your repo, reviewed like code. Memory the
-          wave writes as it works, with every claim drillable to its
-          evidence.
 
   building_blocks:
     heading: "Building blocks"
@@ -58,19 +51,34 @@ homepage:
         content: |
           ## Objective
 
-          Unify authentication. Each loop, pick the next gap — duplicate token
-          validation, session refresh, a slow startup path — create or direct
-          the concrete Task that closes it, and record what shipped in memory.
+          Unify authentication. Each wake, pick the next gap — duplicate
+          token validation, session refresh, a slow startup path — direct
+          the concrete Task that closes it, and record what shipped in
+          memory.
 
           ## Measures
 
           - **Key Results**: one auth path across web and desktop.
           - **Quality**: auth startup under 200ms.
-
-          ## Process
-
-          Use the build flow for implementation work; write a scratch design
-          first when a change crosses storage, tokens, or public auth behavior.
+      - label: "A project"
+        filename: "Linear · created via lf pm"
+        content: |
+          lf pm project create --wave auth \
+            --title "Unified sign-in" \
+            --definition "One auth path across
+              web and desktop." \
+            --kr "Over one week of real sign-ins,
+              every flow rides the new path
+              unattended — zero rescues."
+      - label: "A task"
+        filename: "terminal"
+        content: |
+          lf task start "Unify token validation" \
+            --project unified-sign-in
+          lf task steer AUTH-12 \
+            "prefer the middleware approach"
+          lf task receipt cmd_9f2 --until incorporated
+          lf pr land -c
       - label: "A skill"
         filename: ".lf/skills/implement.md"
         content: |
@@ -80,37 +88,11 @@ homepage:
           1. Understand the design
           2. Implement data structures and functions
           3. Verify with tests and done-when checks
-      - label: "A direction"
-        filename: ".lf/directions/craft.md"
-        content: |
-          Prioritize clarity over cleverness.
-
-          - Match existing patterns in this codebase
-          - Prefer explicit data flow to hidden magic
-          - Ship complete milestones, not partial layers
-      - label: "A flow"
-        filename: ".lf/flows/ship.yaml"
-        content: |
-          - design
-          - implement
-          - review
-          - polish
-
-  terminal:
-    heading: "Watch it work"
-    lines:
-      - type: "command"
-        content: "lf wave billing"
-      - type: "output"
-        content: "wave billing · reading GOAL.md + MEMORY.md"
-      - type: "output"
-        content: "task BIL-41 · lf task run · worktree app.bil-41"
-      - type: "command"
-        content: "lf chat --steer \"invoices first\""
-      - type: "output"
-        content: "steer queued → incorporated (receipt cmd_9f2)"
 
   install:
+    heading: "Get Loopflow"
+    note: "The Mac app bundles the CLI; every wave it runs is steerable from either."
+    cli_label: "Or just the CLI (macOS or Linux):"
     command_display: |
       curl -fsSL https://loopflow.studio/install.sh | sh
       lf init

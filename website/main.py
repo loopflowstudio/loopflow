@@ -51,7 +51,6 @@ def Navbar():
             ),
             Ul(
                 Li(A("Docs", href="/docs")),
-                Li(A("Story", href="/story")),
                 Li(
                     A(
                         "GitHub",
@@ -92,32 +91,11 @@ def SiteFooter():
             ),
             Div(
                 A("Docs", href="/docs"),
-                A("Story", href="/story"),
                 A("GitHub", href="https://github.com/loopflowstudio/loopflow"),
                 cls="footer-links",
             ),
             cls="container",
         ),
-    )
-
-
-def TerminalBlock(lines: list[tuple[str, str]]):
-    """lines is a list of (type, content) tuples where type is 'command', 'output', or 'comment'"""
-    return Div(
-        Div(
-            Span(cls="terminal-dot red", **{"aria-hidden": "true"}),
-            Span(cls="terminal-dot yellow", **{"aria-hidden": "true"}),
-            Span(cls="terminal-dot green", **{"aria-hidden": "true"}),
-            cls="terminal-header",
-        ),
-        Div(
-            *[Div(line[1], cls=f"terminal-line {line[0]}") for line in lines],
-            cls="terminal-body",
-            tabindex="0",
-            role="group",
-            **{"aria-label": "Terminal output"},
-        ),
-        cls="terminal",
     )
 
 
@@ -160,20 +138,18 @@ def _require_content_path(path: str) -> object:
 
 # Homepage
 HERO_CONTENT = _require_content_path("homepage.hero")
-STORY_CONTENT = _require_content_path("homepage.story")
+SCREENSHOT_CONTENT = _require_content_path("homepage.screenshot")
 PILLARS_CONTENT = _require_content_path("homepage.pillars")
 BUILDING_BLOCKS_CONTENT = _require_content_path("homepage.building_blocks")
-TERMINAL_CONTENT = _require_content_path("homepage.terminal")
 INSTALL_CONTENT = _require_content_path("homepage.install")
 
 for required_key in (
     "homepage.hero.tagline",
+    "homepage.hero.subline",
     "homepage.hero.loopflow_download_url",
-    "homepage.story.paragraphs",
-    "homepage.story.link_href",
+    "homepage.screenshot.image",
     "homepage.pillars.items",
     "homepage.building_blocks.items",
-    "homepage.terminal.lines",
     "homepage.install.command_display",
     "homepage.install.command_copy",
 ):
@@ -183,7 +159,7 @@ for required_key in (
 
 DOCS_DIR = Path(__file__).parent / "docs"
 CANONICAL_DOCS_DIR = Path(__file__).parent.parent / "docs"
-STORY_FILE = Path(__file__).parent / "story.md"
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def slugify(text: str) -> str:
@@ -248,7 +224,6 @@ text/markdown`); the complete corpus is at {BASE_URL}/llms-full.txt.
 
 ## Optional
 
-- [The Story]({BASE_URL}/story): how loopflow got this shape, release by release
 - [GitHub](https://github.com/loopflowstudio/loopflow): source, releases, install.sh
 - [Release notes](https://github.com/loopflowstudio/loopflow/blob/main/RELEASE_NOTES.md): the full chronology
 """
@@ -552,14 +527,32 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
+def _screenshot_section():
+    """Rendered only when the capture exists — a missing image never ships."""
+    image = SCREENSHOT_CONTENT["image"]
+    if not (STATIC_DIR / image.removeprefix("/static/")).exists():
+        return None
+    return Section(
+        Div(
+            H2(SCREENSHOT_CONTENT["heading"]),
+            Img(
+                src=image,
+                alt=SCREENSHOT_CONTENT["image_alt"],
+                cls="loopflow-showcase-img",
+            ),
+            P(SCREENSHOT_CONTENT["caption"], cls="loopflow-showcase-caption"),
+            cls="container",
+        ),
+        cls="loopflow-showcase-section",
+    )
+
+
 def build_homepage():
     loopflow_download_url = HERO_CONTENT["loopflow_download_url"]
     install_display = INSTALL_CONTENT["command_display"].strip()
     install_copy = INSTALL_CONTENT["command_copy"]
-    story_paragraphs = STORY_CONTENT["paragraphs"]
     pillar_items = PILLARS_CONTENT["items"]
     building_blocks = BUILDING_BLOCKS_CONTENT["items"]
-    terminal_lines = [(line["type"], line["content"]) for line in TERMINAL_CONTENT["lines"]]
 
     return (
         Title("Loopflow — Living software, conducted by you"),
@@ -572,8 +565,9 @@ def build_homepage():
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo-large"),
                     H1("Loopflow"),
                     P(HERO_CONTENT["tagline"], cls="tagline"),
+                    P(HERO_CONTENT["subline"], cls="hero-subline"),
                     Div(
-                        A("Install", href="/download", cls="btn btn-primary"),
+                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
                         A("Read the docs", href="/docs", cls="btn btn-secondary"),
                         cls="btn-group hero-actions",
                     ),
@@ -581,23 +575,9 @@ def build_homepage():
                 ),
                 cls="hero",
             ),
-            # The story — the narrative leads
-            Section(
-                Div(
-                    H2(STORY_CONTENT["heading"]),
-                    *[P(p, cls="story-paragraph") for p in story_paragraphs],
-                    P(
-                        A(
-                            STORY_CONTENT["link_label"] + " →",
-                            href=STORY_CONTENT["link_href"],
-                        ),
-                        cls="story-link",
-                    ),
-                    cls="container story-container",
-                ),
-                cls="story-section",
-            ),
-            # Pillars — what the pressure produced
+            # Demo — the Context Lab capture, when present
+            _screenshot_section(),
+            # Pillars
             Section(
                 Div(
                     H2(PILLARS_CONTENT["heading"]),
@@ -611,7 +591,7 @@ def build_homepage():
                 ),
                 cls="capabilities-section",
             ),
-            # Building blocks — 2×2 grid
+            # Building blocks — wave → project → task → skill
             Section(
                 Div(
                     H2(BUILDING_BLOCKS_CONTENT["heading"]),
@@ -629,28 +609,21 @@ def build_homepage():
                 ),
                 cls="building-blocks-section",
             ),
-            # Terminal — watch it work
+            # Bottom CTA — the app first; the CLI rides along
             Section(
                 Div(
-                    H2(TERMINAL_CONTENT["heading"]),
-                    TerminalBlock(terminal_lines),
-                    cls="container terminal-showcase",
-                ),
-                cls="terminal-section",
-            ),
-            # Bottom CTA — CLI install + Mac app
-            Section(
-                Div(
-                    H2("Install the CLI", cls="quick-install-heading"),
+                    H2(INSTALL_CONTENT["heading"], cls="quick-install-heading"),
+                    Div(
+                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
+                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
+                        cls="hero-actions",
+                    ),
+                    P(INSTALL_CONTENT["note"], cls="install-note"),
+                    P(INSTALL_CONTENT["cli_label"], cls="install-note"),
                     Div(
                         Pre(Code(install_display), cls="install-code", tabindex="0"),
                         CopyButton(install_copy),
                         cls="install-code-wrapper",
-                    ),
-                    Div(
-                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-secondary"),
-                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                        cls="hero-actions",
                     ),
                     cls="container",
                 ),
@@ -701,29 +674,12 @@ def get():
 
 @rt("/team")
 def get():
-    # The team page became the story page
-    return RedirectResponse("/story", status_code=302)
+    return RedirectResponse("/", status_code=302)
 
 
 @rt("/story")
 def get():
-    content = STORY_FILE.read_text()
-    return (
-        Title("The Story — Loopflow"),
-        SkipLink(),
-        Navbar(),
-        Main(
-            Section(
-                Div(
-                    Div(*render_markdown(content), cls="docs-content story-page"),
-                    cls="container",
-                ),
-                cls="docs-hero",
-            ),
-            id="main-content",
-        ),
-        SiteFooter(),
-    )
+    return RedirectResponse("/", status_code=302)
 
 
 @rt("/agents")

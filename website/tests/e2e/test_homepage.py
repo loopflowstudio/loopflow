@@ -16,19 +16,12 @@ def test_hero_elements_visible(homepage: Page):
 
 def test_hero_ctas(homepage: Page):
     hero = homepage.locator(".hero")
+    assert hero.locator(".hero-subline").text_content().strip()
     ctas = hero.locator("a.btn")
     assert ctas.count() >= 2
     hrefs = [ctas.nth(i).get_attribute("href") for i in range(ctas.count())]
     assert "/docs" in hrefs
-    assert "/download" in hrefs
-
-
-def test_story_section(homepage: Page):
-    section = homepage.locator(".story-section")
-    assert section.is_visible()
-    assert section.locator(".story-paragraph").count() >= 1
-    link = section.locator(".story-link a")
-    assert link.get_attribute("href") == "/story"
+    assert any(h.endswith(".dmg") for h in hrefs), "hero must offer the Mac app"
 
 
 def test_pillars_section(homepage: Page):
@@ -46,16 +39,22 @@ def test_building_blocks(homepage: Page):
     assert section.locator(".code-block").count() >= 1
 
 
-def test_terminal_section(homepage: Page):
-    section = homepage.locator(".terminal-section")
-    assert section.is_visible()
-    assert section.locator(".terminal-line").count() >= 1
+def test_screenshot_section_only_when_capture_exists(homepage: Page, base_url: str):
+    """The demo section renders only when the capture file is present —
+    a missing image never ships as a 404."""
+    section = homepage.locator(".loopflow-showcase-section")
+    if section.count():
+        src = section.locator("img").get_attribute("src")
+        response = homepage.request.get(f"{base_url}{src}")
+        assert response.ok, f"screenshot {src} rendered but does not resolve"
 
 
 def test_no_legacy_homepage_sections(homepage: Page):
     assert homepage.locator(".hero-video-section").count() == 0
     assert homepage.locator(".products-section").count() == 0
     assert homepage.locator(".vocab-section").count() == 0
+    assert homepage.locator(".story-section").count() == 0
+    assert homepage.locator(".terminal-section").count() == 0
     assert homepage.locator("form").count() == 0  # no waitlist
 
 
@@ -86,7 +85,9 @@ def test_legacy_redirects(page: Page, base_url: str):
     page.goto(f"{base_url}/agents")
     assert "/docs" in page.url
     page.goto(f"{base_url}/team")
-    assert page.url == f"{base_url}/story"
+    assert page.url == f"{base_url}/"
+    page.goto(f"{base_url}/story")
+    assert page.url == f"{base_url}/"
     page.goto(f"{base_url}/loopflow")
     assert page.url == f"{base_url}/download"
 

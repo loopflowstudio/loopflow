@@ -11,7 +11,6 @@ from playwright.sync_api import Page
 # Pages to test for accessibility
 PAGES_TO_TEST = [
     "/",
-    "/story",
     "/docs",
     "/docs/agent-api",
     "/docs/config",

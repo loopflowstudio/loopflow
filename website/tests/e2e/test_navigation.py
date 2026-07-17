@@ -4,14 +4,8 @@ from playwright.sync_api import Page, expect
 def test_navbar_links_exist(homepage: Page):
     nav = homepage.locator("nav")
     assert nav.locator("a", has_text="Docs").is_visible()
-    assert nav.locator("a", has_text="Story").is_visible()
     assert nav.locator("a", has_text="GitHub").is_visible()
     assert nav.locator("a", has_text="Install").is_visible()
-
-
-def test_navbar_story_link(homepage: Page, base_url: str):
-    homepage.locator("nav").locator("a", has_text="Story").click()
-    assert homepage.url == f"{base_url}/story"
 
 
 def test_navbar_docs_link(homepage: Page, base_url: str):

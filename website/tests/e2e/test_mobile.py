@@ -131,7 +131,7 @@ class TestMobileImagesNoOverflow:
         page.goto(base_url)
         page.wait_for_load_state("networkidle")
 
-        images = page.locator("main img, .terminal")
+        images = page.locator("main img")
         count = images.count()
 
         for i in range(count):

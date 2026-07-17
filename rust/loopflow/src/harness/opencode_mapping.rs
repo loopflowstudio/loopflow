@@ -10,7 +10,19 @@ pub(super) struct ReaderState {
     status: SessionState,
     current_turn_id: Option<String>,
     tools: HashMap<String, ToolLifecycle>,
+    /// Whether the current turn has emitted any usable assistant work (text,
+    /// reasoning, a tool call, or a diff). A turn that closes `idle` without
+    /// having produced any is a hollow body — see [`Self::mark_substantive`]
+    /// and the hollow-close branch in [`map_status`].
+    turn_substantive: bool,
 }
+
+/// Error codes for turns that close without usable work. Distinct from
+/// `opencode_disconnected` (the harness's own event stream dropping): these mark
+/// a turn opencode itself reported as finished (`idle`) but that carried no
+/// assistant output — the hollow-body failure the SSE incident produced.
+pub(crate) const HOLLOW_BODY_CODE: &str = "opencode_hollow_body";
+pub(crate) const DECODE_GAP_CODE: &str = "opencode_decode_gap";
 
 impl ReaderState {
     pub(super) fn new(session_id: String) -> Self {
@@ -19,11 +31,55 @@ impl ReaderState {
             status: SessionState::Unknown,
             current_turn_id: None,
             tools: HashMap::new(),
+            turn_substantive: false,
         }
     }
 
     fn current_turn_id(&self) -> Option<&str> {
         self.current_turn_id.as_deref()
+    }
+
+    /// Record that the current turn produced usable assistant work. Called at
+    /// every content-bearing emit point so hollowness is measured by what the
+    /// turn actually said, not by the status opencode chose to report.
+    fn mark_substantive(&mut self) {
+        self.turn_substantive = true;
+    }
+
+    /// Whether a turn is open (used by the harness to close an orphaned turn
+    /// when the SSE stream disconnects mid-turn).
+    pub(super) fn turn_is_open(&self) -> bool {
+        self.status == SessionState::Active && self.current_turn_id.is_some()
+    }
+
+    /// Whether the open turn has produced any usable work yet. Lets the harness
+    /// distinguish a pre-content disconnect from a mid-stream one.
+    pub(super) fn turn_has_content(&self) -> bool {
+        self.turn_substantive
+    }
+
+    /// Close a turn left open when the SSE stream disconnected. Returns
+    /// `TurnCompleted { Failed }` + `TurnUsage` so every `TurnStarted` gets a
+    /// terminal close and the journal never carries an open turn past a
+    /// disconnect. The body still fails once via the consumer's `Error`
+    /// handler — this is ledger honesty, not a second failure.
+    pub(super) fn close_orphaned_turn(&mut self) -> Vec<ConversationEvent> {
+        let turn_id = self
+            .current_turn_id
+            .take()
+            .unwrap_or_else(|| "unknown".to_string());
+        self.tools.clear();
+        self.turn_substantive = false;
+        vec![
+            ConversationEvent::TurnCompleted {
+                turn_id: turn_id.clone(),
+                status: Lifecycle::Failed,
+            },
+            ConversationEvent::TurnUsage {
+                turn_id,
+                usage: TurnUsage::default(),
+            },
+        ]
     }
 
     fn accepts(&self, properties: &Value) -> bool {
@@ -96,6 +152,7 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
             let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
             state.current_turn_id = Some(turn_id.clone());
             state.tools.clear();
+            state.turn_substantive = false;
             mapped
                 .events
                 .push(ConversationEvent::TurnStarted { turn_id });
@@ -103,7 +160,17 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
         SessionState::Idle => {
             if was_active {
                 let usage = map_turn_usage(properties);
-                complete_turn(state, Lifecycle::Completed, usage, mapped);
+                if state.turn_substantive {
+                    complete_turn(state, Lifecycle::Completed, usage, mapped);
+                } else {
+                    // opencode reported the turn finished, but it emitted no
+                    // usable assistant work. This is the hollow body an SSE
+                    // disconnect (typically the upstream model stream, not our
+                    // own /event stream) produces when opencode maps a
+                    // truncated response to `idle` rather than `error`. Never
+                    // let it read as Completed.
+                    complete_hollow_turn(state, usage, mapped);
+                }
             }
         }
         SessionState::Error => {
@@ -133,6 +200,38 @@ fn complete_turn(
     mapped.events.push(ConversationEvent::TurnUsage {
         turn_id,
         usage: usage.unwrap_or_default(),
+    });
+}
+
+/// Close a turn that opencode reported `idle` but that produced no usable work.
+/// Emits `TurnCompleted { Failed }` + usage + an `Error` carrying an actionable
+/// reason — never a `Completed`. When usage claims output tokens the model did
+/// produce content we failed to map: that is a harness decode gap, reported
+/// distinctly so a mapping regression cannot masquerade as an empty-but-fine
+/// turn.
+fn complete_hollow_turn(
+    state: &mut ReaderState,
+    usage: Option<TurnUsage>,
+    mapped: &mut MappedEvent,
+) {
+    let produced_tokens = usage.as_ref().is_some_and(|usage| usage.output_tokens > 0);
+    let (code, message) = if produced_tokens {
+        (
+            DECODE_GAP_CODE,
+            "OpenCode turn reported output tokens but no assistant content reached the harness"
+                .to_string(),
+        )
+    } else {
+        (
+            HOLLOW_BODY_CODE,
+            "OpenCode turn completed with no assistant output (hollow body after stream truncation)"
+                .to_string(),
+        )
+    };
+    complete_turn(state, Lifecycle::Failed, usage, mapped);
+    mapped.events.push(ConversationEvent::Error {
+        code: code.to_string(),
+        message,
     });
 }
 
@@ -183,21 +282,27 @@ fn map_part_updated(properties: &Value, state: &mut ReaderState, mapped: &mut Ma
         .to_ascii_lowercase();
 
     if part_type.contains("reasoning") || part_type.contains("thinking") {
-        if let (Some(turn_id), Some(content)) = (state.current_turn_id(), delta_text(part)) {
-            mapped.events.push(ConversationEvent::ReasoningDelta {
-                turn_id: turn_id.to_string(),
-                content,
-            });
+        if let (Some(turn_id), Some(content)) = (
+            state.current_turn_id().map(str::to_string),
+            delta_text(part),
+        ) {
+            state.mark_substantive();
+            mapped
+                .events
+                .push(ConversationEvent::ReasoningDelta { turn_id, content });
         }
         return;
     }
 
     if part_type.contains("text") && !part_type.contains("tool") {
-        if let (Some(turn_id), Some(content)) = (state.current_turn_id(), delta_text(part)) {
-            mapped.events.push(ConversationEvent::TextDelta {
-                turn_id: turn_id.to_string(),
-                content,
-            });
+        if let (Some(turn_id), Some(content)) = (
+            state.current_turn_id().map(str::to_string),
+            delta_text(part),
+        ) {
+            state.mark_substantive();
+            mapped
+                .events
+                .push(ConversationEvent::TextDelta { turn_id, content });
         }
         return;
     }
@@ -221,6 +326,8 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
         tracing::debug!(part = ?part, "opencode tool part missing canonical state");
         return;
     };
+    // A canonical tool part is the model calling a tool — usable work.
+    state.mark_substantive();
     let lifecycle = state.tools.entry(tool_id.clone()).or_default();
 
     if !lifecycle.started {
@@ -251,8 +358,8 @@ fn map_permission(properties: &Value, mapped: &mut MappedEvent) {
     }
 }
 
-fn map_diff(properties: &Value, state: &ReaderState, mapped: &mut MappedEvent) {
-    let Some(turn_id) = state.current_turn_id() else {
+fn map_diff(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
+    let Some(turn_id) = state.current_turn_id().map(str::to_string) else {
         return;
     };
     let Some(diff) = properties
@@ -262,10 +369,10 @@ fn map_diff(properties: &Value, state: &ReaderState, mapped: &mut MappedEvent) {
     else {
         return;
     };
-    mapped.events.push(ConversationEvent::DiffUpdated {
-        turn_id: turn_id.to_string(),
-        diff,
-    });
+    state.mark_substantive();
+    mapped
+        .events
+        .push(ConversationEvent::DiffUpdated { turn_id, diff });
 }
 
 fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
@@ -481,6 +588,18 @@ mod tests {
             other => panic!("expected TurnStarted, got {other:?}"),
         };
 
+        // A substantive turn: some assistant text before it closes.
+        let _ = map_event(
+            &json!({
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "session_1",
+                    "part": { "id": "part_1", "type": "TextPart", "delta": "done" }
+                }
+            }),
+            &mut state,
+        );
+
         let completed = map_event(
             &json!({
                 "type": "session.status",
@@ -517,6 +636,18 @@ mod tests {
             ConversationEvent::TurnStarted { turn_id } => turn_id.clone(),
             other => panic!("expected TurnStarted, got {other:?}"),
         };
+
+        // Substantive content so the close is a real completion, not a decode gap.
+        let _ = map_event(
+            &json!({
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "session_1",
+                    "part": { "id": "part_1", "type": "TextPart", "delta": "answer" }
+                }
+            }),
+            &mut state,
+        );
 
         let completed = map_event(
             &json!({
@@ -739,6 +870,205 @@ mod tests {
             ConversationEvent::TurnUsage { .. }
         ));
         assert!(matches!(mapped.events[2], ConversationEvent::Error { .. }));
+    }
+
+    fn activate(state: &mut ReaderState) {
+        let _ = map_event(
+            &json!({
+                "type": "session.status",
+                "properties": { "sessionID": "session_1", "status": "active" }
+            }),
+            state,
+        );
+    }
+
+    fn go_idle(state: &mut ReaderState, usage: Option<Value>) -> MappedEvent {
+        let mut properties = json!({ "sessionID": "session_1", "status": "idle" });
+        if let Some(usage) = usage {
+            properties["usage"] = usage;
+        }
+        map_event(
+            &json!({ "type": "session.status", "properties": properties }),
+            state,
+        )
+    }
+
+    #[test]
+    fn hollow_idle_close_fails_instead_of_completing() {
+        // opencode said the turn finished (idle), but nothing was ever emitted.
+        // This is the SSE-truncation hollow body: it must fail, never complete.
+        let mut state = ReaderState::new("session_1".to_string());
+        activate(&mut state);
+
+        let closed = go_idle(&mut state, None);
+
+        assert_eq!(closed.events.len(), 3, "TurnCompleted + TurnUsage + Error");
+        assert!(matches!(
+            closed.events[0],
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Failed,
+                ..
+            }
+        ));
+        assert!(matches!(
+            closed.events[1],
+            ConversationEvent::TurnUsage { .. }
+        ));
+        match &closed.events[2] {
+            ConversationEvent::Error { code, .. } => assert_eq!(code, HOLLOW_BODY_CODE),
+            other => panic!("expected hollow-body Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hollow_idle_close_with_output_tokens_is_a_decode_gap() {
+        // Usage claims the model produced output, but no content reached us —
+        // a harness decode gap, reported distinctly from a truly empty turn.
+        let mut state = ReaderState::new("session_1".to_string());
+        activate(&mut state);
+
+        let closed = go_idle(&mut state, Some(json!({ "output_tokens": 42 })));
+
+        match closed.events.last() {
+            Some(ConversationEvent::Error { code, .. }) => assert_eq!(code, DECODE_GAP_CODE),
+            other => panic!("expected decode-gap Error, got {other:?}"),
+        }
+        assert!(matches!(
+            closed.events[0],
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Failed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn tool_only_turn_is_substantive_and_completes() {
+        // A turn that only ran a tool (no prose) still did usable work.
+        let mut state = ReaderState::new("session_1".to_string());
+        activate(&mut state);
+        let _ = map_event(
+            &json!({
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "session_1",
+                    "part": {
+                        "id": "tool_1",
+                        "type": "ToolPart",
+                        "state": "running",
+                        "name": "Bash",
+                        "command": ["echo", "ok"]
+                    }
+                }
+            }),
+            &mut state,
+        );
+
+        let closed = go_idle(&mut state, None);
+
+        assert!(matches!(
+            closed.events[0],
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Completed,
+                ..
+            }
+        ));
+        assert!(
+            !closed
+                .events
+                .iter()
+                .any(|event| matches!(event, ConversationEvent::Error { .. })),
+            "a tool-bearing turn is not hollow"
+        );
+    }
+
+    #[test]
+    fn second_turn_hollowness_is_tracked_independently() {
+        // A substantive turn must not leave the next turn marked substantive.
+        let mut state = ReaderState::new("session_1".to_string());
+        activate(&mut state);
+        let _ = map_event(
+            &json!({
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "session_1",
+                    "part": { "id": "p1", "type": "TextPart", "delta": "hi" }
+                }
+            }),
+            &mut state,
+        );
+        let first = go_idle(&mut state, None);
+        assert!(matches!(
+            first.events[0],
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Completed,
+                ..
+            }
+        ));
+
+        // Second turn produces nothing → hollow.
+        activate(&mut state);
+        let second = go_idle(&mut state, None);
+        match second.events.last() {
+            Some(ConversationEvent::Error { code, .. }) => assert_eq!(code, HOLLOW_BODY_CODE),
+            other => panic!("expected hollow Error on the empty second turn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn close_orphaned_turn_emits_failed_turn_close() {
+        // Pre-content disconnect: turn is open but produced nothing.
+        // close_orphaned_turn gives it a terminal Failed close so the
+        // journal never carries an open turn past a disconnect.
+        let mut state = ReaderState::new("session_1".to_string());
+        activate(&mut state);
+        assert!(state.turn_is_open());
+        assert!(!state.turn_has_content());
+
+        let events = state.close_orphaned_turn();
+
+        assert_eq!(events.len(), 2, "TurnCompleted + TurnUsage");
+        assert!(matches!(
+            events[0],
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Failed,
+                ..
+            }
+        ));
+        assert!(matches!(events[1], ConversationEvent::TurnUsage { .. }));
+        // The turn is no longer open after closing.
+        assert!(!state.turn_is_open());
+    }
+
+    #[test]
+    fn close_orphaned_turn_after_partial_content_still_fails() {
+        // Mid-stream disconnect: turn produced some content, then the
+        // stream died. The partial output does not make the turn
+        // successful — it still closes Failed.
+        let mut state = ReaderState::new("session_1".to_string());
+        activate(&mut state);
+        let _ = map_event(
+            &json!({
+                "type": "message.part.updated",
+                "properties": {
+                    "sessionID": "session_1",
+                    "part": { "id": "p1", "type": "TextPart", "delta": "partial" }
+                }
+            }),
+            &mut state,
+        );
+        assert!(state.turn_is_open());
+        assert!(state.turn_has_content());
+
+        let events = state.close_orphaned_turn();
+
+        assert!(matches!(
+            events[0],
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Failed,
+                ..
+            }
+        ));
     }
 
     #[test]

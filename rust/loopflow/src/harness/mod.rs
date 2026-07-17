@@ -132,6 +132,108 @@ pub fn is_terminal_harness_error(code: &str) -> bool {
     matches!(code, "codex_disconnected" | "opencode_disconnected")
 }
 
+/// A failure whose root cause is a disconnected or truncated stream — the class
+/// that should route to a backup provider rather than blindly retrying the same
+/// one. Covers both the harness's own event-stream drop (`opencode_disconnected`,
+/// session-terminal) and the upstream truncation surfaces (`opencode_hollow_body`,
+/// `opencode_decode_gap`, turn-terminal). The runner records the code from the
+/// trailing `Error` event; the supervisor reads it to decide retry vs. handoff.
+pub(crate) fn is_disconnect_class_failure(code: &str) -> bool {
+    matches!(
+        code,
+        opencode::OPENCODE_DISCONNECTED_CODE
+            | opencode_mapping::HOLLOW_BODY_CODE
+            | opencode_mapping::DECODE_GAP_CODE
+    )
+}
+
+/// Drain events trailing a `TurnCompleted { Failed }` to extract an actionable
+/// error code. The opencode mapping emits `TurnCompleted { Failed }` +
+/// `TurnUsage` + `Error { code }` for hollow-body, decode-gap, and disconnect
+/// failures. The harness sends all three synchronously, so the trailing events
+/// are already in the buffer when the runner processes the `TurnCompleted`.
+/// Returns the best failure reason: the error code/message if found, else the
+/// generic fallback.
+pub(crate) fn drain_turn_failure_reason(
+    event_rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
+    fallback: &str,
+) -> String {
+    let mut reason = fallback.to_string();
+    while let Ok(event) = event_rx.try_recv() {
+        match event {
+            ConversationEvent::Error { code, message } => {
+                reason = format!("{code}: {message}");
+                break;
+            }
+            ConversationEvent::TurnUsage { .. } => continue,
+            other => {
+                tracing::debug!(
+                    event = ?other,
+                    "unexpected event trailing a Failed turn; keeping fallback reason"
+                );
+                break;
+            }
+        }
+    }
+    reason
+}
+
+/// What the runner should do after a body failure, based on whether it's a
+/// disconnect-class failure and whether a backup agent is available.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RecoveryDecision {
+    /// Not a disconnect-class failure — normal failure handling.
+    Normal,
+    /// Hand the next generation to the backup agent. The caller finishes the
+    /// current process, calls `handoff_{task,project}_body`, and returns Ok so
+    /// the supervisor relaunches with the new agent.
+    HandoffToBackup { agent: String, provider: String },
+    /// The turn was replay-safe (no durable side effects) — allow the
+    /// supervisor to respawn the same agent for one bounded retry.
+    AllowRetry,
+    /// Not replay-safe and no backup configured — stop with a non-convergence
+    /// record. Never silently re-run a side-effecting body.
+    Stop,
+}
+
+/// Classify a body failure and decide the recovery path.
+///
+/// `failure_reason` is the string from `drain_turn_failure_reason` (format:
+/// `"code: message"`). `backup_agent` is the wave's configured backup from
+/// GOAL.md frontmatter. `turn_had_durable_side_effect` is true if the failed
+/// turn completed a Command or File tool item (making a same-agent retry
+/// unsafe — the side effect would double-apply).
+pub(crate) fn classify_disconnect_recovery(
+    failure_reason: &str,
+    current_agent: &str,
+    turn_had_durable_side_effect: bool,
+    backup_agent: Option<&str>,
+) -> RecoveryDecision {
+    let code = failure_reason.split(':').next().unwrap_or("").trim();
+
+    if !is_disconnect_class_failure(code) {
+        return RecoveryDecision::Normal;
+    }
+
+    if let Some(backup) = backup_agent {
+        let backup = backup.trim();
+        if !backup.is_empty() && current_agent != backup {
+            let provider = backup.split_once(':').map(|(p, _)| p).unwrap_or(backup);
+            let provider = canonical_harness(provider).unwrap_or(provider);
+            return RecoveryDecision::HandoffToBackup {
+                agent: backup.to_string(),
+                provider: provider.to_string(),
+            };
+        }
+    }
+
+    if !turn_had_durable_side_effect {
+        RecoveryDecision::AllowRetry
+    } else {
+        RecoveryDecision::Stop
+    }
+}
+
 /// What a driver can honestly do, reported per instance so callers degrade
 /// instead of probing vendor behavior out of band.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,6 +380,103 @@ mod tests {
         assert!(!is_terminal_harness_error("opencode_error"));
         // Claude has no session-terminal code: per-turn subprocess.
         assert!(!is_terminal_harness_error("claude_harness_crashed"));
+    }
+
+    #[test]
+    fn disconnect_class_failure_covers_all_three_opencode_codes() {
+        assert!(is_disconnect_class_failure("opencode_disconnected"));
+        assert!(is_disconnect_class_failure("opencode_hollow_body"));
+        assert!(is_disconnect_class_failure("opencode_decode_gap"));
+        // A generic opencode error is not a disconnect-class failure.
+        assert!(!is_disconnect_class_failure("opencode_error"));
+        assert!(!is_disconnect_class_failure("codex_disconnected"));
+    }
+
+    #[test]
+    fn hollow_and_decode_gap_are_turn_terminal_not_session_terminal() {
+        // The hollow-body and decode-gap codes fail the turn, not the session:
+        // the harness process may still be alive (the upstream stream
+        // truncated, not our /event stream). They must NOT register as
+        // session-terminal — that would prevent a same-session retry or
+        // handoff that reuses the opencode server.
+        assert!(!is_terminal_harness_error("opencode_hollow_body"));
+        assert!(!is_terminal_harness_error("opencode_decode_gap"));
+    }
+
+    #[test]
+    fn recovery_classifier_routes_to_backup_when_configured() {
+        let decision = classify_disconnect_recovery(
+            "opencode_disconnected: stream died",
+            "opencode:glm-5.2",
+            false,
+            Some("claude:opus"),
+        );
+        assert_eq!(
+            decision,
+            RecoveryDecision::HandoffToBackup {
+                agent: "claude:opus".to_string(),
+                provider: "claude".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn recovery_classifier_routes_to_backup_even_with_durable_side_effect() {
+        // A durable side effect makes retry unsafe, but the backup is still the
+        // preferred path — it re-reads current state rather than replaying.
+        let decision = classify_disconnect_recovery(
+            "opencode_hollow_body: hollow turn",
+            "opencode:glm-5.2",
+            true,
+            Some("claude:opus"),
+        );
+        assert!(matches!(decision, RecoveryDecision::HandoffToBackup { .. }));
+    }
+
+    #[test]
+    fn recovery_classifier_allows_retry_when_replay_safe_and_no_backup() {
+        let decision = classify_disconnect_recovery(
+            "opencode_disconnected: stream died",
+            "opencode:glm-5.2",
+            false,
+            None,
+        );
+        assert_eq!(decision, RecoveryDecision::AllowRetry);
+    }
+
+    #[test]
+    fn recovery_classifier_stops_when_not_replay_safe_and_no_backup() {
+        let decision = classify_disconnect_recovery(
+            "opencode_hollow_body: hollow turn",
+            "opencode:glm-5.2",
+            true,
+            None,
+        );
+        assert_eq!(decision, RecoveryDecision::Stop);
+    }
+
+    #[test]
+    fn recovery_classifier_skips_backup_already_in_use() {
+        // If the session is already running the backup agent, don't hand off
+        // again (prevents ping-pong). Fall through to replay-safety check.
+        let decision = classify_disconnect_recovery(
+            "opencode_disconnected: stream died",
+            "claude:opus",
+            false,
+            Some("claude:opus"),
+        );
+        assert_eq!(decision, RecoveryDecision::AllowRetry);
+    }
+
+    #[test]
+    fn recovery_classifier_returns_normal_for_non_disconnect_failures() {
+        let decision = classify_disconnect_recovery(
+            "provider turn failed",
+            "opencode:glm-5.2",
+            false,
+            Some("claude:opus"),
+        );
+        assert_eq!(decision, RecoveryDecision::Normal);
     }
 
     #[tokio::test]

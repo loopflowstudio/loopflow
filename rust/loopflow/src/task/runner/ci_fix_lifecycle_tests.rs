@@ -207,6 +207,10 @@ struct PushingHarness {
     store: SharedStore,
     task_id: TaskSessionId,
     lease: ChildWriteLease,
+    /// Provider inputs this body spent. A repair is one turn; a lifecycle step
+    /// taken in its name — a `task_clarify` after a Kickoff-to-Iterate — is a
+    /// second send and nothing else about the Task would show it.
+    sends: Arc<AtomicUsize>,
 }
 
 struct LiveIdleHarness {
@@ -228,6 +232,7 @@ impl ProviderHarness for PushingHarness {
     }
 
     async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+        self.sends.fetch_add(1, Ordering::SeqCst);
         let gh = FakeGh::new(self.gh_dir.clone());
         gh.set_pr(1009, "open", "h2");
         gh.set_checks(
@@ -857,6 +862,50 @@ impl Harness {
             .expect("read reserved task")
             .expect("task exists");
         generation
+    }
+
+    /// Boot a real successor generation and let the production runner drive it
+    /// to its own exit, with a scripted provider whose repair turn pushes a new
+    /// head. Returns the successor generation and how many provider turns the
+    /// body spent.
+    ///
+    /// The whole runner, not a hand-called settlement: the defect this pins is
+    /// an *ordering* between the runner's parent-lifecycle paths and its repair
+    /// exit, so a test that calls `settle_ci_fix_turn` itself asserts the
+    /// ordering it is supposed to prove.
+    async fn run_real_body(&mut self) -> (u32, usize) {
+        let generation = self.crash_and_reserve_successor().await;
+        let sends = Arc::new(AtomicUsize::new(0));
+        let store = self.store.clone();
+        let task_id = self.task.id.clone();
+        let lease = self.lease.clone();
+        let gh_dir = self._guard.state_dir.clone();
+        let creator_store = store.clone();
+        let creator_task_id = task_id.clone();
+        let creator_lease = lease.clone();
+        let creator_sends = sends.clone();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            super::run_task_session_with(
+                store,
+                task_id,
+                &lease,
+                Box::new(move |_name, _approval, events| {
+                    Ok(Box::new(PushingHarness {
+                        events,
+                        gh_dir: gh_dir.clone(),
+                        store: creator_store.clone(),
+                        task_id: creator_task_id.clone(),
+                        lease: creator_lease.clone(),
+                        sends: creator_sends.clone(),
+                    }))
+                }),
+            ),
+        )
+        .await
+        .expect("a bounded ci-fix body must reach its own exit")
+        .expect("the real runner completes and settles the ci-fix turn");
+        (generation, sends.load(Ordering::SeqCst))
     }
 
     async fn command(&self, id: &ChildCommandId) -> ChildCommand {
@@ -1841,33 +1890,15 @@ async fn a_real_ci_fix_turn_preserves_the_gate_cursor_and_settles_its_wake() {
         ChildCommandState::Claimed
     );
 
-    let generation = harness.crash_and_reserve_successor().await;
-    let store = harness.store.clone();
-    let task_id = harness.task.id.clone();
-    let lease = harness.lease.clone();
-    let gh_dir = harness._guard.state_dir.clone();
-    let creator_store = store.clone();
-    let creator_task_id = task_id.clone();
-    let creator_lease = lease.clone();
-    super::run_task_session_with(
-        store.clone(),
-        task_id.clone(),
-        &lease,
-        Box::new(move |_name, _approval, events| {
-            Ok(Box::new(PushingHarness {
-                events,
-                gh_dir: gh_dir.clone(),
-                store: creator_store.clone(),
-                task_id: creator_task_id.clone(),
-                lease: creator_lease.clone(),
-            }))
-        }),
-    )
-    .await
-    .expect("the real runner completes and settles the ci-fix turn");
+    let (generation, sends) = harness.run_real_body().await;
+    assert_eq!(
+        sends, 1,
+        "the repair spends one provider turn, and no gate step"
+    );
 
-    let session = store
-        .get_task_session(&task_id)
+    let session = harness
+        .store
+        .get_task_session(&harness.task.id)
         .await
         .expect("read task")
         .expect("task exists");
@@ -1892,6 +1923,193 @@ async fn a_real_ci_fix_turn_preserves_the_gate_cursor_and_settles_its_wake() {
         harness.command_state(&command).await,
         ChildCommandState::Accepted,
         "settlement terminates the exact wake reclaimed from the predecessor"
+    );
+}
+
+/// One bounded repair turn, driven through the real runner from a given
+/// lifecycle phase, asserting the two properties that make the boundary real:
+/// the parent's cursor is exactly where the repair found it, and the wake
+/// terminalizes once.
+///
+/// `sends` is the load-bearing one and the reason this drives the real runner
+/// rather than calling settlement directly: the Kickoff defect spent a
+/// `task_clarify` turn and left the wake `Claimed`, which every cursor
+/// assertion here would have happily passed. A second send means a parent
+/// lifecycle path ran ahead of the repair's exit.
+async fn a_ci_fix_turn_preserves_the_cursor_of(
+    phase: crate::task::TaskLifecyclePhase,
+    epoch: u32,
+    cursor: u32,
+    iteration: u32,
+) {
+    let mut harness = Harness::new().await;
+    harness.task.lifecycle_phase = phase;
+    harness.task.phase_epoch = epoch;
+    harness.task.phase_cursor = cursor;
+    harness.task.phase_iteration = iteration;
+    harness
+        .store
+        .update_task_session_for_lease(&harness.task, &harness.lease)
+        .await
+        .expect("persist the parent cursor before the repair");
+
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    assert!(
+        harness.arm().await.is_some(),
+        "the predecessor generation claims and arms the wake"
+    );
+
+    let (generation, sends) = harness.run_real_body().await;
+    assert_eq!(
+        sends, 1,
+        "one bounded repair turn; a second send is the lifecycle spending a turn \
+         the repair was never asked for"
+    );
+
+    let session = harness
+        .store
+        .get_task_session(&harness.task.id)
+        .await
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(
+        session.lifecycle_phase, phase,
+        "a repair is not Task progress: the phase is still where the Task stands"
+    );
+    assert_eq!(
+        session.phase_epoch, epoch,
+        "entering another phase would bump the epoch"
+    );
+    assert_eq!(
+        session.phase_cursor, cursor,
+        "the transient playhead never lands in the durable cursor"
+    );
+    assert_eq!(session.phase_iteration, iteration);
+    assert_eq!(session.status, TaskSessionStatus::Waiting);
+    let process = session.latest_process.expect("the successor generation");
+    assert_eq!(process.generation, generation);
+    assert_eq!(process.state, ChildLeaseState::Finished);
+    assert_eq!(
+        process.outcome,
+        Some(crate::child_session::ChildBodyOutcome::Completed)
+    );
+    assert_eq!(
+        harness.command_state(&command).await,
+        ChildCommandState::Accepted,
+        "settlement terminates the exact wake reclaimed from the predecessor"
+    );
+    assert_eq!(
+        harness.ci_fix_commands().await.len(),
+        1,
+        "and no second wake exists to mint a second body"
+    );
+}
+
+/// W2-303 generation 4 reached the real runner from Iterate: durable flow
+/// `task`, transient playhead `ci-fix`. The generic completion path rejected
+/// that playhead against the parent's flow before the repair could settle.
+///
+/// The Gate proof above is not evidence about this one. Each phase reaches the
+/// parent's cursor through a different path, and only running the phase proves
+/// the phase.
+#[tokio::test]
+async fn a_real_ci_fix_turn_preserves_the_iterate_cursor_and_settles_its_wake() {
+    a_ci_fix_turn_preserves_the_cursor_of(crate::task::TaskLifecyclePhase::Iterate, 2, 1, 3).await;
+}
+
+/// W2-309 generation 2 (PR #1062, 2026-07-17) reached the real runner from
+/// Kickoff and failed *silently*: the Kickoff-completion path ran ahead of the
+/// repair's exit, entered Iterate, discarded the `ci-fix` playhead for a fresh
+/// `task` flow, and spent a `task_clarify` turn — leaving the wake `Claimed`
+/// with its incident already stamped `responded_at`.
+///
+/// Nothing rejected anything, which is why this phase needs its own case: the
+/// Iterate and Gate proofs pass with this hole fully present. Kickoff does not
+/// validate the cursor, it replaces it.
+#[tokio::test]
+async fn a_kickoff_ci_fix_turn_settles_before_iterate_and_spends_no_lifecycle_turn() {
+    a_ci_fix_turn_preserves_the_cursor_of(crate::task::TaskLifecyclePhase::Kickoff, 1, 1, 0).await;
+}
+
+/// The parent's interactive rendezvous is the third way a `ci-fix` playhead
+/// reaches the durable cursor, and the quietest: a repair body's boot skips
+/// `reconcile_interactive_rendezvous_at_birth` on purpose, so a prior body's
+/// pending handoff is still open when the repair turn completes — and the park
+/// that handles it records the playhead as the phase's position.
+///
+/// A repair neither opened that rendezvous nor can answer it. It settles and
+/// parks; the handoff stays pending for the next parent body's birth reconcile,
+/// which is the one place allowed to claim its wake exactly once.
+#[tokio::test]
+async fn a_ci_fix_turn_settles_past_a_pending_handoff_it_does_not_own() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    assert!(
+        harness.arm().await.is_some(),
+        "the predecessor generation claims and arms the wake"
+    );
+    let (handoff, created) = harness
+        .store
+        .open_interactive_handoff(crate::interactive_handoff::OpenInteractiveHandoff {
+            parent: crate::interactive_handoff::InteractiveHandoffParent::Task(
+                harness.task.id.clone(),
+            ),
+            home: crate::engine::wave_home::WaveHome::parse("jack@local").unwrap(),
+            cwd: harness.task.worktree.clone(),
+            provider: harness.task.provider.clone(),
+            provider_session_id: None,
+            body_generation: harness.lease.generation,
+            reason: "the parent's iterate step needs an interactive login".to_string(),
+            environment: std::collections::BTreeMap::new(),
+            attach_argv: vec!["tmux".to_string(), "attach".to_string()],
+        })
+        .await
+        .expect("open the parent's handoff");
+    assert!(created);
+
+    let (_, sends) = harness.run_real_body().await;
+    assert_eq!(sends, 1, "the repair still spends exactly one turn");
+
+    assert_eq!(
+        harness.command_state(&command).await,
+        ChildCommandState::Accepted,
+        "the repair reaches its own exit rather than parking on a rendezvous it \
+         cannot answer"
+    );
+    let session = harness
+        .store
+        .get_task_session(&harness.task.id)
+        .await
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(
+        session.lifecycle_phase,
+        crate::task::TaskLifecyclePhase::Iterate
+    );
+    assert_eq!(session.status, TaskSessionStatus::Waiting);
+    assert!(
+        super::parked_on_interactive_handoff(&harness.store, &session)
+            .await
+            .expect("read the handoff"),
+        "and the human's rendezvous is still pending, untouched, for the next \
+         parent body to reconcile at birth"
+    );
+    let handoffs = harness
+        .store
+        .list_interactive_handoffs(Some(
+            &crate::interactive_handoff::InteractiveHandoffParent::Task(harness.task.id.clone()),
+        ))
+        .await
+        .expect("read the handoffs");
+    assert_eq!(handoffs.len(), 1);
+    assert_eq!(handoffs[0].id, handoff.id);
+    assert!(
+        handoffs[0].wake_claimed_by_generation.is_none(),
+        "the repair never claims the wake the parent's birth reconcile owes"
     );
 }
 

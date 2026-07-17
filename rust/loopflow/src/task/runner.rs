@@ -542,7 +542,15 @@ The durable reviewer outcome is:\n{}",
                                 continue 'runner;
                             }
                         }
-                        if flow_turn_active
+                        // A repair never parks on the parent's rendezvous: ci-fix
+                        // boot skips the birth reconcile, so a prior body's
+                        // handoff is still pending here, and parking would write
+                        // the `ci-fix` playhead into the phase's cursor — the
+                        // same rejection by a second route. It stays pending for
+                        // the next parent body, and the exit below parks the Task
+                        // anyway, which is all this park wanted.
+                        if ci_fix_wake.is_none()
+                            && flow_turn_active
                             && status == Lifecycle::Completed
                             && parked_on_interactive_handoff(&store, &session).await?
                         {
@@ -652,6 +660,36 @@ The durable reviewer outcome is:\n{}",
                             }
                             store.finish_task_process(&session, lease).await?;
                             return Ok(());
+                        }
+                        // A ci-fix body is one bounded turn, and this is its exit.
+                        // Standing above the lifecycle loop rather than at its
+                        // tail is the whole fix, and every path below may assume
+                        // no repair body is live — `settle_ci_fix_turn` documents
+                        // why, and why a new lifecycle path belongs below it.
+                        if let Some(wake) = ci_fix_wake.as_ref() {
+                            // The flow ended, or the turn was cut short. Anything
+                            // else is a repair still mid-flow.
+                            if flow_iteration_completed || status == Lifecycle::Interrupted {
+                                let observed_pr = crate::ops::task::reconcile_task_pr_for_lease(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                )
+                                .await
+                                .map_err(|error| anyhow!(error.to_string()))?;
+                                let _ = harness.stop().await;
+                                return settle_ci_fix_turn(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    wake,
+                                    observed_pr.as_ref(),
+                                    iteration_start_head.as_deref(),
+                                    status,
+                                    capture.as_ref(),
+                                )
+                                .await;
+                            }
                         }
                         flow_turn_active = false;
                         loop {
@@ -822,24 +860,6 @@ The durable reviewer outcome is:\n{}",
                             iteration_start_head = observed_pr
                                 .as_ref()
                                 .and_then(|pr| pr.head_sha().map(str::to_string));
-                            // A ci-fix body is one bounded turn, and this is its
-                            // exit. It leaves before rotation, before the gate,
-                            // and before any successor step: those advance the
-                            // Task, and a repair is not Task progress.
-                            if let Some(wake) = ci_fix_wake.as_ref() {
-                                let _ = harness.stop().await;
-                                return settle_ci_fix_turn(
-                                    &store,
-                                    &mut session,
-                                    lease,
-                                    wake,
-                                    observed_pr.as_ref(),
-                                    head_before_turn.as_deref(),
-                                    status,
-                                    capture.as_ref(),
-                                )
-                                .await;
-                            }
                             // Merged, not merely settled: the branch below reports
                             // this PR as merged and waits on its review gate, which
                             // is false of an abandoned one.
@@ -2520,6 +2540,23 @@ enum CiFixVerdict {
 /// The body parks: no gate, no successor step, no PR rotation. A repair pushes to
 /// an existing branch; advancing the Task on its behalf would credit a repair as
 /// progress the Task never made.
+///
+/// **Where the caller must stand.** That last paragraph is only true because the
+/// sole call site sits *above* the runner's parent-lifecycle loop, not at its
+/// tail. Every path in that loop reads, validates, or rewrites a cursor a repair
+/// body does not own: its playhead is `ci-fix` while the phase's flow is
+/// `task-kickoff`, `task`, or `task-gate`. Three phases proved it three
+/// different ways — Gate and Iterate *rejected* the playhead
+/// (W2-280/W2-298, W2-303), and Kickoff silently *replaced* it, spending a
+/// `task_clarify` turn and stranding the wake `Claimed` (W2-309). So a new path
+/// that touches the Task's lifecycle belongs **below** that call; one placed
+/// above re-opens the class, and Kickoff is the proof it re-opens quietly —
+/// it validated nothing, so it survived #1054's cursor guard with a green suite.
+///
+/// This decides *when* a repair ends, never *what* the head deserves:
+/// `decide_open_pr_status` owns the verdict and the wake names its own incident
+/// from [`arm_ci_fix_wake`], so nothing here re-derives "is this failing head
+/// actionable?".
 #[allow(clippy::too_many_arguments)] // capture is a terminal-path output, not a knob
 async fn settle_ci_fix_turn(
     store: &SharedStore,

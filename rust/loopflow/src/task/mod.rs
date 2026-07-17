@@ -282,12 +282,41 @@ impl CiState {
     }
 }
 
+/// The required check `lf pr land` greens itself, by clearing `scratch/`.
+///
+/// See [`CiCheck::land_time_precondition`] for what this class means and the one
+/// rule for admitting a name to it. `crate::ops::land::clear_scratch` is the step
+/// that resolves this check; `land_time_precondition_names_a_real_ci_job` pins
+/// this literal against `.github/workflows/ci.yml`.
+const LAND_TIME_PRECONDITION_CHECK: &str = "scratch-clear";
+
 /// One required check that is not passing, named so the `ci-fix` skill can
 /// resolve the exact failure from its logs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CiCheck {
     pub name: String,
     pub url: Option<String>,
+}
+
+impl CiCheck {
+    /// Whether this check asserts a *land-time precondition* — a condition
+    /// `lf pr land` establishes itself, so no repair turn can green it.
+    ///
+    /// This is the one class of required check a Task body cannot act on.
+    /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
+    /// which is true of every PR carrying its own design doc — i.e. every Task PR
+    /// during kickoff and iterate, by construction — and
+    /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
+    /// body woken to "repair" it could only delete the artifact the reviewer
+    /// reads, to green a check land greens anyway.
+    ///
+    /// A name belongs here only when an `lf pr land` step is what resolves it.
+    /// This is not a catalogue of CI jobs, and it is not a mute button for checks
+    /// that are merely hard to fix: a check anyone *could* fix by changing the
+    /// tree does not belong here, however annoying it is.
+    pub fn land_time_precondition(&self) -> bool {
+        self.name == LAND_TIME_PRECONDITION_CHECK
+    }
 }
 
 /// The required-check reading for one PR head. `head_sha` pins it: a reading is
@@ -315,7 +344,7 @@ impl CiObservation {
     }
 
     /// Whether this reading makes a `ci-fix` wake *legal*: the current head is
-    /// failing a required check.
+    /// failing a required check that a repair turn could actually act on.
     ///
     /// This asks only about legality. Whether a wake has already fired for this
     /// exact failure is a separate question with a separate owner — the durable
@@ -323,8 +352,25 @@ impl CiObservation {
     /// two questions used to be conflated in one mutable JSON marker on this
     /// struct, which meant the wake was deduplicated by a value re-derived on
     /// every reconcile and committed only once a body had already been born.
+    ///
+    /// A head whose failures are *all* land-time preconditions is red and not
+    /// repairable ([`CiCheck::land_time_precondition`]): waking a body there
+    /// spends a full turn on work whose only successful action is destructive.
+    /// The reading still reports the failure — this refuses the wake, it does not
+    /// deny the red — so `lf ci` and `lf task status` are unchanged.
     pub fn wake_legal(&self) -> bool {
-        self.state == CiState::Failing
+        if self.state != CiState::Failing {
+            return false;
+        }
+        // An unnamed failure is one we could not classify, not one proven
+        // harmless, so it still wakes: a filter that swallows unknown failures is
+        // a mute button. Only a non-empty set whose every member land resolves is
+        // provably not a repair.
+        self.failing_checks.is_empty()
+            || self
+                .failing_checks
+                .iter()
+                .any(|check| !check.land_time_precondition())
     }
 }
 
@@ -1581,6 +1627,51 @@ mod tests {
         assert!(!pending.wake_legal());
     }
 
+    /// A head red *only* on a land-time precondition is not a repair a body can
+    /// perform: `lf pr land` clears `scratch/`, and the only action a woken body
+    /// could take is deleting the design doc under review.
+    ///
+    /// The direction that matters is the second half. Suppression fires only when
+    /// every named failure is land-resolved — a real leaf alongside it still
+    /// arms, and an *unnamed* failure still arms, because a filter that swallows
+    /// failures it cannot classify is a mute button rather than a classifier.
+    #[test]
+    fn a_head_red_only_on_a_land_time_precondition_is_not_wakeable() {
+        assert!(!failing("h1", &["scratch-clear"]).wake_legal());
+
+        // A real leaf alongside it is still a repair worth waking for.
+        assert!(failing("h1", &["scratch-clear", "rust-test"]).wake_legal());
+        assert!(failing("h1", &["rust-test"]).wake_legal());
+
+        // Failing with nothing named: unclassified, not proven harmless.
+        assert!(failing("h1", &[]).wake_legal());
+
+        // The reading stays honest — this refuses the wake, it does not deny the
+        // red. Status and `lf ci` still name the failure.
+        let obs = failing("h1", &["scratch-clear"]);
+        assert_eq!(obs.state, super::CiState::Failing);
+        assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);
+    }
+
+    /// The one literal, pinned against the workflow that defines it. A rename of
+    /// the CI job turns this red *at the const* instead of silently re-arming
+    /// wakes in production — the anti-rot guard for a name that cannot be derived.
+    #[test]
+    fn land_time_precondition_names_a_real_ci_job() {
+        let workflow =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/ci.yml");
+        let yaml = std::fs::read_to_string(&workflow)
+            .unwrap_or_else(|e| panic!("read {}: {e}", workflow.display()));
+        let job = format!("\n  {}:", super::LAND_TIME_PRECONDITION_CHECK);
+        assert!(
+            yaml.contains(&job),
+            "no job named `{}` in {} — the const no longer names a real check, so \
+             every design-carrying PR is arming ci-fix wakes again",
+            super::LAND_TIME_PRECONDITION_CHECK,
+            workflow.display()
+        );
+    }
+
     #[test]
     fn ci_fix_restart_bar_permits_only_a_failing_open_pr_wake() {
         let session = task_session(); // status Waiting, no abandon intent
@@ -1600,6 +1691,14 @@ mod tests {
         // Stale reading (observation head != PR head) → fresh_ci None → barred.
         let stale = open_pr("h2", Some(failing("h1", &["build"])));
         assert!(session.ci_fix_restart_bar(Some(&stale)).is_some());
+
+        // Red only on a land-time precondition → no repair exists → barred, and
+        // the automated restart is the one path that could have overridden the
+        // open-PR bar. A real leaf beside it still permits the wake.
+        let land_only = open_pr("h1", Some(failing("h1", &["scratch-clear"])));
+        assert!(session.ci_fix_restart_bar(Some(&land_only)).is_some());
+        let mixed = open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"])));
+        assert!(session.ci_fix_restart_bar(Some(&mixed)).is_none());
 
         // Terminal intent dominates even a legal wake.
         let mut terminal = task_session();

@@ -944,6 +944,22 @@ impl Harness {
         );
     }
 
+    /// The measured shape of a PR carrying its own design doc: every real leaf
+    /// green, red only on `scratch-clear`, and `tests-result` red *solely* as its
+    /// roll-up (`ci.yml` gives it `needs: scratch-clear`). Taken verbatim from
+    /// #1062 at head 904185190 — this Task's own PR, which armed the third wake.
+    fn checks_scratch_clear_only(&self) {
+        self.gh.set_checks(
+            &[("tests-result", "fail")],
+            &[
+                ("tests-result", "fail"),
+                ("scratch-clear", "fail"),
+                ("rust-test", "pass"),
+                ("clippy", "pass"),
+            ],
+        );
+    }
+
     fn checks_pending(&self) {
         self.gh.set_checks(
             &[("tests-result", "pending")],
@@ -1185,6 +1201,85 @@ async fn a_failed_head_wakes_exactly_one_ci_fix_body_and_rearms_until_green() {
             .iter()
             .all(|incident| incident.incident.trigger_command_id.is_some()),
         "every attempt names the command that woke it"
+    );
+}
+
+/// A head red *only* on `scratch-clear` wakes nobody, through the real read path.
+///
+/// `scratch-clear` asserts a land-time precondition: `lf pr land` clears
+/// `scratch/` as its first act, so the check fails on every PR carrying its own
+/// design doc and no repair turn can green it. The only action a woken body could
+/// take is deleting the artifact the reviewer reads. Measured live three times
+/// (ENG-4 #1055, W2-297 #1060, and this Task's own #1062 at 904185190).
+///
+/// Both directions run here, and the second is what keeps this a classifier
+/// rather than a mute button: sabotaging the `wake_legal` clause turns the first
+/// half red while the real-leaf half stays green. A test using a head with a real
+/// failure passes with the bug fully present — which is exactly why this defect
+/// survived two live occurrences before anyone filed it.
+#[tokio::test]
+async fn a_scratch_clear_only_head_arms_no_ci_fix_wake() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_scratch_clear_only();
+
+    assert!(
+        harness.observe().await.is_none(),
+        "a head red only on a land-time precondition enqueues no wake"
+    );
+    assert!(
+        harness.arm().await.is_none(),
+        "and no body is woken to repair what only `lf pr land` can green"
+    );
+    assert!(
+        harness.ci_fix_commands().await.is_empty(),
+        "no ci-fix command exists to be claimed later"
+    );
+
+    // The reading stays honest. This refuses the wake; it does not deny the red.
+    // `lf ci` and `lf task status` still name the failure on this head.
+    let observation = harness
+        .observation()
+        .await
+        .expect("the failing reading still lands");
+    assert_eq!(observation.state, CiState::Failing);
+    let names: Vec<&str> = observation
+        .failing_checks
+        .iter()
+        .map(|check| check.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["scratch-clear"],
+        "the observation reports the real failure; only the repair is refused"
+    );
+
+    // The incident row survives too, and this is the healthy shape rather than a
+    // gap: the head *was* red, and no repair was warranted. A NULL trigger means
+    // nobody was woken, not that a wake was lost.
+    let incidents = harness.incidents().await;
+    assert_eq!(incidents.len(), 1, "the red head still opens an incident");
+    assert_eq!(incidents[0].incident.failure_set, vec!["scratch-clear"]);
+    assert!(
+        incidents[0].incident.trigger_command_id.is_none(),
+        "no command woke for it"
+    );
+
+    // Direction two: a real leaf breaking on the same head still earns exactly
+    // one attributable body. Both, or the fix is a mute button.
+    harness.checks_failing();
+    let (id, created) = harness
+        .observe()
+        .await
+        .expect("an actionable leaf still enqueues a wake");
+    assert!(created, "the real failure mints its own wake");
+    assert_eq!(
+        harness
+            .arm()
+            .await
+            .expect("and wakes a body to repair it")
+            .command_id,
+        id
     );
 }
 

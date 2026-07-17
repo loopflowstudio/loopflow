@@ -247,12 +247,14 @@ fn summarize(incidents: &[CiIncidentDto]) -> CiSummaryDto {
             .filter(|incident| incident.outcome == "blocked")
             .count(),
         // `!human_assisted` alone only says nobody was seen intervening, which is
-        // also true of a green that no `ci-fix` wake repaired.
+        // also true of a green that no `ci-fix` wake repaired. A wake that was
+        // persisted but never serviced did not own the repair either.
         autonomous: incidents
             .iter()
             .filter(|incident| {
                 matches!(incident.outcome.as_str(), "green" | "merged")
                     && incident.trigger_command_id.is_some()
+                    && incident.responded_at.is_some()
                     && !incident.human_assisted
             })
             .count(),
@@ -361,7 +363,7 @@ mod tests {
     use super::{parse_since, percentile, summarize, CiIncidentDto};
     use time::{Duration, OffsetDateTime};
 
-    fn green_incident(trigger: Option<&str>) -> CiIncidentDto {
+    fn green_incident(trigger: Option<&str>, responded: Option<&str>) -> CiIncidentDto {
         CiIncidentDto {
             identity: "github:ci:loopflow:1034".to_string(),
             repo: "loopflow".to_string(),
@@ -378,7 +380,7 @@ mod tests {
             observed_at: "2026-07-16T00:00:00Z".to_string(),
             observer: "poll".to_string(),
             trigger_command_id: trigger.map(str::to_string),
-            responded_at: None,
+            responded_at: responded.map(str::to_string),
             green_at: Some("2026-07-16T00:10:00Z".to_string()),
             merged_at: None,
             blocked_at: None,
@@ -393,17 +395,40 @@ mod tests {
         }
     }
 
-    /// PR #1034: a normal Task body pushed the fix, so no `ci-fix` wake owned the
-    /// repair. Dropping the `trigger_command_id` clause makes this go red; the
-    /// triggered case below still passes, so this is the guard of the pair.
+    /// The first row is PR #1034: a normal Task body pushed the fix, so no `ci-fix`
+    /// wake owned the repair. The second is a green answered by something outside
+    /// the ledger, and it is what pins the `trigger_command_id` clause — #1034 alone
+    /// is excluded by the `responded_at` clause too, so it would pass without it.
     #[test]
     fn an_untriggered_green_is_not_autonomous() {
-        assert_eq!(summarize(&[green_incident(None)]).autonomous, 0);
+        let summary = summarize(&[
+            green_incident(None, None),
+            green_incident(None, Some("2026-07-16T00:05:00Z")),
+        ]);
+        assert_eq!(summary.autonomous, 0);
+    }
+
+    /// A wake persisted but never serviced did not repair anything.
+    #[test]
+    fn a_triggered_but_unanswered_green_is_not_autonomous() {
+        assert_eq!(
+            summarize(&[green_incident(Some("cc_1018"), None)]).autonomous,
+            0
+        );
+    }
+
+    /// A serviced wake still does not own a repair a human was in the loop for.
+    #[test]
+    fn a_human_assisted_green_is_not_autonomous() {
+        let mut incident = green_incident(Some("cc_1018"), Some("2026-07-16T00:05:00Z"));
+        incident.human_assisted = true;
+        assert_eq!(summarize(&[incident]).autonomous, 0);
     }
 
     #[test]
-    fn a_triggered_green_is_autonomous() {
-        assert_eq!(summarize(&[green_incident(Some("cc_1018"))]).autonomous, 1);
+    fn a_triggered_and_answered_green_is_autonomous() {
+        let incident = green_incident(Some("cc_1018"), Some("2026-07-16T00:05:00Z"));
+        assert_eq!(summarize(&[incident]).autonomous, 1);
     }
 
     #[test]

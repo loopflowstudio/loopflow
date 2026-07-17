@@ -1225,3 +1225,57 @@ h3:hover .anchor-link,
         min-width: 160px;
     }
 }
+
+/* Story section (homepage) */
+.story-section {
+    padding: 5rem 0;
+}
+
+.story-container {
+    max-width: 680px;
+}
+
+.story-section h2 {
+    margin-bottom: 1.5rem;
+}
+
+.story-paragraph {
+    font-size: 1.125rem;
+    line-height: 1.7;
+    margin-bottom: 1.25rem;
+    color: var(--text-secondary, inherit);
+}
+
+.story-link {
+    margin-top: 1.5rem;
+    font-weight: 500;
+}
+
+/* Terminal showcase (homepage) */
+.terminal-section {
+    padding: 4rem 0;
+}
+
+.terminal-showcase {
+    max-width: 680px;
+}
+
+.terminal-showcase h2 {
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+
+/* Story page */
+.story-page {
+    max-width: 680px;
+    margin: 0 auto;
+}
+
+/* Mac app option (download page) */
+.mac-app-option {
+    margin-top: 2.5rem;
+}
+
+.mac-app-option .btn {
+    margin-top: 0.75rem;
+}

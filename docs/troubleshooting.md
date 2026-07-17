@@ -1,8 +1,3 @@
----
-layout: default
-title: Troubleshooting
----
-
 # Troubleshooting
 
 Common issues and solutions.

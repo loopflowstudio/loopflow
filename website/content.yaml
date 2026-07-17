@@ -3,34 +3,52 @@
 
 homepage:
   hero:
-    tagline: "Coding agents that work in a team and build over time."
+    tagline: "Persistent agents, no server. Built by one person who runs them all day."
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
-  video:
-    poster: "/static/loopflow-main.png"
-    src: null
+  story:
+    heading: "Built on itself"
+    paragraphs:
+      - >-
+        Loopflow is how one person runs a fleet of coding agents: waves that
+        hold a goal, remember what they learn, and stay steerable while they
+        work. It is developed by its own waves, and the release notes read
+        like a lab notebook because they are one.
+      - >-
+        It has been an agent wrapper, a daemon, a distributed system. Each
+        version got smaller where it mattered — v0.11 deleted the server
+        entirely. What's left is one binary whose verbs humans type and
+        agents call on each other.
+      - >-
+        It isn't chasing installs. It's a daily instrument, documented well
+        enough that you can play it too.
+    link_label: "Read the full story"
+    link_href: "/story"
 
-  install:
-    command_display: |
-      curl -fsSL https://loopflow.studio/install.sh | sh
-      lf init
-    command_copy: "curl -fsSL https://loopflow.studio/install.sh | sh && lf init"
-
-  capabilities:
-    heading: "Built for teams of agents, not one-shot chats."
+  pillars:
+    heading: "What that pressure produced"
     items:
-      - title: "Persistent memory across runs"
-        description: "Each wave keeps a memory its agent writes as it works — so it builds on what it learned, not just what you typed."
-      - title: "Prompt files you can diff"
-        description: "Skills, directions, and goals live in your repo, so prompt changes get reviewed like code."
-      - title: "Delegation you can watch"
-        description: "A wave directs Projects and Tasks; each Task keeps one steerable Session and one PR through merge."
-      - title: "From manual to autonomous"
-        description: "Run a wave by hand, or let it loop — picking work, reacting to merges, firing on a schedule."
-      - title: "Human control at shipping time"
-        description: "Agents do the work; you decide whether to ship, iterate, or branch."
-      - title: "Works across surfaces"
-        description: "The same wave runs in the terminal, headless automation, and Loopflow with context intact."
+      - title: "Agents launch agents"
+        description: >-
+          lf is the API. A wave delegates work with `lf task run`, redirects
+          it mid-turn with `lf task steer`, and proves the redirect landed
+          with a receipt. No SDK — the same binary you type.
+      - title: "No server"
+        description: >-
+          State is a local SQLite store and append-only journals; shared
+          truth is Linear and GitHub; machines reach each other over SSH with
+          credentials that die with the process. Deployable across a company
+          with nothing central to run.
+      - title: "A fleet on one screen"
+        description: >-
+          `lf roadmap` buckets every open task by what it needs from you.
+          Trace what any agent was told, what it spent, and what it shipped.
+          The Mac app renders the same JSON the CLI reads.
+      - title: "Waves remember"
+        description: >-
+          A goal you write once, in your repo, reviewed like code. Memory the
+          wave writes as it works, with every claim drillable to its
+          evidence.
 
   building_blocks:
     heading: "Building blocks"
@@ -71,40 +89,29 @@ homepage:
           - Prefer explicit data flow to hidden magic
           - Ship complete milestones, not partial layers
       - label: "A flow"
-        filename: ".lf/flows/ship-wave.yaml"
+        filename: ".lf/flows/ship.yaml"
         content: |
-          skills:
-            - design
-            - implement
-            - review
-            - polish
+          - design
+          - implement
+          - review
+          - polish
 
-  products:
-    heading: "Free and open source"
-    loopflow:
-      name: "Loopflow"
-      note: "Mac and iOS"
-      description: "Visual podium for running waves across branches and repos."
-      image: "/static/loopflow-main.png"
-      image_alt: "Loopflow showing active and idle waves"
-      details:
-        - "Stay creative — interactive sessions where you play the lead part, not approve permissions"
-        - "Arrange the symphony — create, configure, and launch waves visually"
-        - "Maintain focus — easily find where your attention is most needed"
-    cli:
-      name: "CLI"
-      note: "One local command"
-      description: "Manage prompts, context, Waves, Projects, and Tasks with `lf`."
-      details:
-        - "Run one resident Wave process with its own listener and memory"
-        - "Keep Project and Task lifecycle state in local SQLite"
-        - "Connect provider accounts directly with `lf auth`"
-      terminal_lines:
-        - type: "command"
-          content: "lf wave billing"
-        - type: "output"
-          content: "wave agent · reading GOAL.md + MEMORY.md"
-        - type: "output"
-          content: "dispatch · worker: build \"generate invoices\""
-        - type: "output"
-          content: "session billing-w3 · tmux attach -r -t billing-w3"
+  terminal:
+    heading: "Watch it work"
+    lines:
+      - type: "command"
+        content: "lf wave billing"
+      - type: "output"
+        content: "wave billing · reading GOAL.md + MEMORY.md"
+      - type: "output"
+        content: "task BIL-41 · lf task run · worktree app.bil-41"
+      - type: "command"
+        content: "lf chat --steer \"invoices first\""
+      - type: "output"
+        content: "steer queued → incorporated (receipt cmd_9f2)"
+
+  install:
+    command_display: |
+      curl -fsSL https://loopflow.studio/install.sh | sh
+      lf init
+    command_copy: "curl -fsSL https://loopflow.studio/install.sh | sh && lf init"

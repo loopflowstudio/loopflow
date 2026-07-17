@@ -1,69 +1,71 @@
-from playwright.sync_api import Page
+"""Homepage structure tests.
 
-TAGLINE = "Coding agents that work in a team and build over time."
-LOOPFLOW_DMG_URL = "https://downloads.loopflow.studio/Loopflow-latest.dmg"
+These pin structure — sections exist, links resolve, assets load — not copy.
+Copy lives in content.yaml and should be editable without touching tests.
+"""
+
+from playwright.sync_api import Page
 
 
 def test_hero_elements_visible(homepage: Page):
     assert homepage.locator("h1", has_text="Loopflow").is_visible()
-    assert homepage.locator(".tagline", has_text=TAGLINE).is_visible()
+    tagline = homepage.locator(".hero .tagline")
+    assert tagline.is_visible()
+    assert tagline.text_content().strip()
 
 
-def test_tagline(homepage: Page):
-    assert homepage.locator(".tagline", has_text=TAGLINE).is_visible()
+def test_hero_ctas(homepage: Page):
+    hero = homepage.locator(".hero")
+    ctas = hero.locator("a.btn")
+    assert ctas.count() >= 2
+    hrefs = [ctas.nth(i).get_attribute("href") for i in range(ctas.count())]
+    assert "/docs" in hrefs
+    assert "/download" in hrefs
 
 
-def test_download_loopflow_cta(homepage: Page):
-    cta = homepage.locator(".hero a", has_text="Download for Mac").first
-    assert cta.is_visible()
-    assert cta.get_attribute("href") == LOOPFLOW_DMG_URL
-
-
-def test_docs_cta_navigates_to_docs(homepage: Page):
-    homepage.locator(".hero a", has_text="Read the docs").first.click()
-    assert "/docs" in homepage.url
-
-
-def test_hero_video(homepage: Page):
-    section = homepage.locator(".hero-video-section")
+def test_story_section(homepage: Page):
+    section = homepage.locator(".story-section")
     assert section.is_visible()
-    assert section.locator("video.demo-video").is_visible()
-    assert (
-        section.locator("video.demo-video").get_attribute("poster") == "/static/loopflow-main.png"
-    )
+    assert section.locator(".story-paragraph").count() >= 1
+    link = section.locator(".story-link a")
+    assert link.get_attribute("href") == "/story"
 
 
-def test_capabilities_section(homepage: Page):
+def test_pillars_section(homepage: Page):
     section = homepage.locator(".capabilities-section")
     assert section.is_visible()
-    assert section.locator(".capability-item").count() == 6
+    items = section.locator(".capability-item")
+    assert items.count() >= 3
+    for i in range(items.count()):
+        assert items.nth(i).locator("h3").text_content().strip()
 
 
 def test_building_blocks(homepage: Page):
     section = homepage.locator(".building-blocks-section")
     assert section.is_visible()
-    assert section.locator(".code-block").count() == 4
+    assert section.locator(".code-block").count() >= 1
 
 
-def test_products_section(homepage: Page):
-    section = homepage.locator(".products-section")
+def test_terminal_section(homepage: Page):
+    section = homepage.locator(".terminal-section")
     assert section.is_visible()
-    assert section.locator(".product-card").count() == 2
-    assert section.locator("h3", has_text="Loopflow").is_visible()
-    assert section.locator("h3", has_text="CLI").is_visible()
+    assert section.locator(".terminal-line").count() >= 1
 
 
 def test_no_legacy_homepage_sections(homepage: Page):
-    assert homepage.locator(".variant-toggle").count() == 0
+    assert homepage.locator(".hero-video-section").count() == 0
+    assert homepage.locator(".products-section").count() == 0
     assert homepage.locator(".vocab-section").count() == 0
-    assert homepage.locator(".paired-panel").count() == 0
-    assert homepage.locator(".properties-section").count() == 0
-    assert homepage.locator(".use-cases-section").count() == 0
+    assert homepage.locator("form").count() == 0  # no waitlist
 
 
-def test_copy_button_exists(homepage: Page):
-    copy_btn = homepage.locator(".copy-btn").first
-    assert copy_btn.is_visible()
+def test_homepage_images_resolve(homepage: Page, base_url: str):
+    imgs = homepage.locator("main img, nav img")
+    for i in range(imgs.count()):
+        src = imgs.nth(i).get_attribute("src")
+        assert src, "image without src"
+        response = homepage.request.get(f"{base_url}{src}" if src.startswith("/") else src)
+        assert response.ok, f"image {src} does not resolve"
 
 
 def test_install_code_in_bottom_cta(homepage: Page):
@@ -71,13 +73,7 @@ def test_install_code_in_bottom_cta(homepage: Page):
     assert bottom_cta.is_visible()
     install_code = bottom_cta.locator(".install-code code").first
     assert "loopflow.studio/install.sh" in install_code.text_content()
-
-
-def test_bottom_cta_has_download_and_docs(homepage: Page):
-    bottom_cta = homepage.locator(".quick-install")
-    assert bottom_cta.is_visible()
-    assert bottom_cta.locator("a", has_text="Download for Mac").is_visible()
-    assert bottom_cta.locator("a", has_text="Read the docs").is_visible()
+    assert bottom_cta.locator(".copy-btn").first.is_visible()
 
 
 def test_landing_variant_url_returns_404(page: Page, base_url: str):
@@ -86,9 +82,22 @@ def test_landing_variant_url_returns_404(page: Page, base_url: str):
     assert response.status == 404
 
 
-def test_agents_redirect_to_docs(page: Page, base_url: str):
+def test_legacy_redirects(page: Page, base_url: str):
     page.goto(f"{base_url}/agents")
     assert "/docs" in page.url
+    page.goto(f"{base_url}/team")
+    assert page.url == f"{base_url}/story"
+    page.goto(f"{base_url}/loopflow")
+    assert page.url == f"{base_url}/download"
+
+
+def test_llms_txt(page: Page, base_url: str):
+    response = page.goto(f"{base_url}/llms.txt")
+    assert response is not None
+    assert response.status == 200
+    body = response.text()
+    assert "/docs" in body
+    assert "install.sh" in body
 
 
 def test_mobile_nav_visible(page: Page, base_url: str):

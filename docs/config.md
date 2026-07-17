@@ -1,8 +1,3 @@
----
-layout: default
-title: Configuration
----
-
 # Configuration
 
 Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo config (`.lf/config.yaml`). Precedence: CLI flags > repo config > global config.

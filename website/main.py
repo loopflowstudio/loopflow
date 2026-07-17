@@ -7,7 +7,6 @@ from fasthtml.common import *
 from starlette.responses import PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
-from db import add_to_waitlist, init_db
 from internal_pages import colors_page, design_page, fonts_page
 
 app, rt = fast_app(
@@ -22,7 +21,6 @@ app, rt = fast_app(
             rel="stylesheet",
             href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
         ),
-        Script(src="https://unpkg.com/htmx.org@1.9.10"),
         Link(rel="stylesheet", href="/static/style.css"),
     ),
 )
@@ -49,7 +47,7 @@ def Navbar():
             ),
             Ul(
                 Li(A("Docs", href="/docs")),
-                Li(A("Team", href="/team")),
+                Li(A("Story", href="/story")),
                 Li(
                     A(
                         "GitHub",
@@ -90,25 +88,12 @@ def SiteFooter():
             ),
             Div(
                 A("Docs", href="/docs"),
+                A("Story", href="/story"),
                 A("GitHub", href="https://github.com/loopflowstudio/loopflow"),
                 cls="footer-links",
             ),
             cls="container",
         ),
-    )
-
-
-def TeamCard(name: str, title: str, bio: str, image_src: str | None = None):
-    photo = Img(src=image_src, alt=name, cls="team-photo") if image_src else None
-    return Div(
-        photo,
-        Div(
-            H3(name),
-            P(title, cls="team-title"),
-            P(bio, cls="team-bio"),
-            cls="team-card-body",
-        ),
-        cls="team-card",
     )
 
 
@@ -151,84 +136,8 @@ def CodeBlock(filename: str, content: str):
     )
 
 
-CHEVRON_SVG = '<svg class="term-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 9l-7 7-7-7" /></svg>'
-VOCAB_ACCORDION_SCRIPT = """
-    document.querySelectorAll('.vocab-grid').forEach(grid => {
-        grid.addEventListener('toggle', event => {
-            if (!event.target.open) return;
-            grid.querySelectorAll('details').forEach(card => {
-                if (card !== event.target) card.open = false;
-            });
-        }, true);
-    });
-"""
-
-
-def TermCard(number: str, name: str, icon_svg: str, essence: str, details: list[tuple[str, str]]):
-    """Vocabulary card with expandable details."""
-    summary_content = [
-        Span(number, cls="term-number"),
-        NotStr(f'<div class="term-icon" aria-hidden="true">{icon_svg}</div>'),
-        H3(name),
-        P(essence, cls="term-essence"),
-        NotStr(CHEVRON_SVG),
-    ]
-    detail_items = [
-        Div(
-            Div(label, cls="term-detail-label"),
-            Div(content, cls="term-detail-text"),
-            cls="term-detail-item",
-        )
-        for label, content in details
-    ]
-
-    return Details(
-        Summary(*summary_content),
-        Div(*detail_items, cls="term-details-content"),
-        cls="term-card",
-    )
-
-
-def DemoVideo(poster: str, src: str | None = None, cls: str = "demo-video"):
-    attrs = {
-        "poster": poster,
-        "autoplay": True,
-        "muted": True,
-        "loop": True,
-        "playsinline": True,
-        "preload": "none",
-        "cls": cls,
-        "aria-hidden": "true",
-    }
-    if src:
-        attrs["data-src"] = src
-    return Video(**attrs)
-
-
 def CapabilityItem(title: str, description: str):
-    return Div(H3(title), P(description), cls="capability-item")
-
-
-def _detail_li(text: str):
-    if " — " in text:
-        bold, rest = text.split(" — ", 1)
-        return Li(Strong(bold), f" — {rest}")
-    return Li(text)
-
-
-def ProductCard(
-    name: str, description: str, details: list[str], image_content, note: str | None = None
-):
-    header = [H3(name)]
-    if note:
-        header.append(Span(note, cls="product-note"))
-    return Div(
-        image_content,
-        Div(*header, cls="product-card-header"),
-        P(description),
-        Ul(*[_detail_li(detail) for detail in details]),
-        cls="product-card",
-    )
+    return Div(H3(title), P(render_inline(description)), cls="capability-item")
 
 
 # Load content from YAML (edit content.yaml, not this file)
@@ -247,22 +156,22 @@ def _require_content_path(path: str) -> object:
 
 # Homepage
 HERO_CONTENT = _require_content_path("homepage.hero")
-VIDEO_CONTENT = _require_content_path("homepage.video")
-INSTALL_CONTENT = _require_content_path("homepage.install")
-CAPABILITIES_CONTENT = _require_content_path("homepage.capabilities")
+STORY_CONTENT = _require_content_path("homepage.story")
+PILLARS_CONTENT = _require_content_path("homepage.pillars")
 BUILDING_BLOCKS_CONTENT = _require_content_path("homepage.building_blocks")
-PRODUCTS_CONTENT = _require_content_path("homepage.products")
+TERMINAL_CONTENT = _require_content_path("homepage.terminal")
+INSTALL_CONTENT = _require_content_path("homepage.install")
 
 for required_key in (
     "homepage.hero.tagline",
     "homepage.hero.loopflow_download_url",
-    "homepage.video.poster",
+    "homepage.story.paragraphs",
+    "homepage.story.link_href",
+    "homepage.pillars.items",
+    "homepage.building_blocks.items",
+    "homepage.terminal.lines",
     "homepage.install.command_display",
     "homepage.install.command_copy",
-    "homepage.capabilities.items",
-    "homepage.building_blocks.items",
-    "homepage.products.loopflow",
-    "homepage.products.cli",
 ):
     _require_content_path(required_key)
 
@@ -270,6 +179,7 @@ for required_key in (
 
 DOCS_DIR = Path(__file__).parent / "docs"
 CANONICAL_DOCS_DIR = Path(__file__).parent.parent / "docs"
+STORY_FILE = Path(__file__).parent / "story.md"
 
 
 def slugify(text: str) -> str:
@@ -283,9 +193,11 @@ def slugify(text: str) -> str:
 
 DOCS_NAV = [
     ("Home", "index"),
-    ("Waves", "waves"),
-    ("Wave Authoring", "wave-authoring"),
     ("Get Started", "getting-started"),
+    ("Waves", "waves"),
+    ("The Agent API", "agent-api"),
+    ("The Fleet", "fleet"),
+    ("Architecture", "architecture"),
     # Reference
     ("lf", "lf"),
     ("lf ops", "ops"),
@@ -295,61 +207,56 @@ DOCS_NAV = [
 
 
 def generate_llms_txt() -> str:
-    """Generate machine-readable doc summary for /llms.txt"""
-    return """# Loopflow
-> Living software, conducted by you. Waves of autonomous work that remember, react, and adapt.
+    """Generate machine-readable doc summary for /llms.txt from the docs nav."""
+    doc_lines = "\n".join(
+        f"/docs/{slug}".ljust(24) + title if slug != "index" else "/docs".ljust(24) + title
+        for title, slug in DOCS_NAV
+    )
+    return f"""# Loopflow
+> Persistent agents, no server. Waves hold a goal, remember what they learn, and stay steerable.
 
 ## What is Loopflow?
-Loopflow builds living codebases. Waves — persistent units of autonomous work — loop through your code,
-remember what they learn (via MEMORY.md), react to file changes and other waves, and adapt their prompts
-to the surface (terminal, desktop, mobile). You control context and quality through composable building blocks.
+Loopflow creates and runs Waves — persistent agents that work toward an outcome.
+A Wave coordinates Linear-backed Projects and Tasks, keeps one steerable
+conversation beside the live work map, and folds what it learns into memory.
+Everything is one binary: lf is the command humans type and the API agents call
+to launch, steer, and observe other agents. There is no server — state lives in
+a local SQLite store and append-only journals, shared truth lives in Linear and
+GitHub, and remote machines are reached over SSH.
 
 ## Install
 curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 
 ## Commands
-lf <skill>           Run a skill (design, implement, review, etc.)
-lf debug -c         Fix error from clipboard
-lf pr open          Create PR from current branch
-lf wave X            Start Wave X's resident loop
-lf chat -w X "..."  Post into wave X's thread
-lf project run ID   Start or resume one Linear Project Session
-lf task start "X" --project ID   Create a Linear Task, then run its Session
-lf task steer ID "..."           Redirect that Task Session
-lf wt create X      Low-level worktree primitive for explicit Git work
+lf <skill>            Run a skill (design, implement, gate, debug, ...)
+lf debug -c           Fix an error from the clipboard
+lf wave X             Start Wave X's resident process
+lf chat --steer "..." Steer the live wave body (humans)
+lf radio pub/sub      Agent-to-agent bus; publish is an INSERT, no broker
+lf task run ID        Start a durable Task Session from a Linear issue
+lf task steer ID ".." Redirect a running Task; receipts prove incorporation
+lf roadmap            Every open Task across every wave, bucketed by need
+lf status <wave>      One wave's live Project → Task hierarchy
+lf trace / lf context What an agent did, and exactly what it was told
+Every read surface takes --json.
 
 ## Core Concepts
-Wave: a named agent with a goal. Authored as wave/<name>/GOAL.md (intent + loop
-  prompt) and wave/<name>/MEMORY.md (durable memory the agent writes).
-Wave agent: coordinates — reads roadmap and memory, decides the next move,
-  directs Project and Task Sessions, then folds results back into memory. It
-  does not own a delivery worktree.
-Project: one measured Linear-backed bet under a Wave. Its Session pursues KRs
-  across Tasks without owning a worktree or PR.
-Task: one concrete Linear issue. Its Session owns the only delivery worktree,
-  provider history, controls, and PR through merge or abandonment.
-Worker: a cooperating provider exec inside one Task worktree; never an
-  independent planning noun or worktree owner.
+Wave: a named agent with a goal — wave/<name>/GOAL.md (intent + loop prompt)
+  and wave/<name>/MEMORY.md (durable memory the wave writes).
+Project: one measured Linear-backed bet under a Wave; pursues KRs, owns no worktree.
+Task: one concrete Linear issue; its Session owns the only delivery worktree
+  and advances through serial PRs to main.
+Home: where a wave's work executes — owner plus location, local or ssh://.
 Skill: a prompt that runs a coding agent. Flow: a sequence of skills.
-Direction: composable quality definitions that shape agent judgment.
-Roadmap: the wave's work queue, provider-backed (e.g. Linear).
+Direction: composable quality intents that shape agent judgment.
 
 ## Docs
-/docs              Overview and quick start
-/docs/waves        Waves, Projects, Tasks, and memory
-/docs/lf           lf command reference
-/docs/ops          lf operations reference
-/docs/config       Configuration options
-
-## Configuration
-Config file: .lf/config.yaml
-Skills: .lf/skills/*.md or .claude/commands/*.md
-Directions: .lf/directions/*.md
-Memory: wave/*/MEMORY.md (per-wave, auto-managed)
+{doc_lines}
 
 ## Links
 GitHub: https://github.com/loopflowstudio/loopflow
 Docs: https://loopflow.studio/docs
+Story: https://loopflow.studio/story
 """
 
 
@@ -471,7 +378,11 @@ def render_markdown(content: str) -> list:
 
         # Paragraphs
         if line.strip():
-            para_lines = []
+            # Always consume the current line: a prose line may contain "|"
+            # (it wasn't a table — that case is handled above) and must not
+            # stall the loop.
+            para_lines = [line]
+            i += 1
             while (
                 i < len(lines)
                 and lines[i].strip()
@@ -506,6 +417,8 @@ def render_inline(text: str) -> NotStr:
         label, href = m.group(1), m.group(2)
         if href.endswith(".md") and not href.startswith(("http", "/")):
             href = "/docs/" + href
+        elif ".md#" in href and not href.startswith(("http", "/")):
+            href = "/docs/" + href.replace(".md#", "#")
         return f'<a href="{href}">{label}</a>'
 
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", fix_link, text)
@@ -549,77 +462,29 @@ def load_doc(slug: str) -> str:
 
 # Pages
 
-# SVG icons (shared across sections)
-_ICON_BOLT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>'
-_ICON_SWAP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>'
-_ICON_LOOP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>'
-
-HOMEPAGE_VIDEO_BEHAVIOR_SCRIPT = """
-    document.addEventListener('DOMContentLoaded', () => {
-        const videos = document.querySelectorAll('video[data-src]');
-        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-        if (prefersReducedMotion) {
-            document.querySelectorAll('video[autoplay]').forEach((video) => {
-                video.removeAttribute('autoplay');
-                video.pause();
-            });
-        }
-
-        if (!videos.length) return;
-
-        if (!('IntersectionObserver' in window)) {
-            videos.forEach((video) => {
-                if (!video.getAttribute('src')) {
-                    video.src = video.dataset.src;
-                }
-            });
-            return;
-        }
-
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach((entry) => {
-                if (!entry.isIntersecting) return;
-                const video = entry.target;
-                if (!video.getAttribute('src')) {
-                    video.src = video.dataset.src;
-                }
-                observer.unobserve(video);
-            });
-        }, { rootMargin: '200px' });
-        videos.forEach((video) => observer.observe(video));
-    });
-"""
-
 
 def build_homepage():
     loopflow_download_url = HERO_CONTENT["loopflow_download_url"]
     install_display = INSTALL_CONTENT["command_display"].strip()
     install_copy = INSTALL_CONTENT["command_copy"]
-    capability_items = CAPABILITIES_CONTENT["items"]
+    story_paragraphs = STORY_CONTENT["paragraphs"]
+    pillar_items = PILLARS_CONTENT["items"]
     building_blocks = BUILDING_BLOCKS_CONTENT["items"]
-
-    loopflow_product = PRODUCTS_CONTENT["loopflow"]
-    cli_product = PRODUCTS_CONTENT["cli"]
-    cli_terminal_lines = [
-        (line["type"], line["content"]) for line in cli_product["terminal_lines"]
-    ]
-
-    video_src = VIDEO_CONTENT.get("src") or None
+    terminal_lines = [(line["type"], line["content"]) for line in TERMINAL_CONTENT["lines"]]
 
     return (
         Title("Loopflow — Living software, conducted by you"),
         SkipLink(),
         Navbar(),
         Main(
-            # Hero — tight: logo, headline, tagline, CTAs
+            # Hero — logo, headline, tagline, CTAs
             Section(
                 Div(
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo-large"),
                     H1("Loopflow"),
                     P(HERO_CONTENT["tagline"], cls="tagline"),
                     Div(
-                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
+                        A("Install", href="/download", cls="btn btn-primary"),
                         A("Read the docs", href="/docs", cls="btn btn-secondary"),
                         cls="btn-group hero-actions",
                     ),
@@ -627,22 +492,30 @@ def build_homepage():
                 ),
                 cls="hero",
             ),
-            # Demo visual — immediately after hero
+            # The story — the narrative leads
             Section(
                 Div(
-                    DemoVideo(VIDEO_CONTENT["poster"], src=video_src),
-                    cls="container",
+                    H2(STORY_CONTENT["heading"]),
+                    *[P(p, cls="story-paragraph") for p in story_paragraphs],
+                    P(
+                        A(
+                            STORY_CONTENT["link_label"] + " →",
+                            href=STORY_CONTENT["link_href"],
+                        ),
+                        cls="story-link",
+                    ),
+                    cls="container story-container",
                 ),
-                cls="hero-video-section",
+                cls="story-section",
             ),
-            # Capabilities — 2-col grid
+            # Pillars — what the pressure produced
             Section(
                 Div(
-                    H2(CAPABILITIES_CONTENT["heading"]),
+                    H2(PILLARS_CONTENT["heading"]),
                     Div(
                         *[
                             CapabilityItem(item["title"], item["description"])
-                            for item in capability_items
+                            for item in pillar_items
                         ],
                         cls="capabilities-grid",
                     ),
@@ -667,47 +540,28 @@ def build_homepage():
                 ),
                 cls="building-blocks-section",
             ),
-            # Products — 2-col grid
+            # Terminal — watch it work
             Section(
                 Div(
-                    H2(PRODUCTS_CONTENT["heading"]),
-                    Div(
-                        ProductCard(
-                            loopflow_product["name"],
-                            loopflow_product["description"],
-                            loopflow_product["details"],
-                            Img(
-                                src=loopflow_product["image"],
-                                alt=loopflow_product["image_alt"],
-                            ),
-                            note=loopflow_product.get("note"),
-                        ),
-                        ProductCard(
-                            cli_product["name"],
-                            cli_product["description"],
-                            cli_product["details"],
-                            TerminalBlock(cli_terminal_lines),
-                            note=cli_product.get("note"),
-                        ),
-                        cls="two-products",
-                    ),
-                    cls="container",
+                    H2(TERMINAL_CONTENT["heading"]),
+                    TerminalBlock(terminal_lines),
+                    cls="container terminal-showcase",
                 ),
-                cls="products-section",
+                cls="terminal-section",
             ),
-            # Bottom CTA — download + CLI install
+            # Bottom CTA — CLI install + Mac app
             Section(
                 Div(
-                    Div(
-                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
-                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                        cls="hero-actions",
-                    ),
-                    H2("Or install the CLI", cls="quick-install-heading"),
+                    H2("Install the CLI", cls="quick-install-heading"),
                     Div(
                         Pre(Code(install_display), cls="install-code", tabindex="0"),
                         CopyButton(install_copy),
                         cls="install-code-wrapper",
+                    ),
+                    Div(
+                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-secondary"),
+                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
+                        cls="hero-actions",
                     ),
                     cls="container",
                 ),
@@ -716,7 +570,6 @@ def build_homepage():
             id="main-content",
         ),
         SiteFooter(),
-        Script(HOMEPAGE_VIDEO_BEHAVIOR_SCRIPT),
     )
 
 
@@ -741,130 +594,14 @@ def get():
 
 @rt("/products")
 def get():
-    # Redirect /products to home for now
+    # Redirect /products to home
     return RedirectResponse("/", status_code=302)
-
-
-# Loopflow runtime concepts (Triggers, Loops, Subscriptions)
-LOOPFLOW_VOCAB_ESSENCES = {
-    "Trigger": "What starts an agent",
-    "Loop": "What keeps it going",
-    "Subscription": "What connects them",
-}
-
-LOOPFLOW_VOCAB_DETAILS = {
-    "Trigger": [
-        ("Manual", "Button click or command"),
-        ("File change", "Watch and respond"),
-        ("Schedule", "Cron-style timing"),
-    ],
-    "Loop": [
-        ("Goal-driven", "Runs until done"),
-        ("Interruptible", "Pause, inspect, resume"),
-    ],
-    "Subscription": [
-        ("Agent → Agent", "Output triggers input"),
-        ("Broadcast", "One event, many agents"),
-    ],
-}
-
-LOOPFLOW_VOCAB_ICONS = {
-    "Trigger": _ICON_BOLT,
-    "Loop": _ICON_LOOP,
-    "Subscription": _ICON_SWAP,
-}
 
 
 @rt("/loopflow")
 def get():
-    return (
-        Title("Loopflow — Loopflow UI"),
-        SkipLink(),
-        Navbar(),
-        Main(
-            # Hero
-            Section(
-                Div(
-                    H1("Loopflow"),
-                    P("Arrange and conduct agent orchestras.", cls="tagline"),
-                    cls="container hero-centered",
-                ),
-                cls="hero",
-            ),
-            # Runtime concepts
-            Section(
-                Div(
-                    H2("The runtime"),
-                    Div(
-                        TermCard(
-                            "1",
-                            "Trigger",
-                            LOOPFLOW_VOCAB_ICONS["Trigger"],
-                            LOOPFLOW_VOCAB_ESSENCES["Trigger"],
-                            LOOPFLOW_VOCAB_DETAILS["Trigger"],
-                        ),
-                        TermCard(
-                            "2",
-                            "Loop",
-                            LOOPFLOW_VOCAB_ICONS["Loop"],
-                            LOOPFLOW_VOCAB_ESSENCES["Loop"],
-                            LOOPFLOW_VOCAB_DETAILS["Loop"],
-                        ),
-                        TermCard(
-                            "3",
-                            "Subscription",
-                            LOOPFLOW_VOCAB_ICONS["Subscription"],
-                            LOOPFLOW_VOCAB_ESSENCES["Subscription"],
-                            LOOPFLOW_VOCAB_DETAILS["Subscription"],
-                        ),
-                        cls="vocab-grid vocab-grid-3",
-                    ),
-                    Script(VOCAB_ACCORDION_SCRIPT),
-                    cls="container",
-                ),
-                cls="vocab-section",
-            ),
-            # Screenshot
-            Section(
-                Div(
-                    Img(
-                        src="/static/loopflow-main.png",
-                        alt="Loopflow showing waves with active, idle, and scheduled states",
-                        cls="loopflow-showcase-img",
-                    ),
-                    P(
-                        "All your agents, all your branches, one view.",
-                        cls="loopflow-showcase-caption",
-                    ),
-                    cls="container",
-                ),
-                cls="loopflow-showcase-section",
-            ),
-            # Install
-            Section(
-                Div(
-                    Div(
-                        Pre(
-                            Code("curl -fsSL https://loopflow.studio/install.sh | sh\nlf init"),
-                            cls="install-code",
-                            tabindex="0",
-                        ),
-                        CopyButton("curl -fsSL https://loopflow.studio/install.sh | sh && lf init"),
-                        cls="install-code-wrapper",
-                    ),
-                    Div(
-                        A("Install the CLI", href="/download", cls="btn btn-primary"),
-                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                        cls="hero-actions",
-                    ),
-                    cls="container",
-                ),
-                cls="quick-install",
-            ),
-            id="main-content",
-        ),
-        SiteFooter(),
-    )
+    # The old product page; the app now lives on /download
+    return RedirectResponse("/download", status_code=302)
 
 
 @rt("/maestro")
@@ -875,34 +612,24 @@ def get():
 
 @rt("/team")
 def get():
+    # The team page became the story page
+    return RedirectResponse("/story", status_code=302)
+
+
+@rt("/story")
+def get():
+    content = STORY_FILE.read_text()
     return (
-        Title("Team — Loopflow"),
+        Title("The Story — Loopflow"),
         SkipLink(),
         Navbar(),
         Main(
             Section(
                 Div(
-                    H1("Team"),
-                    P(
-                        "I'm actively looking for co-founders. ",
-                        A("Want to get in touch?", href="mailto:hello@loopflow.studio"),
-                        cls="tagline",
-                    ),
+                    Div(*render_markdown(content), cls="docs-content story-page"),
                     cls="container",
                 ),
-                cls="page-hero team-hero",
-            ),
-            Section(
-                Div(
-                    TeamCard(
-                        name="Jack Heart",
-                        title="Founder & CEO",
-                        bio="Early engineer at Yelp, Asana, and Grail. Explored the emergence of higher-level agents out of collaboration at Softmax. Started Loopflow to combine my expertise in effective collaboration, my passion for simple APIs, and my joy in the creative process.",
-                        image_src="/static/jack.jpg",
-                    ),
-                    cls="container",
-                ),
-                cls="team-section",
+                cls="docs-hero",
             ),
             id="main-content",
         ),
@@ -912,7 +639,7 @@ def get():
 
 @rt("/agents")
 def get():
-    # Redirect /agents to docs (agents is experimental and folded into Coming Soon)
+    # Redirect /agents to docs
     return RedirectResponse("/docs", status_code=302)
 
 
@@ -978,11 +705,11 @@ def get():
                 Div(
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
                     H1("Install"),
-                    P("Read the skills. Try the CLI. Decide with evidence.", cls="tagline"),
+                    P("One binary. No server. Nothing to register.", cls="tagline"),
                     Div(
                         H2("CLI"),
                         P(
-                            "Prompt and context construction from the terminal. Best for: daily work, CI, and careful pilots.",
+                            "The command humans type and the API agents call. Best for: daily work, waves, and everything headless.",
                             cls="install-desc",
                         ),
                         Div(
@@ -994,15 +721,28 @@ def get():
                             CopyButton("curl -fsSL https://loopflow.studio/install.sh | sh"),
                             cls="install-code-wrapper",
                         ),
-                        P("macOS · Claude Code, Codex, or Gemini CLI", cls="system-req"),
+                        P("macOS or Linux · Claude Code, Codex, or OpenCode", cls="system-req"),
                         Div(
                             P("Then:", cls="next-skill-label"),
                             Pre(
-                                Code("cd your-project\nlf init\nlf design"),
+                                Code("cd your-project\nlf init\nlf debug -c"),
                                 cls="install-code next-skills",
                                 tabindex="0",
                             ),
                             cls="next-skills-wrapper",
+                        ),
+                        Div(
+                            H2("Mac app"),
+                            P(
+                                "The fleet cockpit: wave chat, the machine-wide roadmap, and every task's worktree — a pure client over the same local state.",
+                                cls="install-desc",
+                            ),
+                            A(
+                                "Download for Mac",
+                                href=HERO_CONTENT["loopflow_download_url"],
+                                cls="btn btn-secondary",
+                            ),
+                            cls="mac-app-option",
                         ),
                         cls="install-option",
                         style="max-width: 420px; margin: 0 auto;",
@@ -1050,21 +790,6 @@ async def favicon():
 async def static(fname: str):
     return FileResponse(f"static/{fname}")
 
-
-@rt("/waitlist")
-async def post(email: str, product: str):
-    """HTMX endpoint for waitlist signups."""
-    if not email or not product:
-        return P("Please provide an email.", style="color: var(--orange);")
-    result = add_to_waitlist(email.strip().lower(), product)
-    if result is None:
-        return P("Something went wrong. Please try again.", style="color: var(--orange);")
-    if result:
-        return P("Thanks! We'll be in touch.", style="color: var(--green); font-weight: 500;")
-    return P("You're already on the list.", style="color: var(--text-secondary);")
-
-
-init_db()
 
 if __name__ == "__main__":
     serve(host="0.0.0.0", port=int(os.environ.get("PORT", 5001)))

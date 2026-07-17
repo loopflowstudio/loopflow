@@ -1,8 +1,3 @@
----
-layout: default
-title: lf Operations
----
-
 # lf Operations
 
 Operations and utilities that do not launch a prompt.

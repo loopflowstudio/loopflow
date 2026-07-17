@@ -1,8 +1,3 @@
----
-layout: default
-title: Get Started
----
-
 # Get Started
 
 ## Install
@@ -23,7 +18,7 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | `lf init` → `lf wave <name>` |
 | Use Wave Chat (macOS) | Download Loopflow and open a repository |
-| Run on another machine | SSH into the host and run `lf wave <name>` there |
+| Run on another machine | Set the wave's `home:` and run `lf home start <name>` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -184,25 +179,36 @@ audited control prompt. Stop a foreground Wave with Ctrl-C or run
 
 You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
-[Wave Authoring Guide →](wave-authoring.md) · [Waves Reference →](waves.md)
+[Waves →](waves.md) · [The Fleet →](fleet.md)
 
 ---
 
 ## Go Remote
 
-Run agents while you sleep. SSH into a server, install Loopflow, and run
-`lf wave <name>` there. The Wave process owns its listener and resident loop;
-there is no machine-wide service to install.
+Run agents while you sleep. A wave's **Home** — set in `GOAL.md` frontmatter —
+is where its work executes:
 
-Remote Loopflow/Cadenza is future work; for now, use SSH as the remote control
-surface.
+```yaml
+home: ssh://jack@mini.local
+```
 
-Auth connects your providers:
+```bash
+lf home probe shipper    # reachable? stopped? running?
+lf home start shipper    # idempotently start the Wave on its Home
+```
+
+Project and Task launches inherit the Home. There is no machine-wide service
+to install and nothing to register: the remote host needs `lf` and SSH.
+Credentials are resolved on your machine and forwarded per-invocation with
+`lf ssh` — they live only as long as the remote process, so the remote host
+stays a stateless compute surface.
+
+Auth connects your providers locally:
 
 ```bash
 lf auth github    # connect GitHub
 lf auth claude    # connect Claude
-lf auth linear     # connect Linear with OAuth
+lf auth linear    # connect Linear with OAuth
 lf auth status    # check connections
 ```
 
@@ -234,4 +240,4 @@ Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf` operations](ops.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)
+[`lf` commands](lf.md) · [`lf` operations](ops.md) · [Configuration](config.md) · [Waves](waves.md) · [The Agent API](agent-api.md)

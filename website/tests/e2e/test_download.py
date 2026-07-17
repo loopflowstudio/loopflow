@@ -13,11 +13,14 @@ def test_cli_install_section(page: Page, base_url: str):
     assert cli_section.locator("code", has_text="loopflow.studio/install.sh").is_visible()
 
 
+def test_mac_app_section(page: Page, base_url: str):
+    page.goto(f"{base_url}/download")
+    mac_section = page.locator(".mac-app-option")
+    assert mac_section.locator("h2", has_text="Mac app").is_visible()
+    dmg_link = mac_section.locator("a", has_text="Download for Mac")
+    assert dmg_link.get_attribute("href").endswith(".dmg")
+
+
 def test_products_redirects_to_home(page: Page, base_url: str):
     page.goto(f"{base_url}/products")
     assert page.url == f"{base_url}/"
-
-
-def test_loopflow_page_loads(page: Page, base_url: str):
-    page.goto(f"{base_url}/loopflow")
-    assert page.locator("h1", has_text="Loopflow").is_visible()

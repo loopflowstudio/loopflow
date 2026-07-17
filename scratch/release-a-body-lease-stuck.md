@@ -1,5 +1,19 @@
 # Release a body lease stuck at `revoked` when its process group is gone
 
+## Review log
+
+Every review finding to date, and the commit that resolved it. If you are
+reading this doc and a finding below looks unresolved, check the head you are
+reading first — `git log --oneline origin/main..HEAD` — because each of these is
+resolved at the head that carries this table.
+
+| finding | resolved at | how |
+|---------|-------------|-----|
+| `process_target_exists` collapses out-of-range ids and every non-`EPERM` errno into `false`; unsafe as a release predicate | `0de32ffd8` | release owns a tri-state probe; the bool waiter is untouched |
+| "tmux binary missing ⇒ identity absent" is fail-open | `0de32ffd8` | removed; unavailable or ambiguous tmux is `Unprovable` |
+| Name the fail-closed cases as executable guards | `e067f44e6` | the named-guard table in Done when |
+| pid 1's group is not a valid `EPERM` fixture (`Group(1)` is `kill(-1, 0)` broadcast; root makes it non-deterministic) | `fc002534a` | pure `classify_signal_probe` + `signal_probe_id`; no privileged host identity is a fixture; real spawned/absent groups retained for end-to-end |
+
 ## Problem
 
 A body lease has one job: guarantee that no second body runs for a Session. The

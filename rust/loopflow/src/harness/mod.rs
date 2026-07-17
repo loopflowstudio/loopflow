@@ -338,6 +338,18 @@ pub fn canonical_harness(name: &str) -> Option<&'static str> {
     HarnessKind::parse(name).map(HarnessKind::as_str)
 }
 
+/// How a body builds its provider. `default_create_harness` is the only
+/// production implementation; holding it as a value rather than calling it
+/// directly is what lets a body's construction be substituted.
+pub type CreateHarness = Box<
+    dyn Fn(
+            &str,
+            ApprovalPolicy,
+            mpsc::UnboundedSender<ConversationEvent>,
+        ) -> Result<Box<dyn Harness>>
+        + Send,
+>;
+
 pub fn default_create_harness(
     name: &str,
     approval: ApprovalPolicy,

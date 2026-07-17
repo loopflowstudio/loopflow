@@ -305,14 +305,7 @@ type SpawnPass = Box<
     dyn Fn(&Path, &StepRef, &str, Option<u32>) -> std::io::Result<tokio::process::Child> + Send,
 >;
 
-type CreateBodyHarness = Box<
-    dyn Fn(
-            &str,
-            ApprovalPolicy,
-            mpsc::UnboundedSender<ConversationEvent>,
-        ) -> Result<Box<dyn Harness>>
-        + Send,
->;
+use crate::harness::CreateHarness as CreateBodyHarness;
 
 type PrepareBodyHarness = Box<
     dyn Fn(&str, &str, &str, Option<u32>) -> Result<crate::lf::commands::run::PreparedHarnessTurn>

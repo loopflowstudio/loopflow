@@ -405,14 +405,11 @@ pub(crate) async fn absorb_commands(
                     target.accept_command(store, command.id, None).await?;
                 }
             }
-            // Every wake claimable at birth is consumed by `arm_ci_fix_wake` —
-            // matched and withheld from this loop, or superseded there as stale.
-            // So reaching here means a wake was claimed *during* the body's life:
-            // the observer saw an inactive Session and raced a body that was
-            // starting. That body is already working this PR, so the wake is moot.
-            // Superseding is the honest outcome, and the reason is specific to
-            // this race rather than to staleness. Not a settlement: the identity
-            // is spent, and a still-failing head re-arms under a new one.
+            // Task runners consume or retain every ci-fix wake before this shared
+            // absorber: an idle runner arms it, while a provider-owned turn keeps
+            // it claimed until that turn ends. Reaching this fallback therefore
+            // means a child without that bounded repair path already owns the
+            // work, so the wake cannot be serviced here.
             ChildCommandKind::CiFix { .. } => {
                 target
                     .supersede_command(

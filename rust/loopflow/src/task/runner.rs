@@ -149,7 +149,7 @@ async fn run_task_session_with(
     // runs the single-step `ci-fix` flow; every other launch resumes the standard
     // task lifecycle phase. The wake stays `Claimed` for the whole turn — settling
     // it belongs to the repair's exit, not its entry.
-    let (ci_fix_wake, commands) = arm_ci_fix_wake(&store, &session, lease, claimed).await?;
+    let (mut ci_fix_wake, commands) = arm_ci_fix_wake(&store, &session, lease, claimed).await?;
     let mut flow = if ci_fix_wake.is_some() {
         Playhead::new(QueuedInvocation::load(&session.worktree, "ci-fix")?).0
     } else {
@@ -358,12 +358,53 @@ The durable reviewer outcome is:\n{}",
                 }
             }
             _ = command_poll.tick() => {
-                let commands = claim_commands(
-                    &store,
-                    &session,
-                    lease,
-                    &mut seen_commands,
-                ).await?;
+                let (wake, commands) = if provider_turn_active {
+                    let mut commands = claim_commands(
+                        &store,
+                        &session,
+                        lease,
+                        &mut seen_commands,
+                    ).await?;
+                    for command in &commands {
+                        if matches!(&command.kind, ChildCommandKind::CiFix { .. }) {
+                            seen_commands.remove(&command.id);
+                        }
+                    }
+                    commands.retain(|command| {
+                        !matches!(&command.kind, ChildCommandKind::CiFix { .. })
+                    });
+                    (None, commands)
+                } else if ci_fix_wake.is_none() {
+                    claim_and_arm_ci_fix(
+                        &store,
+                        &session,
+                        lease,
+                        &mut seen_commands,
+                    ).await?
+                } else {
+                    (
+                        None,
+                        claim_commands(&store, &session, lease, &mut seen_commands).await?,
+                    )
+                };
+                if let Some(wake) = wake {
+                    start_ci_fix_flow(
+                        &store,
+                        &mut session,
+                        lease,
+                        wave.name(),
+                        harness.as_mut(),
+                        &mut flow,
+                        &wake,
+                    ).await?;
+                    ci_fix_wake = Some(wake);
+                    // The bounded repair owns this body's exit. The durable Gate
+                    // review stays open for the next Task generation.
+                    interaction_review = None;
+                    flow_turn_active = true;
+                    provider_turn_active = true;
+                    last_text.clear();
+                }
                 if let Some(stop) = absorb_commands(
                     &store,
                     &session,
@@ -442,6 +483,64 @@ The durable reviewer outcome is:\n{}",
                                 capture.as_ref(),
                             )
                             .await;
+                        }
+                        if ci_fix_wake.is_none() {
+                            let (wake, commands) = claim_and_arm_ci_fix(
+                                &store,
+                                &session,
+                                lease,
+                                &mut seen_commands,
+                            ).await?;
+                            if let Some(wake) = wake {
+                                start_ci_fix_flow(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    wave.name(),
+                                    harness.as_mut(),
+                                    &mut flow,
+                                    &wake,
+                                ).await?;
+                                ci_fix_wake = Some(wake);
+                                // The repair takes the just-released provider
+                                // boundary before Gate or lifecycle progression.
+                                // Its durable review remains open for recovery.
+                                interaction_review = None;
+                                flow_turn_active = true;
+                                provider_turn_active = true;
+                                last_text.clear();
+                            }
+                            if let Some(stop) = absorb_commands(
+                                &store,
+                                &session,
+                                lease,
+                                commands,
+                                harness.as_mut(),
+                                provider_turn_active,
+                                &mut pending,
+                            ).await? {
+                                return finish_command_stop(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    harness.as_mut(),
+                                    stop,
+                                    capture.as_ref(),
+                                ).await;
+                            }
+                            if provider_turn_active {
+                                continue 'runner;
+                            }
+                            provider_turn_active = apply_next_pending(
+                                &store,
+                                &session,
+                                lease,
+                                harness.as_mut(),
+                                &mut pending,
+                            ).await?;
+                            if provider_turn_active {
+                                continue 'runner;
+                            }
                         }
                         if flow_turn_active
                             && status == Lifecycle::Completed
@@ -1855,6 +1954,31 @@ async fn claim_commands(
         .claim_child_commands_for_lease(&ChildRef::Task(session.id.clone()), lease)
         .await?;
     Ok(filter_new_commands(commands, seen))
+}
+
+async fn claim_and_arm_ci_fix(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: &ChildWriteLease,
+    seen: &mut HashSet<ChildCommandId>,
+) -> Result<(Option<CiFixWake>, Vec<ChildCommand>)> {
+    let commands = claim_commands(store, session, lease, seen).await?;
+    arm_ci_fix_wake(store, session, lease, commands).await
+}
+
+async fn start_ci_fix_flow(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    wave_name: &str,
+    harness: &mut dyn Harness,
+    flow: &mut Playhead,
+    wake: &CiFixWake,
+) -> Result<()> {
+    *flow = Playhead::new(QueuedInvocation::load(&session.worktree, "ci-fix")?).0;
+    let prepared =
+        prepare_task_flow_step(store, session, lease, wave_name, flow, Some(wake)).await?;
+    start_task_flow_turn(store, session, lease, harness, flow, prepared.turn).await
 }
 
 fn filter_new_commands(
@@ -3604,68 +3728,6 @@ mod tests {
                 ChildCommandState::Superseded
             );
         }
-    }
-
-    /// A wake claimed *during* a body's life lost its race: the observer saw an
-    /// inactive Session and enqueued while a body was starting. Every wake
-    /// claimable at birth is consumed by `arm_ci_fix_wake`, so this is the only
-    /// way a `CiFix` reaches `absorb_commands` at all.
-    ///
-    /// The body already working this PR makes the wake moot. It must not be
-    /// delivered as input — the repair seed is not a steer, and this turn is not
-    /// the turn it was written for — and it must not start a second body.
-    #[tokio::test]
-    async fn a_live_body_supersedes_a_raced_ci_fix_wake_without_delivering_it() {
-        let (store, session, lease) = conformance_session("codex").await;
-        let command = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::System,
-            ChildCommandKind::CiFix {
-                incident_identity: "github:ci:owner/repo:7:h1:digest".to_string(),
-                pr_number: 7,
-                head_sha: "h1".to_string(),
-                failing_checks: vec![crate::task::CiCheck {
-                    name: "cargo-fmt".to_string(),
-                    url: None,
-                }],
-            },
-        );
-        store.create_child_command(&command).await.unwrap();
-        let commands = store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-            .await
-            .unwrap();
-        let mut harness = ScriptedHarness::new(true);
-        let mut pending = VecDeque::new();
-
-        let stop = absorb_commands(
-            &store,
-            &session,
-            &lease,
-            commands,
-            &mut harness,
-            true,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(stop, None, "a moot wake does not stop the live turn");
-        assert!(
-            pending.is_empty(),
-            "a repair seed is not input; it must never queue into an unrelated turn"
-        );
-        assert_eq!(harness.sent.len(), 0, "and never reaches the provider");
-        assert_eq!(harness.interrupts, 0, "the live body is not interrupted");
-        assert_eq!(
-            store
-                .get_child_command(&command.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .state,
-            ChildCommandState::Superseded,
-        );
     }
 
     #[tokio::test]

@@ -2159,7 +2159,7 @@ pub(crate) async fn reconcile_project_tasks(
             if !task.status.is_process_active() {
                 relaunch_inactive_process(store, task).await?;
             }
-        } else if !task.status.is_process_active() {
+        } else {
             let Some(pr) = observed.as_ref() else {
                 continue;
             };
@@ -2168,7 +2168,9 @@ pub(crate) async fn reconcile_project_tasks(
                 && task.phase_cursor == 0
                 && task.phase_iteration == 0
             {
-                relaunch_inactive_process(store, task).await?;
+                if !task.status.is_process_active() {
+                    relaunch_inactive_process(store, task).await?;
+                }
             } else {
                 queue_ci_fix_command(store, task, pr).await?;
             }
@@ -5274,7 +5276,11 @@ mod tests {
         fn install(home: &Path) -> Self {
             let bin = tempfile::tempdir().expect("fake tmux bin");
             let tmux = bin.path().join("tmux");
-            std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").expect("write fake tmux");
+            std::fs::write(
+                &tmux,
+                "#!/bin/sh\nif [ \"$1\" = \"list-sessions\" ]; then printf 'lf-live-idle-control\\n'; fi\nexit 0\n",
+            )
+            .expect("write fake tmux");
             let mut permissions = std::fs::metadata(&tmux)
                 .expect("stat fake tmux")
                 .permissions();
@@ -8980,6 +8986,85 @@ mod tests {
                 .expect("ci-fix launch reserves a generation")
                 .generation,
             1
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
+    async fn project_supervision_enqueues_one_attributable_wake_for_live_idle_red() {
+        let _env_lock = crate::journal::test_env_lock();
+        let repo = TestRepo::new();
+        let (home, store, project, mut session, _pr) =
+            parked_gate_task(&repo, "jack/gate-live-idle", Some(CiState::Failing), 0).await;
+        session.begin_generation("lf-live-idle-control".to_string());
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve live control body")
+            .expect("waiting Task reserves one generation");
+        if let Some(process) = session.latest_process.as_mut() {
+            process.state = crate::child_session::ChildLeaseState::Active;
+        }
+        session.set_status(
+            TaskSessionStatus::Running,
+            "Project review owns the Gate step; provider turn is idle",
+        );
+        store
+            .activate_task_process(&session, &lease)
+            .await
+            .expect("activate live control body");
+        let _launch_env = TaskLaunchEnv::install(home.path());
+
+        supervise_project_task_bodies(&store, &project)
+            .await
+            .expect("first live-idle red supervision");
+        supervise_project_task_bodies(&store, &project)
+            .await
+            .expect("duplicate live-idle red supervision");
+
+        let commands = store
+            .list_child_commands(&ChildRef::Task(session.id.clone()))
+            .await
+            .expect("read Task commands");
+        assert_eq!(commands.len(), 1, "the current failure wakes once");
+        assert!(matches!(commands[0].kind, ChildCommandKind::CiFix { .. }));
+        assert_eq!(commands[0].state, ChildCommandState::Persisted);
+        assert_eq!(commands[0].claimed_by_generation, None);
+
+        let incidents = store
+            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
+            .await
+            .expect("read CI incidents");
+        let incident = incidents
+            .iter()
+            .find(|row| row.incident.task_session_id == session.id)
+            .expect("live-idle incident exists");
+        assert_eq!(
+            incident.incident.trigger_command_id.as_ref(),
+            Some(&commands[0].id),
+            "the wake must be attributable before the live control body claims it"
+        );
+        assert_eq!(incident.incident.responded_at, None);
+
+        let persisted = store
+            .get_task_session(&session.id)
+            .await
+            .expect("read Task")
+            .expect("Task exists");
+        assert_eq!(
+            persisted.status,
+            TaskSessionStatus::Running,
+            "{}",
+            persisted.status_reason
+        );
+        assert_eq!(
+            persisted
+                .latest_process
+                .as_ref()
+                .expect("control generation remains active")
+                .generation,
+            lease.generation,
+            "supervision must not interrupt or replace the live control body"
         );
     }
 

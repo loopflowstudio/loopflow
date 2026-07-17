@@ -1379,14 +1379,16 @@ mod tests {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations");
         let mut on_disk: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
-            .map(|entry| {
-                entry
-                    .unwrap()
-                    .path()
-                    .file_stem()
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned()
+            .filter_map(|entry| {
+                let entry = entry.unwrap();
+                entry.file_type().unwrap().is_file().then(|| {
+                    entry
+                        .path()
+                        .file_stem()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
             })
             .collect();
         on_disk.sort();

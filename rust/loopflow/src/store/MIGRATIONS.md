@@ -1,17 +1,33 @@
 # Schema migrations
 
 ```bash
-uv run python scripts/new_migration.py add_wave_colour
+uv run python scripts/new_migration.py add_wave_colour   # author a draft (no ordinal)
 uv run python scripts/check_migrations.py                # what CI and the release run
 ```
 
-Write the SQL, paste the printed entry at the end of `MIGRATIONS` in
-`migrations.rs`, and you are done. The store applies every migration a database
-has not seen, in id order, exactly once.
+Write the SQL, paste the printed entry into the `DRAFTS` slice in `migrations.rs`,
+and you are done. A **draft** carries a stable snake_case name and **no ordinal**;
+it lives at `migrations/drafts/<name>.sql`. Because a draft has no ordinal, two
+branches authored concurrently never contend for or renumber one, and the
+allocator performs no `git fetch` or rebase. Ordering that matters — a data
+migration that must run after another — is declared with `--depends-on`, not by a
+serial number.
 
-The allocator fetches and counts `origin/main` as well as the current worktree.
-CI compares the proposed chain with `origin/main`, so a concurrent branch that
-reuses an ordinal must rebase and allocate a new one before it can merge.
+## The release cut assigns canonical ids
+
+The release PR is the single publication boundary that turns drafts into canonical
+migrations. Inside its worktree, `scripts/canonicalize_migrations.py` freezes the
+draft set, rejects missing or cyclic dependencies, topologically orders it (edges
+first, ties broken by name — never merge time, PR number, or wall clock), and
+assigns the next contiguous ordinals in the namespace of the version being cut
+(a patch continues the current `<major>.<minor>`; a minor bump starts a fresh
+sequence at ordinal 1). It writes `<major>.<minor>.<ordinal>_<name>.sql`, appends
+the `Migration` entry, and deletes the draft. Same drafts and version always
+produce the same ids and diff, so an aborted release regenerates identically.
+
+Only the merged release commit is canonical migration authority. Between releases,
+ordinary merges add drafts, so main's canonical set does not move and a branch
+that is merely behind main — adding only drafts — stays green.
 
 The runner temporarily disables foreign-key actions around the transaction so a
 SQLite table rebuild cannot cascade-delete child history. It runs
@@ -39,8 +55,13 @@ the last release tag and fails the build if one moved.
   same ids and names. A file nobody registered never runs; a registry entry whose
   id, name, and file disagree is a lie about what a database applied.
 - The registry is in id order, and no id is namespaced ahead of the package version.
-- Every migration already on `origin/main` has the same ordinal, name, and bytes.
+- Every canonical migration already on `origin/main` has the same ordinal, name, and
+  bytes.
 - Nothing that shipped in the last release tag has changed.
+- Every draft under `drafts/` is well-formed: a snake_case name matching its file, a
+  `-- name:` header, no collision with a released migration name, and a `depends_on`
+  graph that resolves to other drafts with no cycle. Drafts have no ordinal, so they
+  are never compared against `origin/main`.
 
 It runs in CI, and — because `lf release` cuts a tag from local state and never
 reads a CI result — `lf release check` and `lf release run` run it themselves

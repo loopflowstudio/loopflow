@@ -1070,10 +1070,7 @@ fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<Agent
     _classify_transient_failure(result).map(AgentFailure::Transient)
 }
 
-fn _find_provider_error<T>(
-    result: &LaunchResult,
-    classify: fn(&str) -> Option<T>,
-) -> Option<T> {
+fn _find_provider_error<T>(result: &LaunchResult, classify: fn(&str) -> Option<T>) -> Option<T> {
     for line in result.stdout.lines() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -1366,17 +1363,13 @@ fn _launch_agent_once(
         .as_ref()
         .is_some_and(crate::provider_account::ProviderAccountRoute::allows_failover);
     if let (Some(route), Ok(result)) = (&account_route, &result) {
-        if let Some(session_id) = _provider_session_id(result) {
-            if let Err(error) = route.pin_session_blocking(&session_id) {
-                tracing::warn!(%error, "failed to pin provider session account");
-            }
-        }
-        if let Some(signal) = _account_limit_signal(&harness, result) {
-            if let Err(error) = route.record_rate_limit_blocking(&signal) {
-                tracing::warn!(%error, "failed to record provider account limit");
-                if signal.limited {
-                    account_failover = false;
-                }
+        let resume_token = _provider_resume_token(result);
+        let signal = _account_limit_signal(&harness, result);
+        let limited = signal.as_ref().is_some_and(|signal| signal.limited);
+        if let Err(error) = route.record_launch_blocking(resume_token, signal) {
+            tracing::warn!(%error, "failed to record provider account launch");
+            if limited {
+                account_failover = false;
             }
         }
     }
@@ -2430,7 +2423,7 @@ trust_level = "trusted"
             agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,
-            resume_id: None,
+            resume_token: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2455,7 +2448,7 @@ trust_level = "trusted"
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
-            resume_id: None,
+            resume_token: None,
             skip_permissions: true,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2480,7 +2473,7 @@ trust_level = "trusted"
             agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,
-            resume_id: None,
+            resume_token: None,
             skip_permissions: false,
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".to_string(),
@@ -2587,9 +2580,9 @@ trust_level = "trusted"
         assert_eq!(result.exit_code, 0);
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[0].task_prompt, "compress the branch");
-        assert_eq!(attempts[0].resume_id, None);
+        assert_eq!(attempts[0].resume_token, None);
         assert_eq!(attempts[1].task_prompt, RETRY_PROMPT);
-        assert_eq!(attempts[1].resume_id.as_deref(), Some("thread-123"));
+        assert_eq!(attempts[1].resume_token.as_deref(), Some("thread-123"));
         assert_eq!(waits, vec![Duration::ZERO]);
     }
 
@@ -2614,10 +2607,9 @@ trust_level = "trusted"
         };
         assert!(matches!(
             _classify_agent_failure("claude", &failure),
-            Some(AgentFailure::AccountSubscriptionLimit(RateLimitSignal {
-                resets_at: Some(1_900_000_000),
-                ..
-            }))
+            Some(AgentFailure::AccountSubscriptionLimit {
+                resets_at: Some(1_900_000_000)
+            })
         ));
         let mut results = vec![
             failure,
@@ -2647,7 +2639,7 @@ trust_level = "trusted"
 
         assert_eq!(result.exit_code, 0);
         assert_eq!(attempts.len(), 2);
-        assert_eq!(attempts[1].resume_id, None);
+        assert_eq!(attempts[1].resume_token, None);
         assert!(attempts[1].task_prompt.starts_with(FAILOVER_PROMPT));
         assert!(attempts[1].task_prompt.contains("compress the branch"));
         assert_eq!(waits, vec![Duration::ZERO]);
@@ -2683,7 +2675,7 @@ trust_level = "trusted"
 
         assert!(matches!(
             result.failure,
-            Some(AgentFailure::AccountSubscriptionLimit(_))
+            Some(AgentFailure::AccountSubscriptionLimit { .. })
         ));
     }
 
@@ -2766,7 +2758,7 @@ trust_level = "trusted"
     fn resumed_commands_preserve_provider_session() {
         let launch = AgentConfig {
             agent: Some("codex".to_string()),
-            resume_id: Some("thread-123".to_string()),
+            resume_token: Some("thread-123".to_string()),
             ..default_launch()
         };
         let codex = build_codex_command(&launch, &auto_process(), None);
@@ -2775,7 +2767,7 @@ trust_level = "trusted"
 
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
-            resume_id: Some("session-123".to_string()),
+            resume_token: Some("session-123".to_string()),
             ..default_launch()
         };
         let claude = build_claude_command(

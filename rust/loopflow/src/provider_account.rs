@@ -164,6 +164,10 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
+    pub(crate) fn account_id(&self) -> &ProviderAccountId {
+        &self.account_id
+    }
+
     pub(crate) fn resume_requested_session(&self) -> bool {
         self.resume_requested_session
     }

@@ -370,12 +370,19 @@ fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
         None => return HashSet::new(),
     };
 
-    // Build aliased GraphQL query: one field per branch
+    let branch_heads = branches
+        .iter()
+        .map(|branch| rev_parse(repo, branch).ok())
+        .collect::<Vec<_>>();
+
+    // Build aliased GraphQL query: one field per branch. Branch names are
+    // reusable, so current-head identity decides whether historical PR state
+    // applies to this worktree.
     let mut fields = String::new();
     for (i, branch) in branches.iter().enumerate() {
         let escaped = branch.replace('\\', "\\\\").replace('"', "\\\"");
         fields.push_str(&format!(
-            "b{i}: pullRequests(first: 1, headRefName: \"{escaped}\", states: MERGED) {{ nodes {{ headRefName }} }}\n"
+            "b{i}: pullRequests(first: 100, headRefName: \"{escaped}\", orderBy: {{ field: UPDATED_AT, direction: DESC }}) {{ nodes {{ headRefOid state merged }} }}\n"
         ));
     }
     let query =
@@ -391,15 +398,44 @@ fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
         _ => return HashSet::new(),
     };
 
-    // Parse: any headRefName in a non-empty nodes array is a merged branch
-    // Simple string scan — avoids adding a JSON parsing dep to this module
-    let mut result = HashSet::new();
-    for branch in branches {
-        if stdout.contains(&format!("\"headRefName\":\"{branch}\"")) {
-            result.insert(branch.clone());
-        }
-    }
-    result
+    parse_merged_pr_branches(&stdout, branches, &branch_heads)
+}
+
+fn parse_merged_pr_branches(
+    response: &str,
+    branches: &[String],
+    branch_heads: &[Option<String>],
+) -> HashSet<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(response) else {
+        return HashSet::new();
+    };
+    let Some(repository) = value.pointer("/data/repository") else {
+        return HashSet::new();
+    };
+
+    branches
+        .iter()
+        .enumerate()
+        .filter_map(|(index, branch)| {
+            let head = branch_heads.get(index)?.as_deref()?;
+            let nodes = repository
+                .pointer(&format!("/b{index}/nodes"))?
+                .as_array()?;
+            let matching = nodes.iter().filter(|node| {
+                node.get("headRefOid").and_then(serde_json::Value::as_str) == Some(head)
+            });
+            let has_open = matching
+                .clone()
+                .any(|node| node.get("state").and_then(serde_json::Value::as_str) == Some("OPEN"));
+            let merged = !has_open
+                && matching.into_iter().any(|node| {
+                    node.get("merged")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                });
+            merged.then(|| branch.clone())
+        })
+        .collect()
 }
 
 /// List all remote branch names via a single `git ls-remote --heads origin` call.
@@ -1063,10 +1099,10 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_network_enrichment, plan_placement, prune_abandoned_prompt_logs,
-        prune_branch_worktree, worktree_path, worktree_prune_reason, PlacementError,
-        PlacementStrategy, TargetedPruneOutcome, WorktreePrunePolicy, WorktreePruneReason,
-        WorktreeSegment, WorktreeState,
+        apply_network_enrichment, parse_merged_pr_branches, plan_placement,
+        prune_abandoned_prompt_logs, prune_branch_worktree, worktree_path, worktree_prune_reason,
+        PlacementError, PlacementStrategy, TargetedPruneOutcome, WorktreePrunePolicy,
+        WorktreePruneReason, WorktreeSegment, WorktreeState,
     };
     use std::collections::HashSet;
     use std::fs;
@@ -1155,6 +1191,49 @@ mod tests {
             "new squashed-equivalent branch should stay unprunable while fresh"
         );
         assert!(new.fresh, "new branch should remain fresh");
+    }
+
+    #[test]
+    fn merged_pr_history_does_not_mark_a_reused_branch() {
+        let response = serde_json::json!({
+            "data": {
+                "repository": {
+                    "b0": {
+                        "nodes": [
+                            {"headRefOid": "current", "state": "OPEN", "merged": false},
+                            {"headRefOid": "previous", "state": "MERGED", "merged": true}
+                        ]
+                    }
+                }
+            }
+        });
+        let branches = vec!["jack-heart/product".to_string()];
+        let heads = vec![Some("current".to_string())];
+
+        assert!(parse_merged_pr_branches(&response.to_string(), &branches, &heads).is_empty());
+    }
+
+    #[test]
+    fn merged_pr_history_matches_the_current_branch_head() {
+        let response = serde_json::json!({
+            "data": {
+                "repository": {
+                    "b0": {
+                        "nodes": [
+                            {"headRefOid": "current", "state": "MERGED", "merged": true},
+                            {"headRefOid": "previous", "state": "MERGED", "merged": true}
+                        ]
+                    }
+                }
+            }
+        });
+        let branches = vec!["jack-heart/product".to_string()];
+        let heads = vec![Some("current".to_string())];
+
+        assert_eq!(
+            parse_merged_pr_branches(&response.to_string(), &branches, &heads),
+            HashSet::from(["jack-heart/product".to_string()])
+        );
     }
 
     #[test]

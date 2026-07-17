@@ -506,8 +506,12 @@ fn backup_before_migration(
     if !requires_migration_sqlite(conn)? {
         return Ok(None);
     }
-    let previous =
-        latest_applied_version_sqlite(conn)?.unwrap_or_else(|| "uninitialized".to_string());
+    // Nothing applied yet means no previous generation to preserve, so there is
+    // nothing to back up — and nothing to fingerprint either: the hash below
+    // reads `schema_migrations`, which an uninitialized database does not have.
+    let Some(previous) = latest_applied_version_sqlite(conn)? else {
+        return Ok(None);
+    };
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -1157,18 +1161,32 @@ pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult
     Ok(applied_versions(conn)?.last().cloned())
 }
 
+/// Whether this database still owes migration work.
+///
+/// An *uninitialized* database owes all of it. Both cases below are databases
+/// with no schema yet — no user tables at all, and an empty `schema_migrations`
+/// as the only table — and each answers `true` so the caller reaches
+/// `apply_sqlite_transaction` and creates the schema.
+///
+/// They used to answer `false`, which read as "nothing to do" and was true only
+/// of a *current* schema. Since `SqliteStore::new` routes on `existing_database`
+/// — which asks whether the file has bytes, not whether it holds a schema — a
+/// database killed mid-migration (the exclusive transaction rolls back, the
+/// file keeps its header, the tables are gone) took the migrate path, was told
+/// nothing was pending, and wedged permanently on `no such table: run_events`.
+/// That is reachable in exactly the fleet this predicate's caller was fixed for.
 pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreResult<bool> {
     let tables = user_tables(conn)?;
     if !tables.iter().any(|table| table == "schema_migrations") {
         return if tables.is_empty() {
-            Ok(false)
+            Ok(true)
         } else {
             Err(incompatible())
         };
     }
     let applied = applied_versions(conn)?;
     if applied.is_empty() && tables.len() == 1 {
-        return Ok(false);
+        return Ok(true);
     }
     if applied.as_slice() == [LEGACY_BASELINE_VERSION] {
         return Ok(true);
@@ -2363,6 +2381,42 @@ mod tests {
         apply_sqlite_with_backup(&current, &path).unwrap();
 
         writer.execute_batch("ROLLBACK").unwrap();
+    }
+
+    /// A database file with bytes but no schema must still get one.
+    ///
+    /// `SqliteStore::new` routes to the migrate path on `existing_database`,
+    /// which asks whether the file has bytes — not whether it holds a schema. A
+    /// process killed mid-migration leaves exactly this state: the exclusive
+    /// transaction rolls back, the file keeps its header, the tables are gone.
+    /// Once the migrate path is gated on `requires_migration_sqlite`, that
+    /// predicate is the only thing standing between this file and a permanent
+    /// wedge on `no such table: run_events`.
+    ///
+    /// Reads `run_events` back through the store's own API rather than trusting
+    /// a bare `Ok` from the open, because the regression's exact face was a
+    /// successful open over a database with no tables in it.
+    #[test]
+    fn an_existing_schema_less_database_still_gets_its_schema() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA user_version = 1;").unwrap();
+        }
+        assert!(
+            std::fs::metadata(&path).unwrap().len() > 0,
+            "this is not the case under test unless the file has bytes already"
+        );
+
+        let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
+
+        assert!(store.list_run_events_since(0).unwrap().is_empty());
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
     }
 
     #[test]

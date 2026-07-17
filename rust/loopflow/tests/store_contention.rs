@@ -13,7 +13,9 @@
 //! fanout 51 that lost 426 of 1020 receipts.
 //!
 //! PR #1030 fixed it by consulting `requires_migration_sqlite` before opening
-//! the migration transaction. These tests are that fix's regression guard.
+//! the migration transaction, and carries the timing-free proof that a current
+//! schema takes no write lock (`current_schema_does_not_take_the_database_write_lock`).
+//! This is the evidence that fix did not have: the fleet-scale measurement.
 //!
 //! Each writer opens its own connection. SQLite locks per connection through
 //! file locks and the WAL's shared memory, not per process, so separate
@@ -124,33 +126,4 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
         expected,
         "no receipt may be recorded twice"
     );
-}
-
-/// The precise, timing-free guard for the named cause.
-///
-/// A store open against a database with nothing pending must take no exclusive
-/// lock. Proven by holding the database's write lock across the open: with the
-/// migration transaction gated on a pending-migration read this returns at once;
-/// without the gate the open blocks on `BEGIN EXCLUSIVE` until `busy_timeout`
-/// expires and then fails — which is exactly how the fleet starved itself.
-///
-/// Asserts on the open's outcome, never on elapsed time, so it cannot flake
-/// under parallel test load.
-#[test]
-fn opening_a_current_database_takes_no_exclusive_lock() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("loopflow.db");
-    drop(SqliteStore::new(&path).expect("materialize the schema"));
-
-    // Hold the write lock for the whole open, as a busy peer in the fleet does.
-    let holder = rusqlite::Connection::open(&path).unwrap();
-    holder
-        .busy_timeout(std::time::Duration::from_millis(0))
-        .unwrap();
-    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
-
-    let opened = SqliteStore::new(&path);
-
-    holder.execute_batch("ROLLBACK").unwrap();
-    opened.expect("opening a current database must not wait on the write lock");
 }

@@ -77,7 +77,7 @@ first selected phase runs and checkpoint it after every phase boundary. A
 path below. Store successful records under:
 
 ```text
-<git-common-dir>/loopflow/pre-land/runs/<run-id>.json
+<git-common-dir>/loopflow/pre-land/runs/<kind>/<run-id>.json
 ```
 
 Resolve `<git-common-dir>` with:
@@ -158,9 +158,13 @@ run-selection flags. Mark `kind` as:
 - `changed` for the ordinary changed-aware loop;
 - `required_host` for the separately invoked `--ui-host` gate.
 
-The 30-day KR view defaults to `full` records. It does not pretend that
-`--all` executed the separately named hosted UI gate. Changed-aware and host
-runs remain available as evidence but do not inflate the full-gate count.
+The kind is both a schema field and the parent directory. This makes a corrupt
+or partially readable file classifiable without trusting its contents: an
+unreadable file under `runs/full/` is a full-gate evidence gap, while an
+unreadable diagnostic under `runs/changed/` cannot poison the KR. The 30-day
+KR view reads `runs/full/` by default. It does not pretend that `--all`
+executed the separately named hosted UI gate. Changed-aware and host runs
+remain available as evidence but do not inflate the full-gate count.
 
 ### Add a reader that judges the budget window
 
@@ -208,6 +212,24 @@ the single owner of the existing best-effort ops telemetry path; hardcoding its
 `.lf/tmp` location anywhere new would repeat W2-233's defect. Gate history has
 different correctness and retention semantics, so it gets one narrowly named
 `_gate_history_dir()` resolver instead of masquerading as another ops event.
+
+## Implementation contract
+
+| Boundary | Contract |
+|----------|----------|
+| User-visible outcome | Developers see every selected phase as `elapsed / named budget`; the infrastructure Wave sees a 30-day `IN PROGRESS`, `NOT HOLDING`, or `HOLDING` verdict without reconstructing terminal logs. |
+| End-to-end proof | Run a fixture full gate, delete its worktree-local `.lf/tmp`, and read the same atomic record through `--history 30`; seeded 29-day, 30-day, over-budget, corrupt-full, and corrupt-changed histories prove every verdict and evidence boundary without running the multi-hour matrix. |
+| Source of truth | Versioned per-run JSON beneath `<git-common-dir>/loopflow/pre-land/runs/<kind>/` is authoritative. The ordinary summary and `--history` output are derived views; `PHASE_BUDGETS` is authoritative for future runs, while each record's copied budget is authoritative for that historic run. |
+| Affected surfaces and consumers | `scripts/test.py` writes and reads evidence; `TESTING.md` teaches the command and retention contract; `release/GATE_BUDGET.md` exposes the named budgets; the infrastructure Wave consumes the full-run history weekly. Existing CI invocations, `lf pr land`, ops telemetry, wire DTOs, apps, and hosted-UI semantics remain unchanged. |
+| Absent and error states | No full history means the clock has not started. `running`, `not_run`, malformed, or unreadable files under `runs/full/` are evidence gaps and cannot become `HOLDING`. A full write or checkpoint failure aborts with `MEASUREMENT FAILED`; a non-full failure warns once, disables later checkpoints, and preserves the underlying test result. Files under non-full kind directories never enter the KR verdict. |
+| Operational boundary | Measurement adds no daemon, database, lock, or network call. Writers share no file, checkpoints use atomic replacement, records exclude heavy output, directory reads are bounded by compact retained run files, and existing phase timeouts remain unchanged. |
+| Exclusions | GitHub merge attribution, cross-machine aggregation, generic telemetry, retained build artifacts, budget changes, `lf pr land` integration, and folding the hosted UI gate into `--all` remain outside this Task. |
+
+## Review log
+
+| Review | Reviewed head | Resolution |
+|--------|---------------|------------|
+| `ir_c6dd3e6649334e3fb59d33bb364296c5` | `15908a4ec` | `56c75f80c` scopes load-bearing persistence to `full`; `changed` and `required_host` now warn once and preserve their test result. |
 
 ## De-risking
 
@@ -307,7 +329,8 @@ keeps optional diagnostics from becoming developer friction.
 5. A fixture writes history from two simulated linked worktrees into the same
    common-directory root without collision, then removes one worktree fixture
    and still reads both records.
-6. `--history 30` names every over-budget or incomplete full run and reports:
+6. `--history 30` ignores unreadable non-full diagnostics, names every
+   over-budget, incomplete, or unreadable full run, and reports:
    - `IN PROGRESS` before 30 days of evidence,
    - `NOT HOLDING` for an overrun or evidence gap,
    - `HOLDING` only after a complete 30-day window with no overruns.

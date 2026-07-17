@@ -90,6 +90,7 @@ lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
 lf task acknowledge INF-123 --directive 2 --summary "the shared primitive is first"
 lf task decide INF-123 DECISION_ID revise --message "cover the boundary race"
 lf task wait INF-123
+lf task recover INF-123 --reason "the earlier attempt was abandoned by mistake"
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
@@ -117,6 +118,12 @@ completion. A provider process and transcript are a replaceable body generation;
 plain `resume` keeps compatible provider history, while `--model` hands the same
 Session to another agent. Root Task PRs target `main`; dependent Tasks get their
 own worktree and target the parent Task's active PR until it merges.
+
+`abandon` is terminal. `lf task recover` deliberately creates one linked Task
+Session successor, adopting the abandoned attempt's worktree, directive, and
+complete serial PR history. It refuses missing, detached, mid-operation, or
+branch-mismatched worktrees before moving ownership; `resume` starts the fresh
+body after recovery.
 
 Task Sessions inherit the Wave objective, curated memory, Project definition,
 and KRs. Typed, idempotent Task observations keep the Wave informed without

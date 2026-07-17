@@ -1302,6 +1302,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             )?;
             print_task_control(&result, *json)
         }
+        TaskCommand::Recover {
+            issue,
+            reason,
+            json,
+        } => {
+            let session = loopflow::ops::task::task_recover(issue, reason.clone())?;
+            print_task_session(&session, *json)
+        }
         TaskCommand::Attach { issue } => {
             loopflow::ops::task::task_attach(issue).map_err(Into::into)
         }

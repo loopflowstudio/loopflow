@@ -114,30 +114,111 @@ impl SqliteStore {
         )?;
         insert_task_pr(&transaction, pr)?;
         insert_child_directive(&transaction, directive)?;
-        // Re-key the cursor: move the predecessor's single row onto the
-        // successor. No successor cursor row exists yet (the successor was not
-        // seeded), so the UPDATE cannot collide on the PRIMARY KEY.
+        _carry_task_session_state(&transaction, predecessor, successor)?;
+        transaction.commit()?;
+        Ok(TaskSessionSuccession {
+            session: successor.clone(),
+            created: true,
+        })
+    }
+
+    /// Recover an abandoned Task by creating one linked successor that adopts
+    /// the predecessor's worktree and complete serial PR history.
+    ///
+    /// Unlike [`Self::reserve_task_session_successor`], this does not create a
+    /// new worktree or sequence-1 PR. It re-keys the existing PR rows together
+    /// with the Linear observation state, so the ownership move is atomic and a
+    /// crash cannot leave two partial attempts. A repeated or concurrent call
+    /// converges on the one live successor.
+    pub fn recover_task_session_successor(
+        &self,
+        predecessor: &TaskSession,
+        successor: &TaskSession,
+        directive: &ChildDirective,
+    ) -> StoreResult<TaskSessionSuccession> {
+        if predecessor.status != TaskSessionStatus::Abandoned {
+            return Err(StoreError::InvalidData(format!(
+                "Task Session {} is {}; only abandoned Tasks can be recovered",
+                predecessor.id,
+                predecessor.status.as_str()
+            )));
+        }
+        if successor.launch != predecessor.launch
+            || successor.wave_id != predecessor.wave_id
+            || successor.project_session_id != predecessor.project_session_id
+        {
+            return Err(StoreError::InvalidData(
+                "a recovered Task successor must keep its predecessor's launch and ownership"
+                    .to_string(),
+            ));
+        }
+        if successor.worktree != predecessor.worktree
+            || successor.workspace_slug != predecessor.workspace_slug
+        {
+            return Err(StoreError::InvalidData(
+                "a recovered Task successor must adopt its predecessor's worktree and workspace"
+                    .to_string(),
+            ));
+        }
+        if successor.status != TaskSessionStatus::Waiting
+            || successor.latest_process.is_some()
+            || successor.provider_session_id.is_some()
+            || successor.abandon_intent.is_some()
+        {
+            return Err(StoreError::InvalidData(
+                "a recovered Task successor must begin waiting without a live body".to_string(),
+            ));
+        }
+        ensure_directive_target(directive, "task", successor.id.as_str())?;
+        validate_task_session(successor)?;
+        let issue_id = successor.launch.issue.id.as_str().to_string();
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) =
+            non_terminal_successor_for_issue(&transaction, predecessor.id.as_str(), &issue_id)?
+        {
+            if existing.worktree != predecessor.worktree {
+                return Err(StoreError::InvalidData(format!(
+                    "Task {} already has successor {} on {}; recovery cannot also adopt {}",
+                    predecessor.launch.issue.identifier,
+                    existing.id,
+                    existing.worktree.display(),
+                    predecessor.worktree.display()
+                )));
+            }
+            transaction.commit()?;
+            return Ok(TaskSessionSuccession {
+                session: existing,
+                created: false,
+            });
+        }
+        validate_task_project_session(&transaction, successor)?;
+        let parameters = task_session_params(successor);
         transaction.execute(
-            "UPDATE task_linear_observations SET session_id=?2 WHERE session_id=?1",
-            params![predecessor.id.as_str(), successor.id.as_str()],
+            TASK_SESSION_INSERT,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
-        // Seed-if-absent: a predecessor without a cursor (e.g. one predating
-        // the cursor migration) leaves the successor with no row to move, so
-        // seed from the launch snapshot. INSERT OR IGNORE is a no-op when the
-        // re-key moved a row.
-        seed_task_linear_observation(&transaction, successor)?;
-        // Re-key the comment ledger so an already-delivered comment cannot
-        // become a second follow-up on the successor.
-        transaction.execute(
-            "UPDATE task_linear_ingested_comments SET session_id=?2 WHERE session_id=?1",
-            params![predecessor.id.as_str(), successor.id.as_str()],
+        let moved = transaction.execute(
+            "UPDATE task_prs SET task_session_id=?1, updated_at=?2 WHERE task_session_id=?3",
+            params![successor.id.as_str(), now_unix(), predecessor.id.as_str()],
         )?;
-        // Soft-link the successor to its predecessor. Receipts stay on the
-        // predecessor; this column is the attributable-history link.
-        transaction.execute(
-            "UPDATE task_sessions SET predecessor_session_id=?2 WHERE id=?1",
-            params![successor.id.as_str(), predecessor.id.as_str()],
+        if moved == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "abandoned Task Session {} has no PR history to recover",
+                predecessor.id
+            )));
+        }
+        insert_child_directive(&transaction, directive)?;
+        insert_task_event_in(
+            &transaction,
+            successor,
+            &TaskEventKind::DirectiveChanged {
+                directive_id: directive.id.clone(),
+                version: directive.version,
+                directive_kind: directive.kind,
+            },
         )?;
+        _carry_task_session_state(&transaction, predecessor, successor)?;
         transaction.commit()?;
         Ok(TaskSessionSuccession {
             session: successor.clone(),
@@ -691,6 +772,30 @@ impl SqliteStore {
         )
         .optional()
         .map_err(StoreError::from)
+    }
+
+    /// The predecessor and successor ids linked to one Task Session.
+    pub fn task_session_chain_neighbors(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<(Option<String>, Option<String>)> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let predecessor = conn
+            .query_row(
+                "SELECT predecessor_session_id FROM task_sessions WHERE id=?1",
+                params![session_id.as_str()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let successor = conn
+            .query_row(
+                "SELECT id FROM task_sessions WHERE predecessor_session_id=?1",
+                params![session_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok((predecessor, successor))
     }
 
     pub fn task_session_by_issue(&self, issue: &str) -> StoreResult<Option<TaskSession>> {
@@ -3107,6 +3212,36 @@ fn seed_task_linear_observation(conn: &Connection, session: &TaskSession) -> Sto
             session.launch.issue.description,
             now_unix(),
         ],
+    )?;
+    Ok(())
+}
+
+/// Move the live Linear ingress state onto a Task successor and link the
+/// successor back to its terminal predecessor. Historical commands and
+/// directives stay on the predecessor for attribution.
+fn _carry_task_session_state(
+    conn: &Connection,
+    predecessor: &TaskSession,
+    successor: &TaskSession,
+) -> StoreResult<()> {
+    // Move the cursor rather than copying it: an already-applied Linear edit
+    // must not replay when a successor becomes current.
+    conn.execute(
+        "UPDATE task_linear_observations SET session_id=?2 WHERE session_id=?1",
+        params![predecessor.id.as_str(), successor.id.as_str()],
+    )?;
+    // Legacy predecessors may have no cursor. Seed only when the move above
+    // found nothing.
+    seed_task_linear_observation(conn, successor)?;
+    // A previously delivered Linear comment must not become a second follow-up
+    // on the successor.
+    conn.execute(
+        "UPDATE task_linear_ingested_comments SET session_id=?2 WHERE session_id=?1",
+        params![predecessor.id.as_str(), successor.id.as_str()],
+    )?;
+    conn.execute(
+        "UPDATE task_sessions SET predecessor_session_id=?2 WHERE id=?1",
+        params![successor.id.as_str(), predecessor.id.as_str()],
     )?;
     Ok(())
 }

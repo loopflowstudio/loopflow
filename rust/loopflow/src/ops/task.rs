@@ -137,6 +137,10 @@ pub struct TaskSessionSnapshot {
     /// historical `project_session_id` is a terminal predecessor and a live
     /// successor now owns its observations, reviews, and reconciliation.
     pub project_route_succeeded: bool,
+    /// Terminal attempt this Session recovered from, when any.
+    pub predecessor_session_id: Option<String>,
+    /// Live successor that recovered this terminal attempt, when any.
+    pub successor_session_id: Option<String>,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
     pub status: TaskSessionStatus,
@@ -4104,6 +4108,10 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             local_progress_unsettled: None,
         };
         let actions = derive_task_actions(&action_evidence);
+        let (predecessor_session_id, successor_session_id) = store
+            .task_session_chain_neighbors(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task chain: {error}")))?;
         // Resolve the live routing target for this Task's parent Project. The
         // historical project_session_id stays as provenance; the routing target
         // is its non-terminal successor when the historical session is terminal.
@@ -4127,6 +4135,8 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             project_session_id: session.project_session_id.to_string(),
             routing_project_session_id,
             project_route_succeeded,
+            predecessor_session_id,
+            successor_session_id,
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,
             status: session.status,
@@ -4432,6 +4442,136 @@ pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> 
 
 pub fn task_interrupt(issue: &str, replacement: Option<String>) -> OpsResult<TaskControlResult> {
     queue_command(issue, ChildCommandKind::Interrupt { replacement })
+}
+
+/// Recover an abandoned Task as one linked successor that adopts its worktree,
+/// serial PR history, and current directive.
+pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<TaskSession> {
+    let issue = issue.to_string();
+    block_on_task(async move {
+        let store = task_store().await?;
+        _recover_abandoned_task(&store, &issue, reason).await
+    })
+}
+
+async fn _recover_abandoned_task(
+    store: &SharedStore,
+    issue: &str,
+    reason: Option<String>,
+) -> OpsResult<TaskSession> {
+    let reason = reason
+        .map(|value| value.trim().to_string())
+        .map(|value| {
+            if value.is_empty() {
+                Err(task_error("recovery reason cannot be empty"))
+            } else {
+                Ok(value)
+            }
+        })
+        .transpose()?;
+    let predecessor = store
+        .get_task_session_by_issue(issue)
+        .await
+        .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+        .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+    command_source(store, &predecessor).await?;
+
+    if predecessor.status != TaskSessionStatus::Abandoned {
+        if predecessor.status == TaskSessionStatus::Completed {
+            return Err(task_error(format!(
+                "Task {} is completed; start a new Task rather than recovering it",
+                predecessor.launch.issue.identifier
+            )));
+        }
+        // A retry after a successful recovery resolves to the live successor.
+        // Return it only when it demonstrably adopted the abandoned attempt's
+        // worktree; an ordinary new attempt uses a different worktree and is not
+        // misreported as recovered.
+        let (prior_id, _) = store
+            .task_session_chain_neighbors(&predecessor.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task chain: {error}")))?;
+        if let Some(prior_id) = prior_id {
+            let prior_id = TaskSessionId::parse(&prior_id)
+                .map_err(|error| task_error(format!("invalid Task predecessor: {error}")))?;
+            if let Some(prior) = store
+                .get_task_session(&prior_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read Task predecessor: {error}")))?
+            {
+                if prior.status == TaskSessionStatus::Abandoned
+                    && prior.worktree == predecessor.worktree
+                {
+                    return Ok(predecessor);
+                }
+            }
+        }
+        return Err(task_error(format!(
+            "Task {} is {}; resume it with `lf task resume {}`. Recover is only for abandoned Tasks.",
+            predecessor.launch.issue.identifier,
+            predecessor.status.as_str(),
+            predecessor.launch.issue.identifier
+        )));
+    }
+
+    // Refuse every unsafe worktree/branch/PR shape before moving ownership.
+    task_recovery_adoption(store, &predecessor).await?;
+    let carried = store
+        .child_directives(&ChildRef::Task(predecessor.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .into_iter()
+        .find(|directive| directive.version == predecessor.current_directive_version)
+        .ok_or_else(|| task_error("abandoned Task Session has no current directive"))?;
+    let now = time::OffsetDateTime::now_utc();
+    let status_reason = reason.map_or_else(
+        || format!("recovered from {}; resume to continue", predecessor.id),
+        |reason| {
+            format!(
+                "recovered from {}: {reason}; resume to continue",
+                predecessor.id
+            )
+        },
+    );
+    let successor = TaskSession {
+        id: TaskSessionId::new(),
+        launch: predecessor.launch.clone(),
+        pm_writeback: PmWritebackState::Current,
+        wave_id: predecessor.wave_id.clone(),
+        project_session_id: predecessor.project_session_id.clone(),
+        current_directive_version: 1,
+        incorporated_directive_version: 0,
+        status: TaskSessionStatus::Waiting,
+        status_reason,
+        status_at: now,
+        worktree: predecessor.worktree.clone(),
+        workspace_slug: predecessor.workspace_slug.clone(),
+        lifecycle: predecessor.lifecycle.clone(),
+        lifecycle_phase: crate::task::TaskLifecyclePhase::Kickoff,
+        phase_epoch: 1,
+        phase_cursor: 0,
+        phase_iteration: 0,
+        gate_cycle: 0,
+        gate_proposal: None,
+        agent: predecessor.agent.clone(),
+        provider: predecessor.provider.clone(),
+        provider_session_id: None,
+        latest_process: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+        observation: Observation::NotRequired,
+    };
+    let directive = ChildDirective::initial(
+        ChildRef::Task(successor.id.clone()),
+        carried.text,
+        carried.source,
+    );
+    let succession = store
+        .recover_task_session_successor(&predecessor, &successor, &directive)
+        .await
+        .map_err(|error| task_error(format!("failed to recover Task: {error}")))?;
+    Ok(succession.session)
 }
 
 pub fn task_resume(
@@ -4873,20 +5013,20 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        _defer_task_interactions, cached_github_observation, changes_snapshot,
-        count_recovery_attempts, decide_open_pr_status, derive_workspace_slug, diff_snapshot,
-        ensure_working_pr, ensure_working_pr_with_authority, file_snapshot, next_pr_slug,
-        parse_pr_slug, parse_workspace_slug, project_context, reconcile_process_liveness,
-        reconcile_task_pr, recover_stalled_task_body, recover_stranded_task_body,
-        refuse_dirty_between_prs, refuse_if_canonical_ahead,
+        _defer_task_interactions, _recover_abandoned_task, cached_github_observation,
+        changes_snapshot, count_recovery_attempts, decide_open_pr_status, derive_workspace_slug,
+        diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
+        next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
+        reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
+        recover_stranded_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
         require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
         succession_workspace_slug, task_recovery_adoption, verify_task_pr_range_with_authority,
         RotateOptions, TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildLeaseState, ChildProcessGeneration, ChildRef,
-        MAX_RECOVERY_ATTEMPTS,
+        ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
+        ChildProcessGeneration, ChildRef, MAX_RECOVERY_ATTEMPTS,
     };
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
@@ -7277,6 +7417,115 @@ mod tests {
             resume_still_pending,
             "the Resume command is still in the queue, not discarded"
         );
+    }
+
+    #[tokio::test]
+    async fn recover_refuses_a_non_abandoned_task() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
+
+        let error = _recover_abandoned_task(&store, &session.launch.issue.identifier, None)
+            .await
+            .expect_err("a waiting Task resumes instead of recovering");
+        assert!(error.to_string().contains("lf task resume"), "{error}");
+        assert_eq!(
+            store
+                .get_task_session_by_issue(&session.launch.issue.identifier)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            session.id
+        );
+    }
+
+    #[tokio::test]
+    async fn recover_abandoned_task_adopts_existing_worktree_pr_and_direction() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/task-pr-proof";
+        repo.create_branch(branch);
+        repo.create_file("recovery.txt", "work survives abandonment\n");
+        repo.stage_all();
+        repo.commit("task work");
+        let (_home, store, session, pr) = rotation_task(&repo, branch, &base).await;
+
+        let target = ChildRef::Task(session.id.clone());
+        let command = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "finish the existing PR".to_string(),
+            },
+        );
+        let directive = ChildDirective::replacement(
+            target,
+            1,
+            "finish the existing PR".to_string(),
+            command.source.clone(),
+            command.id.clone(),
+        );
+        store
+            .create_child_command_with_directive(&command, &directive)
+            .await
+            .expect("record current direction");
+        let mut abandoned = store.get_task_session(&session.id).await.unwrap().unwrap();
+        abandoned.set_status(TaskSessionStatus::Abandoned, "operator stopped the attempt");
+        store.update_task_session(&abandoned).await.unwrap();
+
+        let successor = _recover_abandoned_task(
+            &store,
+            &abandoned.launch.issue.identifier,
+            Some("the work is still valid".to_string()),
+        )
+        .await
+        .expect("recover abandoned Task");
+        assert_ne!(successor.id, abandoned.id);
+        assert_eq!(successor.status, TaskSessionStatus::Waiting);
+        assert_eq!(successor.worktree, abandoned.worktree);
+        assert_eq!(successor.workspace_slug, abandoned.workspace_slug);
+        assert!(successor.latest_process.is_none());
+        assert_eq!(
+            successor.lifecycle_phase,
+            crate::task::TaskLifecyclePhase::Kickoff
+        );
+        assert!(successor.status_reason.contains("the work is still valid"));
+
+        assert!(store.task_prs(&abandoned.id).await.unwrap().is_empty());
+        let adopted_prs = store.task_prs(&successor.id).await.unwrap();
+        assert_eq!(adopted_prs.len(), 1);
+        assert_eq!(adopted_prs[0].id, pr.id);
+        let carried = store
+            .child_directives(&ChildRef::Task(successor.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(carried.len(), 1);
+        assert_eq!(carried[0].text, directive.text);
+        assert_eq!(carried[0].source, directive.source);
+
+        let repeated = _recover_abandoned_task(
+            &store,
+            &successor.launch.issue.identifier,
+            Some("the work is still valid".to_string()),
+        )
+        .await
+        .expect("recovery retry converges");
+        assert_eq!(repeated.id, successor.id);
+
+        let mut completed = repeated;
+        completed.set_status(TaskSessionStatus::Completed, "recovered work landed");
+        store.update_task_session(&completed).await.unwrap();
+        let error = _recover_abandoned_task(
+            &store,
+            &completed.launch.issue.identifier,
+            Some("try again".to_string()),
+        )
+        .await
+        .expect_err("a completed recovered Task cannot be recovered again");
+        assert!(error.to_string().contains("is completed"), "{error}");
     }
 
     // ── Task recovery adoption preconditions (W2-251) ───────────────────────

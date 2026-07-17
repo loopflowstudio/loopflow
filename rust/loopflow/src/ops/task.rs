@@ -3465,56 +3465,36 @@ fn unpublished_work(worktree: &Path, pr: &TaskPr) -> OpsResult<CommittedFollowUp
     )
 }
 
-/// The commit a branch actually forks from — the one authority for `base_commit`.
-///
-/// `verify_task_pr_range_with_authority` already asserts
-/// `base_commit == merge_base(upstream, HEAD)` before every publish and calls it
-/// the core parity proof, and [`unpublished_work`] independently defines
-/// `base_commit` as the fork point. Recording that same expression at the mint is
-/// what turns the check into an invariant instead of a hope: reading the base
-/// from `origin/main` while the branch sits elsewhere is how the two drift apart.
-///
-/// A merge-base is always an ancestor of both inputs, so a pair recorded here can
-/// never read `Unprovable` for incoherence — the bad pair is unrepresentable
-/// rather than merely discouraged.
+/// The commit `branch` forks from — the one authority for `base_commit`, and the
+/// same expression `verify_task_pr_range_with_authority` asserts before every
+/// publish. A merge-base is always an ancestor of both inputs, so a base recorded
+/// here can never read `Unprovable` for incoherence.
 fn fork_point(worktree: &Path, base_ref: &str, branch: &str) -> OpsResult<String> {
     merge_base(worktree, base_ref, branch).map_err(|error| {
         task_error(format!(
-            "failed to resolve the fork point of {branch:?} from {base_ref}: {error}; \
-             the branch shares no history with {base_ref}"
+            "{branch:?} shares no history with {base_ref}: {error}"
         ))
     })
 }
 
-/// Repair a recorded base that a pre-`fork_point` mint left incoherent with its
-/// branch. A re-mint used to record `origin/main`'s tip against a branch it never
-/// moved, so [`unpublished_work`] read `Unprovable` forever, completion could
-/// never settle, and the Task reopened and re-minted against an even newer main
-/// (W2-300). The mint can no longer create such a row; this frees the ones it
-/// already wrote.
-///
-/// Opportunistic by construction. Detection is a local ancestry check — no fetch —
-/// so a coherent row (every healthy Task, every iteration) costs nothing, and any
-/// failure leaves the row exactly as it found it: the gate still fails closed on
-/// `Unprovable`, which is the behaviour without this repair. It heals the data the
-/// gate reads; it never relaxes the gate.
+/// Re-derive a `base_commit` an older mint left incoherent with its branch, which
+/// wedged completion on `Unprovable` forever (W2-300). The mint can no longer
+/// write such a row; this frees the ones it already did. Fail-soft throughout: any
+/// failure leaves the row for the gate to refuse, so this heals the data the gate
+/// reads and never relaxes the gate.
 async fn heal_incoherent_base(
     store: &SharedStore,
     session: &TaskSession,
     pr: TaskPr,
     lease: Option<&ChildWriteLease>,
 ) -> OpsResult<TaskPr> {
-    // Only an unpublished PR's base is a fork-point claim about a branch we own;
-    // a published range is GitHub's and is settled elsewhere.
     if pr.phase() != PrPhase::Working || !session.worktree.exists() {
         return Ok(pr);
     }
-    let coherent = is_ancestor(&session.worktree, &pr.base_commit, &pr.branch).unwrap_or(false);
-    if coherent {
+    // Local, so a coherent row costs no fetch.
+    if is_ancestor(&session.worktree, &pr.base_commit, &pr.branch).unwrap_or(false) {
         return Ok(pr);
     }
-    // Incoherent: the recorded base is not a commit this branch sits on, so it
-    // holds no information worth preserving. Re-derive it from the one authority.
     let Ok(default_branch) = get_default_branch(&session.worktree) else {
         return Ok(pr);
     };
@@ -3522,13 +3502,11 @@ async fn heal_incoherent_base(
         return Ok(pr);
     };
     let Ok(base_commit) = fork_point(&session.worktree, &base_ref, &pr.branch) else {
-        // No common history: nothing can place this branch on the upstream. Leave
-        // the row alone and let the gate keep refusing on `Unprovable`.
         tracing::warn!(
             task = %session.launch.issue.identifier,
             branch = %pr.branch,
             base = %pr.base_commit,
-            "Task PR base is incoherent and the branch shares no history with the upstream; \
+            "Task PR base is incoherent and shares no history with the upstream; \
              leaving the row for the completion gate to refuse"
         );
         return Ok(pr);
@@ -7495,263 +7473,174 @@ mod tests {
         assert_eq!(prs[1].id, second.id);
     }
 
-    /// A re-mint must record the base its branch actually forks from, not the
-    /// upstream tip of the moment.
-    ///
-    /// The sabotage that proves this test guards the fix: restore the old
-    /// `let (base_ref, base_commit) = resolve_upstream_base(..)` and record that
-    /// `base_commit`. The re-minted row then pairs base `B2` with a branch still
-    /// at `B1`, `is_ancestor(B2, branch)` is false, and the cut reads
-    /// `Unprovable` — completion fails closed forever and the Task reopens and
-    /// re-mints against an ever-newer main (W2-300, live).
-    ///
-    /// The trap this test exists to avoid: a FIRST mint cuts the branch at the
-    /// base, so the pair agrees and the bug is invisible. Only a re-mint onto an
-    /// already-positioned branch, AFTER main has moved, separates the two. That
-    /// is why the worktree is left on the successor branch with no row — the
-    /// documented "partial rotation adopted" state — and why `origin/main`
-    /// advances to `B2` before the rotation runs.
+    /// The state only a re-mint can produce: sequence 1 merged, the successor
+    /// branch already cut at `b1` and left checked out — the documented
+    /// "partial rotation adopted" shape — with `origin/main` advanced to `b2`
+    /// underneath it. A first mint cuts the branch at its base, so the pair
+    /// agrees by accident and the defect is invisible; only main moving under an
+    /// already-positioned branch separates base from branch.
+    struct RemintFixture {
+        _home: tempfile::TempDir,
+        repo: TestRepo,
+        store: SharedStore,
+        session: TaskSession,
+        settled: TaskPr,
+        b1: String,
+        b2: String,
+    }
+
+    impl RemintFixture {
+        const SUCCESSOR: &'static str = "jack/task-pr-proof-2";
+
+        /// `carry` names a file committed onto the successor before main moves.
+        async fn new(carry: Option<&str>) -> Self {
+            let repo = TestRepo::new();
+            let b1 = repo.head_sha();
+            let settled_branch = "jack/task-pr-proof";
+            repo.create_branch(settled_branch);
+            repo.create_file("first.txt", "first PR\n");
+            repo.stage_all();
+            repo.commit("first PR");
+            let (home, store, session, mut settled) =
+                rotation_task(&repo, settled_branch, &b1).await;
+            settled.publication = Some(PrPublication {
+                requested_at: OffsetDateTime::now_utc(),
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number: 1050,
+                    url: "https://example.com/pr/1050".to_string(),
+                    head_sha: None,
+                }),
+            });
+            settled.merge_commit = Some("merge-1050".to_string());
+            settled.updated_at = OffsetDateTime::now_utc();
+
+            git(repo.path(), &["checkout", "-b", Self::SUCCESSOR, &b1]);
+            if let Some(file) = carry {
+                repo.create_file(file, "work a partial rotation already carried\n");
+                repo.stage_all();
+                repo.commit("carried follow-up");
+            }
+            repo.checkout("main");
+            repo.create_file("elsewhere.txt", "another PR merged\n");
+            repo.stage_all();
+            repo.commit("main advances");
+            repo.push();
+            let b2 = repo.head_sha();
+            assert_ne!(b1, b2, "origin/main must move or the defect cannot show");
+            repo.checkout(Self::SUCCESSOR);
+
+            Self {
+                _home: home,
+                repo,
+                store,
+                session,
+                settled,
+                b1,
+                b2,
+            }
+        }
+
+        async fn settle(&self, next: Option<&TaskPr>) {
+            self.store
+                .settle_task_pr(&self.settled, next)
+                .await
+                .expect("settle merged PR");
+        }
+
+        async fn rotate(&mut self) -> TaskPr {
+            ensure_working_pr(&self.store, &mut self.session)
+                .await
+                .expect("rotate")
+                .expect("working PR")
+        }
+
+        fn cut(&self, pr: &TaskPr) -> CommittedFollowUp {
+            unpublished_work(&self.session.worktree, pr).expect("classify")
+        }
+    }
+
+    /// Sabotage: record `resolve_upstream_base`'s `base_commit` again and this
+    /// goes red, while every first-mint rotation test stays green.
     #[tokio::test]
     async fn a_re_mint_after_main_advances_records_the_base_its_branch_forks_from() {
-        let repo = TestRepo::new();
-        let b1 = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &b1).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1050,
-                url: "https://example.com/pr/1050".to_string(),
-                head_sha: None,
-            }),
-        });
-        settled.merge_commit = Some("merge-1050".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged PR");
+        let mut fx = RemintFixture::new(None).await;
+        fx.settle(None).await;
 
-        // A previous rotation already cut and checked out the successor branch at
-        // B1, then died before its row was recorded. The worktree is left exactly
-        // where `ensure_working_pr_with_authority` adopts it.
-        let successor = "jack/task-pr-proof-2";
-        git(repo.path(), &["checkout", "-b", successor, &b1]);
-
-        // main advances underneath it — another Task's PR merges. This is the step
-        // that makes the pair separable; without it a stale base and a fresh one
-        // are the same commit and the defect cannot show.
-        repo.checkout("main");
-        repo.create_file("elsewhere.txt", "another PR merged\n");
-        repo.stage_all();
-        repo.commit("main advances while the successor branch sits still");
-        repo.push();
-        let b2 = repo.head_sha();
-        assert_ne!(b1, b2, "origin/main must have moved for this test to bite");
-        repo.checkout(successor);
-
-        let next = ensure_working_pr(&store, &mut session)
-            .await
-            .expect("rotate onto the reused successor branch")
-            .expect("working PR");
+        let next = fx.rotate().await;
 
         assert_eq!(next.sequence, 2);
-        assert_eq!(next.branch, successor);
-        // The branch never moved, so its fork point is still B1 — not the B2 tip
-        // the upstream now carries.
+        assert_eq!(next.branch, RemintFixture::SUCCESSOR);
         assert_eq!(
-            next.base_commit, b1,
-            "a re-mint must record the fork point of the branch it reused, not the current upstream tip"
+            next.base_commit, fx.b1,
+            "the fork point of the reused branch, not the upstream tip"
         );
-        assert_ne!(
-            next.base_commit, b2,
-            "recording the upstream tip against a stale branch is the W2-300 defect"
-        );
-        // The pair is coherent by construction: the recorded base is an ancestor
-        // of the branch, so the cut can never read `Unprovable` for incoherence.
+        assert_ne!(next.base_commit, fx.b2);
         assert!(
-            is_ancestor(repo.path(), &next.base_commit, &next.branch).expect("ancestry"),
+            is_ancestor(fx.repo.path(), &next.base_commit, &next.branch).expect("ancestry"),
             "the recorded base must be an ancestor of its branch"
         );
-        // The whole point: the completion gate can now prove the successor empty.
-        assert!(
-            matches!(
-                unpublished_work(&session.worktree, &next).expect("classify"),
-                CommittedFollowUp::ProvenEmpty
-            ),
-            "an empty reused branch must read ProvenEmpty so completion can settle"
-        );
+        assert!(matches!(fx.cut(&next), CommittedFollowUp::ProvenEmpty));
     }
 
-    /// A re-mint carrying real work must still read `Range`. The fork point is
-    /// what makes this safe: recording the branch TIP would read `ProvenEmpty`
-    /// here and let the gate discard committed work — the fail-open hole #1050
-    /// closed, and the reason `base = rev_parse(branch)` was rejected.
+    /// Recording the branch tip instead would read `ProvenEmpty` here and let the
+    /// gate discard committed work — the fail-open hole #1050 closed.
     #[tokio::test]
     async fn a_re_mint_holding_committed_work_still_reads_range() {
-        let repo = TestRepo::new();
-        let b1 = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &b1).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1050,
-                url: "https://example.com/pr/1050".to_string(),
-                head_sha: None,
-            }),
-        });
-        settled.merge_commit = Some("merge-1050".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged PR");
+        let mut fx = RemintFixture::new(Some("carried.txt")).await;
+        fx.settle(None).await;
+        let carried_tip = fx.repo.head_sha();
 
-        // The reused successor branch already carries a real commit atop B1.
-        let successor = "jack/task-pr-proof-2";
-        git(repo.path(), &["checkout", "-b", successor, &b1]);
-        repo.create_file("carried.txt", "work a partial rotation already carried\n");
-        repo.stage_all();
-        repo.commit("carried follow-up");
-        let carried_tip = repo.head_sha();
+        let next = fx.rotate().await;
 
-        repo.checkout("main");
-        repo.create_file("elsewhere.txt", "another PR merged\n");
-        repo.stage_all();
-        repo.commit("main advances");
-        repo.push();
-        repo.checkout(successor);
-
-        let next = ensure_working_pr(&store, &mut session)
-            .await
-            .expect("rotate")
-            .expect("working PR");
-
-        assert_eq!(next.base_commit, b1, "the fork point, not the carried tip");
-        assert_ne!(
-            next.base_commit, carried_tip,
-            "recording the branch tip would mark carried work empty — the fail-open hole"
+        assert_eq!(
+            next.base_commit, fx.b1,
+            "the fork point, not the carried tip"
         );
-        assert!(
-            matches!(
-                unpublished_work(&session.worktree, &next).expect("classify"),
-                CommittedFollowUp::Range { .. }
-            ),
-            "committed work must read Range, never ProvenEmpty"
-        );
+        assert_ne!(next.base_commit, carried_tip);
+        assert!(matches!(fx.cut(&next), CommittedFollowUp::Range { .. }));
     }
 
-    /// The live repair: a row a pre-fix mint already wrote is healed on adopt, so
-    /// W2-300's permanently-Unprovable successor becomes provable. Sabotage: drop
-    /// the `heal_incoherent_base` call at the active-PR early return and the cut
-    /// stays `Unprovable`.
+    /// The live repair: a row an older mint already wrote heals on adopt, so
+    /// W2-300's wedged successor becomes provable.
     #[tokio::test]
     async fn an_incoherent_recorded_base_is_healed_when_the_active_pr_is_adopted() {
-        let repo = TestRepo::new();
-        let b1 = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &b1).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1050,
-                url: "https://example.com/pr/1050".to_string(),
-                head_sha: None,
-            }),
-        });
-        settled.merge_commit = Some("merge-1050".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-
-        let successor = "jack/task-pr-proof-2";
-        git(repo.path(), &["checkout", "-b", successor, &b1]);
-        repo.checkout("main");
-        repo.create_file("elsewhere.txt", "another PR merged\n");
-        repo.stage_all();
-        repo.commit("main advances");
-        repo.push();
-        let b2 = repo.head_sha();
-        repo.checkout(successor);
-
-        // Exactly W2-300's row: base recorded at the newer main tip, branch still
-        // sitting at the older one.
-        let mut incoherent = settled.clone();
+        let mut fx = RemintFixture::new(None).await;
+        // Exactly W2-300's row: base at the newer main tip, branch still at the older.
+        let mut incoherent = fx.settled.clone();
         incoherent.id = TaskPrId::new();
         incoherent.sequence = 2;
         incoherent.slug = "2".to_string();
-        incoherent.branch = successor.to_string();
-        incoherent.base_commit = b2.clone();
+        incoherent.branch = RemintFixture::SUCCESSOR.to_string();
+        incoherent.base_commit = fx.b2.clone();
         incoherent.publication = None;
         incoherent.merge_commit = None;
         incoherent.created_at = OffsetDateTime::now_utc();
         incoherent.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, Some(&incoherent))
-            .await
-            .expect("record the incoherent successor");
+        fx.settle(Some(&incoherent)).await;
         assert!(
-            !is_ancestor(repo.path(), &incoherent.base_commit, &incoherent.branch)
-                .expect("ancestry"),
-            "fixture must start incoherent, or it proves nothing"
-        );
-        assert!(
-            matches!(
-                unpublished_work(&session.worktree, &incoherent).expect("classify"),
-                CommittedFollowUp::Unprovable { .. }
-            ),
-            "fixture must start Unprovable — the state W2-300 is wedged in"
+            matches!(fx.cut(&incoherent), CommittedFollowUp::Unprovable { .. }),
+            "fixture must start wedged, or it proves nothing"
         );
 
-        let adopted = ensure_working_pr(&store, &mut session)
-            .await
-            .expect("adopt the active PR")
-            .expect("working PR");
+        let adopted = fx.rotate().await;
 
         assert_eq!(
             adopted.id, incoherent.id,
             "the same row, healed — not a new one"
         );
-        assert_eq!(
-            adopted.base_commit, b1,
-            "healed to the branch's true fork point"
-        );
-        assert!(
-            matches!(
-                unpublished_work(&session.worktree, &adopted).expect("classify"),
-                CommittedFollowUp::ProvenEmpty
-            ),
-            "the healed row must be provable so completion can settle"
-        );
-        // The heal is durable, not just in the returned value.
-        let stored = store
-            .task_prs(&session.id)
+        assert_eq!(adopted.base_commit, fx.b1);
+        assert!(matches!(fx.cut(&adopted), CommittedFollowUp::ProvenEmpty));
+        let stored = fx
+            .store
+            .task_prs(&fx.session.id)
             .await
             .expect("read PR history")
             .into_iter()
             .find(|pr| pr.sequence == 2)
             .expect("successor row");
-        assert_eq!(stored.base_commit, b1, "the heal must reach the store");
+        assert_eq!(stored.base_commit, fx.b1, "the heal must reach the store");
     }
 
     #[tokio::test]

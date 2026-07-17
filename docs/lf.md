@@ -784,10 +784,12 @@ waits on Linear.
 
 `lf pm reteam` migrates a wave's existing issues into its own team. It
 **defaults to a dry run** and only mutates with `--apply`; it defers an issue
-only while a Task body can write to its Session, and leaves completed issues
-in the shared team as historical — a team move renumbers the issue, and
-shipped PR references are immutable. Each moved issue gets a comment
-recording its prior identifier; re-running is a no-op.
+only while a Task body can write to its Session. Completed issues move too:
+Linear cannot remove the shared team from a Project while any issue in that
+Project still belongs to it. Before each issue moves, Loopflow records its old
+identifier in a comment; after every issue is on the wave team, it narrows the
+Projects to that team and reconciles cached Task identifiers. Interrupted runs
+resume without duplicating comments or moves.
 
 ## lf release
 

@@ -916,12 +916,6 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     if result.already > 0 {
         println!("  already in team: {} (skipped)", result.already);
     }
-    if result.historical > 0 {
-        println!(
-            "  left as historical: {} completed issue(s) stay in the shared team",
-            result.historical
-        );
-    }
 }
 
 fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {

@@ -236,8 +236,7 @@ fn write_pr_json(dir: &std::path::Path, file: &str, number: u32, head_sha: &str)
         "html_url": format!("https://github.com/test/repo/pull/{number}"),
         "head": { "sha": head_sha },
     });
-    std::fs::write(dir.join(file), serde_json::to_string(&body).unwrap())
-        .expect("write pr json");
+    std::fs::write(dir.join(file), serde_json::to_string(&body).unwrap()).expect("write pr json");
 }
 
 struct FakeGh {

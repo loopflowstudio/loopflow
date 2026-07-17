@@ -2624,8 +2624,13 @@ pub(crate) async fn reconcile_task_pr(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, None, crate::ops::pr::PrReadFreshness::Cached)
-        .await
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        None,
+        crate::ops::pr::PrReadFreshness::Cached,
+    )
+    .await
 }
 
 /// Status for a Task whose PR is open, decided after a body turn completed.
@@ -2929,53 +2934,56 @@ async fn reconcile_task_pr_with_authority(
         }
     }
     let previous = pr.clone();
-    let github_pr =
-        match crate::ops::pr::observe_pr_by_number(&session.worktree, number, &pr.branch, freshness)
-        {
-            crate::ops::pr::PrObservation::Fresh(info) => {
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Fresh,
-                });
-                session.observation = Observation::Fresh { observed_at: now };
-                info
-            }
-            crate::ops::pr::PrObservation::NotFound => {
-                // The PR ref was deleted remotely; a merge (if any) is already
-                // persisted. Cache the successful absence briefly and keep the
-                // settled/working state.
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Fresh,
-                });
-                pr.updated_at = now;
-                update_task_pr_with_authority(store, &pr, lease)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                session.observation = Observation::Fresh { observed_at: now };
-                return Ok(Some(pr));
-            }
-            crate::ops::pr::PrObservation::Degraded { reason } => {
-                let retry_at = now + PR_OBSERVATION_DEGRADED_BACKOFF;
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Degraded {
-                        reason: reason.clone(),
-                    },
-                });
-                // `updated_at` remains the time of the cached PR data, not the
-                // failed attempt. Only the observation metadata changes.
-                update_task_pr_with_authority(store, &pr, lease)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                session.observation = Observation::Degraded {
-                    reason,
-                    cached_as_of: pr.updated_at,
-                    retry_at,
-                };
-                return Ok(Some(pr));
-            }
-        };
+    let github_pr = match crate::ops::pr::observe_pr_by_number(
+        &session.worktree,
+        number,
+        &pr.branch,
+        freshness,
+    ) {
+        crate::ops::pr::PrObservation::Fresh(info) => {
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Fresh,
+            });
+            session.observation = Observation::Fresh { observed_at: now };
+            info
+        }
+        crate::ops::pr::PrObservation::NotFound => {
+            // The PR ref was deleted remotely; a merge (if any) is already
+            // persisted. Cache the successful absence briefly and keep the
+            // settled/working state.
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Fresh,
+            });
+            pr.updated_at = now;
+            update_task_pr_with_authority(store, &pr, lease)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            session.observation = Observation::Fresh { observed_at: now };
+            return Ok(Some(pr));
+        }
+        crate::ops::pr::PrObservation::Degraded { reason } => {
+            let retry_at = now + PR_OBSERVATION_DEGRADED_BACKOFF;
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Degraded {
+                    reason: reason.clone(),
+                },
+            });
+            // `updated_at` remains the time of the cached PR data, not the
+            // failed attempt. Only the observation metadata changes.
+            update_task_pr_with_authority(store, &pr, lease)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            session.observation = Observation::Degraded {
+                reason,
+                cached_as_of: pr.updated_at,
+                retry_at,
+            };
+            return Ok(Some(pr));
+        }
+    };
     let number = u32::try_from(github_pr.number).map_err(|_| {
         task_error(format!(
             "pull request #{} exceeds supported range",
@@ -3634,8 +3642,13 @@ async fn ensure_working_pr_with_authority(
     lease: Option<&ChildWriteLease>,
     rotate: RotateOptions,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, lease, crate::ops::pr::PrReadFreshness::Cached)
-        .await?;
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        lease,
+        crate::ops::pr::PrReadFreshness::Cached,
+    )
+    .await?;
     if session.status.is_terminal() {
         return Ok(None);
     }

@@ -402,7 +402,11 @@ pub(crate) fn observe_pr_by_number(
     if matches!(freshness, PrReadFreshness::Cached) {
         args.extend(["--cache", "60s"]);
     }
-    args.extend(["-H", "Accept: application/vnd.github+json", endpoint.as_str()]);
+    args.extend([
+        "-H",
+        "Accept: application/vnd.github+json",
+        endpoint.as_str(),
+    ]);
     let output = match Command::new("gh").current_dir(repo).args(&args).output() {
         Ok(output) => output,
         Err(error) => {

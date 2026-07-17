@@ -409,7 +409,8 @@ mod tests {
         dto.repaired_head_sha = Some("02527e29".to_string());
         let json = serde_json::to_value(&dto).expect("serialize CiIncidentDto");
         assert_eq!(
-            json.get("repaired_head_sha").and_then(|value| value.as_str()),
+            json.get("repaired_head_sha")
+                .and_then(|value| value.as_str()),
             Some("02527e29"),
             "lf ci --json carries the repaired head beside failed_head_sha"
         );
@@ -417,7 +418,8 @@ mod tests {
         dto.repaired_head_sha = None;
         let json = serde_json::to_value(&dto).expect("serialize CiIncidentDto");
         assert!(
-            json.get("repaired_head_sha").is_some_and(serde_json::Value::is_null),
+            json.get("repaired_head_sha")
+                .is_some_and(serde_json::Value::is_null),
             "an unrepaired incident renders repaired_head_sha: null, never a missing key"
         );
     }

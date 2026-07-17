@@ -117,6 +117,14 @@ fn machine_home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
+pub(crate) fn production_database_path() -> PathBuf {
+    machine_home_dir().join(".lf/loopflow.db")
+}
+
+pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
+    sqlite::read_nonterminal_task_worktrees(path)
+}
+
 fn default_lf_home_dir() -> PathBuf {
     default_lf_home_dir_for(
         &machine_home_dir(),
@@ -985,8 +993,8 @@ mod tests {
     use super::sqlite::SqliteStore;
     use super::{
         default_lf_home_dir_for, guard_development_database, may_apply_migrations, open_store,
-        select_store_env_value, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-        RoutingState, RunEventRow, StorageConfig,
+        read_nonterminal_task_worktrees, select_store_env_value, CredentialState, PmSnapshotRow,
+        ProviderAccount, ProviderAccountId, RoutingState, RunEventRow, StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child_session::{
@@ -1037,6 +1045,33 @@ mod tests {
         assert_ne!(
             default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-a"),
             default_lf_home_dir_for(&home, BuildProvenance::Development, "branch-b")
+        );
+    }
+
+    #[test]
+    fn reads_nonterminal_task_ownership_without_opening_the_store_for_writes() {
+        let temp = tempfile::tempdir().expect("create temp directory");
+        let path = temp.path().join("registry.db");
+        let connection = rusqlite::Connection::open(&path).expect("open fixture database");
+        connection
+            .execute_batch(
+                "CREATE TABLE task_sessions (status TEXT NOT NULL, worktree TEXT NOT NULL);
+                 INSERT INTO task_sessions VALUES ('running', '/repo.running');
+                 INSERT INTO task_sessions VALUES ('waiting', '/repo.waiting');
+                 INSERT INTO task_sessions VALUES ('completed', '/repo.completed');
+                 INSERT INTO task_sessions VALUES ('abandoned', '/repo.abandoned');",
+            )
+            .expect("seed task ownership");
+        drop(connection);
+
+        let mut paths = read_nonterminal_task_worktrees(&path).expect("read task ownership");
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/repo.running"),
+                PathBuf::from("/repo.waiting")
+            ]
         );
     }
 

@@ -1734,14 +1734,11 @@ pub enum WtCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Remove worktrees whose branches have been merged
+    /// Remove every worktree not protected by active ownership
     Prune {
         /// Show what would be pruned without removing anything
         #[arg(long)]
         dry_run: bool,
-        /// Also prune fresh worktrees (no commits beyond main)
-        #[arg(long)]
-        include_fresh: bool,
     },
     /// Remove a worktree
     #[command(alias = "rm")]

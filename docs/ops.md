@@ -284,20 +284,48 @@ lf wt ci
 
 ### lf wt prune
 
-Remove worktrees whose branches have been merged.
+Remove every worktree without active ownership.
 
 ```bash
-lf wt prune           # show what would be pruned
-lf wt prune --dry-run # show what would be pruned
-lf wt prune --force   # remove prunable worktrees
+lf wt prune --dry-run # show every unprotected worktree
+lf wt prune           # force-remove all of them and their local branches
 ```
 
-Finds worktrees where the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or worktrees with uncommitted changes (scratch/ files are excluded).
+This is intentionally destructive. It preserves main, the current worktree,
+nonterminal Task Sessions, and worktrees owned by live processes. Every other
+registered worktree is force-removed, including dirty, fresh, unmerged, and
+unpushed work; its local branch is deleted too. Run `--dry-run` first when the
+repository contains work created outside Loopflow.
 
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Show what would be pruned without removing |
-| `--force` | Skip confirmation prompt |
+
+`lfd` runs a lossless sweep on startup and every 15 minutes. It removes only
+clean landed, remotely deleted, or terminal Task worktrees, prunes stale Git
+registrations, and deletes abandoned `.lf/logs/.tmp*` directories after 24
+hours. Nonterminal Task Sessions and any worktree currently owned by a live
+process are protected even when their branch is merged or remotely deleted.
+Disable the fallback sweep explicitly:
+
+```yaml
+autoprune: false
+```
+
+Subscribe the daemon to GitHub merges and branch deletions by defining both
+values in Doppler:
+
+```bash
+LF_GITHUB_WEBHOOK_URL=https://example.com/github/webhook
+LF_GITHUB_WEBHOOK_SECRET=<doppler-injected>
+```
+
+On startup, `lfd` registers or refreshes the repository webhook for
+`pull_request` and `delete` events. The signing secret travels to `gh api` over
+stdin and never appears in process arguments or the service file. Environment
+values override Doppler when running the daemon directly. `lfd install` records
+the repository and executable search path so launchd can run recovery after a
+reboot.
 
 ## lf pr abandon
 

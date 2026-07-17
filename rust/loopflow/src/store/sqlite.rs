@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
@@ -31,6 +31,21 @@ mod provider_deliveries;
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+}
+
+pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
+    let mut statement = conn.prepare(
+        "SELECT worktree FROM task_sessions \
+         WHERE status NOT IN ('completed', 'abandoned')",
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
+        .collect()
 }
 
 /// How long a bus frame survives. The bus is a wire, not a log: long enough

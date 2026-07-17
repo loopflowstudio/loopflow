@@ -2,9 +2,8 @@
 //! user (Linux) unit that keeps the Home daemon running.
 //!
 //! Service files never carry secrets. `LF_HOME` / `LF_DB_PATH` are non-secret
-//! path configuration and may be embedded; `LF_LINEAR_WEBHOOK_SECRET`,
-//! `LF_LINEAR_VIEWER_ID`, and `LF_LFD_AUTH_TOKEN` are sourced out-of-band
-//! (Doppler via a wrapper, or `launchctl setenv`). The file is written `0o600`
+//! path configuration and `PATH` may be embedded; secrets are resolved from
+//! the environment or Doppler by `lfd` itself. The file is written `0o600`
 //! regardless, since it may contain paths.
 
 use std::path::{Path, PathBuf};
@@ -20,10 +19,16 @@ pub struct ServiceSpec {
     pub lfd_path: PathBuf,
     /// Address the daemon binds (`serve --addr <addr>`).
     pub addr: String,
+    /// Repository root passed explicitly because service managers do not start
+    /// in the checkout that ran `lfd install`.
+    pub repo_root: PathBuf,
     /// `LF_HOME`, when set in the installing environment.
     pub lf_home: Option<PathBuf>,
     /// `LF_DB_PATH`, when set in the installing environment.
     pub db_path: Option<PathBuf>,
+    /// Executable search path captured at install time so launchd can find
+    /// Homebrew tools such as `gh` and `doppler`.
+    pub path_env: Option<String>,
 }
 
 /// Where the rendered service file lands, and how it is loaded, per platform.
@@ -65,6 +70,8 @@ pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
         "serve".to_string(),
         "--addr".to_string(),
         spec.addr.clone(),
+        "--repo".to_string(),
+        spec.repo_root.to_string_lossy().to_string(),
     ];
     let program_args_xml = program_args
         .iter()
@@ -82,6 +89,12 @@ pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
         env.push_str(&format!(
             "        <key>LF_DB_PATH</key>\n        <string>{}</string>\n",
             xml_escape(&db.to_string_lossy())
+        ));
+    }
+    if let Some(path) = &spec.path_env {
+        env.push_str(&format!(
+            "        <key>PATH</key>\n        <string>{}</string>\n",
+            xml_escape(path)
         ));
     }
     let env_block = if env.is_empty() {
@@ -139,12 +152,15 @@ pub fn render_systemd_unit(spec: &ServiceSpec) -> String {
             shell_escape(&db.to_string_lossy())
         ));
     }
+    if let Some(path) = &spec.path_env {
+        env_lines.push_str(&format!("Environment=PATH={}\n", shell_escape(path)));
+    }
     let exec_start = shell_escape(&spec.lfd_path.to_string_lossy());
     format!(
         "[Unit]\nDescription=Loopflow Home daemon (lfd)\n\n\
          [Service]\n\
          Type=simple\n\
-         ExecStart={exec_start} serve --addr {addr}\n\
+         ExecStart={exec_start} serve --addr {addr} --repo {repo}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
          {env_lines}\
@@ -153,6 +169,7 @@ pub fn render_systemd_unit(spec: &ServiceSpec) -> String {
          [Install]\n\
          WantedBy=default.target\n",
         addr = shell_escape(&spec.addr),
+        repo = shell_escape(&spec.repo_root.to_string_lossy()),
         log_path = shell_escape(&format!(
             "{}/.lf/logs/lfd.log",
             dirs::home_dir()
@@ -321,8 +338,10 @@ mod tests {
         ServiceSpec {
             lfd_path: PathBuf::from("/usr/local/bin/lfd"),
             addr: "127.0.0.1:8080".to_string(),
+            repo_root: PathBuf::from("/home/op/src/loopflow"),
             lf_home: Some(PathBuf::from("/home/op/.lf")),
             db_path: None,
+            path_env: Some("/opt/homebrew/bin:/usr/bin:/bin".to_string()),
         }
     }
 
@@ -337,6 +356,10 @@ mod tests {
         assert!(plist.contains("/usr/local/bin/lfd</string>"));
         assert!(plist.contains("serve</string>"));
         assert!(plist.contains("127.0.0.1:8080</string>"));
+        assert!(plist.contains("--repo</string>"));
+        assert!(plist.contains("/home/op/src/loopflow</string>"));
+        assert!(plist.contains("<key>PATH</key>"));
+        assert!(plist.contains("/opt/homebrew/bin:/usr/bin:/bin"));
         // Secrets must never appear in the file.
         assert!(!plist.contains("WEBHOOK_SECRET"));
         assert!(!plist.contains("VIEWER_ID"));
@@ -346,10 +369,13 @@ mod tests {
     #[test]
     fn systemd_unit_carries_execstart_restart_and_env_lines() {
         let unit = render_systemd_unit(&spec());
-        assert!(unit.contains("ExecStart=/usr/local/bin/lfd serve --addr 127.0.0.1:8080"));
+        assert!(unit.contains(
+            "ExecStart=/usr/local/bin/lfd serve --addr 127.0.0.1:8080 --repo /home/op/src/loopflow"
+        ));
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("RestartSec=5"));
         assert!(unit.contains("Environment=LF_HOME=/home/op/.lf"));
+        assert!(unit.contains("Environment=PATH=/opt/homebrew/bin:/usr/bin:/bin"));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(!unit.contains("WEBHOOK_SECRET"));
     }
@@ -359,8 +385,10 @@ mod tests {
         let bare = ServiceSpec {
             lfd_path: PathBuf::from("/usr/local/bin/lfd"),
             addr: "127.0.0.1:8080".to_string(),
+            repo_root: PathBuf::from("/home/op/src/loopflow"),
             lf_home: None,
             db_path: None,
+            path_env: None,
         };
         let plist = render_launchd_plist(&bare);
         assert!(!plist.contains("EnvironmentVariables"));

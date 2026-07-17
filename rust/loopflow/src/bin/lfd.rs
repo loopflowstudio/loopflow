@@ -35,6 +35,11 @@ enum Commands {
         /// Address the installed daemon binds.
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: String,
+
+        /// Repository whose worktrees the machine daemon owns. Defaults to the
+        /// Loopflow repo root of this checkout.
+        #[arg(long)]
+        repo: Option<String>,
     },
     /// Report whether the daemon service is loaded and running.
     Status,
@@ -84,14 +89,21 @@ fn main() -> anyhow::Result<()> {
 
             rt.block_on(lfd::serve(repo_root, socket, store, linear))
         }
-        Commands::Install { addr } => {
+        Commands::Install { addr, repo } => {
             let lfd_path = std::env::current_exe()
                 .map_err(|e| anyhow::anyhow!("cannot locate the lfd binary: {e}"))?;
+            let repo_root = match repo {
+                Some(path) => std::path::PathBuf::from(path),
+                None => loopflow::lf::commands::util::find_repo_root()
+                    .map_err(|e| anyhow::anyhow!("cannot find repo root: {e}"))?,
+            };
             let spec = lfd::service::ServiceSpec {
                 lfd_path,
                 addr,
+                repo_root,
                 lf_home: std::env::var_os("LF_HOME").map(std::path::PathBuf::from),
                 db_path: std::env::var_os("LF_DB_PATH").map(std::path::PathBuf::from),
+                path_env: std::env::var("PATH").ok(),
             };
             let file = lfd::service::install(&spec)?;
             println!(
@@ -100,8 +112,7 @@ fn main() -> anyhow::Result<()> {
                 file.path.display()
             );
             println!(
-                "source Linear credentials before the daemon starts, e.g.:\n  \
-                 doppler run -- launchctl setenv LF_LINEAR_WEBHOOK_SECRET $LF_LINEAR_WEBHOOK_SECRET"
+                "webhook credentials are read from the environment or Doppler at daemon startup"
             );
             Ok(())
         }

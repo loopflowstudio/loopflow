@@ -1,6 +1,6 @@
 //! `lf top` — one-hour provider throughput and live Loopflow activity.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -63,6 +63,27 @@ pub fn run() -> Result<()> {
 
     print!("{}", render_dashboard(&buckets, &processes));
     Ok(())
+}
+
+/// Best-effort snapshot of directories currently owned by a live process.
+///
+/// Worktree cleanup uses this as a second ownership signal alongside durable
+/// Task Sessions. An empty set is returned when `lsof` is unavailable so the
+/// daemon can still rely on its registry on minimal hosts.
+pub fn running_workspace_paths() -> HashSet<PathBuf> {
+    let output = Command::new("lsof").args(["-d", "cwd", "-Fn"]).output();
+    let Ok(output) = output else {
+        return HashSet::new();
+    };
+    if !output.status.success() {
+        return HashSet::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.strip_prefix('n'))
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .collect()
 }
 
 fn read_run_events(path: &Path) -> Result<Vec<RunEventRow>> {

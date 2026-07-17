@@ -24,10 +24,11 @@ use crate::store::{CredentialState, RoutingState};
 pub const FORWARDED_PROFILE_BUNDLE_ENV: &str = "LF_FORWARDED_PROFILE_BUNDLE";
 pub const FORWARDED_PROFILE_STORE_ENV: &str = "LF_FORWARDED_PROFILE_STORE";
 pub const PROFILE_REPO_ID_ENV: &str = "LF_PROFILE_REPO_ID";
-/// Explicit account selection (`lf --account <email|id>`): every provider
-/// resolution in this process and its children uses the named account,
-/// bypassing the repo route and health gating — an explicit human choice.
-pub const PROVIDER_ACCOUNT_ENV: &str = "LF_PROVIDER_ACCOUNT";
+/// Explicit account selection (`lf --account <email|id>`, or exported as
+/// `LF_ACCOUNT=<email|id>`): every provider resolution in this process and
+/// its children uses the named account, bypassing the repo route and health
+/// gating — an explicit human choice.
+pub const PROVIDER_ACCOUNT_ENV: &str = "LF_ACCOUNT";
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
 const LEGACY_CHROME_PROFILE_FILE: &str = ".loopflow-chrome-profile.json";
@@ -683,19 +684,48 @@ pub async fn resolve_provider_account(
     }
 }
 
-/// An explicit selector names an account by login email (case-insensitive)
-/// or by exact account id.
-fn match_account<'a>(
-    accounts: &'a [ProviderAccount],
-    selector: &str,
-) -> Option<&'a ProviderAccount> {
-    accounts.iter().find(|account| {
+#[derive(Debug)]
+enum AccountMatch<'a> {
+    One(&'a ProviderAccount),
+    Ambiguous(Vec<&'a ProviderAccount>),
+    None,
+}
+
+/// An explicit selector names an account by login email or account id —
+/// exactly, or by any prefix that matches exactly one known account
+/// (`manabot` reaches `manabot-eng`). Matching is case-insensitive.
+fn match_account<'a>(accounts: &'a [ProviderAccount], selector: &str) -> AccountMatch<'a> {
+    let selector_lower = selector.to_ascii_lowercase();
+    let exact = accounts.iter().find(|account| {
         account
             .login_email
             .as_ref()
             .is_some_and(|email| email.as_str().eq_ignore_ascii_case(selector))
-            || account.account_id.as_str() == selector
-    })
+            || account.account_id.as_str().eq_ignore_ascii_case(selector)
+    });
+    if let Some(account) = exact {
+        return AccountMatch::One(account);
+    }
+    let prefixed: Vec<&ProviderAccount> = accounts
+        .iter()
+        .filter(|account| {
+            account.login_email.as_ref().is_some_and(|email| {
+                email
+                    .as_str()
+                    .to_ascii_lowercase()
+                    .starts_with(&selector_lower)
+            }) || account
+                .account_id
+                .as_str()
+                .to_ascii_lowercase()
+                .starts_with(&selector_lower)
+        })
+        .collect();
+    match prefixed.as_slice() {
+        [] => AccountMatch::None,
+        [account] => AccountMatch::One(account),
+        _ => AccountMatch::Ambiguous(prefixed),
+    }
 }
 
 /// Resolve `lf --account <email|id>`: the named account, verified live, with
@@ -711,11 +741,24 @@ async fn resolve_explicit_account(
     let accounts = store
         .list_provider_accounts(Some(provider.as_str()))
         .await?;
-    let account = match_account(&accounts, selector).ok_or_else(|| {
-        ProviderAccountError::Runtime(format!(
-            "no managed {provider} account matches '{selector}'; see `lf auth accounts`"
-        ))
-    })?;
+    let account = match match_account(&accounts, selector) {
+        AccountMatch::One(account) => account,
+        AccountMatch::Ambiguous(candidates) => {
+            return Err(ProviderAccountError::Runtime(format!(
+                "'{selector}' matches several {provider} accounts: {}",
+                candidates
+                    .iter()
+                    .map(|account| account.account_id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        AccountMatch::None => {
+            return Err(ProviderAccountError::Runtime(format!(
+                "no managed {provider} account matches '{selector}'; see `lf auth accounts`"
+            )));
+        }
+    };
     let home = account.home.clone().ok_or_else(|| {
         ProviderAccountError::Runtime(format!(
             "{provider} account '{}' has no managed credential home",
@@ -1039,7 +1082,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_account_selector_matches_email_case_insensitively_or_id() {
+    fn explicit_account_selector_matches_exactly_or_by_unique_prefix() {
         let temp = tempdir().unwrap();
         let accounts = vec![
             new_account(
@@ -1054,23 +1097,33 @@ mod tests {
                 temp.path().join("manabot-eng"),
                 None,
             ),
+            new_account(
+                Provider::Codex,
+                parse_account_id("manabot-ops").unwrap(),
+                temp.path().join("manabot-ops"),
+                None,
+            ),
         ];
+        let one = |selector: &str| match match_account(&accounts, selector) {
+            AccountMatch::One(account) => account.account_id.as_str().to_string(),
+            other => panic!("expected one match for '{selector}', got {other:?}"),
+        };
 
-        assert_eq!(
-            match_account(&accounts, "LoopFlow-Eng@loopflow.studio")
-                .expect("email match")
-                .account_id
-                .as_str(),
-            "engineering"
-        );
-        assert_eq!(
-            match_account(&accounts, "manabot-eng")
-                .expect("id match")
-                .account_id
-                .as_str(),
-            "manabot-eng"
-        );
-        assert!(match_account(&accounts, "nobody@example.com").is_none());
+        assert_eq!(one("LoopFlow-Eng@loopflow.studio"), "engineering");
+        assert_eq!(one("manabot-eng"), "manabot-eng");
+        // A unique prefix reaches its account; email prefixes count too.
+        assert_eq!(one("manabot-e"), "manabot-eng");
+        assert_eq!(one("loopflow-eng@"), "engineering");
+        // An exact id wins even when it prefixes nothing else and another
+        // account's id shares its prefix.
+        assert!(matches!(
+            match_account(&accounts, "manabot"),
+            AccountMatch::Ambiguous(candidates) if candidates.len() == 2
+        ));
+        assert!(matches!(
+            match_account(&accounts, "nobody@example.com"),
+            AccountMatch::None
+        ));
     }
 
     #[test]

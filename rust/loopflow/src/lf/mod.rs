@@ -1592,15 +1592,6 @@ pub enum AuthCommand {
     },
     /// Clear observed utilization and cooldown for an account
     Reset { provider: String, account: String },
-    /// Run the provider's CLI on a managed account's credential home
-    Exec {
-        provider: String,
-        /// Managed account id or login email
-        account: String,
-        /// Arguments passed through to the provider CLI
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
     /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),

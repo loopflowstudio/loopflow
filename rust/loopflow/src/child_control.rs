@@ -120,7 +120,7 @@ impl<'a> ChildTarget<'a> {
             .await
     }
 
-    async fn accept_command(
+    pub(crate) async fn accept_command(
         self,
         store: &SharedStore,
         command_id: ChildCommandId,
@@ -157,7 +157,7 @@ impl<'a> ChildTarget<'a> {
         .await
     }
 
-    async fn fail_command(
+    pub(crate) async fn fail_command(
         self,
         store: &SharedStore,
         command_id: ChildCommandId,

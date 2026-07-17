@@ -25,6 +25,7 @@ use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
+use crate::chat::types::Lifecycle;
 use crate::child_session::{
     ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
     ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
@@ -741,6 +742,28 @@ exit 1
 "#,
         );
     }
+
+    /// What the runner's exit does: reconcile the PR the turn just acted on, then
+    /// settle the wake and park the body. Mirrors the production call site.
+    async fn settle(
+        &mut self,
+        wake: &super::CiFixWake,
+        head_before_turn: Option<&str>,
+        status: Lifecycle,
+    ) {
+        let observed_pr = self.reconcile().await;
+        super::settle_ci_fix_turn(
+            &self.store,
+            &mut self.task,
+            &self.lease,
+            wake,
+            observed_pr.as_ref(),
+            head_before_turn,
+            status,
+        )
+        .await
+        .expect("settle the ci-fix turn");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1375,4 +1398,217 @@ async fn a_degraded_read_refuses_to_rotate_past_an_abandoned_pr() {
         .await
         .expect("read task prs");
     assert_eq!(prs.len(), 1, "a refused rotation mints no successor");
+}
+
+// ---------------------------------------------------------------------------
+// The exit: settlement and parking
+// ---------------------------------------------------------------------------
+
+/// The repair worked: the body pushed a new head, so the wake it was born for is
+/// accepted and the Task waits on CI again. Nothing about the Task advances — a
+/// repair is not Task progress.
+#[tokio::test]
+async fn a_repaired_head_accepts_the_wake_and_parks_without_a_gate() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    let wake = harness.arm().await.expect("a red head wakes a body");
+    let phase = harness.task.lifecycle_phase;
+    let gate_cycle = harness.task.gate_cycle;
+
+    // The repair turn's push: the head moves, and the new head is not yet red.
+    harness.head("h2");
+    harness.checks_pending();
+    harness
+        .settle(&wake, Some("h1"), Lifecycle::Completed)
+        .await;
+
+    assert_eq!(
+        harness.command_state(&command).await,
+        ChildCommandState::Accepted,
+        "a repair that moved the head settles the exact wake it was born for"
+    );
+    let session = harness
+        .store
+        .get_task_session(&harness.task.id)
+        .await
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(
+        session.status,
+        TaskSessionStatus::Waiting,
+        "and the Task durably waits on CI for the head it just pushed"
+    );
+    assert_eq!(
+        session.lifecycle_phase, phase,
+        "a ci-fix body must not advance the Task's lifecycle phase"
+    );
+    assert_eq!(session.gate_cycle, gate_cycle, "nor open a gate cycle");
+    assert!(
+        session.gate_proposal.is_none(),
+        "nor propose a Task outcome"
+    );
+    let process = session.latest_process.expect("a generation");
+    assert_eq!(
+        process.state,
+        ChildLeaseState::Finished,
+        "the body is over and the Session is reservable again"
+    );
+    assert_eq!(
+        process.outcome,
+        Some(crate::child_session::ChildBodyOutcome::Completed),
+        "a repair that ran to the end is Completed; reporting it as Interrupted \
+         would file finished work as abandoned"
+    );
+    assert_eq!(
+        harness
+            .store
+            .task_prs(&harness.task.id)
+            .await
+            .expect("read task prs")
+            .len(),
+        1,
+        "a repair pushes to the branch it was given; it never rotates to a successor PR"
+    );
+}
+
+/// The repair ran and the head is still red: the wake fails with the reason a
+/// human needs, and that failure is final. One failing head earns one automatic
+/// repair — the bound that keeps a broken PR from spinning bodies.
+#[tokio::test]
+async fn an_unrepaired_head_fails_the_wake_and_never_rearms_the_same_failure() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    let wake = harness.arm().await.expect("a red head wakes a body");
+
+    // The turn ends with the head exactly where it started, still red.
+    harness
+        .settle(&wake, Some("h1"), Lifecycle::Completed)
+        .await;
+
+    let settled = harness.command(&command).await;
+    assert_eq!(
+        settled.state,
+        ChildCommandState::Failed,
+        "a repair that did not move the head is a failure, not a success"
+    );
+    let error = settled.error.as_deref().expect("a failed wake names why");
+    assert!(
+        error.contains("did not repair the head"),
+        "the wake carries the operator-facing reason: {error}"
+    );
+    assert_eq!(
+        harness.task.status,
+        TaskSessionStatus::Blocked,
+        "and the Task blocks for a human rather than looping"
+    );
+    assert_eq!(harness.task.status_reason, error, "saying the same thing");
+
+    // The bound. The head is still red, and the next supervision pass tries to
+    // wake a body for it. (Only `enqueue`: the park finished this body's lease,
+    // so nothing may reconcile under it any more — which is itself the shape of a
+    // parked body.)
+    let (again, created) = harness.enqueue().await.expect("the failure still stands");
+    assert_eq!(again, command, "the observation lands on the spent wake");
+    assert!(
+        !created,
+        "a settled identity mints no second wake, however it settled — so no body \
+         can launch, and this failure is a human's now"
+    );
+    assert_eq!(harness.ci_fix_commands().await.len(), 1);
+}
+
+/// An interrupted turn reached no outcome, so it reports none: the wake stays
+/// `Claimed`, the same state a crash leaves and recovered the same way (see
+/// `a_crash_after_arm_reclaims_the_same_command_and_reselects_ci_fix`).
+#[tokio::test]
+async fn an_interrupted_turn_leaves_the_wake_claimed() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    let wake = harness.arm().await.expect("a red head wakes a body");
+
+    harness
+        .settle(&wake, Some("h1"), Lifecycle::Interrupted)
+        .await;
+
+    assert_eq!(
+        harness.command_state(&command).await,
+        ChildCommandState::Claimed,
+        "an interrupted repair reports no outcome, so a successor can still run it"
+    );
+    assert_eq!(
+        harness.task.status,
+        TaskSessionStatus::Waiting,
+        "the body still parks; it just settles nothing"
+    );
+    assert!(
+        matches!(
+            harness
+                .task
+                .latest_process
+                .as_ref()
+                .expect("a generation")
+                .outcome,
+            Some(crate::child_session::ChildBodyOutcome::Interrupted { .. })
+        ),
+        "a turn cut short is Interrupted — the outcome and the unsettled wake have \
+         to tell the same story"
+    );
+}
+
+/// The park-before-terminalize invariant (argued on `settle_ci_fix_turn`), read
+/// off the durable record: both writes append to the event stream in the order
+/// they land, so a settlement that ever preceded its park would show here.
+#[tokio::test]
+async fn the_wake_never_settles_while_the_session_still_reads_running() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    let wake = harness.arm().await.expect("a red head wakes a body");
+    assert_eq!(
+        harness.task.status,
+        TaskSessionStatus::Running,
+        "the body is running as the turn ends"
+    );
+
+    harness
+        .settle(&wake, Some("h1"), Lifecycle::Completed)
+        .await;
+
+    let events = harness
+        .store
+        .task_events_after(&harness.task.id, 0)
+        .await
+        .expect("read task events");
+    let parked = events
+        .iter()
+        .position(|event| {
+            matches!(
+                &event.kind,
+                crate::task::TaskEventKind::StatusChanged { to, .. }
+                    if *to == TaskSessionStatus::Blocked
+            )
+        })
+        .expect("the body records its park");
+    let settled = events
+        .iter()
+        .position(|event| {
+            matches!(
+                &event.kind,
+                crate::task::TaskEventKind::CommandChanged { command_id, state, .. }
+                    if *command_id == command && state.is_terminal()
+            )
+        })
+        .expect("the body records its settlement");
+    assert!(
+        parked < settled,
+        "the Session must park before the wake goes terminal: a death in that window \
+         has to leave a Claimed wake, not a spent one under a Running Session"
+    );
 }

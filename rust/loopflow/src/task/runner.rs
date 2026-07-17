@@ -142,7 +142,10 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
         // parks the parent without ever starting the provider.
         if reconcile_interactive_rendezvous_at_birth(&store, &mut session, lease, &mut flow).await?
         {
-            return finish_parked(&store, &mut session, lease, None).await;
+            let outcome = ChildBodyOutcome::Interrupted {
+                reason: session.status_reason.clone(),
+            };
+            return finish_parked(&store, &mut session, lease, None, outcome).await;
         }
         flow
     };
@@ -401,11 +404,15 @@ The durable reviewer outcome is:\n{}",
                                 "interactive handoff open; waiting for a human",
                             )
                             .await?;
+                            let outcome = ChildBodyOutcome::Interrupted {
+                                reason: session.status_reason.clone(),
+                            };
                             return finish_parked(
                                 &store,
                                 &mut session,
                                 lease,
                                 Some(harness.as_mut()),
+                                outcome,
                             )
                             .await;
                         }
@@ -655,6 +662,23 @@ The durable reviewer outcome is:\n{}",
                             iteration_start_head = observed_pr
                                 .as_ref()
                                 .and_then(|pr| pr.head_sha().map(str::to_string));
+                            // A ci-fix body is one bounded turn, and this is its
+                            // exit. It leaves before rotation, before the gate,
+                            // and before any successor step: those advance the
+                            // Task, and a repair is not Task progress.
+                            if let Some(wake) = ci_fix_wake.as_ref() {
+                                let _ = harness.stop().await;
+                                return settle_ci_fix_turn(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    wake,
+                                    observed_pr.as_ref(),
+                                    head_before_turn.as_deref(),
+                                    status,
+                                )
+                                .await;
+                            }
                             // Merged, not merely settled: the branch below reports
                             // this PR as merged and waits on its review gate, which
                             // is false of an abandoned one.
@@ -1434,23 +1458,22 @@ async fn parked_on_interactive_handoff(store: &SharedStore, session: &TaskSessio
     Ok(interactive_rendezvous::pending(&handoffs).is_some())
 }
 
-/// End a parked body: the session status is already `Waiting` or `Blocked`, so
-/// only the process is settled. The parent stays non-terminal and resumes when a
-/// later body reconciles the handoff outcome.
+/// End a parked body: the session status is already `Waiting` or `Blocked`, so only
+/// the process is settled and the parent stays non-terminal. The caller supplies
+/// `outcome` — only it knows whether the turn finished or was cut short.
 async fn finish_parked(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: &ChildWriteLease,
     harness: Option<&mut dyn Harness>,
+    outcome: ChildBodyOutcome,
 ) -> Result<()> {
     if let Some(harness) = harness {
         let _ = harness.stop().await;
     }
     if let Some(process) = &mut session.latest_process {
         process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Interrupted {
-            reason: "interactive handoff; waiting on a human".to_string(),
-        });
+        process.outcome = Some(outcome);
     }
     store.finish_task_process(session, lease).await?;
     Ok(())
@@ -2072,13 +2095,10 @@ async fn finish_command_stop(
 pub(crate) struct CiFixWake {
     /// Which durable command this body is repairing.
     ///
-    /// Read by the tests that prove the entry contract — that a body services the
-    /// wake naming the PR's *current* failure, and the same one again after a
-    /// crash. No production reader yet: settling this command is ENG-19's, and
-    /// this PR deliberately changes no settlement behaviour. Deleting it would
-    /// make the contract unassertable, and re-adding it is the whole of ENG-19's
-    /// entry-side dependency.
-    #[allow(dead_code)]
+    /// The turn's whole span: claimed at the arm, settled by `settle_ci_fix_turn`
+    /// at the exit, and nothing in between transitions it. Naming the command —
+    /// rather than re-deriving the identity at the exit — is what makes the body
+    /// settle the wake it actually serviced, even if the PR moved on underneath.
     pub command_id: ChildCommandId,
     pub pr_number: u32,
     pub head_sha: String,
@@ -2208,6 +2228,130 @@ async fn arm_ci_fix_wake(
         }),
         remaining,
     ))
+}
+
+/// What a finished ci-fix turn does to the wake that started it. Named apart from
+/// the writes so the verdict is decided before anything is durable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CiFixVerdict {
+    /// The turn left the PR in a good place.
+    Accept,
+    /// The turn ran and the PR is still blocked, or the reading was too degraded
+    /// to tell. Either way the failure is a human's now, not a retry loop's.
+    Fail,
+    /// The PR settled or went away; the repair stopped mattering.
+    Supersede,
+    /// Not an outcome — the turn never reached one, so recovery re-runs it.
+    LeaveClaimed,
+}
+
+/// End a bounded ci-fix turn: park the body, then settle the wake that started it.
+///
+/// The exit half of [`arm_ci_fix_wake`], and the only place a `CiFix` command goes
+/// terminal by running. It settles `wake.command_id` — the command this body was
+/// born for — rather than re-deriving the identity from a PR that may since name a
+/// different failure. The verdict rides [`decide_open_pr_status`], which already
+/// reads an open PR the way the lifecycle does: `Waiting` accepts, `Blocked` fails
+/// with the same operator-facing reason, a settled or vanished PR supersedes.
+///
+/// Any terminal state spends the incident identity for good — `ensure_` mints no
+/// second wake for an identity that already has one, however it settled. That is
+/// the bound: one failing head, one automatic repair; a *new* failure is a new
+/// identity and wakes again.
+///
+/// **The invariant.** The park and the settlement are two writes with no
+/// transaction around them, so their order is the whole crash contract: park the
+/// Session *before* terminalizing the wake. A death in that window then leaves the
+/// wake `Claimed`, which is what [`relaunch_on_duplicate`] documents as recovery's
+/// job. The reverse order would spend the identity while the Session still read
+/// `Running`, and the successor — finding no claimable wake — would silently
+/// resume the generic lifecycle and leave the PR red with nobody repairing it.
+/// Interruption is the same case reached deliberately: no outcome, so no
+/// settlement.
+///
+/// The body parks: no gate, no successor step, no PR rotation. A repair pushes to
+/// an existing branch; advancing the Task on its behalf would credit a repair as
+/// progress the Task never made.
+async fn settle_ci_fix_turn(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+    wake: &CiFixWake,
+    observed_pr: Option<&crate::task::TaskPr>,
+    head_before_turn: Option<&str>,
+    status: Lifecycle,
+) -> Result<()> {
+    let (verdict, settled_status, reason) = match observed_pr
+        .filter(|pr| pr.phase() == PrPhase::Open)
+    {
+        Some(pr) if status != Lifecycle::Interrupted => {
+            let head_advanced = match (head_before_turn, pr.head_sha()) {
+                // No baseline: this body never saw a head to move.
+                (None, _) => false,
+                (Some(start), Some(current)) => start != current,
+                (Some(_), None) => false,
+            };
+            // Reconcile names a degraded read on the session; for a turn that just
+            // ran, that reading could not have verified a repair.
+            let degraded = match &session.observation {
+                Observation::Degraded { reason, .. } => Some(reason.as_str()),
+                _ => None,
+            };
+            let (settled_status, reason) =
+                crate::ops::task::decide_open_pr_status(pr, degraded, head_advanced);
+            let verdict = match settled_status {
+                TaskSessionStatus::Blocked => CiFixVerdict::Fail,
+                _ => CiFixVerdict::Accept,
+            };
+            (verdict, settled_status, reason)
+        }
+        Some(_) => (
+            CiFixVerdict::LeaveClaimed,
+            TaskSessionStatus::Waiting,
+            format!(
+                "ci-fix turn on pull request #{} was interrupted; the repair resumes on resume",
+                wake.pr_number
+            ),
+        ),
+        None => (
+            CiFixVerdict::Supersede,
+            TaskSessionStatus::Waiting,
+            format!(
+                "pull request #{} settled or is no longer attached; the ci-fix wake no longer applies",
+                wake.pr_number
+            ),
+        ),
+    };
+
+    set_and_record_status(store, session, lease, settled_status, &reason).await?;
+    let target = ChildTarget::Task(&session.id, lease);
+    match verdict {
+        CiFixVerdict::Accept => {
+            target
+                .accept_command(store, wake.command_id.clone(), None)
+                .await?
+        }
+        CiFixVerdict::Fail => {
+            target
+                .fail_command(store, wake.command_id.clone(), None, &reason)
+                .await?
+        }
+        CiFixVerdict::Supersede => {
+            target
+                .supersede_command(store, wake.command_id.clone(), &reason)
+                .await?
+        }
+        CiFixVerdict::LeaveClaimed => {}
+    }
+    // The body's outcome describes this turn, not the wake's verdict: a repair
+    // that ran to the end Completed, whatever it found. Only a turn cut short was
+    // Interrupted — and that is the one that leaves the wake reclaimable.
+    let outcome = if status == Lifecycle::Interrupted {
+        ChildBodyOutcome::Interrupted { reason }
+    } else {
+        ChildBodyOutcome::Completed
+    };
+    finish_parked(store, session, lease, None, outcome).await
 }
 
 /// The seed for a `ci-fix` turn: the PR the skill must repair plus the failing
@@ -3565,7 +3709,10 @@ mod tests {
             .await
             .unwrap();
 
-        super::finish_parked(&store, &mut session, &lease, None)
+        let outcome = crate::child_session::ChildBodyOutcome::Interrupted {
+            reason: session.status_reason.clone(),
+        };
+        super::finish_parked(&store, &mut session, &lease, None, outcome)
             .await
             .unwrap();
 

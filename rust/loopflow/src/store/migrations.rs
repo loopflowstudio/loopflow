@@ -332,6 +332,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "accounts_first",
         sql: include_str!("migrations/0.11.027_accounts_first.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 29,
+        },
+        name: "ci_incident_repaired_head",
+        sql: include_str!("migrations/0.11.029_ci_incident_repaired_head.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1438,7 +1447,8 @@ mod tests {
                 "0.11.024_ci_incidents".to_string(),
                 "0.11.025_usage_deltas".to_string(),
                 "0.11.026_lineage_boundary".to_string(),
-                "0.11.027_accounts_first".to_string()
+                "0.11.027_accounts_first".to_string(),
+                "0.11.029_ci_incident_repaired_head".to_string()
             ]
         );
     }
@@ -1446,7 +1456,7 @@ mod tests {
     #[test]
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
         // Bait for the withheld tail (`0.11.026_lineage_boundary`): a parent no
         // row records. Its survival is what proves the tail stayed withheld.
         conn.execute_batch(
@@ -1479,7 +1489,7 @@ mod tests {
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
@@ -1526,7 +1536,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 5]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 6]).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"
@@ -1754,7 +1764,7 @@ mod tests {
     fn accounts_first_migration_preserves_asymmetric_routes_venues_and_session_pins() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
         conn.execute_batch(
             "INSERT INTO provider_accounts (
                 provider, account_id, home, login_email, credential_state,

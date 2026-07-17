@@ -384,6 +384,11 @@ pub struct CiIncident {
     pub repo: String,
     pub pr_number: u32,
     pub failed_head_sha: String,
+    /// The first authoritative post-turn remote head that settlement observed to
+    /// differ from `failed_head_sha` — the head the repair body actually shipped
+    /// for this incident. `None` until a ci-fix body advances the head; written
+    /// once and never overwritten by a later push.
+    pub repaired_head_sha: Option<String>,
     pub failure_set: Vec<String>,
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,

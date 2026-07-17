@@ -1264,6 +1264,7 @@ mod tests {
             repo: "owner/repo".to_string(),
             pr_number: 42,
             failed_head_sha: "bad-head".to_string(),
+            repaired_head_sha: None,
             failure_set: vec!["test".to_string()],
             provider_completed_at: None,
             poll_observed_at: Some(observed_at),

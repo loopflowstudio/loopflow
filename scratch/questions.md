@@ -2,6 +2,28 @@
 
 Headless run: decisions made with best judgment, recorded here for the reviewer.
 
+## Serial slices
+
+This is one Task shipping across serial PRs (the runner rotates the branch). This
+first PR is the **Python authoring → release-cut pipeline**, which is fully
+verifiable without a Rust toolchain (this host's cargo is wedged, so the Rust
+surface is deferred to where CI compiles it):
+
+- **PR 1 (this one):** `new_migration.py` emits ordinal-free drafts;
+  `check_migrations.py` validates the draft graph (names, collisions, cycles);
+  `canonicalize_migrations.py` orders drafts and assigns the canonical tail at the
+  cut; `drafts/` dir; `MIGRATIONS.md`. Delivers the headline Measure — concurrent
+  branches add drafts with no ordinal contention, and `migration-check` stays green
+  on a draft-adding branch behind main. Canonicalize reads the draft *files* as the
+  source of truth, so it needs no Rust registry yet.
+- **PR 2 (next):** the Rust `DraftMigration` struct + `DRAFTS` registry (so dev/test
+  builds apply drafts on top of the canonical chain), recreate-on-draft-drift, the
+  `previous_release.db` upgrade-gate `#[test]` + `apply_through` helper, wiring
+  `canonicalize_migrations.py` into `release_run` before `verify_migrations`, doctor
+  output, and `check_migrations.py` cross-checking the `DRAFTS` registry against
+  `drafts/`. The `new_migration.py` printout already prints the `DraftMigration`
+  paste block PR 2 consumes.
+
 ## Assumptions taken
 
 - **`DRAFTS` lives in `migrations.rs` (or a sibling `drafts.rs`), not a separate crate

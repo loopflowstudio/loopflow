@@ -252,6 +252,39 @@ WHERE failure_set = '["scratch-clear"]' AND trigger_command_id IS NOT NULL;
 Incidents with `failure_set = ["scratch-clear"]` and a NULL `trigger_command_id`
 are the healthy shape, not a gap: the head was red, and no repair was warranted.
 
+## Verification status — read before approving the implementation
+
+**The local test run is blocked by host `syspolicyd`, before the test binary
+reaches `main`. No local pass is claimed here.** Every `cargo test` invocation in
+this worktree died on signal (exit 143/144) during or just after compile, without
+producing a `test result:` line. That is the host security policy refusing the
+freshly built executable — not a compiler error and not a failing assertion.
+Nothing about the code has been proven locally, and nothing about it has been
+disproven either.
+
+**GitHub CI is therefore the verifier for this PR.** `rust-test` and `rust-lint`
+run the same targets on a host without that policy, and they are the authority
+that decides whether this lands: the merge queue answers to required checks
+alone, so an implementation that does not compile or whose tests fail cannot
+reach main regardless of what this section says.
+
+What a reviewer should hold me to, given that:
+
+* Judge the implementation on **`rust-test` + `rust-lint` green at the published
+  head**, not on any claim in this doc.
+* The three tests named under "Done when" are written and committed
+  (`c4fa88eee`); whether they *pass* is CI's answer, not mine.
+* The sabotage proof (revert the `wake_legal` clause → the scratch-clear tests go
+  red, the real-leaf test stays green) has **not** been executed. It is a claim
+  about the tests' construction, argued from their fixtures, not a measurement.
+  If CI is green, the sabotage run is still owed before anyone treats the guard
+  as proven — and I have not run it.
+
+A wry note for the Task this design serves: a local verifier that cannot be run
+is exactly the class of infrastructure friction the Developer Efficiency KRs
+measure. It is not W2-309's defect and I am not widening scope to chase it, but
+it is worth someone's filing.
+
 ## Review log
 
 A reviewer's observation head can lag the current one by a revision, so this
@@ -263,3 +296,5 @@ outstanding, the head being read is older than the sha named here.
 | Design claimed `wake_legal` "has exactly the two callers that matter" — false; three more askers exist (`open_pr_model`, `next_move`, `decide_open_pr_status`) | this head — see "Who asks this question" |
 | Measure baseline said 2 armings | this head — 3, incl. this PR's own `904185190` |
 | Consumers 3/4 (Resume recommended, Review blocked on a scratch-clear head) unowned | this head — PR 2 `ci-fix-actionable-consumers`, scoped in "Scope" |
+| Implementation landed in the PR (design-only through `bdcf2a9b`) | `c4fa88eee` — `land_time_precondition`, the `wake_legal` clause, the `clear_scratch` doc pointer, and all four tests |
+| Local test evidence | **none, and none claimed** — see "Verification status"; host `syspolicyd` kills the test binary before `main`, so CI is the verifier |

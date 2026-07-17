@@ -50,7 +50,14 @@ Execution `started`, progress, and reaped are receipts inside those operations. 
 
 **Realignment**: Keep the Epoch `Open`. Ending a nonterminal Run records one typed `Wait` that names what can wake the Work: input, time, external evidence, child Work, capability restoration, or effect reconciliation. Work with an active Run is Running; open Work without one is Waiting. Resolve or invalidate the Wait from its authoritative evidence rather than through generic `wake` or `unblock` mutations. An empty/manual-input wait permits indefinite dormancy. A failed Run or unreachable Home remains runtime or topology evidence until reconciliation either starts another Run or produces a specific Wait.
 
-An interactive flow step never becomes a Work Wait. In attended mode it is a TUI `Launch` inside the active Task Run, openable in the Swift app whether or not a window is attached. `AwaitingHuman` is a projection over that live Launch, not stored Work state. In non-blocking mode the flow routes the request into the parent steering path and the response becomes a child Steer; the Task does not pretend to wait on a parent as if it were waiting on a human. There is no `Interaction` entity or `InteractionId`. The current `InteractionReview` and `InteractiveHandoff` records collapse into flow position, Launch, and Steer.
+An interactive flow step never becomes a Work Wait. It is a Review derived
+from flow position, a live Launch, and `attention: User | Parent(WorkRef)`.
+Swift is one User client and opens the Launch whether or not it was attached
+when the Review began. A parent-routed Review enters the parent's priority
+control lane and every conversation message is a Steer. There is no
+Interaction/Review row, id, disposition, or reviewer generation. The current
+`InteractionReview` and `InteractiveHandoff` records collapse into flow
+position, Launch, attention, and Steer.
 
 **Cascade**: `WorkState` needs only `Open`, `Done`, and `Abandoned`; `Blocked` and `Sleeping` disappear from storage and the public lifecycle. Monitoring can still group waits by `on` without maintaining two state machines. Home reachability remains an observation over execution location rather than a status copied onto every Work item.
 
@@ -60,7 +67,15 @@ An interactive flow step never becomes a Work Wait. In attended mode it is a TUI
 
 **Symptom**: Reconstruction asks for a minimum Turn record that does not exist on every supported surface, account and provider fallback appear to change Work attempts, and native child ids acquire durable lifecycle meaning they cannot carry consistently.
 
-**Realignment**: Reconstruct from current domain truth: Work Basis, ordered Steers, flow position, Workspace/HEAD, typed decisions and approvals, current PR/CI/review evidence, and Loopflow-mediated effect receipts. Summaries and provider events are optional context. A Launch may store an opaque resume token with the provider/account/Home that can use it; it does not create a separate Handle entity. A new Launch may resume that token when compatible or start clean from one rendered context projection. Observed Turns remain optional trace and usage evidence beneath a Launch, never the recovery floor.
+**Realignment**: Reconstruct from current domain truth: Work Basis, ordered
+Steers, interactive flow/attention position, Workspace/HEAD, narrow typed tool
+responses, current PR/CI evidence, and Loopflow-mediated effect receipts.
+Summaries and provider events are optional context. A Launch may store an
+opaque resume token with the provider/account/Home that can use it; it does not
+create a separate Handle entity. A new Launch may resume that token when
+compatible or start clean from one rendered context projection. Observed Turns
+remain optional trace and usage evidence beneath a Launch, never the recovery
+floor.
 
 Provider, model, or account fallback starts another Launch in the same active Run. A new Run is required only after execution authority ended or was fenced and reaped.
 

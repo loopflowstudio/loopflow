@@ -80,9 +80,10 @@ cutover.
 
 - Work/Epoch/Basis/Home persistence or migration;
 - Run/Launch containment and keeper recovery;
-- durable Steer/Send rows, typed decision inputs, and completion fencing;
+- durable Steer/Send rows, narrow typed tool responses, and completion fencing;
 - reconstruction without provider transcripts;
-- Wait/attention/status collapse and removal of Handoff/Review concepts;
+- Review/attention/status collapse and removal of Handoff/InteractionReview
+  aggregates;
 - OpenCode usage parser normalization;
 - the final Session/body/ChildCommand purge.
 

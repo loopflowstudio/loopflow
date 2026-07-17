@@ -304,7 +304,8 @@ repository contains work created outside Loopflow.
 `lfd` runs a lossless sweep on startup and every 15 minutes. It removes only
 clean landed, remotely deleted, or terminal Task worktrees, prunes stale Git
 registrations, and deletes abandoned `.lf/logs/.tmp*` directories after 24
-hours. Nonterminal Task Sessions and any worktree currently owned by a live
+hours. Its own log is capped at one 8 MiB current file plus one predecessor.
+Nonterminal Task Sessions and any worktree currently owned by a live
 process are protected even when their branch is merged or remotely deleted.
 Disable the fallback sweep explicitly:
 

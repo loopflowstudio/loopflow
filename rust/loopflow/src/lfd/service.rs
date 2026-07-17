@@ -63,7 +63,8 @@ fn shell_escape(value: &str) -> String {
 }
 
 /// Render the launchd plist for macOS. `RunAtLoad` + `KeepAlive` keep the daemon
-/// up; `ThrottleInterval` bounds restart churn; logs go to `~/.lf/logs/lfd.log`.
+/// up; `ThrottleInterval` bounds restart churn. `lfd` owns its bounded log;
+/// launchd output is discarded so the service manager cannot duplicate it.
 pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
     let program_args = [
         spec.lfd_path.to_string_lossy().to_string(),
@@ -102,12 +103,6 @@ pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
     } else {
         format!("    <key>EnvironmentVariables</key>\n    <dict>\n{env}    </dict>\n")
     };
-    let log_path = xml_escape(&format!(
-        "{}/.lf/logs/lfd.log",
-        dirs::home_dir()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|| "$HOME".to_string())
-    ));
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -126,9 +121,9 @@ pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
     <key>ThrottleInterval</key>
     <integer>10</integer>
     <key>StandardOutPath</key>
-    <string>{log_path}</string>
+    <string>/dev/null</string>
     <key>StandardErrorPath</key>
-    <string>{log_path}</string>
+    <string>/dev/null</string>
 </dict>
 </plist>
 "#,
@@ -164,18 +159,12 @@ pub fn render_systemd_unit(spec: &ServiceSpec) -> String {
          Restart=on-failure\n\
          RestartSec=5\n\
          {env_lines}\
-         StandardOutput=append:{log_path}\n\
-         StandardError=append:{log_path}\n\n\
+         StandardOutput=null\n\
+         StandardError=null\n\n\
          [Install]\n\
          WantedBy=default.target\n",
         addr = shell_escape(&spec.addr),
         repo = shell_escape(&spec.repo_root.to_string_lossy()),
-        log_path = shell_escape(&format!(
-            "{}/.lf/logs/lfd.log",
-            dirs::home_dir()
-                .map(|h| h.to_string_lossy().to_string())
-                .unwrap_or_else(|| "$HOME".to_string())
-        ))
     )
 }
 
@@ -360,6 +349,7 @@ mod tests {
         assert!(plist.contains("/home/op/src/loopflow</string>"));
         assert!(plist.contains("<key>PATH</key>"));
         assert!(plist.contains("/opt/homebrew/bin:/usr/bin:/bin"));
+        assert_eq!(plist.matches("<string>/dev/null</string>").count(), 2);
         // Secrets must never appear in the file.
         assert!(!plist.contains("WEBHOOK_SECRET"));
         assert!(!plist.contains("VIEWER_ID"));
@@ -374,6 +364,8 @@ mod tests {
         ));
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("RestartSec=5"));
+        assert!(unit.contains("StandardOutput=null"));
+        assert!(unit.contains("StandardError=null"));
         assert!(unit.contains("Environment=LF_HOME=/home/op/.lf"));
         assert!(unit.contains("Environment=PATH=/opt/homebrew/bin:/usr/bin:/bin"));
         assert!(unit.contains("WantedBy=default.target"));

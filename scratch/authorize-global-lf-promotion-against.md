@@ -270,7 +270,7 @@ reported — the two are genuinely separate commits, not one lie about atomicity
 | Does the candidate binary already know its own identity + registry? | Yes: `build_info::{source_revision,source_identity,migration_authority}` and `store::migrations::MIGRATIONS`/`latest_known_version` are compiled in; `install.py` already stamps `LOOPFLOW_MIGRATION_AUTHORITY` per build (install.py:176–201, build.rs:113). | Run promotion *as the candidate*; no cross-binary RPC, no re-derivation. |
 | Can a possibly-older candidate read the shared frontier without mutating it? | Yes: `doctor::inspect_store` opens the store `SQLITE_OPEN_READ_ONLY` and calls `latest_applied_version_sqlite` + `validate_sqlite`; the "unknown migration" error is produced read-only (migrations.rs:988). | The preflight is a read-only lift of `inspect_store` + liveness; no new store-open semantics. |
 | Is the migration-compatibility logic reusable as-is? | `pending_migrations` (migrations.rs:978) already returns the exact "unknown to lf … latest known …" error; `validate_applied_checksums` (772) catches checksum drift; `divergent_history` (925) catches the one known divergence. | Reject reasons come straight from these; Python parses nothing. |
-| How is body liveness authoritatively read? | `ChildLeaseState::{Active,Reserved}` is the live fencing state; `list_task_sessions`/`list_project_sessions` (child_sessions.rs:825, 2509) enumerate sessions; `status.is_process_active()` is the coarse cross-check. | Live = active/reserved lease + process-active status; name each in the refusal. |
+| How is body liveness authoritatively read? | `ChildLeaseState::{Active,Reserved}` is the live fencing state; `list_task_sessions`/`list_project_sessions` (child_sessions.rs:825, 2509) enumerate sessions. | Live = an `Active` or `Reserved` lease, sole authority; process status is report-only enrichment and never vetoes. Name each live body in the refusal. |
 | Does `may_apply_migrations` already fence validation-only writes to production? | Yes (store/mod.rs:255): a validation-only build against `~/.lf/loopflow.db` gets `validate_sqlite` (read-only), never `apply`. | The store already refuses the *write*; W2-319 is that promotion mutates the **global command** before any store open happens. Promotion must gate the swap, not the store write. |
 | Will "no replacement while any body is live" make promotion impossible during dogfooding? | Likely blocks often; but that is the intended, safe behavior — the refusal names each body so the operator drains a quiet window. The task is explicit: "Do not stop live bodies as part of promotion." | Accept the operational cost; document it; refusal is actionable, not a dead end. |
 | Does copy-vs-symlink break the "rebuild takes effect" workflow? | Yes — intentionally. That auto-effect is the implicit-fleet-replacement footgun. Developers who want the new build re-run `--use` (which now previews). | Key decision, called out below; net safety win. |
@@ -318,7 +318,8 @@ reported — the two are genuinely separate commits, not one lie about atomicity
 - **In scope:** delete `install.py._promote`; route `local --use`, `refresh`,
   `refresh --no-pull`, `--install-dir`, app + bundled-helper install, and
   post-install skill sync through `lf install {preflight,promote,rollback}`; the
-  Rust promotion boundary (preflight struct, decision, atomic locked publish,
+  Rust promotion boundary (preflight struct, decision, staged ordered
+  lock-guarded failure-preserving publication,
   rollback retention); copy-based immutable global binary; the two-worktree
   end-to-end regression; docs on local-vs-global builds.
 - **Out of scope:** stopping live bodies; OS-level immutability flags or bin-dir

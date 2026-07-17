@@ -213,6 +213,13 @@ struct PushingHarness {
     sends: Arc<AtomicUsize>,
 }
 
+/// One harness for both first-turn shapes, because the shape *is* the variable:
+/// `release_first_turn_after` = `Some` models ordinary work, which ends on its
+/// own and releases the arm's boundary; `None` models a parked interactive
+/// review, where the agent is waiting and no `TurnCompleted` is ever coming.
+/// Only an interrupt releases that one, which is why `interrupt` emits it — after
+/// a delay, so several 200ms `command_poll` ticks elapse while the turn is still
+/// active and already preempted, making `interrupts == 1` mean once-across-ticks.
 struct LiveIdleHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
     gh_dir: std::path::PathBuf,
@@ -223,6 +230,7 @@ struct LiveIdleHarness {
     repair_started_while_active: Arc<AtomicBool>,
     sends: Arc<AtomicUsize>,
     interrupts: Arc<AtomicUsize>,
+    release_first_turn_after: Option<std::time::Duration>,
 }
 
 #[async_trait]
@@ -309,21 +317,25 @@ impl ProviderHarness for LiveIdleHarness {
                 crate::ops::task::queue_ci_fix_command(&self.store, &session, &pr)
                     .await
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                self.first_turn_active.store(true, Ordering::SeqCst);
                 self.events
                     .send(ConversationEvent::TurnStarted {
-                        turn_id: "gate-review-turn".to_string(),
+                        turn_id: "first-turn".to_string(),
                     })
-                    .map_err(|_| anyhow::anyhow!("runner dropped the review event stream"))?;
-                let events = self.events.clone();
-                let first_turn_active = self.first_turn_active.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-                    first_turn_active.store(false, Ordering::SeqCst);
-                    let _ = events.send(ConversationEvent::TurnCompleted {
-                        turn_id: "gate-review-turn".to_string(),
-                        status: Lifecycle::Completed,
+                    .map_err(|_| anyhow::anyhow!("runner dropped the first event stream"))?;
+                // Ordinary work ends on its own; a parked review never does.
+                if let Some(after) = self.release_first_turn_after {
+                    let events = self.events.clone();
+                    let first_turn_active = self.first_turn_active.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(after).await;
+                        first_turn_active.store(false, Ordering::SeqCst);
+                        let _ = events.send(ConversationEvent::TurnCompleted {
+                            turn_id: "first-turn".to_string(),
+                            status: Lifecycle::Completed,
+                        });
                     });
-                });
+                }
             }
             1 => {
                 if self.first_turn_active.load(Ordering::SeqCst) {
@@ -367,8 +379,21 @@ impl ProviderHarness for LiveIdleHarness {
         Ok(())
     }
 
+    /// The only thing that can release a parked review. Delayed so poll ticks
+    /// keep firing on a turn that is active and already preempted. Never called
+    /// in the ordinary-work case, so the emit there is unreachable.
     async fn interrupt(&mut self) -> anyhow::Result<()> {
         self.interrupts.fetch_add(1, Ordering::SeqCst);
+        let events = self.events.clone();
+        let first_turn_active = self.first_turn_active.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            first_turn_active.store(false, Ordering::SeqCst);
+            let _ = events.send(ConversationEvent::TurnCompleted {
+                turn_id: "first-turn".to_string(),
+                status: Lifecycle::Interrupted,
+            });
+        });
         Ok(())
     }
 
@@ -2116,23 +2141,32 @@ async fn a_ci_fix_turn_settles_past_a_pending_handoff_it_does_not_own() {
 /// A red observation can arrive while the Task control body is alive and a
 /// provider turn still owns the transcript. The wake belongs to that same
 /// generation, but only after the provider turn releases ownership.
+///
+/// **The coordinates are load-bearing.** This must be *ordinary* work — a turn
+/// doing something, which therefore ends and releases the boundary the arm
+/// rides. Iterate step 0 is `task_clarify`, which carries no `interactive:` key,
+/// so no interaction review opens and `interaction_review` stays `None`.
+///
+/// It sat at Gate `phase_cursor = 0` until W2-308 and that was wrong on its own
+/// terms: `make_task` uses `TaskLifecyclePlan::standard`, whose **Gate policy is
+/// `Require`**, and gate step 0 is `demo`, which *is* `interactive: true`. So the
+/// turn this test called `"gate-review-turn"` was a live **human interaction
+/// review** — the one state a ci-fix wake is now allowed to interrupt
+/// (`a_parked_review_wait_is_preempted_once_by_an_actionable_wake`). Asserting
+/// `interrupts == 0` there asserted the defect. Every assertion below is
+/// unchanged; only the phase moved, so the name is now true.
 #[tokio::test]
 async fn a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle() {
     let mut harness = Harness::new().await;
-    harness.task.lifecycle_phase = crate::task::TaskLifecyclePhase::Gate;
+    harness.task.lifecycle_phase = crate::task::TaskLifecyclePhase::Iterate;
     harness.task.phase_epoch = 4;
     harness.task.phase_cursor = 0;
     harness.task.phase_iteration = 0;
-    harness.task.gate_cycle = 3;
-    harness.task.gate_proposal = Some(crate::task::TaskGateProposal {
-        status: TaskSessionStatus::Completed,
-        reason: "implementation waits for green CI".to_string(),
-    });
     harness
         .store
         .update_task_session_for_lease(&harness.task, &harness.lease)
         .await
-        .expect("persist the Gate waitpoint");
+        .expect("persist the Iterate waitpoint");
 
     harness.head("h1");
     harness.checks_failing();
@@ -2179,6 +2213,7 @@ async fn a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle() {
                     repair_started_while_active: creator_repair_started_while_active.clone(),
                     sends: creator_sends.clone(),
                     interrupts: creator_interrupts.clone(),
+                    release_first_turn_after: Some(std::time::Duration::from_millis(350)),
                 }))
             }),
         ),
@@ -2190,12 +2225,12 @@ async fn a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle() {
     assert_eq!(
         sends.load(Ordering::SeqCst),
         2,
-        "one review turn is followed by exactly one ci-fix turn"
+        "one ordinary turn is followed by exactly one ci-fix turn"
     );
     assert_eq!(
         interrupts.load(Ordering::SeqCst),
         0,
-        "the active provider turn is never interrupted"
+        "an ordinary active provider turn is never interrupted"
     );
     assert!(
         !repair_started_while_active.load(Ordering::SeqCst),
@@ -2377,5 +2412,266 @@ async fn the_wake_never_settles_while_the_session_still_reads_running() {
         parked < settled,
         "the Session must park before the wake goes terminal: a death in that window \
          has to leave a Claimed wake, not a spent one under a Running Session"
+    );
+}
+
+/// **The defect W2-308 exists to close.** A review turn is the agent *waiting*,
+/// so it never reaches the `TurnCompleted` boundary the arm rides — the claimed
+/// wake would sit `Claimed` with `responded_at` null forever. One interrupt
+/// releases that boundary, and the existing arm does the rest.
+///
+/// The wake here is **actionable** (`rust-test`): a real repair exists, which is
+/// the only thing that justifies spending a review turn. Its sibling
+/// `a_scratch_clear_only_wake_never_preempts_a_review_wait` proves the other
+/// direction.
+///
+/// Gate step 0 is `demo` and `make_task` uses `TaskLifecyclePlan::standard`,
+/// whose Gate policy is `Require` — so this opens a real **human** interaction
+/// review and leaves its provider turn live. That is production's shape, not a
+/// hand-built one.
+#[tokio::test]
+async fn a_parked_review_wait_is_preempted_once_by_an_actionable_wake() {
+    let mut harness = Harness::new().await;
+    harness.task.lifecycle_phase = crate::task::TaskLifecyclePhase::Gate;
+    harness.task.phase_epoch = 4;
+    harness.task.phase_cursor = 0;
+    harness.task.phase_iteration = 0;
+    harness.task.gate_cycle = 3;
+    harness.task.gate_proposal = Some(crate::task::TaskGateProposal {
+        status: TaskSessionStatus::Completed,
+        reason: "implementation waits for green CI".to_string(),
+    });
+    harness
+        .store
+        .update_task_session_for_lease(&harness.task, &harness.lease)
+        .await
+        .expect("persist the Gate waitpoint");
+
+    harness.head("h1");
+    harness.checks_failing();
+    harness.reconcile().await;
+
+    let generation = harness.crash_and_reserve_successor().await;
+    let sends = Arc::new(AtomicUsize::new(0));
+    let interrupts = Arc::new(AtomicUsize::new(0));
+    let repair_started_while_active = Arc::new(AtomicBool::new(false));
+    let review_turn_active = Arc::new(AtomicBool::new(false));
+    let store = harness.store.clone();
+    let task_id = harness.task.id.clone();
+    let lease = harness.lease.clone();
+    let gh_dir = harness._guard.state_dir.clone();
+    let creator_store = store.clone();
+    let creator_task_id = task_id.clone();
+    let creator_lease = lease.clone();
+    let creator_sends = sends.clone();
+    let creator_interrupts = interrupts.clone();
+    let creator_repair_started = repair_started_while_active.clone();
+    let creator_review_active = review_turn_active.clone();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        super::run_task_session_with(
+            store.clone(),
+            task_id.clone(),
+            &lease,
+            Box::new(move |_name, _approval, events| {
+                Ok(Box::new(LiveIdleHarness {
+                    events,
+                    gh_dir: gh_dir.clone(),
+                    store: creator_store.clone(),
+                    task_id: creator_task_id.clone(),
+                    lease: creator_lease.clone(),
+                    first_turn_active: creator_review_active.clone(),
+                    repair_started_while_active: creator_repair_started.clone(),
+                    sends: creator_sends.clone(),
+                    interrupts: creator_interrupts.clone(),
+                    release_first_turn_after: None,
+                }))
+            }),
+        ),
+    )
+    .await
+    .expect("a parked review must be preempted, not waited on forever")
+    .expect("the same runner services and settles the wake");
+
+    // Once, across ticks: the interrupt lands on one poll tick and the review's
+    // `TurnCompleted` only arrives ~500ms later, so several further ticks see a
+    // still-active turn with the same current wake.
+    assert_eq!(
+        interrupts.load(Ordering::SeqCst),
+        1,
+        "the parked review is interrupted exactly once, across poll ticks"
+    );
+    assert_eq!(
+        sends.load(Ordering::SeqCst),
+        2,
+        "the review turn is followed by exactly one bounded ci-fix turn"
+    );
+    assert!(
+        !repair_started_while_active.load(Ordering::SeqCst),
+        "the repair seed reaches the provider only on the released boundary"
+    );
+
+    let commands = harness.ci_fix_commands().await;
+    assert_eq!(
+        commands.len(),
+        1,
+        "the failing head keeps one wake identity"
+    );
+    let command = &commands[0];
+    assert_eq!(
+        command.state,
+        ChildCommandState::Accepted,
+        "the repair settles the exact command it was born for"
+    );
+    assert_eq!(
+        command.claimed_by_generation,
+        Some(generation),
+        "ci-fix runs in the same generation, not a second body"
+    );
+
+    let incident = harness
+        .incidents()
+        .await
+        .into_iter()
+        .next()
+        .expect("the attributed incident remains recorded");
+    assert!(
+        incident.incident.responded_at.is_some(),
+        "body birth stamps the response the ledger measures"
+    );
+
+    // The durable review outlives the repair: clearing `interaction_review` in
+    // the runner is a local, so the next generation reopens this row and normal
+    // lifecycle review resumes.
+    let review = store
+        .interaction_review_at(&task_id, 4, 0, 0)
+        .await
+        .expect("read the review at its waitpoint")
+        .expect("the review the repair interrupted still exists");
+    assert_eq!(
+        review.status,
+        crate::interaction_review::InteractionReviewStatus::Active,
+        "the repair must not dispose, close, or complete the review it interrupted"
+    );
+    assert!(review.disposition.is_none());
+}
+
+/// The other direction, and the one that catches a regression in W2-309's
+/// `wake_legal` clause from this side of the seam.
+///
+/// A head red only on `scratch-clear` asserts a land-time precondition: no code
+/// change greens it, and the only action that would "succeed" is deleting the
+/// design doc the reviewer is reading. Such a head must never arm a wake, so it
+/// can never reach the preempt — a review parked on it is left strictly alone.
+///
+/// This holds through inheritance rather than through any rule written here:
+/// `holds_current_ci_fix_wake` routes `current_ci_incident`, which filters on
+/// `wake_legal`. There is deliberately no `scratch-clear` literal in the preempt.
+#[tokio::test]
+async fn a_scratch_clear_only_wake_never_preempts_a_review_wait() {
+    let mut harness = Harness::new().await;
+    harness.task.lifecycle_phase = crate::task::TaskLifecyclePhase::Gate;
+    harness.task.phase_epoch = 4;
+    harness.task.phase_cursor = 0;
+    harness.task.phase_iteration = 0;
+    harness.task.gate_cycle = 3;
+    harness.task.gate_proposal = Some(crate::task::TaskGateProposal {
+        status: TaskSessionStatus::Completed,
+        reason: "implementation waits for green CI".to_string(),
+    });
+    harness
+        .store
+        .update_task_session_for_lease(&harness.task, &harness.lease)
+        .await
+        .expect("persist the Gate waitpoint");
+
+    harness.head("h1");
+    harness.checks_scratch_clear_only();
+    harness.reconcile().await;
+
+    // The runner only runs under the lease it holds, so drive it from a reserved
+    // successor exactly as the preempt regression does. Without this the body
+    // refuses with "generation 1 no longer holds its write lease" and never
+    // reaches the review at all.
+    harness.crash_and_reserve_successor().await;
+
+    let sends = Arc::new(AtomicUsize::new(0));
+    let interrupts = Arc::new(AtomicUsize::new(0));
+    let repair_started_while_active = Arc::new(AtomicBool::new(false));
+    let review_turn_active = Arc::new(AtomicBool::new(false));
+    let store = harness.store.clone();
+    let task_id = harness.task.id.clone();
+    let lease = harness.lease.clone();
+    let gh_dir = harness._guard.state_dir.clone();
+    let creator_store = store.clone();
+    let creator_task_id = task_id.clone();
+    let creator_lease = lease.clone();
+    let creator_sends = sends.clone();
+    let creator_interrupts = interrupts.clone();
+    let creator_repair_started = repair_started_while_active.clone();
+    let creator_review_active = review_turn_active.clone();
+
+    // The review waits forever and nothing releases it, so the runner cannot
+    // return: the timeout elapsing *is* the assertion that no repair was armed.
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        super::run_task_session_with(
+            store.clone(),
+            task_id.clone(),
+            &lease,
+            Box::new(move |_name, _approval, events| {
+                Ok(Box::new(LiveIdleHarness {
+                    events,
+                    gh_dir: gh_dir.clone(),
+                    store: creator_store.clone(),
+                    task_id: creator_task_id.clone(),
+                    lease: creator_lease.clone(),
+                    first_turn_active: creator_review_active.clone(),
+                    repair_started_while_active: creator_repair_started.clone(),
+                    sends: creator_sends.clone(),
+                    interrupts: creator_interrupts.clone(),
+                    release_first_turn_after: None,
+                }))
+            }),
+        ),
+    )
+    .await;
+    // Only the timeout is correct here: nothing releases the review, so the
+    // runner must still be waiting. `is_err()` alone could not say which way it
+    // went wrong -- a runner that *failed* returns `Ok(Err(..))` and reads the
+    // same as a runner that finished.
+    match outcome {
+        Err(_elapsed) => {}
+        Ok(Ok(())) => panic!("the runner returned instead of leaving the review waiting"),
+        Ok(Err(error)) => {
+            panic!("the runner failed instead of leaving the review waiting: {error:#}")
+        }
+    }
+
+    assert_eq!(
+        interrupts.load(Ordering::SeqCst),
+        0,
+        "a land-time precondition must never interrupt a live review"
+    );
+    assert_eq!(
+        sends.load(Ordering::SeqCst),
+        1,
+        "no bounded repair turn runs against a check no repair can green"
+    );
+
+    assert!(
+        harness.ci_fix_commands().await.is_empty(),
+        "no wake is minted for a head whose only failure land itself resolves"
+    );
+
+    let review = store
+        .interaction_review_at(&task_id, 4, 0, 0)
+        .await
+        .expect("read the review at its waitpoint")
+        .expect("the untouched review still exists");
+    assert_eq!(
+        review.status,
+        crate::interaction_review::InteractionReviewStatus::Active
     );
 }

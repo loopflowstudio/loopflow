@@ -12,12 +12,67 @@ The review rows are correct immutable audit evidence. The defect is only the
 completion gate's eligibility rule: it confuses historical dispositions with
 the review epochs that still govern the Task.
 
-## The demo
+## User-visible outcome
 
-This is infrastructure-only. The focused lifecycle tests replay the failure:
-kickoff rejection stops binding after the Task enters Iterate, a rejected Gate
-continues to bind during repair, and a later approved Gate becomes the only
-Gate settlement verdict that completion consults.
+A reviewer can request changes without permanently killing the Task. After the
+Task leaves kickoff, its rejected kickoff review stops blocking completion. A
+rejected Gate continues to block while the Task repairs in Iterate, and approval
+from the next Gate supersedes that rejection so the existing Task can complete.
+
+## End-to-end proof
+
+Replay one Task Session through the authoritative lifecycle and review store:
+
+1. Complete a required kickoff review with `changes_requested`, enter Iterate,
+   and observe that `task_completion_gate` no longer reports that review.
+2. Complete a required Gate review with `changes_requested`, enter Iterate, and
+   observe that the same review still blocks completion during repair.
+3. Enter the next Gate, complete its required review with `approved`, and
+   observe that `task_completion_gate` is satisfied while both immutable review
+   rows remain stored.
+
+The three focused `ops::task` tests prove these boundaries through the real
+SQLite store and completion-gate consumer. Run them with `cargo test -p
+loopflow --lib <test-name>` using the names under Done when.
+
+## Source of truth
+
+The persisted `interaction_reviews` rows are authoritative review evidence:
+`task_session_id`, `policy`, `phase`, `phase_epoch`, `status`, and `disposition`
+do not change meaning. `TaskSession.lifecycle_phase` and `phase_epoch` are the
+authoritative current lifecycle coordinate. `required_reviews_for_task` derives
+the still-binding projection from those records; `review_gate` and
+`task_completion_gate` consume that projection. No review row is deleted or
+re-disposed.
+
+## Affected surfaces and consumers
+
+- `required_reviews_for_task` changes which persisted reviews still govern the
+  current completion attempt.
+- `review_gate`, `task_completion_gate`, completion reconciliation, and the
+  existing `lf task complete` path inherit that projection without API changes.
+- Interaction-review creation, messaging, completion, and audit reads remain
+  compatible. SQLite schema, wire DTOs, CLI syntax, apps, Task runner behavior,
+  and PR automation do not change.
+
+## Absent and error states
+
+- No required reviews means review eligibility contributes no blocker.
+- No required Gate review means only required reviews at the current epoch are
+  eligible.
+- Every required Gate review tied at the newest Gate epoch remains eligible;
+  all must satisfy the existing approval rule.
+- Reviews from another Task Session and `Defer` reviews remain excluded.
+- A requested, active, incomplete, or non-approved eligible review keeps the
+  existing named completion blocker.
+- Failure to list interaction reviews remains a completion-gate error; the
+  projection does not invent an empty history or weaken the gate.
+
+## Operational boundary
+
+Keep the existing single interaction-review store read. Compute one in-memory
+maximum and one filter over that result: linear time in the Session review
+history, no extra query, network request, subprocess, retry, or recovery path.
 
 ## Approach
 

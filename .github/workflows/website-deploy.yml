@@ -6,6 +6,7 @@ on:
     paths:
       - "website/**"
       - "docs/**"
+      - "PROMPTS.md"
       - ".github/workflows/website-deploy.yml"
 
 concurrency:
@@ -43,6 +44,7 @@ jobs:
           rm -rf docs
           mkdir -p docs
           cp ../docs/*.md docs/
+          cp ../PROMPTS.md docs/prompts.md
 
       - name: Save current release image
         id: pre-deploy

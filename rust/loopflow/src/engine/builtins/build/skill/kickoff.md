@@ -30,9 +30,15 @@ re-derive what these already record.
 
    **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
 
-   The output of this step is concrete findings, not a worry list. "Linear's API doesn't support conditional assignment, so we need read-then-assign with conflict detection" — not "there might be API limitations."
+   The output of this step is concrete findings, not a worry list. "Linear's API doesn't support conditional assignment, so we need read-then-assign with conflict detection" — not "there might be API limitations." When two explanations remain plausible, run the smallest safe probe whose outcomes distinguish them. Preserve the observation even when it kills the attractive approach.
 
-3. **Consider alternatives.** What are 2-3 different approaches? What are the tradeoffs? Don't settle for the first idea. Let the risks you found shape which alternatives are viable.
+3. **Consider alternatives.** Develop 2-3 approaches that differ by mechanism,
+   not presentation. Keep them independent long enough to expose their real
+   strengths and exact gaps. Mark a route blocked when its remaining dependency
+   is as hard as the original task; elegance does not make a deferred problem
+   progress. If parallel agent work was explicitly authorized, assign approach
+   families dynamically and require concrete artifacts or counterexamples, not
+   status reports. Let the risks you found shape which alternatives are viable.
 
 4. **Imagine wild success.** The feature ships and users love it. What details made it great? What surprised you about how people use it?
 

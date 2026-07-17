@@ -46,6 +46,13 @@ its available status/next owner.
 ## Pursue
 
 - Select from filed tasks and open KRs; filing work does not require launching it.
+- Treat Projects as the Wave's bet portfolio. When one Project has an unresolved
+  mechanism choice, direct its Project Session to run an approach portfolio;
+  do not create duplicate Projects or several Tasks with the same favored
+  brief. Allocate attention from concrete Task evidence and exact gaps, not
+  activity or symmetrical fan-out. Let the Project preserve early independence
+  and synthesize the routes; the Wave judges whether the bet still earns
+  attention against its siblings.
 - Keep coordination and small read-only decisions in the Wave. Every concrete
   file-writing change begins as a Linear task under exactly one Project.
 - Start the task with `lf task run <issue-id> --directive "<delegation brief>"`.

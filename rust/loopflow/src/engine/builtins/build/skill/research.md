@@ -38,6 +38,22 @@ Research first, then analysis. Understand what exists before evaluating it. If y
 5. **Patterns**: What conventions exist? Where are they consistent? Where do they break?
 6. **Tests**: What's tested? What's the testing strategy? Where are gaps?
 
+## Evidence discipline
+
+- Separate observations, interpretations, and open hypotheses. A source, code
+  path, trace, or experiment supports an observation; resemblance does not.
+- When uncertainty would change the conclusion, keep two or more materially
+  different explanations alive and run the smallest safe check that separates
+  them.
+- Test the resulting system model against the complete relevant source set,
+  especially evidence that predates or contradicts the favored explanation.
+- Treat a contradiction as a reason to revise the representation or boundary,
+  not merely patch the local claim.
+- If the human explicitly authorizes parallel agent research, divide work by
+  independent approach family, keep a registry of evidence and exact gaps, and
+  require concrete findings rather than status reports. Do not broadcast the
+  favored route until the independent passes have exposed their own gaps.
+
 ## What to capture
 
 **System understanding.** How the pieces fit together. Not a file listing—the mental model someone needs to work here effectively.
@@ -69,6 +85,9 @@ Write `scratch/research.md`:
 
 ### Key abstractions
 <The concepts this code is built around>
+
+### Evidence and counterexamples
+<The observations that support this model and the strongest facts it must explain>
 
 ## Tensions
 
@@ -110,3 +129,6 @@ Write `scratch/research.md`:
 **Exhaustive listings.** Don't enumerate every file. Capture the structure that matters.
 
 **Vague observations.** "Code quality varies" is useless. "Error messages in `src/cli/commands.py` lack context while `src/api/errors.py` includes stack traces" is useful.
+
+**A model that only fits the latest evidence.** Read the older paths, failures,
+and tests that could falsify it before presenting it as system understanding.

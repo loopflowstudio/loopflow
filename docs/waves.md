@@ -182,6 +182,30 @@ lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
 PRs, but it still needs one concrete finish line.
 
+## Evidence Portfolios
+
+There are two different portfolios in the hierarchy:
+
+- The Wave's **bet portfolio** is its set of Projects. It allocates attention
+  according to each Project's KR evidence and fit with the Wave objective.
+- A Project's optional **approach portfolio** is a set of independent Tasks
+  testing different mechanisms for one uncertain KR.
+
+An approach portfolio is useful when a premature architecture choice would be
+expensive and several safe probes can run independently. Each Task should name
+its mechanism and return evidence, an artifact, an exact gap, or a
+counterexample. Keep routes independent long enough to expose their own failure
+modes; then let the Project Session synthesize and redirect them.
+
+Do not represent competing approaches as duplicate Projects, launch multiple
+Tasks with the same favored brief, or count activity as evidence. Block a route
+whose missing dependency is as hard as the original question, and reopen it
+only when a materially new mechanism appears. The Wave judges whether the
+Project still earns attention; it does not micromanage the individual probes.
+
+See [Bet Portfolios and Approach Portfolios](https://loopflow.studio/docs/wave-authoring#bet-portfolios-and-approach-portfolios)
+for the authoring pattern and command examples.
+
 ## Crons
 
 Crons schedule supplementary flows on a wave. They live in `GOAL.md`

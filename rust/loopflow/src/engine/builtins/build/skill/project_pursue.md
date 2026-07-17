@@ -48,6 +48,12 @@ its available status/next owner.
   project acknowledge` command. State the resulting priority or plan change.
 - Read the filed backlog before creating work. File a concrete task when the
   KR needs it; no rule requires every filed task to start immediately.
+- When one uncertain KR warrants parallel investigation, file independent Tasks
+  by approach family rather than duplicate assignments. Keep a compact registry
+  of each mechanism, concrete evidence, exact gap, and status. Redirect
+  convergence, mark theorem-strength or dependency-strength gaps blocked, and
+  reopen a route only for a materially new mechanism. Cross-pollinate only
+  after the independent Tasks have exposed their own strengths and failures.
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
   same Task Session through review and merge.

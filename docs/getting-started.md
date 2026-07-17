@@ -88,6 +88,7 @@ lf task wait <issue-id> --until terminal
 
 | Skill | What it does |
 |------|--------------|
+| `prompt` | Author or audit a skill, direction, Wave goal, or inline prompt |
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `gate` | Ship-ready check: tests, quality, PR description |
@@ -119,7 +120,13 @@ Project, and Task runtimes.
 
 ### Custom skills
 
-Add your own in `.lf/skills/`:
+Author one from intent:
+
+```bash
+lf prompt: create a dependency-audit skill
+```
+
+Or add one directly in `.lf/skills/`:
 
 ```markdown
 # .lf/skills/audit.md
@@ -130,6 +137,9 @@ Focus on input validation and auth boundaries.
 ```bash
 lf audit    # runs your custom skill
 ```
+
+The [Prompt Authoring guide](https://loopflow.studio/docs/prompts) covers prompt
+contracts, evidence loops, Wave goals, and directions.
 
 ### Shipping
 
@@ -173,7 +183,9 @@ tmux attach -r -t <name> # inspect one; never mutate the session directly
 Use `lf project attach <project>` or `lf task attach <issue>` for a writable,
 audited control prompt. Stop a running Wave with `lf stop <name>`.
 
-You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
+Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
+`lf design` to explore an uncertain operating context, or write it by hand.
+Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
 

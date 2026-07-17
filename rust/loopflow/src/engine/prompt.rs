@@ -2097,8 +2097,13 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
         assert!(prompt.contains("Execute Here First"));
+        assert!(prompt.contains("Evidence Loop"));
+        assert!(prompt.contains("all relevant recorded evidence"));
+        assert!(prompt.contains("Treat unexpected tool, test, or user output as a"));
         assert!(prompt.contains("lf pr land"));
         assert!(prompt.contains("lf memory add"));
+        assert!(!prompt.contains("## Prompt layers"));
+        assert!(!prompt.contains("## Search portfolios"));
         assert!(!prompt.contains("lf pm show"));
         assert!(!prompt.contains("lf loop <flow>"));
         assert!(!prompt.contains("tmux attach"));

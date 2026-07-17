@@ -123,6 +123,9 @@ file. Report the personal choices as deferred.
 `lf npx/<owner>/<repo>` — fetched live, no install step. `gstack` and core loopflow
 workflows are built in; npx covers everything else.
 
+**Prompt authoring:** mention `lf prompt: <intent>` when the user wants to create
+or tighten a repo skill, direction, or Wave goal.
+
 ## Phase 6: Next steps
 
 Platform-aware guidance:
@@ -135,6 +138,7 @@ Setup complete!
 ✓ .lf/config.yaml created
 
 Next:
+  lf prompt: create a skill # author a repo prompt
   lf design              # interactive design session
   lf debug -c            # paste an error, fix it
   lf --list              # see all steps and flows
@@ -150,6 +154,7 @@ Setup complete!
 ✓ .lf/config.yaml created
 
 Next:
+  lf prompt: create a skill # author a repo prompt
   lf design              # interactive design session
   lf debug -c            # paste an error, fix it
   lf --list              # see all steps and flows

@@ -14,8 +14,8 @@ use crate::child_session::{
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
-    fetch, get_default_branch, is_ancestor, is_clean, push_with_upstream, ref_exists, rev_parse,
-    stash_including_untracked, stash_pop,
+    fetch, get_default_branch, is_ancestor, is_clean, merge_base, push_with_upstream, ref_exists,
+    rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::{
@@ -3465,6 +3465,89 @@ fn unpublished_work(worktree: &Path, pr: &TaskPr) -> OpsResult<CommittedFollowUp
     )
 }
 
+/// The commit `branch` forks from — the one authority for `base_commit`, and the
+/// same expression `verify_task_pr_range_with_authority` asserts before every
+/// publish. A merge-base is always an ancestor of both inputs, so a base recorded
+/// here can never read `Unprovable` for incoherence.
+fn fork_point(worktree: &Path, base_ref: &str, branch: &str) -> OpsResult<String> {
+    merge_base(worktree, base_ref, branch).map_err(|error| {
+        task_error(format!(
+            "{branch:?} shares no history with {base_ref}: {error}"
+        ))
+    })
+}
+
+/// Re-derive a `base_commit` an older mint left incoherent with its branch, which
+/// wedged completion on `Unprovable` forever (W2-300). The mint can no longer
+/// write such a row; this frees the ones it already did. Fail-soft throughout: any
+/// failure leaves the row for the gate to refuse, so this heals the data the gate
+/// reads and never relaxes the gate.
+///
+/// Scoped to the legacy mint's exact signature, `M <= B <= upstream`: it sourced
+/// `B` from the upstream line, so a base it wrote is always a commit the upstream
+/// carries. Merely "the fork point is an ancestor of `B`" is too weak — a sibling
+/// or foreign base satisfies that too, and is contamination rather than a stale
+/// mint. Those stay `Unprovable`, which is the fail-closed answer.
+async fn heal_incoherent_base(
+    store: &SharedStore,
+    session: &TaskSession,
+    pr: TaskPr,
+    lease: Option<&ChildWriteLease>,
+) -> OpsResult<TaskPr> {
+    if pr.phase() != PrPhase::Working || !session.worktree.exists() {
+        return Ok(pr);
+    }
+    // Local, so a coherent row costs no fetch.
+    if is_ancestor(&session.worktree, &pr.base_commit, &pr.branch).unwrap_or(false) {
+        return Ok(pr);
+    }
+    let Ok(default_branch) = get_default_branch(&session.worktree) else {
+        return Ok(pr);
+    };
+    let Ok((base_ref, _)) = resolve_upstream_base(&session.worktree, &default_branch) else {
+        return Ok(pr);
+    };
+    let Ok(fork) = fork_point(&session.worktree, &base_ref, &pr.branch) else {
+        tracing::warn!(
+            task = %session.launch.issue.identifier,
+            branch = %pr.branch,
+            base = %pr.base_commit,
+            "Task PR base is incoherent and shares no history with the upstream; \
+             leaving the row for the completion gate to refuse"
+        );
+        return Ok(pr);
+    };
+    let ancestry = |commit: &str, descendant: &str| {
+        is_ancestor(&session.worktree, commit, descendant).unwrap_or(false)
+    };
+    if !(ancestry(&fork, &pr.base_commit) && ancestry(&pr.base_commit, &base_ref)) {
+        tracing::warn!(
+            task = %session.launch.issue.identifier,
+            branch = %pr.branch,
+            base = %pr.base_commit,
+            "Task PR base is incoherent but is not on the upstream line, so no past mint \
+             wrote it; leaving the row for the completion gate to refuse"
+        );
+        return Ok(pr);
+    }
+    let mut healed = pr;
+    tracing::info!(
+        task = %session.launch.issue.identifier,
+        branch = %healed.branch,
+        from = %healed.base_commit,
+        to = %fork,
+        "healing a Task PR base that is not an ancestor of its branch"
+    );
+    healed.base_commit = fork;
+    healed.updated_at = time::OffsetDateTime::now_utc();
+    match lease {
+        Some(lease) => store.heal_task_pr_base_for_lease(&healed, lease).await,
+        None => store.heal_task_pr_base(&healed).await,
+    }
+    .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
+    Ok(healed)
+}
+
 /// A directive was accepted (its version advanced) but the body has not yet
 /// acknowledged it. Completion — manual or an armed auto-merge — must not fire
 /// while this holds, or the accepted direction is silently erased.
@@ -3527,7 +3610,9 @@ async fn ensure_working_pr_with_authority(
         .await
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
     {
-        return Ok(Some(active));
+        return Ok(Some(
+            heal_incoherent_base(store, session, active, lease).await?,
+        ));
     }
 
     let prs = store
@@ -3584,7 +3669,10 @@ async fn ensure_working_pr_with_authority(
     let branch = deterministic_next_branch(session, &settled, rotate.slug_override.as_deref())?;
     let default_branch = get_default_branch(&session.worktree)
         .map_err(|error| task_error(format!("failed to resolve default branch: {error}")))?;
-    let (base_ref, base_commit) = resolve_upstream_base(&session.worktree, &default_branch)?;
+    // `base_ref` positions the branch below; the recorded `base_commit` is read
+    // from the branch itself once it is positioned, never from a parallel read of
+    // the upstream — see `fork_point`.
+    let (base_ref, _) = resolve_upstream_base(&session.worktree, &default_branch)?;
     if !rotate.carry_dirty
         && !is_clean(&session.worktree)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
@@ -3678,6 +3766,13 @@ async fn ensure_working_pr_with_authority(
             })?;
         }
     }
+    // The branch is now positioned — freshly cut at `base_ref`, or reused where a
+    // partial rotation already left it. Record the base it actually forks from, so
+    // the pair agrees by construction whichever of those two it was. Reading the
+    // upstream tip here instead is what paired a fresh base with a stale branch
+    // and left completion unable to prove the successor empty (W2-300).
+    let base_commit = fork_point(&session.worktree, &base_ref, &branch)?;
+
     push_with_upstream(&session.worktree, "origin", &branch)
         .map_err(|error| task_error(format!("failed to push next PR branch: {error}")))?;
 
@@ -5441,14 +5536,16 @@ mod tests {
         recover_stranded_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
         require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
         resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
-        task_recovery_adoption, task_snapshot, verify_task_pr_range_with_authority, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        task_recovery_adoption, task_snapshot, unpublished_work,
+        verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions, TaskControlResult,
+        TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
         ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
         ChildProcessGeneration, ChildRef, ChildWriteLease, MAX_RECOVERY_ATTEMPTS,
     };
+    use crate::engine::git::is_ancestor;
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
@@ -7393,6 +7490,244 @@ mod tests {
         assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(prs[0].phase(), PrPhase::Merged);
         assert_eq!(prs[1].id, second.id);
+    }
+
+    /// The state only a re-mint can produce: sequence 1 merged, the successor
+    /// branch already cut at `b1` and left checked out — the documented
+    /// "partial rotation adopted" shape — with `origin/main` advanced to `b2`
+    /// underneath it. A first mint cuts the branch at its base, so the pair
+    /// agrees by accident and the defect is invisible; only main moving under an
+    /// already-positioned branch separates base from branch.
+    struct RemintFixture {
+        _home: tempfile::TempDir,
+        repo: TestRepo,
+        store: SharedStore,
+        session: TaskSession,
+        settled: TaskPr,
+        b1: String,
+        b2: String,
+    }
+
+    impl RemintFixture {
+        const SUCCESSOR: &str = "jack/task-pr-proof-2";
+
+        /// `carry` names a file committed onto the successor before main moves.
+        async fn new(carry: Option<&str>) -> Self {
+            let repo = TestRepo::new();
+            let b1 = repo.head_sha();
+            let settled_branch = "jack/task-pr-proof";
+            repo.create_branch(settled_branch);
+            repo.create_file("first.txt", "first PR\n");
+            repo.stage_all();
+            repo.commit("first PR");
+            let (home, store, session, mut settled) =
+                rotation_task(&repo, settled_branch, &b1).await;
+            settled.publication = Some(PrPublication {
+                requested_at: OffsetDateTime::now_utc(),
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number: 1050,
+                    url: "https://example.com/pr/1050".to_string(),
+                    head_sha: None,
+                }),
+            });
+            settled.merge_commit = Some("merge-1050".to_string());
+            settled.updated_at = OffsetDateTime::now_utc();
+
+            git(repo.path(), &["checkout", "-b", Self::SUCCESSOR, &b1]);
+            if let Some(file) = carry {
+                repo.create_file(file, "work a partial rotation already carried\n");
+                repo.stage_all();
+                repo.commit("carried follow-up");
+            }
+            repo.checkout("main");
+            repo.create_file("elsewhere.txt", "another PR merged\n");
+            repo.stage_all();
+            repo.commit("main advances");
+            repo.push();
+            let b2 = repo.head_sha();
+            assert_ne!(b1, b2, "origin/main must move or the defect cannot show");
+            repo.checkout(Self::SUCCESSOR);
+
+            Self {
+                _home: home,
+                repo,
+                store,
+                session,
+                settled,
+                b1,
+                b2,
+            }
+        }
+
+        async fn settle(&self, next: Option<&TaskPr>) {
+            self.store
+                .settle_task_pr(&self.settled, next)
+                .await
+                .expect("settle merged PR");
+        }
+
+        async fn rotate(&mut self) -> TaskPr {
+            ensure_working_pr(&self.store, &mut self.session)
+                .await
+                .expect("rotate")
+                .expect("working PR")
+        }
+
+        fn cut(&self, pr: &TaskPr) -> CommittedFollowUp {
+            unpublished_work(&self.session.worktree, pr).expect("classify")
+        }
+
+        /// An unpublished successor row recording `base`, as a past mint would have.
+        fn successor_row(&self, base: &str) -> TaskPr {
+            let mut pr = self.settled.clone();
+            pr.id = TaskPrId::new();
+            pr.sequence = 2;
+            pr.slug = "2".to_string();
+            pr.branch = Self::SUCCESSOR.to_string();
+            pr.base_commit = base.to_string();
+            pr.publication = None;
+            pr.merge_commit = None;
+            pr.created_at = OffsetDateTime::now_utc();
+            pr.updated_at = OffsetDateTime::now_utc();
+            pr
+        }
+
+        /// A commit on a sibling branch off `b1` — never on the upstream line.
+        fn sibling_commit(&self) -> String {
+            git(
+                self.repo.path(),
+                &["checkout", "-b", "jack/sibling", &self.b1],
+            );
+            self.repo
+                .create_file("sibling.txt", "another branch's work\n");
+            self.repo.stage_all();
+            self.repo.commit("sibling work");
+            let tip = self.repo.head_sha();
+            self.repo.checkout(Self::SUCCESSOR);
+            tip
+        }
+    }
+
+    /// Sabotage: record `resolve_upstream_base`'s `base_commit` again and this
+    /// goes red, while every first-mint rotation test stays green.
+    #[tokio::test]
+    async fn a_re_mint_after_main_advances_records_the_base_its_branch_forks_from() {
+        let mut fx = RemintFixture::new(None).await;
+        fx.settle(None).await;
+
+        let next = fx.rotate().await;
+
+        assert_eq!(next.sequence, 2);
+        assert_eq!(next.branch, RemintFixture::SUCCESSOR);
+        assert_eq!(
+            next.base_commit, fx.b1,
+            "the fork point of the reused branch, not the upstream tip"
+        );
+        assert_ne!(next.base_commit, fx.b2);
+        assert!(
+            is_ancestor(fx.repo.path(), &next.base_commit, &next.branch).expect("ancestry"),
+            "the recorded base must be an ancestor of its branch"
+        );
+        assert!(matches!(fx.cut(&next), CommittedFollowUp::ProvenEmpty));
+    }
+
+    /// Recording the branch tip instead would read `ProvenEmpty` here and let the
+    /// gate discard committed work — the fail-open hole #1050 closed.
+    #[tokio::test]
+    async fn a_re_mint_holding_committed_work_still_reads_range() {
+        let mut fx = RemintFixture::new(Some("carried.txt")).await;
+        fx.settle(None).await;
+        let carried_tip = fx.repo.head_sha();
+
+        let next = fx.rotate().await;
+
+        assert_eq!(
+            next.base_commit, fx.b1,
+            "the fork point, not the carried tip"
+        );
+        assert_ne!(next.base_commit, carried_tip);
+        assert!(matches!(fx.cut(&next), CommittedFollowUp::Range { .. }));
+    }
+
+    /// The live repair: a row an older mint already wrote heals on adopt, so
+    /// W2-300's wedged successor becomes provable.
+    #[tokio::test]
+    async fn an_incoherent_recorded_base_is_healed_when_the_active_pr_is_adopted() {
+        let mut fx = RemintFixture::new(None).await;
+        // Exactly W2-300's row: base at the newer main tip, branch still at the
+        // older — the legacy signature, M <= B <= upstream.
+        let incoherent = fx.successor_row(&fx.b2);
+        fx.settle(Some(&incoherent)).await;
+        assert!(
+            matches!(fx.cut(&incoherent), CommittedFollowUp::Unprovable { .. }),
+            "fixture must start wedged, or it proves nothing"
+        );
+
+        let adopted = fx.rotate().await;
+
+        assert_eq!(
+            adopted.id, incoherent.id,
+            "the same row, healed — not a new one"
+        );
+        assert_eq!(adopted.base_commit, fx.b1);
+        assert!(matches!(fx.cut(&adopted), CommittedFollowUp::ProvenEmpty));
+        let stored = fx
+            .store
+            .task_prs(&fx.session.id)
+            .await
+            .expect("read PR history")
+            .into_iter()
+            .find(|pr| pr.sequence == 2)
+            .expect("successor row");
+        assert_eq!(stored.base_commit, fx.b1, "the heal must reach the store");
+    }
+
+    /// A foreign base is not a stale mint and must stay fail-closed. It is built
+    /// so the true fork point IS its ancestor (M <= B holds), which is what makes
+    /// this catch an M<=B-only heal: only `B <= upstream` separates the legacy
+    /// signature from contamination.
+    #[tokio::test]
+    async fn a_recorded_base_off_the_upstream_line_is_refused_not_healed() {
+        let mut fx = RemintFixture::new(None).await;
+        let sibling = fx.sibling_commit();
+        let foreign = fx.successor_row(&sibling);
+        fx.settle(Some(&foreign)).await;
+
+        // The two preconditions that give this test its teeth.
+        assert!(
+            is_ancestor(fx.repo.path(), &fx.b1, &sibling).expect("ancestry"),
+            "M <= B must hold, or an M<=B-only heal would refuse this anyway and the test proves nothing"
+        );
+        assert!(
+            !is_ancestor(fx.repo.path(), &sibling, "origin/main").expect("ancestry"),
+            "B must be off the upstream line"
+        );
+        assert!(matches!(
+            fx.cut(&foreign),
+            CommittedFollowUp::Unprovable { .. }
+        ));
+
+        let adopted = fx.rotate().await;
+
+        assert_eq!(
+            adopted.base_commit, sibling,
+            "a base no past mint could have written must not be healed"
+        );
+        assert!(
+            matches!(fx.cut(&adopted), CommittedFollowUp::Unprovable { .. }),
+            "contamination stays Unprovable — the gate keeps refusing"
+        );
+        let stored = fx
+            .store
+            .task_prs(&fx.session.id)
+            .await
+            .expect("read PR history")
+            .into_iter()
+            .find(|pr| pr.sequence == 2)
+            .expect("successor row");
+        assert_eq!(stored.base_commit, sibling, "the store row is untouched");
     }
 
     #[tokio::test]

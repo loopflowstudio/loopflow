@@ -66,6 +66,30 @@ Two providers, different depths, no profile in the routing surface, and a
 wrong-identity login that today succeeds silently now refuses with the reason
 and the fix. Both halves run against the real store.
 
+**The end-goal demo (PR 3): health-driven failover on prod, on provider-observed
+evidence.** The day PR 3 lands, on the real fleet, with no fixture:
+
+```
+$ lf usage --refresh                     # provider-observed, not inferred
+codex/manabot-eng   weekly 80%  resets in 6d   (poll, observed 2026-07-16 23:16)
+
+$ lf route default set codex manabot-eng engineering    # strained account, ordered FIRST
+$ lf -m codex --account-explain -- true
+route: default → [manabot-eng, engineering]
+  manabot-eng   demoted: weekly 80% >= 75% strained, resets in 6d
+  engineering   weekly 0%
+selected: codex/engineering
+```
+
+Ordered first, and still not chosen — because the provider says it is nearly
+spent. That is the whole thesis in one line: order is intent, health is
+observation, and the account that spends is the one that can. It is also
+falsifiable: put `manabot-eng` at the head, and if it gets selected, PR 3 failed.
+Re-read the live windows before landing (`sqlite3 ~/.lf/loopflow.db "SELECT
+provider, account_id, window, used_percent FROM provider_account_limits ORDER BY
+used_percent DESC"`) — if the fleet's strain has moved, the demo picks whichever
+account is then over 75%, and the threshold does not move to chase it.
+
 ## Approach
 
 **One arrow: account → ordered venues.** A venue is consulted only at a
@@ -147,9 +171,27 @@ reorders intent; it only filters and demotes.
 
 - **Exclude**: `credential_state != Connected`, `effective_routing_state !=
   Automatic`, or `cooldown_until > now`. (Today's rule, unchanged.)
-- **Demote**: any window in `provider_account_limits` with `used_percent >= 90`
-  and `resets_at` in the future sorts to the back, preserving relative order.
-  Never excluded — a strained account still beats no account.
+- **Demote**: any window in `provider_account_limits` with `used_percent >=
+  STRAINED_UTILIZATION_PERCENT` and `resets_at` in the future sorts to the back,
+  preserving relative order. Never excluded — a strained account still beats no
+  account.
+
+```rust
+/// A window this far spent, with its reset still ahead, has less than one
+/// agent session of headroom left: demote before the provider refuses, not
+/// after. Lives beside DEFAULT_COOLDOWN_SECS in provider_account.rs.
+const STRAINED_UTILIZATION_PERCENT: i64 = 75;
+```
+
+75 is a policy choice, not a fitted one, but it is chosen against the live fleet
+so PR 3 demonstrates itself on prod the day it lands: `codex/manabot-eng` sits
+at **80% weekly** (`resets_at` ~6 days out) and demotes, while the next-highest
+window in the whole store is `claude/loopflow` weekly at 31%. That is a 44-point
+margin on both sides — the threshold demotes exactly the strained account and
+cannot flap against the rest of the fleet. A single constant covers every window
+kind; if a fast-resetting `session` window at 80% ever proves too eager to demote
+compared to a `weekly` at the same number, that is a reset-horizon refinement to
+make then, with the evidence, not now.
 - Pinned session wins if still eligible. (Today's rule, unchanged.)
 
 ### Ceremony (`lf auth connect <provider> <account>`)
@@ -237,9 +279,10 @@ It is also the demo.
 | Then is `host_id` on venues load-bearing? | **No — and it is worse than useless.** `HostId::local()` is `gethostname` and nothing more (`profile.rs:81`), so the stamp compares hostnames. It therefore cannot distinguish the case it exists for (this store was restored onto another Mac) from a case that is not a problem at all (this Mac was renamed), and it refuses identically in both. A stamp that yields a false refusal as often as a true one is a coin, not a guard. | **Delete the column.** `access_profiles` collapses `profiles` + `chrome_profile_bindings` into one table keyed by `profile_id` alone, with `chrome_directory` unique. The ceremony's real protection is step 4, which is the argument the rest of this doc already makes. A genuinely multi-host store would host-qualify the ids *then* — the same "don't build ahead of need" reasoning that killed the `home` scoping. |
 | If `host_id` goes, can the machine default still be keyed by host? | **No, and this is the sharper half.** Keying `provider_routes(Host(host_id), …)` on `gethostname` would leave `HostId` with exactly one consumer — resurrected for a *new* purpose, on the same unstable primitive. Renaming the Mac would then silently drop the machine default, and every unrouted repo would fall straight back to ambient credentials: **problem 3, reintroduced by the mechanism meant to fix it.** | The store is host-local (row above), so "machine-wide default" *is* "this store's default". `RouteScope { Repo(RepoId), Default }`; the default scope carries no id (`scope_id = ''`, enforced by CHECK). `HostId` is deleted outright — all 22 references are Chrome-binding-related — which retires the `gethostname` instability rather than filing it. |
 | Does `lf auth exec` (named in the directive) exist? | **No.** It landed in #1027 and was deleted in the #1029 branch (merged to main as `0dd1bf843`, in my base). `grep "fn exec_account"` → absent; `AuthCommand::Exec` → absent. Rationale, verbatim: *"auth is for ceremonies, not for running agents; interactive vendor use on a managed account goes through the same selection (lf -m codex --account <x> --tui)."* The installed release `lf auth --help` still lists it — the binary lags main. | Do **not** re-add it. The directive's "exec addresses accounts" is already satisfied by `lf --account` + `-m`, which is the stronger form of the same principle. Flagged as an incorrect assumption per the guiding constraint. |
-| Is utilization usable as a demotion signal? | Yes. `provider_account_limits(provider, account_id, window, used_percent, resets_at, plan, source)` is populated live — `claude/loopflow` 6% session / 31% weekly, `codex/manabot-eng` **80% weekly**. But `utilization_percent` is written by `record_rate_limit` and read **only for display**; the sole gate is `cooldown_until` (`sqlite.rs:1128-1132`). | Demotion is new behavior, not a rewiring. Multiple windows per account → strained if **any** live window is ≥ 90%. Demote, never exclude. |
+| Is utilization usable as a demotion signal? | Yes. `provider_account_limits(provider, account_id, window, used_percent, resets_at, plan, source)` is populated live and provider-observed — `claude/loopflow` 6% session / 31% weekly, `codex/manabot-eng` **80% weekly** from a `poll`. But `utilization_percent` is written by `record_rate_limit` and read **only for display**; the sole gate is `cooldown_until` (`sqlite.rs:1128-1132`). | Demotion is new behavior, not a rewiring. Multiple windows per account → strained if **any** live window is ≥ `STRAINED_UTILIZATION_PERCENT` (75). Demote, never exclude. The threshold sits below the live fleet's 80% so PR 3 proves itself on prod rather than on a fixture. |
+| Does a session pinned under the old shape survive `provider_session_accounts` losing `profile_id`? A parked wave resuming post-migration must not error. | **It resolves cleanly, and gets strictly better.** The rebuild preserves `(provider, provider_session_id, account_id, created_at)` for all 109 live rows and drops only `profile_id`, so every pin keeps the thing that spends. Resume today requires **both** profile *and* account to match a candidate (`sqlite.rs`, `let profile_id = profile_id.as_deref()?` — a NULL `profile_id` makes the whole `and_then` return `None`), so the pin is *silently lost* and the head of the route is re-selected. Keying resume on `account_id` alone can only widen what resumes. No error path either way: an unmatched pin falls through to the first healthy candidate, and an account that is deleted takes its session rows with it (`ON DELETE CASCADE`). | Rebuild the table in the migration; resume matches on `account_id`. This also **deletes** the dedup special-case that re-points `available[index].0` at the pinned profile when a shared account appears twice in a route — that block exists only because the pin carried a venue. Pin the behavior with a test that seeds a pre-migration row, migrates, and resumes onto the same account. |
 | How wide is the blast radius? | Contained. All five tables are touched **only** through `SqliteStore` — no raw SQL elsewhere. Consumers: `provider_account.rs`, `lf/commands/{profile,auth,usage,ssh}.rs`. No Swift or Python mirrors, no `tests/fixtures/dto/` entry (grep: zero hits). | One migration + one store file + the routing engine + 4 CLI files. Justifies doing the inversion in one PR instead of straddling both arrows. |
-| Is migration ordinal `0.11.027` free? | Yes, **at each moment it was looked at.** `0.11.026` is the max on main; none of the 4 open PRs adds a migration (checked while drafting), and none of the 8 open PRs adds one either (re-checked at review — the count moved by three *while this doc was being written*). | Take `0.11.027`. **Re-scan at land, not at design:** `gh pr list` + `gh pr diff` for the migrations directory, and grep open diffs for the *tables*, not just the ordinal. Per wave memory a sibling merging any migration turns migration-check red on this branch — that failure is staleness, and rebasing is the whole fix. The ordinal is only free at the instant you look. |
+| Is migration ordinal `0.11.027` free? | Yes, **at each moment it was looked at** — and it has a known claimant. `0.11.026` is the max on main; none of the 4 open PRs adds a migration (checked while drafting), and none of the 8 open PRs does either (re-checked at review — the count moved by three *while this doc was being written*). But **W2-280's PR 2 plans a migration too**, and neither Task can see the other's ordinal until one lands. | Take `0.11.027`, and expect to lose it. **Whoever lands second rebases** — that is the whole protocol, and it is cheap. **Re-scan at land, not at design:** `gh pr list` + `gh pr diff` for the migrations directory, and grep open diffs for the *tables*, not just the ordinal (per wave memory, siblings have duplicated entire migrations, not just collided on numbers). A sibling merging any migration turns migration-check red here — that failure is staleness, and rebasing is the whole fix. The ordinal is only free at the instant you look. |
 | Does today's Chrome check actually prove the venue is signed in? | No — `resolve_local_chrome_profile` reads `user_name` from Chrome's on-disk `Local State` (`profile.rs:118-129`), a cached hint. `--profile-directory` is a request; an already-running Chrome may adopt the URL in another window. | Accepted, unchanged, and now *harmless*: the venue check is only a pre-flight that saves a doomed login. The load-bearing check is step 4, which reads the credential the ceremony actually produced. This is precisely why identity evidence must come from the provider, not the venue. |
 
 ## Alternatives considered
@@ -310,7 +353,13 @@ presentation with the strained marker. Independent of the arrow: it changes
 which eligible account wins, not who owns whom, and it is separately observable
 (`manabot-eng` at 80% stops being picked before the provider refuses).
 
-**Out of scope:** `RoutingState::Disabled` and `ExplicitOnly` remain indistinguishable at the
+**Out of scope:** A stable machine identity — filed as
+[W2-292](https://linear.app/loopflow/issue/W2-292), not absorbed here. Deleting
+`HostId` (decision 2) removes the last consumer that *keyed* on `gethostname`;
+the only caller left is `playhead.rs:140`, which stamps a human-readable `host`
+label nothing reads as a key. So this design retires the symptom, and W2-292
+owns the capability the wave's cron-host work will need before a second host
+exists. `RoutingState::Disabled` and `ExplicitOnly` remain indistinguishable at the
 routing layer (both auto-excluded, both reachable by `--account`); `Disabled`
 still has no enforcement point. Live Chrome session probing. Non-macOS venues.
 Providers beyond Claude and Codex.
@@ -346,7 +395,13 @@ and on the refusal's message — not on `is_err()`, per wave memory):
 - A venue whose Chrome login ≠ `expected_login` is skipped and the **next**
   venue is tried; the skip reason names both logins.
 - A provider-reported email ≠ the account's `login_email` **refuses**, leaves
-  `login_email` and the account home byte-identical, and leaves no tempdir.
+  `login_email` and the account home byte-identical, and leaves no tempdir. The
+  refusal **names the discarded login verbatim**, in the shape the demo prints:
+  `Claude reports <reported>; account '<id>' is <expected>. Refused: the login
+  was discarded, '<id>' is unchanged.` Assert the rendered string, not a
+  substring and not `is_err()` — **this message is the feature**. Someone holding
+  two Google identities needs to know *which* one just answered the OAuth prompt;
+  a bare "identity mismatch" sends them to the wrong browser window.
 - A provider reporting **no** email refuses (Claude's assume-branch is gone).
   Sabotage check: hardwire `parse_claude_status_login` to `None` — the test must
   fail.
@@ -357,8 +412,9 @@ and on the refusal's message — not on `is_err()`, per wave memory):
 - An unrouted repo selects via the default route; with both routes empty it falls
   to ambient — and the three `Ok(None)` conditions are distinguishable.
 - `--account` still bypasses route and health gating, and still verifies auth.
-- A strained account (any window ≥ 90%, `resets_at` in the future) sorts last but
-  is still selected when it is the only candidate. (PR 3)
+- A strained account (any window ≥ `STRAINED_UTILIZATION_PERCENT`, `resets_at` in
+  the future) sorts last but is still selected when it is the only candidate, and
+  a *reset* window (`resets_at` in the past) does not demote at all. (PR 3)
 
 ## Measure
 

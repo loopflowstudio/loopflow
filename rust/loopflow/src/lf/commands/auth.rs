@@ -64,6 +64,16 @@ pub fn run(cmd: &AuthCommand) -> Result<()> {
 }
 
 async fn run_async(cmd: &AuthCommand) -> Result<()> {
+    if crate::provider_account::lease::account_lease_active() {
+        return match cmd {
+            AuthCommand::Status { provider } | AuthCommand::Accounts { provider } => {
+                forwarded_accounts(provider.as_deref())
+            }
+            _ => Err(anyhow!(
+                "provider account authentication and account edits are unavailable while account authority is fixed by an outer invocation"
+            )),
+        };
+    }
     match cmd {
         AuthCommand::Status { provider } => status(provider.as_deref()).await,
         AuthCommand::Disconnect { provider, account } => match account {
@@ -124,6 +134,32 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             connect(provider).await
         }
     }
+}
+
+fn forwarded_accounts(raw_provider: Option<&str>) -> Result<()> {
+    let provider = raw_provider.map(parse_managed_provider).transpose()?;
+    let client = crate::provider_account::lease::AccountLeaseClient::from_env()?
+        .ok_or_else(|| anyhow!("forwarded account lease is unavailable"))?;
+    let lease = client.describe()?;
+    for grant in lease
+        .grants
+        .iter()
+        .filter(|grant| provider.is_none_or(|provider| provider == grant.provider))
+    {
+        for (position, account_id) in grant.accounts.iter().enumerate() {
+            let mut labels = vec!["forwarded"];
+            if position < grant.preferred {
+                labels.push("preferred");
+            }
+            println!(
+                "{:<12} {} {}",
+                grant.provider,
+                account_id,
+                labels.join(" · ")
+            );
+        }
+    }
+    Ok(())
 }
 
 async fn status(provider: Option<&str>) -> Result<()> {
@@ -1442,14 +1478,13 @@ mod account_first_tests {
     use base64::Engine;
 
     use super::{
-        connect_account, exhausted_access_profiles_error, verify_provider_login,
+        connect_account, exhausted_access_profiles_error, run, verify_provider_login,
         TEST_ACCESS_PROFILE_FAILURES, TEST_OPENED_CHROME_PROFILES,
     };
+    use crate::lf::AuthCommand;
     use crate::profile::{AccessProfile, EmailAddress, ProfileId};
-    use crate::provider_account::{
-        account_home_path, parse_account_id, FORWARDED_ACCOUNT_BUNDLE_ENV,
-        FORWARDED_ACCOUNT_STORE_ENV,
-    };
+    use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
+    use crate::provider_account::{account_home_path, parse_account_id};
     use crate::provider_auth::Provider;
     use crate::store::{open_store, CredentialState, ProviderAccount, RoutingState, StorageConfig};
     use tempfile::tempdir;
@@ -1476,6 +1511,21 @@ mod account_first_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn fixed_account_authority_rejects_account_mutation() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[ACCOUNT_LEASE_ENV]);
+        std::env::set_var(ACCOUNT_LEASE_ENV, "forwarded");
+
+        let error = run(&AuthCommand::Reset {
+            provider: "codex".to_string(),
+            account: "reserve".to_string(),
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("fixed by an outer invocation"));
     }
 
     fn configure_connect_test(temp: &Path, reported_login: &str, fail_first: bool) {
@@ -1526,8 +1576,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         std::env::set_var("HOME", temp);
         std::env::set_var("LF_HOME", temp);
         std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
-        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
+        std::env::remove_var(ACCOUNT_LEASE_ENV);
         std::env::set_var("LF_TEST_CODEX_AUTH_JSON", auth_json);
         std::env::set_var("LF_TEST_CODEX_COUNT", temp.join("codex-count"));
         std::env::set_var("LF_TEST_CODEX_HOMES", temp.join("codex-homes"));
@@ -1601,8 +1650,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             "LF_HOME",
             "LF_DB_PATH",
             "PATH",
-            FORWARDED_ACCOUNT_BUNDLE_ENV,
-            FORWARDED_ACCOUNT_STORE_ENV,
+            ACCOUNT_LEASE_ENV,
             "LF_TEST_CODEX_AUTH_JSON",
             "LF_TEST_CODEX_COUNT",
             "LF_TEST_CODEX_HOMES",
@@ -1661,8 +1709,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             "LF_HOME",
             "LF_DB_PATH",
             "PATH",
-            FORWARDED_ACCOUNT_BUNDLE_ENV,
-            FORWARDED_ACCOUNT_STORE_ENV,
+            ACCOUNT_LEASE_ENV,
             "LF_TEST_CODEX_AUTH_JSON",
             "LF_TEST_CODEX_COUNT",
             "LF_TEST_CODEX_HOMES",
@@ -1723,8 +1770,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             "LF_HOME",
             "LF_DB_PATH",
             "PATH",
-            FORWARDED_ACCOUNT_BUNDLE_ENV,
-            FORWARDED_ACCOUNT_STORE_ENV,
+            ACCOUNT_LEASE_ENV,
             "LF_TEST_CODEX_AUTH_JSON",
             "LF_TEST_CODEX_COUNT",
             "LF_TEST_CODEX_HOMES",

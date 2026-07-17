@@ -5660,7 +5660,7 @@ mod tests {
                 "LF_CONTROL_BIN",
                 "LF_CONTROL_HOME",
                 "LF_CONTROL_DB_PATH",
-                crate::provider_account::FORWARDED_ACCOUNT_BUNDLE_ENV,
+                crate::provider_account::lease::ACCOUNT_LEASE_ENV,
             ];
             let previous = keys
                 .into_iter()
@@ -5682,7 +5682,7 @@ mod tests {
             std::env::set_var("LF_CONTROL_BIN", "/usr/bin/true");
             std::env::set_var("LF_CONTROL_HOME", home);
             std::env::set_var("LF_CONTROL_DB_PATH", db);
-            std::env::remove_var(crate::provider_account::FORWARDED_ACCOUNT_BUNDLE_ENV);
+            std::env::remove_var(crate::provider_account::lease::ACCOUNT_LEASE_ENV);
             Self {
                 previous,
                 _bin: bin,

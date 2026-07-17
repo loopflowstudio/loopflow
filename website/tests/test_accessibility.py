@@ -14,6 +14,7 @@ PAGES_TO_TEST = [
     "/docs",
     "/docs/agent-api",
     "/docs/config",
+    "/docs/security",
     "/download",
 ]
 

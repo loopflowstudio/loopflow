@@ -43,12 +43,21 @@ pub struct Cli {
     #[arg(short = 'm', long = "model", short_alias = 'M')]
     pub model: Option<String>,
 
-    /// Run as this managed provider account (login email or account id),
-    /// overriding the repo's route for this invocation and its children.
+    /// Prefer this managed provider account before the normal route. Repeat to
+    /// select provider-qualified preferences such as `claude=personal`.
     /// Accounts spend; a profile is only the Chrome venue accounts log in
     /// through, so it is never a run-time selector.
-    #[arg(long = "account")]
-    pub account: Option<String>,
+    #[arg(long = "account", conflicts_with = "only_account", global = true)]
+    pub account: Vec<String>,
+
+    /// Restrict this invocation and its children to exactly these managed
+    /// provider accounts. Providers without a selection are unavailable.
+    #[arg(long = "only-account", conflicts_with = "account", global = true)]
+    pub only_account: Vec<String>,
+
+    /// Internal SSH compatibility and broker-connectivity probe.
+    #[arg(long = "__account-lease-probe", hide = true)]
+    pub account_lease_probe: bool,
 
     /// Skip permission prompts
     #[arg(long)]
@@ -539,8 +548,8 @@ pub enum Commands {
     },
     /// Run a command on a remote host carrying your local credentials.
     ///
-    /// Resolves the local credential bundle (GitHub, Claude, PM) and forwards it
-    /// over the ssh channel per-invocation; nothing persists on the remote. The
+    /// Resolves local credentials and forwards a foreground account lease over
+    /// SSH; Loopflow writes no managed provider credential on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
     /// to resolve them locally. Example: `lf ssh mini-heart -- lf pr open`.
     Ssh {
@@ -1887,6 +1896,96 @@ mod tests {
                 }
             }) if provider == "claude" && accounts == vec!["loopflow", "primary"]
         ));
+    }
+
+    #[test]
+    fn account_preference_and_restriction_are_distinct_repeatable_flags() {
+        let preferred = Cli::try_parse_from([
+            "lf",
+            "--account",
+            "claude=personal",
+            "--account",
+            "codex=reserve",
+            "skill",
+            "implement",
+        ])
+        .expect("parse account preferences");
+        assert_eq!(preferred.account, vec!["claude=personal", "codex=reserve"]);
+        assert!(preferred.only_account.is_empty());
+
+        let restricted = Cli::try_parse_from([
+            "lf",
+            "--only-account",
+            "claude=personal",
+            "--only-account",
+            "codex=reserve",
+            "skill",
+            "implement",
+        ])
+        .expect("parse account restrictions");
+        assert_eq!(
+            restricted.only_account,
+            vec!["claude=personal", "codex=reserve"]
+        );
+
+        assert!(Cli::try_parse_from([
+            "lf",
+            "--account",
+            "reserve",
+            "--only-account",
+            "reserve",
+            "skill",
+            "implement",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn account_lease_probe_is_parseable_but_hidden() {
+        let cli = Cli::try_parse_from(["lf", "--__account-lease-probe"])
+            .expect("parse internal account lease probe");
+        assert!(cli.account_lease_probe);
+        assert!(!Cli::command()
+            .render_long_help()
+            .to_string()
+            .contains("__account-lease-probe"));
+    }
+
+    #[test]
+    fn account_selection_applies_to_ssh_before_or_after_the_host() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "--account",
+            "reserve",
+            "ssh",
+            "mini",
+            "--",
+            "lf",
+            "task",
+            "pursue",
+        ])
+        .expect("parse SSH account preference");
+
+        assert_eq!(cli.account, vec!["reserve"]);
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Ssh { cmd, .. })
+                if cmd == vec!["lf", "task", "pursue"]
+        ));
+
+        let after_host = Cli::try_parse_from([
+            "lf",
+            "ssh",
+            "mini",
+            "--account",
+            "reserve",
+            "--",
+            "lf",
+            "task",
+            "pursue",
+        ])
+        .expect("parse account preference after SSH host");
+        assert_eq!(after_host.account, vec!["reserve"]);
     }
 
     #[test]

@@ -328,30 +328,30 @@ summaries:
 
 ### Accounts and Profiles
 
-Connect providers once, then route each repository through personal profiles:
+Connect providers once, then route each repository through managed accounts:
 
 ```bash
 lf auth status                   # GitHub / Claude / Codex / OpenCode Zen / Linear
 lf auth github                   # connect a provider in your browser
-lf auth connect claude --profile primary@example.com
+lf auth connect claude primary --chrome-profile primary@example.com
 lf auth accounts claude          # list connected accounts
 
-lf profile create primary@example.com --chrome-profile primary@example.com
-lf profile route set \
-  --default primary@example.com \
-  --backup engineering@example.com
-lf profile route show
+lf profile create --chrome-profile primary@example.com --as primary
+lf auth access set claude primary --profile primary
+lf route set claude primary engineering
+lf route show
 ```
 
 Each provider account keeps independent auth and session state under
-`~/.lf/accounts/`. Profiles reuse those accounts and give each repository a
-default plus ordered backups; a provider child stays pinned to its selected
-profile and account for its lifetime. Shared accounts are tried once and share
-one cooldown. Profiles, bindings, and repo routes live in the local database —
-Loopflow ships no account topology.
+`~/.lf/accounts/`. Access profiles record the Chrome venues that can authenticate
+an account; repository routes record the ordered accounts a provider may use. A
+provider child stays pinned to its selected account for its lifetime. Shared
+accounts are tried once and share one cooldown. Profiles, bindings, and repo
+routes live in the local database — Loopflow sends no account topology to a
+central service.
 
-`auth connect --profile` reuses a matching account or creates one, opens the
-profile's bound Chrome directory, and binds the account to the profile. Codex
+`auth connect <provider> <account> --chrome-profile` opens the selected Chrome
+directory and binds the verified login to the managed account. Codex
 verifies the login email from its ID token; Claude uses the selected Chrome
 profile email. `auth import` adopts an existing isolated credential — or the
 current macOS Keychain login when the account home is empty — without another
@@ -369,18 +369,24 @@ lf auth disconnect claude --account <account-id>
 Once `paid-through` passes, automatic routing treats the account as
 `explicit-only` until cleared.
 
-Force one account for a single invocation (children inherit it):
+Prefer accounts for one invocation, or restrict the process tree to exactly the
+selected accounts:
 
 ```bash
 lf -m codex --account eng@example.com : "fix the tests"
-LF_ACCOUNT=jack@example.com lf implement
+lf --account claude=personal --account codex=reserve implement
+lf --only-account codex=reserve review
 ```
 
-`lf ssh <host> -- <cmd>` forwards the repository's ordered profile route and
-each referenced credential once, for the life of that foreground command; it
-writes no credential files on the remote host. Detached remote sessions are
-rejected — their credentials would vanish when SSH exits — so authenticate on
-the remote host for long-running work.
+`--account` keeps the normal provider route as fallback; `--only-account`
+removes every unselected account and provider. Both accept repeatable
+`claude=<selector>` and `codex=<selector>` forms.
+
+`lf ssh <host> -- <cmd>` resolves the selected route locally and forwards an
+opaque handle to a foreground credential broker. It writes no managed provider
+credential files on the remote host. Detached remote sessions are rejected —
+their lease would vanish when SSH exits — so authenticate on the remote host
+for long-running work.
 
 ### External Skills
 

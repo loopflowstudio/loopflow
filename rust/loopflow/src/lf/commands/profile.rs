@@ -14,6 +14,11 @@ use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
 
 pub fn run(cmd: &ProfileCommand, _repo_root: &Path) -> Result<()> {
+    if crate::provider_account::lease::account_lease_active() {
+        return Err(anyhow!(
+            "access-profile inspection and edits are unavailable while account authority is fixed by an outer invocation"
+        ));
+    }
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     runtime.block_on(run_async(cmd))
 }
@@ -36,6 +41,14 @@ async fn run_async(cmd: &ProfileCommand) -> Result<()> {
 }
 
 async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
+    if crate::provider_account::lease::account_lease_active() {
+        return match cmd {
+            RouteCommand::Show { .. } => show_forwarded_routes(),
+            _ => Err(anyhow!(
+                "provider route edits are unavailable while account authority is fixed by an outer invocation"
+            )),
+        };
+    }
     let store = open_account_store().await?;
     match cmd {
         RouteCommand::Set {
@@ -53,6 +66,24 @@ async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
         },
         RouteCommand::Show { repo } => show_routes(&store, repo_root, repo.as_deref()).await,
     }
+}
+
+fn show_forwarded_routes() -> Result<()> {
+    let client = crate::provider_account::lease::AccountLeaseClient::from_env()?
+        .ok_or_else(|| anyhow!("forwarded account lease is unavailable"))?;
+    let lease = client.describe()?;
+    for grant in lease.grants {
+        println!("{}  (forwarded)", grant.provider);
+        for (position, account_id) in grant.accounts.iter().enumerate() {
+            let preferred = if position < grant.preferred {
+                "  preferred"
+            } else {
+                ""
+            };
+            println!("  {}. {}{preferred}", position + 1, account_id);
+        }
+    }
+    Ok(())
 }
 
 async fn create_profile(
@@ -289,4 +320,49 @@ fn resolve_repo_id(repo_root: &Path, raw_repo: Option<&str>) -> Result<RepoId> {
 
 fn now_unix() -> i64 {
     OffsetDateTime::now_utc().unix_timestamp()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{run, run_route};
+    use crate::lf::{ProfileCommand, RouteCommand};
+    use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
+
+    #[test]
+    fn fixed_account_authority_rejects_profile_and_route_mutation() {
+        let _lock = crate::journal::test_env_lock();
+        let previous = std::env::var_os(ACCOUNT_LEASE_ENV);
+        std::env::set_var(ACCOUNT_LEASE_ENV, "forwarded");
+        let profile = run(
+            &ProfileCommand::Create {
+                chrome_profile: "Profile 1".to_string(),
+                name: None,
+                expects: None,
+            },
+            Path::new("."),
+        );
+        let route = run_route(
+            &RouteCommand::Set {
+                provider: "codex".to_string(),
+                accounts: vec!["reserve".to_string()],
+                repo: None,
+            },
+            Path::new("."),
+        );
+        match previous {
+            Some(value) => std::env::set_var(ACCOUNT_LEASE_ENV, value),
+            None => std::env::remove_var(ACCOUNT_LEASE_ENV),
+        }
+
+        assert!(profile
+            .unwrap_err()
+            .to_string()
+            .contains("fixed by an outer invocation"));
+        assert!(route
+            .unwrap_err()
+            .to_string()
+            .contains("fixed by an outer invocation"));
+    }
 }

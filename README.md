@@ -105,6 +105,7 @@ corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 | [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
 | [Authoring](docs/authoring.md) | Writing skills, flows, directions, and goals |
 | [Architecture](docs/architecture.md) | No server: the store, the journal, Homes, `lf ssh`, `lfd` |
+| [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
 | [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |
 

@@ -24,6 +24,7 @@ use crate::engine::wave_home::{
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::{Commands, HomeCommand};
+use crate::provider_account::lease::AccountSelection;
 
 /// `lf home <probe|start>` — the shared Home control path for any surface.
 pub fn run(cmd: &HomeCommand, repo: &Path) -> anyhow::Result<()> {
@@ -108,6 +109,7 @@ fn print_runtime(name: &str, runtime: &HomeRuntimeDto) {
 pub fn route(
     command: &Commands,
     wave: Option<&str>,
+    account_selection: &AccountSelection,
     args: &[String],
 ) -> Option<anyhow::Result<()>> {
     if !is_routable(command) {
@@ -124,6 +126,7 @@ pub fn route(
         &dest,
         home.ssh_port(),
         None,
+        account_selection,
         &remote_argv(args),
     ))
 }
@@ -169,17 +172,35 @@ fn resolve_home(wave: Option<&str>) -> WaveHome {
 
 /// Rebuild the invocation as an `lf` command for the remote shell: the local
 /// `argv[0]` is an absolute path to this machine's binary, so replace it with
-/// bare `lf` (resolved against the remote PATH) and keep every other argument.
+/// bare `lf` (resolved against the remote PATH). Account-selection flags are
+/// consumed at this origin boundary: the remote invocation inherits the fixed
+/// lease handle and must not try to resolve the selectors again.
 fn remote_argv(args: &[String]) -> Vec<String> {
     let mut cmd = Vec::with_capacity(args.len());
     cmd.push("lf".to_string());
-    cmd.extend(args.iter().skip(1).cloned());
+    let mut args = args.iter().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            cmd.push(arg.clone());
+            cmd.extend(args.cloned());
+            break;
+        }
+        if matches!(arg.as_str(), "--account" | "--only-account") {
+            let _ = args.next();
+            continue;
+        }
+        if arg.starts_with("--account=") || arg.starts_with("--only-account=") {
+            continue;
+        }
+        cmd.push(arg.clone());
+    }
     cmd
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{is_routable, remote_argv};
+    use crate::lf::Commands;
 
     #[test]
     fn remote_argv_swaps_the_binary_path_for_bare_lf() {
@@ -189,6 +210,38 @@ mod tests {
             "open".to_string(),
         ];
         assert_eq!(remote_argv(&args), vec!["lf", "pr", "open"]);
+    }
+
+    #[test]
+    fn remote_argv_consumes_account_selectors_at_the_origin_boundary() {
+        let args = vec![
+            "/local/lf",
+            "--account",
+            "claude=personal",
+            "--only-account=codex=reserve",
+            "commit",
+            "-m",
+            "ship it",
+            "--",
+            "--account",
+            "literal",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+        assert_eq!(
+            remote_argv(&args),
+            vec![
+                "lf",
+                "commit",
+                "-m",
+                "ship it",
+                "--",
+                "--account",
+                "literal"
+            ]
+        );
     }
 
     #[test]

@@ -677,10 +677,7 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    reject_detached_forwarded_account(
-        std::env::var_os(crate::provider_account::FORWARDED_ACCOUNT_BUNDLE_ENV)
-            .is_some_and(|value| !value.is_empty()),
-    )?;
+    reject_detached_forwarded_account(crate::provider_account::lease::account_lease_active())?;
     let context = pinned_execution_context()?;
     let inherited_context = ["LF_RUN_ID", "LF_PROCESS_ID"]
         .into_iter()

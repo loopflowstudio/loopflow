@@ -183,6 +183,7 @@ DOCS_NAV = [
     # Reference
     ("lf", "lf"),
     ("Config", "config"),
+    ("Security", "security"),
     ("Troubleshooting", "troubleshooting"),
 ]
 
@@ -197,6 +198,7 @@ DOC_DESCRIPTIONS = {
     "architecture": "No server: the store, the journal, Homes, lf ssh, lfd",
     "lf": "Every command, PR/planning/release operations, the builtin catalog",
     "config": "Config files, context assembly, models, accounts and profiles",
+    "security": "Execution boundaries, permissions, credentials, and account authority",
     "troubleshooting": "Exact failure → cause → fix",
 }
 

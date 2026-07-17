@@ -3347,6 +3347,7 @@ async fn ensure_working_pr_with_authority(
             )));
         }
     }
+    let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
     // A settled completing PR normally never rotates: completion is pending on
     // the review gate, not on a follow-up PR. `reconcile_task_completion`
     // advances the Session to `Completed` once the gate closes. The one exception
@@ -3356,7 +3357,7 @@ async fn ensure_working_pr_with_authority(
         .publication
         .as_ref()
         .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-        && committed_follow_up_range(&session.worktree, &settled)?.is_none()
+        && committed_carry.is_none()
     {
         return Ok(None);
     }
@@ -3386,7 +3387,6 @@ async fn ensure_working_pr_with_authority(
     // already-merged work and the follow-up the worker committed on top after the
     // merge. Rotation carries that committed range forward — plus any dirty edits
     // — so no work is dropped when moving onto the next serial branch.
-    let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
     let current = current_branch(&session.worktree)
         .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
         .ok_or_else(|| task_error("Task worktree is detached"))?;

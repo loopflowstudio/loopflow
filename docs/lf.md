@@ -456,18 +456,21 @@ lf doctor --json                # machine-readable audit
 ```
 
 ```bash
-lf -m codex --account manabot-eng : "fix the tests"   # this account, this run
-lf -m codex --account manabot-eng --tui               # interactive codex, same session
-LF_ACCOUNT=jack@loopflow.studio lf implement          # exported form, inherited by children
+lf -m codex --account manabot-eng : "fix the tests"   # prefer this account, then route
+lf --account claude=personal --account codex=reserve implement
+lf --only-account codex=reserve review                # no fallback account
 ```
 
-`--account <email|id>` (or `LF_ACCOUNT=`) makes every provider resolution in
-the invocation — and its child lf processes — use the named managed account,
-bypassing the repo route and cooldown gating. The credential is still
-verified, so a revoked account errors with the re-login fix. Use it for
-interactive vendor sessions too (`--tui`): logging into a managed account
-with a bare `codex login` creates a second session and evicts the managed
-one ("needs re-login"); entering through lf shares one session.
+`--account <email|id>` prefers each matching managed account before its
+provider's normal route. The first preferred attempt bypasses stored health;
+a missing credential continues through the healthy fallback route.
+`--only-account` restricts the invocation and its children to exactly the
+selected provider accounts. Both flags are repeatable and accept
+`claude=<selector>` or `codex=<selector>`. They cannot be combined.
+
+Use the flags for interactive vendor sessions too (`--tui`): logging into a
+managed account with a bare `codex login` creates a second session and evicts
+the managed one ("needs re-login"); entering through lf shares one session.
 
 `lf usage` leads with each managed account's subscription state — provider-
 reported plan, session and weekly windows as percent *used*, reset times —
@@ -478,6 +481,10 @@ live poll when older than 15 minutes. `--refresh` polls everything now;
 per-boundary delta rows; TOTAL is input+output with cache reads their own
 column, and `% TOKENS` is each row's slice of all tokens in the window — a
 distribution across repos, not a subscription measure.
+
+Under forwarded account authority, subscription polling is unavailable so the
+remote account store is never consulted. `lf usage` still prints process token
+spend from the local execution ledger.
 
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a

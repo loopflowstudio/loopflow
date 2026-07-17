@@ -560,6 +560,28 @@ impl Drop for EnvGuard {
     }
 }
 
+/// Build a local, in-process account-lease broker for a non-`ssh` command that
+/// carries `--account`/`--only-account`, exporting the opaque `LF_ACCOUNT_LEASE`
+/// handle so this process and its children resolve one credential through it.
+/// Returns `None` when the selection resolves to no grant. The returned broker
+/// and env guard must outlive the command.
+fn build_local_account_lease(
+    selection: &loopflow::provider_account::lease::AccountSelection,
+) -> anyhow::Result<
+    Option<(
+        loopflow::provider_account::lease::AccountLeaseBroker,
+        EnvGuard,
+    )>,
+> {
+    use loopflow::provider_account::lease;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let Some(broker) = runtime.block_on(lease::AccountLeaseBroker::start_root(selection))? else {
+        return Ok(None);
+    };
+    let guard = EnvGuard::set(lease::ACCOUNT_LEASE_ENV, broker.local_env_value()?);
+    Ok(Some((broker, guard)))
+}
+
 fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
     let value = value.trim();
     let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
@@ -1377,14 +1399,18 @@ fn main() -> anyhow::Result<()> {
             wave.name().to_string(),
         )
     });
-    // Explicit account selection rides the environment so every provider
-    // resolution in this invocation — and its child lf processes — honors it.
-    let _explicit_account_env = cli.account.as_deref().map(|account| {
-        EnvGuard::set(
-            loopflow::provider_account::PROVIDER_ACCOUNT_ENV,
-            account.to_string(),
-        )
-    });
+    // `--account`/`--only-account` are resolved once at the outer invocation.
+    // Under an already-forwarded lease the grant is fixed, so a nested
+    // selection is rejected rather than silently re-derived.
+    let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
+        &cli.account,
+        &cli.only_account,
+    )?;
+    loopflow::provider_account::lease::validate_account_selection(&account_selection)?;
+    if cli.account_lease_probe {
+        return loopflow::provider_account::lease::probe_forwarded_authority()
+            .map_err(anyhow::Error::from);
+    }
     debug!(?cli, "parsed CLI arguments");
 
     // Global-promotion commands dispatch before home routing, journal emission,
@@ -1402,12 +1428,26 @@ fn main() -> anyhow::Result<()> {
     // dispatch. A remote (SSH) home forwards over `lf ssh`; a local or absent home
     // falls through and runs in-process exactly as before.
     if let Some(command) = &cli.command {
-        if let Some(routed) =
-            loopflow::lf::commands::home::route(command, cli.wave.as_deref(), &args)
-        {
+        if let Some(routed) = loopflow::lf::commands::home::route(
+            command,
+            cli.wave.as_deref(),
+            &account_selection,
+            &args,
+        ) {
             return routed;
         }
     }
+
+    // SSH and remote-Home commands build and forward their broker in the
+    // transport path. Every local command with a selection gets an in-process
+    // broker here, after early install and Home routing have had their chance
+    // to dispatch without opening the ordinary account store.
+    let is_ssh = matches!(cli.command, Some(loopflow::lf::Commands::Ssh { .. }));
+    let _local_account_lease = if is_ssh || account_selection.is_default() {
+        None
+    } else {
+        build_local_account_lease(&account_selection)?
+    };
 
     let result = if cli.list {
         in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
@@ -1702,9 +1742,14 @@ fn main() -> anyhow::Result<()> {
                 secret,
                 forward_agent,
                 cmd,
-            }) => {
-                loopflow::lf::commands::ssh::run(host, repo.as_deref(), secret, *forward_agent, cmd)
-            }
+            }) => loopflow::lf::commands::ssh::run(
+                host,
+                repo.as_deref(),
+                secret,
+                *forward_agent,
+                &account_selection,
+                cmd,
+            ),
             Some(Commands::Flow { name, args: rest }) => {
                 require_target_kind(name, TargetKind::Flow)?;
                 let message = join_args(rest);
@@ -2002,6 +2047,32 @@ mod tests {
         ];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-m", "codex", "debug"]);
+    }
+
+    #[test]
+    fn reorder_args_repeatable_account_flags_after_skill() {
+        let args = [
+            "lf",
+            "implement",
+            "--account",
+            "claude=personal",
+            "--account",
+            "codex=reserve",
+        ]
+        .map(String::from)
+        .to_vec();
+
+        assert_eq!(
+            reorder_args(args),
+            vec![
+                "lf",
+                "--account",
+                "claude=personal",
+                "--account",
+                "codex=reserve",
+                "implement"
+            ]
+        );
     }
 
     #[test]

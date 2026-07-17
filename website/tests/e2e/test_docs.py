@@ -10,6 +10,7 @@ NAV_SLUGS = [
     "architecture",
     "lf",
     "config",
+    "security",
     "troubleshooting",
 ]
 
@@ -41,6 +42,21 @@ def test_docs_sidebar_navigation(page: Page, base_url: str):
     page.goto(f"{base_url}/docs")
     page.locator(".docs-nav").locator("a", has_text="Config").click()
     assert "/docs/config" in page.url
+
+
+def test_docs_security_page_states_forwarded_authority_guarantees(
+    page: Page, base_url: str
+):
+    page.goto(f"{base_url}/docs/security")
+    content = page.locator(".docs-content")
+    assert content.is_visible()
+    text = content.inner_text()
+    assert "--only-account" in text
+    assert "Only the first is general containment" in text
+    assert "workspace-write" in text
+    assert "fail closed" in text
+    assert "Doppler master credential never" in text
+    assert "second SSH hop" in text
 
 
 def test_docs_nonexistent_redirects(page: Page, base_url: str):

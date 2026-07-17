@@ -1006,6 +1006,25 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn provider_session_account(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> StoreResult<Option<ProviderAccountId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT account_id FROM provider_session_accounts
+             WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), provider_session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
+    }
+
     pub fn select_provider_account(
         &self,
         provider: Provider,

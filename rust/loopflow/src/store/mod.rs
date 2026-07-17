@@ -668,6 +668,18 @@ impl Store {
         .await
     }
 
+    pub async fn provider_session_account(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> StoreResult<Option<ProviderAccountId>> {
+        let provider_session_id = provider_session_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_session_account(provider, &provider_session_id)
+        })
+        .await
+    }
+
     pub async fn select_provider_account(
         &self,
         provider: Provider,
@@ -863,7 +875,7 @@ pub struct ProviderAccountSelection {
 
 /// One observed subscription rate-limit window: how much of the plan's
 /// `session`/`weekly`/`weekly:<model>` window an account has consumed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountLimitWindow {
     pub window: String,
     pub used_percent: u8,

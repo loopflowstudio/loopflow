@@ -9,6 +9,35 @@
   or unknown Steer in the next-boundary seed, but crash-proof incorporation
   still depends on replacing that ledger with immutable Send plus Basis.
 
+## Codex steer rejections: what the live app-server proved
+
+Probed against codex-cli 0.144.5 (`codex app-server`, real JSON-RPC, no
+`turn/start` needed for the first two):
+
+| Request | Response |
+| --- | --- |
+| steer an idle thread | `-32600` `no active turn to steer` |
+| steer with a stale `expectedTurnId` while a turn is live | ``-32600`` ``expected active turn id `X` but found `Y` `` |
+| steer a thread that does not exist | `-32600` `thread not found: <id>` |
+| malformed params | `-32600` `Invalid request: invalid type: null, expected a string` |
+
+**One code covers all four.** Classifying by JSON-RPC code is therefore
+impossible; only the message separates provider policy from a Loopflow defect.
+`send_current` now matches the two policy shapes and defaults everything else to
+`Failed`, so an unrecognized error stays loud instead of being absorbed as a
+normal seed fallback. This is brittle against vendor prose changes — the
+mitigation is the default, not the match: a reworded rejection degrades to a
+noisy `Failed` that still seeds correctly, never to a silent wrong answer.
+
+Worth noting from the probe: steering with the *correct* `expectedTurnId` two
+seconds after observing it still returned `no active turn to steer` — the turn
+had already ended. The Turn-boundary race the architecture predicts is not
+theoretical; it is the common case, and it was previously logged as `Failed`.
+
+Not yet observed: a *successful* steer response. The probe could not catch a
+live turn fast enough to confirm the `result.turnId` shape that `Sent` depends
+on. That shape is still assumed from the app-server README.
+
 ## One spend grain (W2-280): what the dogfood ledger proved
 
 Measured on a copy of `~/.lf/loopflow.db` before cutting `run_events` spend:

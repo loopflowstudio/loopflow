@@ -61,7 +61,7 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 
 | Phase | Status | Evidence still missing |
 | --- | --- | --- |
-| 0. Executable spec | Partial | Static JSON names four provider shapes, but no transition tables and no executable opaque-TUI contract |
+| 0. Executable spec | Partial | Four provider shapes now run through the controller; transition tables still missing |
 | 1. Work/Epoch/Basis/Home | Not started | No target types, tables, migration, ids, or revision allocator exist |
 | 2. Run/Launch/containment | Vocabulary only | Trace ids were renamed; Session/body lease stores and duplicated runners remain authoritative |
 | 3. Steer/typed control | Adapter only | `ChildCommand`, `ChildDirective`, replacement/resume/decision variants, ambient authority, and explicit Ack remain |
@@ -75,8 +75,8 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 1. **A confirmed live send is not crash-durable.** `send_current_input` marks the `ChildCommand` accepted, converts the future seed to anonymous `PendingInput::system`, and keeps it only in memory. A crash after `Sent` can lose the later seed. The immutable Steer must remain authoritative; Send is only its receipt.
 2. **Live Steer is not completion-fenced.** Task completion checks unincorporated directives, not Steer commands. The active Turn can still complete Work after a live Steer advanced what it should honor. Basis must land with Steer, not as later hardening.
 3. **Typed decisions cannot inherit ordinary Steer timing.** On a seed-only provider, the current code queues `Decide` until the active Turn ends but records `DecisionResolved` only after sending that queued text. A Turn blocked in `decision request --wait` can therefore wait on the write that is waiting on the Turn. Persist the typed resolution and revision first; live/seed prose is optional notification.
-4. **The provider fixture is descriptive, not conformance.** Its test asserts literals in `control_contract.json`; it never invokes an adapter or controller. Keep the four shapes, but drive executable fake protocols through the same controller and assert durable state.
-5. **Codex outcome cleanup is incomplete.** A timeout leaves the pending request sender in the map until a late response, disconnect, or stop. Provider rejection of an ended/non-steerable Turn currently maps to generic `Failed`, not `NotSteerable`. Test timeout, late response, disconnect, mismatched Turn, and explicit rejection.
+4. **The provider fixture was descriptive, not conformance.** Its test asserted literals in `control_contract.json` and never invoked an adapter or controller. **Done (2026-07-17):** the fixture is deleted and the four shapes drive `absorb_commands`/`apply_input`, asserting that each still seeds the next boundary and never interrupts.
+5. **Codex outcome cleanup is incomplete. Done (2026-07-17).** A `PendingReply` guard releases the waiter on every terminal path, and rejections are typed from probed live evidence (see `scratch/questions.md`): codex 0.144.5 answers *every* rejection with `-32600`, so only the message separates the expected Turn-boundary race from a Loopflow bug. Timeout, late response, disconnect, mismatched Turn, and explicit rejection are covered; each test was verified to fail against the pre-fix behavior. The `Sent` response shape remains assumed rather than observed.
 6. **The usage cutover is the right independent reduction but is not done until every reader moves.** At review time the working tree had removed `RunEventRow` spend fields before all consumers and JSON serialization compiled. The final query must also retain a Turn whose only reported measurement is cache usage and preserve absent versus zero.
 7. **One table still has two parser/producer paths.** Legacy agent launches update Turn usage through `StreamEvent::Usage`; harness launches use `ConversationEvent::TurnUsage`. Both reach `agent_turns`, but W2-289 remains possible until one normalization function/event owns replacement-versus-accumulation semantics.
 8. **`lf top` still has a parallel Codex usage reader.** It reads raw Codex session logs and conditionally suppresses Codex Turn rows. That may be useful live evidence, but it cannot remain a second additive spend authority. Either persist it through the Turn producer or expose it as explicitly provisional, non-additive activity that budgets and totals never consume.
@@ -299,8 +299,8 @@ Done when:
 - crash-after-`Sent` still leaves direction available to a later seed;
 - a live Steer racing current completion prevents stale completion;
 - a seed-only fake blocked in `decision request --wait` observes the decision without ending its Turn first;
-- the conformance tests execute behavior rather than validate fixture literals;
-- Codex has no retained pending waiter after success, rejection, timeout, disconnect, or a late response;
+- ~~the conformance tests execute behavior rather than validate fixture literals~~ **done**;
+- ~~Codex has no retained pending waiter after success, rejection, timeout, disconnect, or a late response~~ **done**;
 - cache-only, zero, absent, failed, and interrupted Turn usage remain distinct;
 - one parser path owns whether usage replaces or accumulates, and every additive total reads only persisted Turn rows;
 - `lf doctor` identifies terminal agent Launches whose provider usage is absent without treating absence as zero;
@@ -692,7 +692,7 @@ Record after each checkpoint:
 | Public Run lifecycle verbs | at least reserve/activate/finish/revoke/reap plus runner variants | unchanged | 3 internal: reserve/advance/stop |
 | Stored Work lifecycle states | multiple Session/lease/interaction enums | unchanged | 3 Epoch states |
 | Additive usage authorities | 2 | 1 Turn ledger (store landed; `lf top`'s raw Codex log reader still parallel) | 1 Turn ledger |
-| Executable provider-independent steering shapes | fragmented | 0; one literal fixture | 4 shapes, one contract |
+| Executable provider-independent steering shapes | fragmented | 4 shapes through the controller | 4 shapes, one contract |
 | Files containing core deletion symbols | 31 | 31 | 0 |
 
 Net reduction matters because this architecture deletes duplicate truth. It is not a license to compress readable code or count removed tests without replacing their behavioral proof.

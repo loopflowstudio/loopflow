@@ -2871,6 +2871,10 @@ mod tests {
 
     struct ScriptedHarness {
         accepts_current_send: bool,
+        /// Overrides what the active Turn answers, so a test can script a
+        /// live-capable provider whose Turn rejects, loses its response, or
+        /// faults — shapes a bare "supports steering" bool cannot express.
+        steer_outcome: Option<SendCurrentOutcome>,
         sent: Vec<String>,
         interrupts: usize,
         fail_send: bool,
@@ -2946,11 +2950,54 @@ mod tests {
         fn new(accepts_current_send: bool) -> Self {
             Self {
                 accepts_current_send,
+                steer_outcome: None,
                 sent: Vec::new(),
                 interrupts: 0,
                 fail_send: false,
                 fail_interrupt: false,
             }
+        }
+
+        /// A live-capable provider whose active Turn answers with `outcome`.
+        fn steering(outcome: SendCurrentOutcome) -> Self {
+            Self {
+                steer_outcome: Some(outcome),
+                ..Self::new(true)
+            }
+        }
+    }
+
+    /// A provider Loopflow cannot see inside: a TUI behind tmux. It takes seed
+    /// input and exposes no Turn, so it never overrides `send_current` and
+    /// inherits the trait default.
+    struct OpaqueTuiHarness {
+        sent: Vec<String>,
+        interrupts: usize,
+    }
+
+    #[async_trait]
+    impl Harness for OpaqueTuiHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, content: &str) -> Result<()> {
+            self.sent.push(content.to_string());
+            Ok(())
+        }
+
+        async fn interrupt(&mut self) -> Result<()> {
+            self.interrupts += 1;
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        /// A TUI exposes no resumable vendor id.
+        fn provider_session_id(&self) -> Option<String> {
+            None
         }
     }
 
@@ -2969,6 +3016,14 @@ mod tests {
         }
 
         async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
+            if let Some(outcome) = self.steer_outcome.clone() {
+                // Only a confirmed Sent means the provider took the text; a
+                // rejected or lost send must not record a delivery.
+                if matches!(outcome, SendCurrentOutcome::Sent { .. }) {
+                    self.sent.push(content.to_string());
+                }
+                return outcome;
+            }
             if !self.accepts_current_send {
                 return SendCurrentOutcome::NotSteerable;
             }
@@ -3708,6 +3763,147 @@ mod tests {
             );
             assert_eq!(harness.interrupts, 0, "{provider}");
         }
+    }
+
+    /// The four provider control shapes must share one durable outcome: the
+    /// Steer text reaches the next boundary's seed no matter which route the
+    /// provider took, and plain steering never interrupts.
+    ///
+    /// This drives the real controller against each shape. Asserting these
+    /// literals from a fixture file instead would only prove the file parses.
+    #[tokio::test]
+    async fn every_provider_control_shape_still_seeds_the_next_boundary() {
+        for (shape, mut harness) in [
+            (
+                "live steer accepted",
+                ScriptedHarness::steering(SendCurrentOutcome::Sent {
+                    provider_turn_id: "turn_live".to_string(),
+                }),
+            ),
+            (
+                // Codex answering `no active turn to steer`: the Turn ended
+                // between observation and delivery.
+                "live steer rejected",
+                ScriptedHarness::steering(SendCurrentOutcome::NotSteerable),
+            ),
+            (
+                // The send began but its response never came back. The provider
+                // may or may not hold the text.
+                "live steer response lost",
+                ScriptedHarness::steering(SendCurrentOutcome::Unknown {
+                    provider_turn_id: Some("turn_unknown".to_string()),
+                    error: "timed out waiting for Codex steer response".to_string(),
+                }),
+            ),
+        ] {
+            let (store, session, lease) = conformance_session("codex").await;
+            let command = ChildCommand::new(
+                ChildRef::Task(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::Steer {
+                    text: "change direction".to_string(),
+                },
+            );
+            store.create_child_command(&command).await.unwrap();
+            let commands = store
+                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+                .await
+                .unwrap();
+            let mut pending = VecDeque::new();
+
+            absorb_commands(
+                &store,
+                &session,
+                &lease,
+                commands,
+                &mut harness,
+                true,
+                &mut pending,
+            )
+            .await
+            .unwrap();
+
+            let seed = pending
+                .pop_front()
+                .unwrap_or_else(|| panic!("{shape}: the Steer must survive to the next seed"));
+            assert_eq!(seed.text, "change direction", "{shape}");
+
+            apply_input(
+                &store,
+                &session,
+                &lease,
+                &mut harness,
+                &seed.text,
+                seed.command_id.map(|id| (id, seed.effect)),
+                seed.decision,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                harness.sent.last().map(String::as_str),
+                Some("change direction"),
+                "{shape}: the next boundary starts from the Steer"
+            );
+            assert_eq!(
+                harness.interrupts, 0,
+                "{shape}: plain steering never interrupts"
+            );
+        }
+
+        // Fourth shape: a TUI with no observable Turn at all. It inherits the
+        // trait default, so there is no live route to attempt — the Steer can
+        // only reach it as seed input.
+        let (store, session, lease) = conformance_session("codex").await;
+        let command = ChildCommand::new(
+            ChildRef::Task(session.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "change direction".to_string(),
+            },
+        );
+        store.create_child_command(&command).await.unwrap();
+        let commands = store
+            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
+            .await
+            .unwrap();
+        let mut harness = OpaqueTuiHarness {
+            sent: Vec::new(),
+            interrupts: 0,
+        };
+        let mut pending = VecDeque::new();
+
+        absorb_commands(
+            &store,
+            &session,
+            &lease,
+            commands,
+            &mut harness,
+            true,
+            &mut pending,
+        )
+        .await
+        .unwrap();
+
+        let seed = pending
+            .pop_front()
+            .expect("opaque TUI: the Steer must survive to the next seed");
+        apply_input(
+            &store,
+            &session,
+            &lease,
+            &mut harness,
+            &seed.text,
+            seed.command_id.map(|id| (id, seed.effect)),
+            seed.decision,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(harness.sent, vec!["change direction".to_string()]);
+        assert_eq!(harness.interrupts, 0);
+        let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(receipt.effect, Some(ChildCommandEffect::NextTurn));
     }
 
     #[tokio::test]

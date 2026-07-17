@@ -724,6 +724,7 @@ impl SqliteStore {
             &transaction,
             &ChildRef::Task(session.id.clone()),
             process.generation,
+            token.as_str(),
         )?;
         insert_task_event_in(
             &transaction,
@@ -2493,6 +2494,7 @@ impl SqliteStore {
             &transaction,
             &ChildRef::Project(session.id.clone()),
             process.generation,
+            token.as_str(),
         )?;
         insert_project_event_in(
             &transaction,

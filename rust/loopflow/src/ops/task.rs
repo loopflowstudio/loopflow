@@ -2624,7 +2624,8 @@ pub(crate) async fn reconcile_task_pr(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, None).await
+    reconcile_task_pr_with_authority(store, session, None, crate::ops::pr::PrReadFreshness::Cached)
+        .await
 }
 
 /// Status for a Task whose PR is open, decided after a body turn completed.
@@ -2738,7 +2739,31 @@ pub(crate) async fn reconcile_task_pr_for_lease(
     session: &mut TaskSession,
     lease: &ChildWriteLease,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, Some(lease)).await
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        Some(lease),
+        crate::ops::pr::PrReadFreshness::Cached,
+    )
+    .await
+}
+
+/// Reconcile the PR reading GitHub live, bypassing both the store observation
+/// cache and `gh`'s HTTP cache. The ci-fix settlement path uses this so it judges
+/// head advancement against the authoritative remote head the repair body just
+/// pushed — never a warm pre-turn observation.
+pub(crate) async fn reconcile_task_pr_fresh_for_lease(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &ChildWriteLease,
+) -> OpsResult<Option<TaskPr>> {
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        Some(lease),
+        crate::ops::pr::PrReadFreshness::Fresh,
+    )
+    .await
 }
 
 /// Read the open PR's required checks and classify them for `head_sha`. Returns
@@ -2802,6 +2827,7 @@ fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
         repo: identity.repo,
         pr_number: identity.number,
         failed_head_sha: observation.head_sha.clone(),
+        repaired_head_sha: None,
         failure_set,
         provider_completed_at: None,
         poll_observed_at: Some(observation.observed_at),
@@ -2877,6 +2903,7 @@ async fn reconcile_task_pr_with_authority(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: Option<&ChildWriteLease>,
+    freshness: crate::ops::pr::PrReadFreshness,
 ) -> OpsResult<Option<TaskPr>> {
     let Some(mut pr) = reconcile_subject(store, session).await? else {
         return Ok(None);
@@ -2892,13 +2919,19 @@ async fn reconcile_task_pr_with_authority(
         return Ok(Some(pr));
     };
     let now = time::OffsetDateTime::now_utc();
-    if let Some(observation) = cached_github_observation(&pr, now) {
-        session.observation = observation;
-        return Ok(Some(pr));
+    // A `Fresh` read (ci-fix settlement) must never be served from the store's
+    // observation cache: the repair body may have pushed a new head seconds ago,
+    // and the warm cache still names the pre-turn head.
+    if matches!(freshness, crate::ops::pr::PrReadFreshness::Cached) {
+        if let Some(observation) = cached_github_observation(&pr, now) {
+            session.observation = observation;
+            return Ok(Some(pr));
+        }
     }
     let previous = pr.clone();
     let github_pr =
-        match crate::ops::pr::observe_pr_by_number(&session.worktree, number, &pr.branch) {
+        match crate::ops::pr::observe_pr_by_number(&session.worktree, number, &pr.branch, freshness)
+        {
             crate::ops::pr::PrObservation::Fresh(info) => {
                 pr.github_observation = Some(GithubObservation {
                     checked_at: now,
@@ -3601,7 +3634,8 @@ async fn ensure_working_pr_with_authority(
     lease: Option<&ChildWriteLease>,
     rotate: RotateOptions,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, lease).await?;
+    reconcile_task_pr_with_authority(store, session, lease, crate::ops::pr::PrReadFreshness::Cached)
+        .await?;
     if session.status.is_terminal() {
         return Ok(None);
     }
@@ -3850,7 +3884,13 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
             .await?
             .ok_or_else(|| task_error("no Task Session owns this worktree"))?;
         // Observe an out-of-band merge before deciding whether to rotate.
-        reconcile_task_pr_with_authority(&store, &mut session, lease.as_ref()).await?;
+        reconcile_task_pr_with_authority(
+            &store,
+            &mut session,
+            lease.as_ref(),
+            crate::ops::pr::PrReadFreshness::Cached,
+        )
+        .await?;
         if let Some(active) = store
             .active_task_pr(&session.id)
             .await

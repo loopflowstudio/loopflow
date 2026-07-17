@@ -50,6 +50,9 @@ pub struct CiIncidentDto {
     pub attempt: usize,
     pub fixes_for_pr: usize,
     pub failed_head_sha: String,
+    /// The head a ci-fix body shipped for this incident, once one advanced the
+    /// head past `failed_head_sha`. `None` while the incident is unrepaired.
+    pub repaired_head_sha: Option<String>,
     pub failure_set: Vec<String>,
     pub provider_completed_at: Option<String>,
     pub observed_at: String,
@@ -196,6 +199,7 @@ fn incident_dto(
         attempt,
         fixes_for_pr,
         failed_head_sha: incident.failed_head_sha,
+        repaired_head_sha: incident.repaired_head_sha,
         failure_set: incident.failure_set,
         provider_completed_at: incident
             .provider_completed_at
@@ -375,6 +379,7 @@ mod tests {
             attempt: 1,
             fixes_for_pr: 1,
             failed_head_sha: "0123456789ab".to_string(),
+            repaired_head_sha: None,
             failure_set: vec!["rust-test".to_string()],
             provider_completed_at: None,
             observed_at: "2026-07-16T00:00:00Z".to_string(),
@@ -393,6 +398,28 @@ mod tests {
             merge_seconds: None,
             task_cycle_seconds: None,
         }
+    }
+
+    /// `repaired_head_sha` is the operator-facing half of the settlement-race fix
+    /// (W2-320): `lf ci --json` must carry the head a ci-fix body shipped, beside
+    /// the head it failed on, or the attribution is invisible.
+    #[test]
+    fn repaired_head_is_exposed_on_the_json_surface() {
+        let mut dto = green_incident(Some("cc_1"), Some("2026-07-16T00:05:00Z"));
+        dto.repaired_head_sha = Some("02527e29".to_string());
+        let json = serde_json::to_value(&dto).expect("serialize CiIncidentDto");
+        assert_eq!(
+            json.get("repaired_head_sha").and_then(|value| value.as_str()),
+            Some("02527e29"),
+            "lf ci --json carries the repaired head beside failed_head_sha"
+        );
+
+        dto.repaired_head_sha = None;
+        let json = serde_json::to_value(&dto).expect("serialize CiIncidentDto");
+        assert!(
+            json.get("repaired_head_sha").is_some_and(serde_json::Value::is_null),
+            "an unrepaired incident renders repaired_head_sha: null, never a missing key"
+        );
     }
 
     /// The first row is PR #1034: a normal Task body pushed the fix, so no `ci-fix`

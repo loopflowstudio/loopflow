@@ -362,12 +362,29 @@ pub(crate) enum PrObservation {
     Degraded { reason: String },
 }
 
+/// Whether a PR read may be served from a cache, or must reflect GitHub now.
+///
+/// `Cached` lets `gh api --cache 60s` coalesce reads across a burst of `lf`
+/// processes. `Fresh` drops that flag so the read reflects GitHub's live state —
+/// the ci-fix settlement path needs the authoritative head the repair body just
+/// pushed, which a warm cache would hide behind the pre-turn head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrReadFreshness {
+    Cached,
+    Fresh,
+}
+
 /// One `TaskPr.publication.github` PR read via a single bounded REST call — no
 /// enumeration. Task reconcile always holds a persisted PR number, so it never
 /// needs `gh pr list`; an unpublished working PR has no number and is not read
 /// remotely at all. A transport/quota/network failure returns `Degraded` rather
 /// than erroring, so local Task control survives a GitHub outage.
-pub(crate) fn observe_pr_by_number(repo: &Path, number: u32, branch: &str) -> PrObservation {
+pub(crate) fn observe_pr_by_number(
+    repo: &Path,
+    number: u32,
+    branch: &str,
+    freshness: PrReadFreshness,
+) -> PrObservation {
     if !gh_available() {
         return PrObservation::Degraded {
             reason: "gh CLI not found".to_string(),
@@ -379,18 +396,14 @@ pub(crate) fn observe_pr_by_number(repo: &Path, number: u32, branch: &str) -> Pr
         };
     };
     let endpoint = format!("repos/{owner}/{name}/pulls/{number}");
-    let output = match Command::new("gh")
-        .current_dir(repo)
-        .args([
-            "api",
-            "--cache",
-            "60s",
-            "-H",
-            "Accept: application/vnd.github+json",
-            &endpoint,
-        ])
-        .output()
-    {
+    // `Fresh` drops `--cache` so the read hits GitHub live; `Cached` coalesces a
+    // control-command burst into one read for 60s.
+    let mut args = vec!["api"];
+    if matches!(freshness, PrReadFreshness::Cached) {
+        args.extend(["--cache", "60s"]);
+    }
+    args.extend(["-H", "Accept: application/vnd.github+json", endpoint.as_str()]);
+    let output = match Command::new("gh").current_dir(repo).args(&args).output() {
         Ok(output) => output,
         Err(error) => {
             return PrObservation::Degraded {

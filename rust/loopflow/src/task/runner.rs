@@ -686,13 +686,20 @@ The durable reviewer outcome is:\n{}",
                             // The flow ended, or the turn was cut short. Anything
                             // else is a repair still mid-flow.
                             if flow_iteration_completed || status == Lifecycle::Interrupted {
-                                let observed_pr = crate::ops::task::reconcile_task_pr_for_lease(
-                                    &store,
-                                    &mut session,
-                                    lease,
-                                )
-                                .await
-                                .map_err(|error| anyhow!(error.to_string()))?;
+                                // Settlement judges head advancement against the
+                                // authoritative remote head: a `Fresh` reconcile
+                                // bypasses both the store observation cache and
+                                // gh's HTTP cache, so the head the repair body
+                                // just pushed is what settlement reads — never a
+                                // warm pre-turn observation.
+                                let observed_pr =
+                                    crate::ops::task::reconcile_task_pr_fresh_for_lease(
+                                        &store,
+                                        &mut session,
+                                        lease,
+                                    )
+                                    .await
+                                    .map_err(|error| anyhow!(error.to_string()))?;
                                 let _ = harness.stop().await;
                                 return settle_ci_fix_turn(
                                     &store,
@@ -2384,6 +2391,10 @@ pub(crate) struct CiFixWake {
     /// rather than re-deriving the identity at the exit — is what makes the body
     /// settle the wake it actually serviced, even if the PR moved on underneath.
     pub command_id: ChildCommandId,
+    /// The incident this wake repairs. Carried forward from the `CiFix` command
+    /// so settlement can record the repaired head against the exact incident,
+    /// without re-deriving the identity from a PR that may have moved on.
+    pub incident_identity: String,
     pub pr_number: u32,
     pub head_sha: String,
     pub failing_checks: Vec<CiCheck>,
@@ -2536,6 +2547,7 @@ async fn arm_ci_fix_wake(
     Ok((
         Some(CiFixWake {
             command_id: command.id,
+            incident_identity,
             pr_number,
             head_sha,
             failing_checks,
@@ -2614,6 +2626,10 @@ async fn settle_ci_fix_turn(
     status: Lifecycle,
     capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
+    // The authoritative post-turn head, when it moved past the incident head. Set
+    // only when the fresh reconcile proved advancement, so it names the head the
+    // repair body shipped for this incident.
+    let mut repaired_head: Option<String> = None;
     let (verdict, settled_status, reason) = match observed_pr
         .filter(|pr| pr.phase() == PrPhase::Open)
     {
@@ -2624,6 +2640,9 @@ async fn settle_ci_fix_turn(
                 (Some(start), Some(current)) => start != current,
                 (Some(_), None) => false,
             };
+            if head_advanced {
+                repaired_head = pr.head_sha().map(str::to_string);
+            }
             // Reconcile names a degraded read on the session; for a turn that just
             // ran, that reading could not have verified a repair.
             let degraded = match &session.observation {
@@ -2657,6 +2676,18 @@ async fn settle_ci_fix_turn(
     };
 
     set_and_record_status(store, session, lease, settled_status, &reason).await?;
+    // The head the body shipped is durable attribution on the incident, tied to
+    // its wake command and generation. First-write in the store, so a retry or a
+    // later push never rewrites which head settled it.
+    if let Some(head) = &repaired_head {
+        store
+            .mark_ci_incident_repaired(
+                &wake.incident_identity,
+                head,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await?;
+    }
     let target = ChildTarget::Task(&session.id, lease);
     match verdict {
         CiFixVerdict::Accept => {
@@ -3473,6 +3504,7 @@ mod tests {
         );
         let wake = super::CiFixWake {
             command_id: crate::child_session::ChildCommandId::new(),
+            incident_identity: "github:ci:test/repo:916:headsha:deadbeef".to_string(),
             pr_number: 916,
             head_sha: "headsha".to_string(),
             failing_checks: vec![crate::task::CiCheck {

@@ -197,6 +197,49 @@ echo "fake gh: unexpected invocation: $*" >&2
 exit 90
 "#;
 
+/// A fake `gh` that answers the PR read **by cache mode**, so the settlement
+/// race can be pinned by behavior rather than argv: a `--cache` invocation (the
+/// store's coalescing path) serves `pr_cached.json`, an uncached invocation
+/// serves `pr_fresh.json`. A test that keeps the two files at different heads
+/// proves *which* read settlement made — restoring either the store-cache
+/// bypass or `--cache` on the head read then serves the old head and flips the
+/// verdict. `pr checks` is unchanged from `FAKE_GH`.
+const CACHE_MODE_GH: &str = r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo "gh version 2.40.0 (fake)"; exit 0; fi
+case "$1" in
+  api)
+    for arg in "$@"; do
+      if [ "$arg" = "--cache" ]; then cat "$LF_TEST_GH_DIR/pr_cached.json"; exit 0; fi
+    done
+    cat "$LF_TEST_GH_DIR/pr_fresh.json"; exit 0;;
+  pr)
+    if [ "$2" = "checks" ]; then
+      for arg in "$@"; do
+        if [ "$arg" = "--required" ]; then cat "$LF_TEST_GH_DIR/required.json"; exit 0; fi
+      done
+      cat "$LF_TEST_GH_DIR/full.json"; exit 0
+    fi;;
+esac
+echo "fake gh: unexpected invocation: $*" >&2
+exit 90
+"#;
+
+/// Write a PR-read JSON body (the shape `observe_pr_by_number` parses) to a named
+/// file in the fake-`gh` state dir. `CACHE_MODE_GH` picks `pr_cached.json` vs
+/// `pr_fresh.json` by cache mode.
+fn write_pr_json(dir: &std::path::Path, file: &str, number: u32, head_sha: &str) {
+    let body = serde_json::json!({
+        "number": number,
+        "state": "open",
+        "merged_at": serde_json::Value::Null,
+        "merge_commit_sha": serde_json::Value::Null,
+        "html_url": format!("https://github.com/test/repo/pull/{number}"),
+        "head": { "sha": head_sha },
+    });
+    std::fs::write(dir.join(file), serde_json::to_string(&body).unwrap())
+        .expect("write pr json");
+}
+
 struct FakeGh {
     dir: std::path::PathBuf,
 }
@@ -1071,14 +1114,24 @@ exit 1
     }
 
     /// What the runner's exit does: reconcile the PR the turn just acted on, then
-    /// settle the wake and park the body. Mirrors the production call site.
+    /// settle the wake and park the body. Mirrors the production call site, which
+    /// uses `reconcile_task_pr_fresh_for_lease` — a `Fresh` read that bypasses the
+    /// store observation cache and gh's HTTP cache, and does **not** expire the
+    /// cache first. A warm pre-turn observation must never decide head
+    /// advancement; that is exactly the race this Task fixes.
     async fn settle(
         &mut self,
         wake: &super::CiFixWake,
         head_before_turn: Option<&str>,
         status: Lifecycle,
     ) {
-        let observed_pr = self.reconcile().await;
+        let observed_pr = crate::ops::task::reconcile_task_pr_fresh_for_lease(
+            &self.store,
+            &mut self.task,
+            &self.lease,
+        )
+        .await
+        .expect("reconcile the task PR");
         super::settle_ci_fix_turn(
             &self.store,
             &mut self.task,
@@ -1877,6 +1930,90 @@ async fn a_repaired_head_accepts_the_wake_and_parks_without_a_gate() {
             .len(),
         1,
         "a repair pushes to the branch it was given; it never rotates to a successor PR"
+    );
+}
+
+/// The settlement observation race (W2-320, live on W2-311 / PR #1065): the
+/// repair body pushed a new remote head, but the pre-turn observation was still
+/// cache-fresh at the old head, so settlement judged head advancement against
+/// the stale head and blocked a PR the body had already repaired.
+///
+/// The fix reads the *authoritative* remote head at settlement — past both the
+/// store observation cache and gh's `--cache`. This proves it **by behavior,
+/// through both cache layers independently**: the fake `gh` serves the old head
+/// `h1` to any cached read and the pushed head `h2` only to an uncached one,
+/// while the store observation is left warm at `h1`. So the verdict turns on
+/// which read settlement makes:
+///   - `Fresh` (production) → store bypass + uncached → `h2` → Waiting.
+///   - revert the settlement reconcile to `Cached` → the warm store cache
+///     short-circuits at `h1` → did-not-repair Blocked.
+///   - keep the store bypass but restore `--cache` on the head read → gh serves
+///     `h1` → did-not-repair Blocked.
+/// Checks stay failing on `h2`, so the `Waiting` verdict is attributable to head
+/// advancement alone, never a green reading.
+#[tokio::test]
+async fn settlement_reads_the_authoritative_head_past_a_warm_pre_turn_cache() {
+    let mut harness = Harness::new().await;
+
+    // The failing head that woke the body. `observe` reads gh and stamps the
+    // store observation `checked_at=now`, so the pre-turn cache is warm at `h1`.
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    let wake = harness.arm().await.expect("a red head wakes a body");
+
+    // The repair turn's push, modeled as a remote that answers by cache mode: the
+    // warm store cache and any `--cache` read still name `h1`; only an
+    // authoritative uncached read sees the pushed `h2`. The new head stays red.
+    write_pr_json(&harness.gh.dir, "pr_cached.json", harness.pr_number, "h1");
+    write_pr_json(&harness.gh.dir, "pr_fresh.json", harness.pr_number, "h2");
+    harness.checks_failing();
+    write_fake_gh(harness._guard._bin.path(), CACHE_MODE_GH);
+
+    // Settlement does NOT expire the cache first: a warm `h1` observation is
+    // exactly the pre-turn state a fast body races, and the fresh reconcile must
+    // defeat it.
+    harness
+        .settle(&wake, Some("h1"), Lifecycle::Completed)
+        .await;
+
+    let session = harness
+        .store
+        .get_task_session(&harness.task.id)
+        .await
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(
+        session.status,
+        TaskSessionStatus::Waiting,
+        "settlement read the pushed head h2 and waits on it — not a warm h1"
+    );
+    assert_eq!(
+        harness.command_state(&command).await,
+        ChildCommandState::Accepted,
+        "a repair that moved the head accepts its wake, never blocks it"
+    );
+    assert_eq!(
+        harness.ci_fix_commands().await.len(),
+        1,
+        "a new remote head rearms CI observation, not a second repair body"
+    );
+
+    let incident = harness
+        .incidents()
+        .await
+        .into_iter()
+        .map(|row| row.incident)
+        .find(|incident| incident.failed_head_sha == "h1")
+        .expect("the h1 incident is recorded");
+    assert_eq!(
+        incident.repaired_head_sha.as_deref(),
+        Some("h2"),
+        "durable attribution: the incident names the head the body shipped"
+    );
+    assert!(
+        incident.blocked_at.is_none(),
+        "an incident whose remote head advanced is never blocked as unrepaired"
     );
 }
 

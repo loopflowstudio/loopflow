@@ -61,6 +61,7 @@ fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncide
             repo: row.get(3)?,
             pr_number: row.get::<_, i64>(4)? as u32,
             failed_head_sha: row.get(5)?,
+            repaired_head_sha: row.get::<_, Option<String>>(24)?,
             failure_set,
             provider_completed_at: optional_datetime(7, row.get(7)?)?,
             poll_observed_at: optional_datetime(8, row.get(8)?)?,
@@ -170,6 +171,27 @@ impl super::SqliteStore {
         mark_ci_incident_triggered_on(&conn, identity, command_id, updated_at)
     }
 
+    /// Record the head a ci-fix body shipped for this incident. First-write only:
+    /// `COALESCE` keeps the head that originally settled it, so a crash-then-retry
+    /// or a later unrelated push cannot rewrite the attribution. Returns whether
+    /// the incident existed.
+    pub fn mark_ci_incident_repaired(
+        &self,
+        identity: &str,
+        repaired_head_sha: &str,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<bool> {
+        let at = timestamp(updated_at);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "UPDATE ci_incidents
+             SET repaired_head_sha=COALESCE(repaired_head_sha, ?2),
+                 updated_at=MAX(updated_at, ?3)
+             WHERE identity=?1",
+            params![identity, repaired_head_sha, at],
+        )? > 0)
+    }
+
     pub fn mark_ci_incidents_green(
         &self,
         pr_id: &TaskPrId,
@@ -244,7 +266,8 @@ impl super::SqliteStore {
                           ELSE MIN(ci.poll_observed_at, ci.webhook_received_at)
                       END
                       AND cc.created_at <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
-                )
+                ),
+                ci.repaired_head_sha
              FROM ci_incidents ci
              JOIN task_sessions ts ON ts.id=ci.task_session_id
              JOIN waves w ON w.id=ts.wave_id

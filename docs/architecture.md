@@ -61,6 +61,21 @@ resident process with that Wave's listener, journal, cadence, memory, and
 Project selection. Project and Task Sessions are local child processes sharing
 SQLite. There is no global service.
 
+Current decentralized truth is deliberately split by substrate:
+
+| Substrate | Owns |
+| --- | --- |
+| local SQLite | this Home's runtime, credentials, receipts, and agent bus |
+| append-only journals | Wave conversation and durable run narrative |
+| Linear | shared Wave/Project/Task planning truth |
+| GitHub | branches, PRs, checks, and merges |
+| SSH | reach to another Home without a central Loopflow coordinator |
+
+`lfd` is currently a small machine daemon for durable webhook ingress and
+liveness probes. It hosts no Sessions and is not a control API. The target Home
+runtime may consolidate local keeping and Work wakeups, but it does not turn
+`lfd` or any other process into a company-wide authority.
+
 The current runtime contains several overlapping representations:
 
 - Project/Task Session identity mixes durable Work with one attempt;
@@ -76,7 +91,7 @@ These are the implementation being replaced, not compatibility contracts.
 
 ### Foundations already changed
 
-**Current.** Two prerequisites now match the target:
+**Current.** Several prerequisites now match the target:
 
 1. Provider steering is attempted against the exact active Turn. The adapter
    returns `Sent`, `NotSteerable`, `Failed`, or `Unknown`; there is no
@@ -86,6 +101,13 @@ These are the implementation being replaced, not compatibility contracts.
 2. Observed Turn is the only additive spend grain. `lf usage`, `lf top`,
    `lf runs`, Doctor coverage, JSON, and Mac telemetry read one Turn query.
    Missing usage remains absent rather than becoming zero.
+3. Provider accounts are the routing primitive. Access profiles are verified
+   login venues owned by an account, not agent identity.
+4. Revoked body recovery releases authority only after positive absence
+   evidence; an unprovable probe remains fenced.
+5. A current actionable CI incident can interrupt a parked Task Review once
+   and settle before the background lifecycle resumes. This is the narrow
+   implementation precursor to the generic control lane.
 
 The first foundation still stores Project/Task direction through
 `ChildCommand`. A confirmed live send can therefore become only an anonymous
@@ -298,10 +320,16 @@ A CI failure is evidence, not direction:
 observe failed checks
 -> ensure one CiIncident for repository, PR head, and failure set
 -> select it as execution input
--> allocate its revision and reserve one bounded repair Run atomically
+-> allocate its revision
+-> if a Run is active, put it first in that Run's control lane
+-> otherwise reserve one bounded repair Run atomically
 ```
 
-Duplicate observations cannot reserve a second Run. A User saying “fix CI
+An actionable incident that arrives during a parked Turn interrupts that Turn
+once and becomes the next boundary. It does not create a second Run beside the
+current writer. A failure that only `lf pr land` can resolve remains honest CI
+evidence but never enters the control lane. Duplicate observations can neither
+reserve a second Run nor claim the same incident twice. A User saying “fix CI
 now” is a separate Steer.
 
 ## Authority
@@ -378,6 +406,12 @@ Recovery reserves a new Run linked by `retry_of`; it never mutates a failed Run
 or impersonates its lease. Automatic recovery requires durable evidence that
 replay is safe. Unsafe or unknown effects produce a typed Wait.
 
+New input does not imply a new Run. While the Epoch already has an active Run,
+the input becomes durable control work for that Run and is selected at its next
+boundary. Only input that finds no active Run may resolve a Wait and reserve
+one. This is how a child Review or CI incident wakes useful execution without
+creating overlapping authority.
+
 ### Races
 
 **Decision.** Waking input and Run end serialize on the Epoch row:
@@ -390,11 +424,20 @@ replay is safe. Unsafe or unknown effects produce a typed Wait.
 Revoking a Run fences writes immediately but retains the active slot until
 containment absence is proved. Recovery cannot overlap a stale writer.
 
+Absence is a positive observation, not the lack of a successful probe. The
+portable verdict is `Absent | Present | Unprovable`; only `Absent` releases the
+slot. A live tmux unit vetoes stale process evidence, and a recorded process
+group is preferred to a recyclable pid. Stop/recovery must preserve this
+fail-closed behavior when the old child-body probe moves into the generic Run
+controller.
+
 ## Launch and Turn
 
 **Decision.** Launch owns provider, model, account, Home, containment identity,
-and optional opaque continuation token. Provider/account/model fallback creates
-another Launch in the same Run.
+and optional opaque continuation token. Account is the routing primitive;
+browser profiles are verified login venues belonging to accounts, not Launch
+identity. Provider/account/model fallback creates another Launch in the same
+Run.
 
 ```rust
 enum LaunchState { Starting, Live, Stopping, Ended }
@@ -504,6 +547,13 @@ interrupts it and starts the next Turn from the already-durable child input.
 The durable playhead does not advance on interruption, so background work
 resumes after the interaction. Plain User Steer still never implies interrupt;
 this is explicit parent scheduler policy for higher-priority child attention.
+
+The same rule handles other actionable control evidence. Current code has
+proved the narrow form for CI: a claimed incident can interrupt a parked Review
+once, settle its bounded repair before the parent lifecycle loop, and leave the
+background playhead untouched. The target removes that CI-only ordering hook by
+making control input and background flow position separate facts. Completing a
+control item cannot rewrite, advance, or validate the background playhead.
 
 Transport delivery to the parent does not discharge attention. The item stays
 first until the parent actually sends an ordinary Steer to the child or closes
@@ -687,10 +737,12 @@ Trace `TraceId` and `ExecId` are diagnostic lineage. Product `RunId`,
    current input outstanding;
 6. move continuation data to Launch and preserve unknown historical links as
    absent;
-7. verify foreign keys, active-slot constraints, historical Work lookup, and
+7. preserve account-first routes and session pins as Launch route identity;
+   access profiles remain account-owned login venues;
+8. verify foreign keys, active-slot constraints, historical Work lookup, and
    reconstruction on a copied dogfood database;
-8. drop live Session/body/command tables, old readers/writers, DTOs, and parsing;
-9. restart residents and let the keeper reserve current Work.
+9. drop live Session/body/command tables, old readers/writers, DTOs, and parsing;
+10. restart residents and let the keeper reserve current Work.
 
 Shipped migration files remain history. The live schema retains one
 implementation.
@@ -698,7 +750,8 @@ implementation.
 ## Implementation frontier
 
 **Current status.** Provider outcome, controller conformance, trace vocabulary,
-and Turn-spend store/query are implemented. The working tree contains an
+Turn-spend store/query, account-first routing, fail-closed revoked-body release,
+and narrow CI preemption are implemented. The working tree contains an
 unfinished additive attempt at durable ids, Epoch revisions, Runs, Steers,
 Sends, and Turn Basis. It is reconnaissance, not an achieved slice: current
 Session/body/command authority still exists and the new path is not yet the
@@ -723,10 +776,10 @@ small additive phases:
 8. finish the Run/Launch/Turn controller and migrations needed to leave one
    executable architecture.
 
-The deletion is part of correctness. The pass must move Rust from the 133,974
-line baseline to at most 121,974 lines. Because the unfinished additive working
-tree is currently 136,525 lines, this requires at least 14,551 net lines of
-deletion from the present state.
+The deletion is part of correctness. After rebasing on `main`, the unfinished
+additive tree is 131,127 Rust source lines. The core cut still owes the intended
+12,000-line reduction, so the target is at most 119,127 lines rather than
+claiming upstream deletion as architecture progress.
 
 It is done when:
 
@@ -747,6 +800,12 @@ It is done when:
 - User and parent conduct the same Review protocol; only routing differs;
 - closing an old Review after Basis or flow position advances is rejected;
 - dirty canonical main cannot prevent a read-only parent control response;
+- an actionable CI incident arriving during an active Run becomes that Run's
+  next control boundary; it never reserves an overlapping repair Run;
+- a land-time-only or stale CI incident neither interrupts a Review nor enters
+  the control lane;
+- Run authority is released only after positive containment absence; an
+  unprovable probe remains fenced;
 - a narrow typed tool response, where one exists, resolves before optional
   provider prose;
 - stale parent lease and stale Epoch/Basis writes are rejected;
@@ -773,7 +832,9 @@ Use deterministic barriers, never sleeps:
 - typed tool response versus seed-only blocked tool;
 - child Review versus parent background Turn on live and seed-only providers;
 - repeated child Review messages versus parent flow resumption;
-- duplicate CI observation versus crash after reserve;
+- actionable CI incident versus a parked Review and active Run;
+- non-actionable CI evidence versus a parked Review;
+- duplicate CI observation versus crash after reserve or active-Run claim;
 - fifty SQLite writers versus receipt allocation.
 
 Every harness runs the same durable-outcome scenarios: live accepted, live
@@ -787,10 +848,11 @@ noun or source of truth:
 
 1. Capture one successful Codex `turn/steer` response against the dogfood
    app-server and verify the assumed result shape.
-2. Normalize OpenCode usage end to end. Task/Project launches currently miss
-   usage because `StreamEvent::Usage` and `ConversationEvent::TurnUsage` enter
-   capture through different surfaces and disagree on accumulation versus
-   replacement.
+2. Normalize OpenCode usage end to end. Task capture now records normalized
+   conversation events, but `StreamEvent::Usage` and
+   `ConversationEvent::TurnUsage` still enter through different surfaces and
+   disagree on accumulation versus replacement. Re-measure before deleting
+   either parser or declaring the old missing-usage observation fixed.
 3. Choose the exact stable `HomeId` migration source and route-observation
    format. Hostname remains disqualified as identity.
 4. Prove containment for each provider's native subagents and background tasks.

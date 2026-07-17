@@ -28,7 +28,10 @@ Make the durable input spine authoritative end to end:
    Turn derives which Steers applied; transport acceptance never does.
 4. Fence terminal completion with current and successfully applied Basis.
 5. Keep interrupt, stop, abandon, CI wake, and process recovery as typed
-   lifecycle/evidence operations. They may not carry authored prose.
+   lifecycle/evidence operations. They may not carry authored prose. Preserve
+   main's current actionable-CI behavior: an incident arriving beside active
+   execution preempts a parked Turn once and settles before background flow;
+   it does not become Steer or launch a second writer.
 6. Rename the narrow machine response to ToolResponse throughout. It persists
    before optional provider notification. Do not retain generic Decision or
    Approval domain APIs.
@@ -50,6 +53,8 @@ controller replaces them, but no command may represent direction.
 - crash after a confirmed live Send still leaves the Steer in a later seed;
 - a live Steer makes completion from the older Turn Basis stale;
 - ordered outstanding Steers seed exactly once as one projection;
+- current actionable CI still preempts a parked Review once, while stale and
+  land-time-only failures do not interrupt it;
 - `agent_turns` remains the only Turn table and additive usage store;
 - no separate `turns` or shadow Launch table survives;
 - migration from a copied pre-cut database succeeds without `child_directives`;

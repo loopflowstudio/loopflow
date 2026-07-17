@@ -44,7 +44,8 @@ Do not add compatibility shims. Migrate stored data once, cut every caller to th
 
 ## Current implementation review
 
-Review snapshot: `c03c74cd0` plus the paused, uncommitted durable-input attempt
+Review snapshot: PR #1073 rebased through main `547708b3f`, plus the unfinished
+durable-input scaffold
 and the revised canonical architecture in `docs/architecture.md` on 2026-07-17.
 
 Disposition: **the adapter and Turn-spend foundations are coherent. The paused
@@ -92,7 +93,11 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 11. **Review is conversation, not decision state.** A Review may be critique, questions, brainstorming, or direction. It is the interval where a flow's current step is interactive and its live Launch owes attention to `User | Parent(WorkRef)`. Steers and Turns occur inside it. Close advances the flow; it carries no approval or changes-requested disposition. There is no Review row or `ReviewId`.
 12. **Parent responsiveness is scheduler behavior.** Wave and Project must drain direct User interaction, awaiting child Reviews, and other unblocking child evidence before beginning their own background flow. Child attention may explicitly interrupt a non-steerable background Turn; this does not change plain Steer semantics.
 13. **`User` replaces `Human`.** User means an authenticated external Loopflow client, whether a person in Swift/CLI or another system's agent. Internal Loopflow authority remains `Run(RunId)`.
-14. **Small checkpoints optimize against the desired simplification.** The current working tree is 136,525 Rust lines and still contains all legacy authority. The next pass must cross the structural cut and delete at least 14,551 net lines to reach the 121,974 target, not preserve additive scaffolding as progress.
+14. **Small checkpoints optimize against the desired simplification.** The
+    rebased working tree is 131,127 Rust source lines and still contains all
+    legacy authority. The next pass must cross the structural cut and delete at
+    least 12,000 net lines to reach 119,127, not preserve additive scaffolding
+    or count unrelated upstream deletion as progress.
 15. **Work is the long-lived logical server; its process is not.** One generic
     Home runtime serves stable Wave, Project, and Task Work. Each kind supplies
     domain policy through an explicit `WorkRef` match, while Run reservation,
@@ -107,6 +112,30 @@ That is adapter groundwork, not the core cutover. Current state against the phas
     observed Turn and usage store and `agent_launches` is its Launch lineage.
     Extend or replace those tables in place. A second `turns` or shadow Launch
     ledger recreates the normalization debt this architecture exists to remove.
+18. **Main proved preemption, but only as a Task/CI special case.** PRs #1063
+    and #1064 settle a bounded `ci-fix` turn before the parent lifecycle loop
+    and interrupt a parked Review exactly once for a current actionable
+    incident. This is the executable seed for the generic control lane. Preserve
+    the behavior; delete the CI-only cursor/ordering hook after control input and
+    background playhead are separate facts.
+19. **New input does not always reserve a Run.** A CI incident or child Review
+    may arrive while its Work already has active execution authority. It joins
+    that Run's control lane and becomes the next boundary; only an idle Work may
+    resolve a Wait and reserve a Run. Otherwise the target would recreate the
+    overlapping-writer bug while claiming active-slot uniqueness.
+20. **`phase_epoch` is a legacy review fence, not product Epoch.** Main now
+    ignores superseded review dispositions by phase/gate epoch. The normalized
+    model makes that bug impossible with current flow position plus Basis; do
+    not migrate `phase_epoch` or old dispositions into product Epoch history.
+21. **Containment absence already has the right fail-closed evidence.** Main's
+    revoked-body recovery returns `Absent | Present | Unprovable` and releases
+    only on `Absent`, preferring tmux and process-group evidence over recyclable
+    pids. Move that evidence into generic Run stop/recovery instead of replacing
+    it with boolean liveness.
+22. **Accounts are Launch route identity.** Main routes directly by provider
+    account; access profiles are verified login venues owned by accounts.
+    Preserve migration 0.11.027 before spend/input migrations and never put a
+    profile id back on Work, Run, or Launch as the account identity.
 
 No more behavior should be adapted around `ChildCommand`, `InteractionReview`,
 or Handoff. The next checkpoint is the large core-control cutover specified in
@@ -212,6 +241,12 @@ stop(run, cause) -> StopReceipt
 - `stop` fences authority immediately, owns physical cleanup, and reaches terminal Run state only after executor absence is established.
 
 `boot`, `activate`, `continue`, `settle`, `finish`, `revoke`, `reap`, and `retry` are not public domain operations. Started/progress/reaped are receipts. Revoke and reap are stop phases. Recovery reserves a new Run after the prior containment is absent; it never mutates or blindly replays the failed Run.
+
+Input arriving during an active Run belongs to that Run's control lane and
+becomes its next boundary; it does not call `reserve`. Input arriving with no
+active Run may resolve a Wait and reserve one atomically. Stop releases the
+active slot only on positive `Absent` containment evidence. `Present` and
+`Unprovable` remain fenced.
 
 ### Review, waiting, and attention
 
@@ -320,7 +355,7 @@ The goal is not only fewer files. Each normalization must remove a class of repr
 | Failed Run immutable; new Run requires prior absence | Recovery replays unknown effects or starts beside the old writer | retry side-effect risk | Unknown external effect yields `WaitOn::Effect`; retry before reap is rejected |
 | Steer is the only authored direction | CI evidence, lifecycle, decisions, and prose compete in one command enum | ENG-19, ENG-20; PRD-8 | Type-level API has no path to encode CI incident as Steer or replacement as Interrupt |
 | Unique Steer revision and immutable Send attempts | Retrying an unknown delivery mutates history or live-sends twice to one Turn | child delivery ambiguity | Unique `(steer, turn, via=live)`; Unknown remains immutable and next seed still contains Steer |
-| Typed `RunTrigger::CiIncident` plus incident/head uniqueness | One CI failure falls through into ordinary iterate/gate or launches two repair bodies | ENG-19, ENG-20; PRD-8 | Duplicate webhook and crash-after-reserve produce one incident and one active repair Run |
+| Typed `RunTrigger::CiIncident` plus incident/head uniqueness | One CI failure falls through into ordinary iterate/gate or launches two repair bodies | ENG-19, ENG-20; PRD-8 | Duplicate webhook produces one incident; it joins the active Run when present and otherwise reserves exactly one repair Run |
 | One durable flow position advanced in the boundary transaction | A completed review/gate is re-entered, or duplicate reconciliation emits empty serial work | W2-296, W2-297, W2-300 | Reconcile the same evidence repeatedly; flow position advances at most once and then waits/runs from the resulting state |
 | Review derived from flow + Launch + attention | A Task is “waiting on Project review” while its live body is idle and the Project is busy or cannot boot | dogfood parent bottleneck; interaction debt | Review needs no row/id/disposition; parent control-lane test services it before background work on every provider shape |
 | Parent control lane before background flow | Project/Wave starts another pursue Turn while a child remains synchronously blocked on it | dogfood parent bottleneck | Child Review during live and seed-only background Turns becomes the parent's next handled input; FIFO among child Reviews |
@@ -366,8 +401,8 @@ The pass is accepted only when:
 - Review and parent priority execute through the same Steer/Launch path;
 - the old writers, readers, DTOs, commands, and schemas in the deletion ledger
   are removed;
-- Rust is at most 121,974 lines, a 12,000-line reduction from the 133,974
-  baseline and at least 14,551 lines below the current additive working tree;
+- Rust is at most 119,127 lines, a 12,000-line reduction from the rebased
+  additive tree;
 - any retained legacy-looking code names a distinct truth and is recorded here
   before acceptance.
 
@@ -450,6 +485,8 @@ Migration rules:
 - initial/work-revised directives become Work truth revisions;
 - replacement/follow-up prose becomes ordered Steer input in the matching Epoch;
 - stale provider session fields are not copied onto Work;
+- provider account routes and pins become Launch route identity; access
+  profiles remain account-owned login venues and are never Work identity;
 - historical rows remain queryable after their Project disappears from the current roadmap.
 
 Done when:
@@ -483,11 +520,15 @@ Done when:
 - the same transition suite runs against Wave, Project, and Task Work;
 - a Steer addressed while Work has no Run remains durable and causes the Home
   runtime to reserve one without changing Work identity;
+- a CI incident or child Review addressed while a Run is active becomes that
+  Run's next control boundary and cannot reserve a sibling Run;
 - killing every Work executor leaves the Home resident able to recover all
   runnable Work through the same controller;
 - reserve-versus-reserve, input-versus-advance, done-versus-input, stop-versus-start, and reap-versus-recovery races have deterministic tests;
 - killing the provider at every side-effect boundary leaves either a recoverable Run or an explicit unknown effect, never a second writer;
 - Run cannot be terminal while an owned Launch/containment is live;
+- `Unprovable` process/tmux evidence keeps the Run fenced; only `Absent`
+  releases it for recovery;
 - fifty concurrent local writers lose no accepted receipt;
 - Task providers receive no writable canonical-main path.
 
@@ -506,6 +547,11 @@ Replace `ChildCommand`, `ChildDirective`, and their Task/Project variants with:
 
 Persist Steer before attempting the provider. Permit at most one live Send attempt for a Steer/Turn. Render all still-outstanding Steers as one ordered seed projection while preserving their individual receipts.
 
+CiIncident selection uses the same control path but is not a Steer. If the Work
+has an active Run, claim the incident for that Run and preempt a parked boundary
+at most once. Otherwise reserve one bounded repair Run. Land-time-only, stale,
+and duplicate incidents remain evidence without interrupting or reserving.
+
 Persist a typed tool response before trying to notify the provider. It allocates
 its Epoch revision and directly releases that tool. A same-Turn Send may reduce
 latency; later seed text may explain the response; delivery never owns it.
@@ -520,7 +566,9 @@ Done when:
 - the wire request cannot submit `Author` or otherwise claim User provenance;
 - callers cannot request live, seed, replace, or retry behavior;
 - a seed-only provider can observe a typed tool response without ending the blocked Turn or receiving prose first;
-- CI failures enter only through `CiIncident` and reserve one bounded repair Run;
+- CI failures enter only through `CiIncident`; an active Run claims the
+  incident as its next control boundary, while idle Work reserves exactly one
+  bounded repair Run;
 - `ChildCommandKind`, `ChildDirective`, `Replacement`, `FollowUp`, command `Resume`, and command `Decide` have no production references.
 - changing any authored Work field changes the next rendered seed without a second copy/update path.
 
@@ -646,8 +694,7 @@ Done when:
 - provider smoke tests pass where credentials are available without exposing secrets;
 - a copied dogfood database survives migration and recovery drills;
 - no dual read/write, fallback parser, old enum case, or compatibility DTO remains;
-- Rust code is at most 121,974 lines: 12,000 below the 133,974 baseline and
-  14,551 below the current additive working tree;
+- Rust code is at most 119,127 lines: 12,000 below the rebased additive tree;
 - no shortfall is accepted as a completed core cutover.
 
 ## Deletion ledger
@@ -733,9 +780,11 @@ token/cost/provider/model spend columns on run_events
 Migrate retained domain rows such as Task PRs, CI incidents, and Linear
 observations to stable `TaskId` plus `EpochId` where pursuit-specific. Review
 conversation becomes Steers/Turns and current interactive flow position; do
-not copy dispositions or an interaction aggregate. Migrate provider/account
-pinning to Launch route identity. Do not drop audit history before its durable
-replacement has been verified on a copied database.
+not copy dispositions, `phase_epoch`, or an interaction aggregate. Migrate
+provider/account pinning to Launch route identity while preserving the
+account-first route and account-owned login venues created by 0.11.027. Do not
+drop audit history before its durable replacement has been verified on a copied
+database.
 
 ### Symbols and cases that must reach zero production references
 
@@ -794,7 +843,9 @@ Provider adapter internals may still say provider session/thread id. Production 
 - stop × new reserve;
 - reap observation × keeper recovery;
 - provider fallback × stop;
-- duplicate CI webhook × crash after reserve;
+- actionable CI incident × active Run and parked Review;
+- land-time-only CI evidence × active Run and parked Review;
+- duplicate CI webhook × crash after reserve or active-Run claim;
 - Wait resolution × duplicate external event;
 - fifty SQLite writers × receipt persistence.
 
@@ -849,7 +900,7 @@ Record after each checkpoint:
 
 | Measure | Baseline | Review snapshot | Done |
 | --- | ---: | ---: | ---: |
-| Rust code | 133,974 | 136,525 additive working tree | ≤121,974 |
+| Rust code | 133,974 before upstream integration | 131,127 rebased additive tree | ≤119,127 |
 | Named legacy child/control/interaction modules | 12,002 physical lines | 12,002 | 0 old concept lines |
 | Complete old interaction/handoff physical lines | 4,803 | 4,803 | 0 old concept lines |
 | Authored-direction domain types | command + directive + review + handoff | unchanged | 1: Steer; Review is derived |

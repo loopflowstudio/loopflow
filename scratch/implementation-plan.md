@@ -44,9 +44,10 @@ Do not add compatibility shims. Migrate stored data once, cut every caller to th
 
 ## Current implementation review
 
-Review snapshot: `9ffba7edd` plus the uncommitted Turn-spend cutover in progress on 2026-07-16.
+Review snapshot: `4193acb52` plus the executable architecture rewrite on 2026-07-17.
 
-Disposition: **extend; do not land the steering commit as a standalone architecture**.
+Disposition: **the adapter and Turn-spend foundations are coherent; begin the
+durable input spine. Do not land them as the final architecture.**
 
 The implementation found one sound seam:
 
@@ -61,13 +62,13 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 
 | Phase | Status | Evidence still missing |
 | --- | --- | --- |
-| 0. Executable spec | Partial | Four provider shapes now run through the controller; transition tables still missing |
+| 0. Executable spec | Complete | `architecture.md` now fixes the stored nouns, constraints, transitions, side-effect order, races, migration, and next vertical slice |
 | 1. Work/Epoch/Basis/Home | Not started | No target types, tables, migration, ids, or revision allocator exist |
 | 2. Run/Launch/containment | Vocabulary only | Trace ids were renamed; Session/body lease stores and duplicated runners remain authoritative |
 | 3. Steer/typed control | Adapter only | `ChildCommand`, `ChildDirective`, replacement/resume/decision variants, ambient authority, and explicit Ack remain |
-| 4. Provider reconstruction | Partial | Dynamic Send outcome exists; reconstruction, fallback Launches, exact durable Send correlation, and real conformance do not |
+| 4. Provider reconstruction | Partial | Dynamic Send outcome and controller conformance exist; reconstruction, fallback Launches, durable Send rows, and Basis correlation do not |
 | 5. Wait/interaction/status | Not started | InteractionReview, InteractiveHandoff, stored status cross-products, and Swift Handoff surfaces remain |
-| 6. Turn usage | In progress | Writer deletion and reader cutover are uncommitted and not yet accepted by the full gate |
+| 6. Turn usage | Store/query complete | Every additive reader uses Turn spend; OpenCode still needs one end-to-end usage producer/parser |
 | 7. Purge | Not started | Every named legacy module/schema object remains |
 
 ### Findings that change the next implementation step
@@ -77,12 +78,16 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 3. **Typed decisions cannot inherit ordinary Steer timing.** On a seed-only provider, the current code queues `Decide` until the active Turn ends but records `DecisionResolved` only after sending that queued text. A Turn blocked in `decision request --wait` can therefore wait on the write that is waiting on the Turn. Persist the typed resolution and revision first; live/seed prose is optional notification.
 4. **The provider fixture was descriptive, not conformance.** Its test asserted literals in `control_contract.json` and never invoked an adapter or controller. **Done (2026-07-17):** the fixture is deleted and the four shapes drive `absorb_commands`/`apply_input`, asserting that each still seeds the next boundary and never interrupts.
 5. **Codex outcome cleanup is incomplete. Done (2026-07-17).** A `PendingReply` guard releases the waiter on every terminal path, and rejections are typed from probed live evidence (see `scratch/questions.md`): codex 0.144.5 answers *every* rejection with `-32600`, so only the message separates the expected Turn-boundary race from a Loopflow bug. Timeout, late response, disconnect, mismatched Turn, and explicit rejection are covered; each test was verified to fail against the pre-fix behavior. The `Sent` response shape remains assumed rather than observed.
-6. **The usage cutover is the right independent reduction but is not done until every reader moves.** At review time the working tree had removed `RunEventRow` spend fields before all consumers and JSON serialization compiled. The final query must also retain a Turn whose only reported measurement is cache usage and preserve absent versus zero.
+6. **The usage store/query cutover is done.** `agent_turns` is the only additive grain; Rust, Swift, CLI, Doctor, and monitoring use the shared Turn-spend wire. Cache-only, explicit zero, and absent usage remain distinct.
 7. **One table still has two parser/producer paths.** Legacy agent launches update Turn usage through `StreamEvent::Usage`; harness launches use `ConversationEvent::TurnUsage`. Both reach `agent_turns`, but W2-289 remains possible until one normalization function/event owns replacement-versus-accumulation semantics.
 8. **Fixed during gate:** `lf top` no longer reads raw Codex session logs or conditionally suppresses persisted Codex Turns. Its throughput chart reads the same `turn_spend_since` query as `lf usage`; live process inspection remains a separate non-spend signal.
 9. **Fixed during the usage cutover:** `lf doctor`'s “agent ran but no usage was captured” check moved from `run_events` to terminal Launch/Turn evidence. It reports absent provider usage without converting it to zero, which is how the remaining OpenCode parser gap stays visible.
 
-No more behavior should be adapted around `ChildCommand`. Finish the independent usage cutover, harden the provider outcome seam, then take Phases 1–3 as one core branch: no intermediate state may accept a Steer without durable Basis fencing.
+No more behavior should be adapted around `ChildCommand`. The next coherent
+checkpoint is the durable input spine specified at the end of
+`scratch/architecture.md`: stable Epoch revision, Steer/Send, fixed boundary
+Basis, typed input, and completion fencing cut together. No intermediate state
+may accept a Steer without durable Basis fencing.
 
 ## Target contract
 
@@ -282,17 +287,18 @@ Some failures cannot be made impossible by data shape: a provider can lie, a mac
 
 ### A. Close the current foundation slices
 
-This checkpoint contains no new domain model. It makes the already-started adapter and usage work honest enough to support the cutover.
+This checkpoint is complete except for the crash/completion criteria that
+deliberately belong to the durable input spine.
 
-- Replace the literal-only provider fixture test with controller tests backed by four fake protocols: live accepted, live rejected, response lost, and opaque TUI.
-- Test Codex `Sent`, provider rejection, mismatched Turn, timeout, late response, and disconnect. Remove every pending waiter on terminal outcome.
+- ~~Replace the literal-only provider fixture test with controller tests backed by four fake protocols: live accepted, live rejected, response lost, and opaque TUI.~~
+- ~~Test Codex `Sent`, provider rejection, mismatched Turn, timeout, late response, and disconnect. Remove every pending waiter on terminal outcome.~~
 - Keep the Loopflow `TurnId` beside the provider Turn id so the future Send row can name both without inferring correlation later.
 - Do not mark a confirmed live Steer incorporated or consume its durable source.
 - Persist typed decision/approval resolution before any provider delivery attempt; provider text cannot be the transaction that unblocks the decision.
-- Finish the Turn-spend migration and move `usage`, `top`, `runs`, `doctor`, budgets, and JSON to it.
+- ~~Finish the Turn-spend migration and move `usage`, `top`, `runs`, `doctor`, budgets, and JSON to it.~~
 - Normalize legacy stream usage and harness usage through one TurnUsage producer; delete the other accumulation semantics.
-- Remove raw Codex log totals from additive `top` accounting, or label them as a separate provisional signal that is never combined with Turn spend.
-- Move `lf doctor` usage/capture coverage to Launch/Turn evidence before deleting the old run-event check.
+- ~~Remove raw Codex log totals from additive `top` accounting.~~
+- ~~Move `lf doctor` usage/capture coverage to Launch/Turn evidence before deleting the old run-event check.~~
 
 Done when:
 
@@ -308,11 +314,15 @@ Done when:
 
 The first two criteria require Phases 1 and 3. Until then, keep the steering work on this cutover branch rather than adding temporary ChildCommand incorporation rules.
 
-### 0. Ratify the executable spec
+### 0. Ratify the executable spec — complete 2026-07-17
 
-Rewrite `scratch/architecture.md` around the target contract above. Remove the earlier required-Turn Ack, Handle graph, Block/Sleep split, Interaction entity, `settle`, and Session/body terminology. Add transition tables for Epoch, Run, Launch, boundary outcome, Wait resolution, and completion.
+`scratch/architecture.md` now contains one target contract. The earlier
+required-Turn Ack, Handle graph, Block/Sleep split, Interaction entity,
+`settle`, and Session/body alternatives are gone. Epoch, Run, Launch, Turn,
+Wait, Send, completion, authority, side-effect order, and migration are stated
+as executable constraints and transition tables.
 
-Create fixtures for the four provider shapes before changing persistence:
+The four provider shapes already execute through the controller:
 
 - live steer accepted;
 - live steer rejected and later seeded;

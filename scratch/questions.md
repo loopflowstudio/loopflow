@@ -1,21 +1,13 @@
-# Assumptions and tensions
+# Open questions
 
-Resolved by the 2026-07-17 revision (scratch/living-website.md):
+None blocking. Revision 2 of scratch/living-website.md scopes this round to
+one human-driven update: `uv run python scripts/capture_screenshots.py`
+writes PNGs and provenance sidecars into website/static/ from whatever
+Loopflow is installed; a human reviews `git status` and commits.
 
-- Straight-to-main publication stands. The publisher refuses a dirty tree or a
-  non-default branch, then uses `lf commit -m ... -p`; install still succeeds
-  when that precondition is not met.
-- The freshness/no-churn tension is dissolved by splitting the deploy gate:
-  structural failures block, staleness warns loudly and ships. Zero no-op
-  commits remain possible without the age check blocking unrelated docs or
-  website deploys.
-- The busted-live-state note is superseded: the liveness bar is a served Wave
-  only. Red or failed task states are honest and publishable, so the current
-  imperfect `product` state is a valid capture subject once the Wave is served.
+The ladder back up, explicitly later:
 
-Parked with the revised bar:
-
-- Backstop capture host (laptop launchd vs mini-heart) is deferred along with
-  Done When 2's four-unattended-weeks streak. This round's only triggers are
-  the install hook and a hand-run
-  `uv run python scripts/refresh_website_screens.py --publish`.
+- One command that installs the latest loopflow and runs the whole capture
+  process.
+- Automation of that command (install hook or schedule), then the Done Whens
+  in scratch/living-website.md.

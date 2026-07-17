@@ -1,9 +1,9 @@
 # Two capture pipelines, one manifest.
 #
-#   uv run python scripts/refresh_website_screens.py   # live product images for the site
+#   uv run python scripts/capture_screenshots.py       # live product images for the site
 #   uv run python scripts/generate_screenshots.py      # deterministic Wave-surface proof
 
-# Public captures. Always the real registry and the promoted app.
+# Public captures: the installed app against this repo's own registry.
 website:
   - name: context-lab
     view: context-lab

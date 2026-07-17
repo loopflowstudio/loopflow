@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Gate the website deploy on capture provenance.
 
-Structural failures — missing or invalid sidecars, wrong Wave, non-2x pixels,
-an unserved status snapshot, a future-dated capture — block the deploy.
-Staleness only warns: docs and website changes ship even when the laptop has
-not promoted a build lately.
+An image without a parseable provenance sidecar blocks the deploy. A stale
+`captured_at` (older than 14 days) only warns: docs and website changes ship
+even when nobody has recaptured lately.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ def main() -> None:
     errors: list[str] = []
     warnings: list[str] = []
     for shot in shots:
-        shot_errors, shot_warnings = validate_capture(REPO_ROOT / shot.output, shot)
+        shot_errors, shot_warnings = validate_capture(REPO_ROOT / shot.output)
         errors.extend(shot_errors)
         warnings.extend(shot_warnings)
     for warning in warnings:
@@ -25,7 +24,7 @@ def main() -> None:
     if errors:
         raise SystemExit("Website capture gate failed:\n- " + "\n- ".join(errors))
     published = sum(1 for shot in shots if (REPO_ROOT / shot.output).is_file())
-    freshness = "stale but structurally proven" if warnings else "current"
+    freshness = "stale but present" if warnings else "current"
     print(f"Website capture gate: {published} published capture(s) {freshness}")
 
 

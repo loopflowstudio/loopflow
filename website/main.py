@@ -13,7 +13,6 @@ from starlette.routing import Route
 from internal_pages import colors_page, design_page, fonts_page
 
 BASE_URL = "https://loopflow.studio"
-REPO_URL = "https://github.com/loopflowstudio/loopflow"
 
 app, rt = fast_app(
     htmlkw={"lang": "en"},
@@ -535,57 +534,46 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
-def _capture_figure(item):
-    """Render only a complete image + provenance + live-status triple."""
-    image = item["image"]
-    image_path = STATIC_DIR / image.removeprefix("/static/")
-    sidecar_path = image_path.with_suffix(".json")
-    status_snapshot = image.removesuffix(".png") + ".status.json"
-    if not all(
-        path.is_file()
-        for path in (image_path, sidecar_path, image_path.with_suffix(".status.json"))
-    ):
+def _provenance_line(sidecar_path: Path):
+    """The caption's provenance line, only when the sidecar exists and parses."""
+    if not sidecar_path.is_file():
         return None
     try:
         provenance = json.loads(sidecar_path.read_text())
         captured_at = provenance["captured_at"][:10]
         wave = provenance["wave"]
         app_version = provenance["app_version"]
-        app_commit = provenance["app_commit"]
     except (KeyError, TypeError, json.JSONDecodeError):
         return None
-    capture_label = f"Captured {captured_at} from the {wave} wave"
-    build_label = f"Loopflow {app_version} @ {app_commit[:7]}"
+    return P(
+        f"Captured {captured_at} from the {wave} wave · Loopflow {app_version}",
+        cls="loopflow-showcase-provenance",
+    )
+
+
+def _capture_figure(item):
+    """A figure renders whenever its image exists; provenance rides along when proven."""
+    image = item["image"]
+    image_path = STATIC_DIR / image.removeprefix("/static/")
+    if not image_path.is_file():
+        return None
+    caption_parts = [P(item["caption"])]
+    provenance = _provenance_line(image_path.with_suffix(".json"))
+    if provenance is not None:
+        caption_parts.append(provenance)
     return Figure(
         Img(
             src=image,
             alt=item["image_alt"],
             cls="loopflow-showcase-img",
         ),
-        Figcaption(
-            P(item["caption"]),
-            P(
-                A(
-                    capture_label,
-                    href=status_snapshot,
-                    **{"aria-label": f"{capture_label}; inspect the live status snapshot"},
-                ),
-                " · ",
-                A(
-                    build_label,
-                    href=f"{REPO_URL}/commit/{app_commit}",
-                    **{"aria-label": f"{build_label}; inspect the source commit"},
-                ),
-                cls="loopflow-showcase-provenance",
-            ),
-            cls="loopflow-showcase-caption",
-        ),
+        Figcaption(*caption_parts, cls="loopflow-showcase-caption"),
         cls="loopflow-showcase-figure",
     )
 
 
 def _screenshot_section():
-    """A missing or unproven capture never renders."""
+    """A missing capture never renders."""
     figures = [figure for item in SHOWCASE_CONTENT["items"] if (figure := _capture_figure(item))]
     if not figures:
         return None

@@ -5,7 +5,7 @@
 
 Renders the `wave-proof` manifest set offline through the UI test target, so the
 same states are comparable across commits. The website's live product images are
-a different pipeline: see scripts/refresh_website_screens.py.
+a different pipeline: see scripts/capture_screenshots.py.
 """
 
 from __future__ import annotations

@@ -2590,6 +2590,12 @@ async fn a_scratch_clear_only_wake_never_preempts_a_review_wait() {
     harness.checks_scratch_clear_only();
     harness.reconcile().await;
 
+    // The runner only runs under the lease it holds, so drive it from a reserved
+    // successor exactly as the preempt regression does. Without this the body
+    // refuses with "generation 1 no longer holds its write lease" and never
+    // reaches the review at all.
+    harness.crash_and_reserve_successor().await;
+
     let sends = Arc::new(AtomicUsize::new(0));
     let interrupts = Arc::new(AtomicUsize::new(0));
     let repair_started_while_active = Arc::new(AtomicBool::new(false));

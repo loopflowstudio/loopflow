@@ -236,6 +236,8 @@ Inspect exactly what an agent received and what Loopflow observed:
 ```bash
 lf runs                         # skill calls with context, tokens, and cost
 lf top                          # last-hour provider throughput and live sessions
+lf ci --since 7d                # CI repairs from failure through green and merge
+lf ci --since 7d --json         # the same machine-wide incident receipt
 lf execs                        # every lf process, including lookups
 lf trace <exec-or-trace-id>
 lf trace <exec-or-trace-id> --events
@@ -258,6 +260,11 @@ missing rather than becoming zero. `--steered-only` requires an observed steer
 turn. `--current-revision-only` keeps launches containing a resolvable
 file-backed instruction revision that matches the file currently on disk;
 unresolvable revision identity never silently counts as current.
+
+`lf ci` reads the local Home ledger without calling GitHub. It shows every
+failed head as one repair attempt, including poll detection, Task response,
+green, merge, blockers, and whether Human or Linear direction entered the loop.
+Use `--wave` or `--repo owner/repo` to narrow the machine-wide report.
 
 ### Crons
 

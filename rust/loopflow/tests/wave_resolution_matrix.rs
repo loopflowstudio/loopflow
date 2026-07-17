@@ -100,6 +100,11 @@ const AMBIENT_ONLY: &[&[&str]] = &[
     &["radio", "sub"],
 ];
 
+/// Commands whose optional `--wave` narrows a machine-wide result instead of
+/// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
+/// reject names absent from the registry.
+const FILTER_ONLY: &[&[&str]] = &[&["ci"]];
+
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────
     Cmd {
@@ -909,11 +914,11 @@ fn find_clap_command<'a>(root: &'a clap::Command, path: &[&str]) -> Option<&'a c
     Some(current)
 }
 
-/// The registry is complete: every `wave`-bearing clap leaf is in the matrix,
-/// every ambient-only command exists as a real clap leaf, and every registry
-/// entry maps to a real clap leaf. Adding a new `--wave`-bearing command
-/// without registering it fails CI; removing a command leaves a stale entry
-/// that also fails.
+/// The registry is complete: every `wave`-bearing clap leaf is classified as
+/// either a resolver or a machine-wide filter, every ambient-only command
+/// exists as a real clap leaf, and every registry entry maps to a real clap
+/// leaf. Adding a new `--wave`-bearing command without classifying it fails CI;
+/// removing a command leaves a stale entry that also fails.
 #[test]
 fn registry_is_complete() {
     let root = Cli::command();
@@ -929,22 +934,27 @@ fn registry_is_complete() {
         .iter()
         .map(|c| c.path.iter().map(|s| s.to_string()).collect())
         .collect();
+    let filter_paths: HashSet<Vec<String>> = FILTER_ONLY
+        .iter()
+        .map(|path| path.iter().map(|s| s.to_string()).collect())
+        .collect();
 
-    // 3. Every wave-arg clap command must be in the registry.
+    // 3. Every wave-arg clap command must be classified.
     for path in &found {
         assert!(
-            registry_paths.contains(path),
-            "clap command {:?} has an optional `wave` arg but is not in the matrix \
-             registry — add it to COMMANDS",
+            registry_paths.contains(path) || filter_paths.contains(path),
+            "clap command {:?} has an optional `wave` arg but is not classified — \
+             add resolvers to COMMANDS or machine-wide filters to FILTER_ONLY",
             path
         );
     }
 
-    // 4. Every ambient-only command must exist as a real clap leaf.
-    for path in AMBIENT_ONLY {
+    // 4. Every ambient-only and filter-only command must exist as a real clap
+    //    leaf.
+    for path in AMBIENT_ONLY.iter().chain(FILTER_ONLY) {
         assert!(
             find_clap_command(&root, path).is_some(),
-            "ambient-only command {:?} does not exist in the clap tree",
+            "classified command {:?} does not exist in the clap tree",
             path
         );
     }

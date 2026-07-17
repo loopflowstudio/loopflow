@@ -24,6 +24,9 @@ use crate::child_session::{
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
+use crate::interaction_review::{
+    InteractionReview, InteractionReviewDisposition, InteractionReviewStatus,
+};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
@@ -270,16 +273,10 @@ pub enum TaskAttentionLevel {
     Unknown,
 }
 
-/// Lifecycle controls the current evidence makes safe. Navigation affordances
-/// such as opening the worktree or PR are references, not lifecycle controls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskAttentionControl {
-    Start,
-    Attach,
-    Resume,
-    Interrupt,
-}
+pub use crate::task::actions::{
+    ci_failure_reason, derive_task_actions, ReviewGateState, TaskAction, TaskActionEvidence,
+    TaskActionModel, TaskActionStatus,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -330,7 +327,7 @@ pub struct TaskAttentionSnapshot {
     /// Age of the durable Session state at that sample, if a Session exists.
     pub evidence_age_secs: Option<i64>,
     pub next_owner: NextMoveOwner,
-    pub controls: Vec<TaskAttentionControl>,
+    pub actions: TaskActionModel,
     pub pm_completed: bool,
     pub session_status: Option<TaskSessionStatus>,
     pub process: TaskProcessEvidence,
@@ -1331,13 +1328,47 @@ async fn snapshot_task_detail(
     };
     let process = task_process_evidence(session, runtime.as_ref(), liveness);
     let local_progress = task_local_progress(session, active, &process);
+    let action_evidence = match session {
+        Some(session) => {
+            let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
+                Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
+                None => None,
+            };
+            let review_gate = store
+                .interaction_review_at(
+                    &session.id,
+                    session.phase_epoch,
+                    session.phase_iteration,
+                    session.phase_cursor,
+                )
+                .await?
+                .map(|r| review_gate_from(&r));
+            Some(TaskActionEvidence {
+                status: session.status,
+                active_pr_phase: active.map(TaskPr::phase),
+                active_pr_after_merge: active
+                    .and_then(|pr| pr.publication.as_ref())
+                    .map(|p| p.after_merge),
+                active_pr_next_slug: active
+                    .and_then(|pr| pr.publication.as_ref())
+                    .and_then(|p| p.next_slug.as_deref()),
+                ci: active.and_then(|pr| pr.fresh_ci()),
+                process_alive: process.alive,
+                predecessor_phase,
+                review_gate,
+                abandon_intent: session.abandon_intent.is_some(),
+                local_progress_unsettled: local_progress.unsettled,
+            })
+        }
+        None => None,
+    };
     let attention = derive_task_attention(
         item.completed,
         runtime.as_ref(),
         &next_move,
-        active.map(TaskPr::phase),
         process,
         local_progress,
+        action_evidence.as_ref(),
         observed_at,
     );
     let directive = match session {
@@ -1510,15 +1541,30 @@ fn inspect_task_local_progress(
     }
 }
 
+fn review_gate_from(review: &InteractionReview) -> ReviewGateState {
+    match review.status {
+        InteractionReviewStatus::Requested => ReviewGateState::Requested,
+        InteractionReviewStatus::Active => ReviewGateState::Active,
+        InteractionReviewStatus::Completed => match review.disposition {
+            Some(InteractionReviewDisposition::Approved) => ReviewGateState::Approved,
+            Some(InteractionReviewDisposition::ChangesRequested) => {
+                ReviewGateState::ChangesRequested
+            }
+            None => ReviewGateState::Approved,
+        },
+    }
+}
+
 fn derive_task_attention(
     pm_completed: bool,
     runtime: Option<&TaskRuntimeSnapshot>,
     next_move: &NextMove,
-    active_pr_phase: Option<PrPhase>,
     process: TaskProcessEvidence,
     local_progress: LocalProgressEvidence,
+    action_evidence: Option<&TaskActionEvidence>,
     observed_at: time::OffsetDateTime,
 ) -> TaskAttentionSnapshot {
+    let active_pr_phase = action_evidence.map(|e| e.active_pr_phase).unwrap_or(None);
     let live = process.alive == Some(true);
     let human_handoff = matches!(
         next_move.owner,
@@ -1566,19 +1612,9 @@ fn derive_task_attention(
     } else {
         (TaskAttentionLevel::Black, next_move.reason.clone())
     };
-    let controls = match runtime {
-        None if !pm_completed => vec![TaskAttentionControl::Start],
-        None => Vec::new(),
-        Some(runtime) if runtime.status.is_terminal() => Vec::new(),
-        Some(runtime) if runtime.status.is_process_active() => match process.alive {
-            Some(true) => vec![
-                TaskAttentionControl::Attach,
-                TaskAttentionControl::Interrupt,
-            ],
-            Some(false) => vec![TaskAttentionControl::Resume],
-            None => Vec::new(),
-        },
-        Some(_) => vec![TaskAttentionControl::Resume],
+    let actions = match action_evidence {
+        None => TaskActionModel::no_session(),
+        Some(evidence) => derive_task_actions(evidence),
     };
     TaskAttentionSnapshot {
         level,
@@ -1587,7 +1623,7 @@ fn derive_task_attention(
             .expect("Task attention observation time formats as RFC 3339"),
         evidence_age_secs: runtime.and_then(|runtime| age_secs(&runtime.status_at, observed_at)),
         next_owner: next_move.owner,
-        controls,
+        actions,
         pm_completed,
         session_status: runtime.map(|runtime| runtime.status),
         process,
@@ -1786,20 +1822,6 @@ fn next_move_for_task(
     NextMove {
         owner,
         reason: reason.to_string(),
-    }
-}
-
-/// A one-line reason naming the failing required checks, for `lf status`.
-fn ci_failure_reason(ci: &CiObservation) -> String {
-    let names: Vec<&str> = ci
-        .failing_checks
-        .iter()
-        .map(|check| check.name.as_str())
-        .collect();
-    if names.is_empty() {
-        "required checks failed".to_string()
-    } else {
-        format!("required checks failed: {}", names.join(", "))
     }
 }
 
@@ -2276,7 +2298,6 @@ mod tests {
                 })
                 .collect(),
             observed_at: time::OffsetDateTime::now_utc(),
-            woken_failure_set: None,
         }
     }
 
@@ -3076,13 +3097,25 @@ mod tests {
             recovery_required,
             reason: None,
         };
+        let action_evidence = runtime.map(|r| TaskActionEvidence {
+            status: r.status,
+            active_pr_phase: None,
+            active_pr_after_merge: None,
+            active_pr_next_slug: None,
+            ci: None,
+            process_alive: process.alive,
+            predecessor_phase: None,
+            review_gate: None,
+            abandon_intent: false,
+            local_progress_unsettled: local_progress.unsettled,
+        });
         derive_task_attention(
             pm_completed,
             runtime,
             next_move,
-            None,
             process,
             local_progress,
+            action_evidence.as_ref(),
             now(),
         )
     }
@@ -3127,6 +3160,18 @@ mod tests {
         process: TaskProcessEvidence,
         local_progress: LocalProgressEvidence,
     ) -> TaskAttentionSnapshot {
+        let action_evidence = runtime.map(|r| TaskActionEvidence {
+            status: r.status,
+            active_pr_phase: phase,
+            active_pr_after_merge: None,
+            active_pr_next_slug: None,
+            ci: None,
+            process_alive: process.alive,
+            predecessor_phase: None,
+            review_gate: None,
+            abandon_intent: false,
+            local_progress_unsettled: local_progress.unsettled,
+        });
         derive_task_attention(
             completed,
             runtime,
@@ -3134,9 +3179,9 @@ mod tests {
                 owner,
                 reason: reason.into(),
             },
-            phase,
             process,
             local_progress,
+            action_evidence.as_ref(),
             now(),
         )
     }
@@ -3154,13 +3199,7 @@ mod tests {
             local_progress(Some(false), Some(false), Some(false), Some(false)),
         );
         assert_eq!(green.level, TaskAttentionLevel::Green);
-        assert_eq!(
-            green.controls,
-            vec![
-                TaskAttentionControl::Attach,
-                TaskAttentionControl::Interrupt
-            ]
-        );
+        assert_eq!(green.actions.recommended, Some(TaskAction::NoAction));
 
         let human = projected_attention(
             false,
@@ -3198,6 +3237,19 @@ mod tests {
         );
         assert_eq!(commits.level, TaskAttentionLevel::Red);
         assert_eq!(commits.reason, "checks passed; awaiting review");
+        assert_eq!(
+            commits.actions.recommended,
+            Some(TaskAction::Review),
+            "waiting on a passing open PR must advertise Review, not Resume"
+        );
+        assert!(
+            !commits
+                .actions
+                .status(TaskAction::Resume)
+                .unwrap()
+                .available,
+            "Resume must be blocked when the PR is open and awaiting review"
+        );
 
         let backlog = projected_attention(
             false,
@@ -3209,7 +3261,7 @@ mod tests {
             local_progress(Some(false), None, None, None),
         );
         assert_eq!(backlog.level, TaskAttentionLevel::Black);
-        assert_eq!(backlog.controls, vec![TaskAttentionControl::Start]);
+        assert_eq!(backlog.actions.recommended, None);
 
         let completed_runtime =
             task_runtime(TaskSessionStatus::Completed, "merged", at(600), false);
@@ -3223,7 +3275,7 @@ mod tests {
             local_progress(Some(false), Some(false), Some(false), Some(false)),
         );
         assert_eq!(completed.level, TaskAttentionLevel::Black);
-        assert!(completed.controls.is_empty());
+        assert_eq!(completed.actions.recommended, Some(TaskAction::NoAction));
 
         let stale = projected_attention(
             false,
@@ -3262,7 +3314,6 @@ mod tests {
             local_progress(None, Some(false), Some(false), None),
         );
         assert_eq!(unobservable.level, TaskAttentionLevel::Unknown);
-        assert!(unobservable.controls.is_empty());
     }
 
     fn git(repo: &Path, args: &[&str]) -> String {

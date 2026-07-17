@@ -153,6 +153,9 @@ pub struct RateLimitSignal {
     pub resets_at: Option<i64>,
     pub limited: bool,
     pub reason: String,
+    /// Per-window subscription state carried by the provider event, persisted
+    /// so `lf usage` can answer "how much is left" without a fresh poll.
+    pub windows: Vec<crate::store::AccountLimitWindow>,
 }
 
 #[derive(Clone)]
@@ -291,6 +294,16 @@ impl ProviderAccountRoute {
                 signal.limited.then_some(signal.reason.as_str()),
             )
             .await?;
+        if !signal.windows.is_empty() {
+            self.store
+                .upsert_provider_account_limits(
+                    self.provider.as_str(),
+                    &self.account_id,
+                    &signal.windows,
+                    "stream",
+                )
+                .await?;
+        }
         Ok(())
     }
 }
@@ -1191,6 +1204,12 @@ mod tests {
                 resets_at: Some(now_unix() + 300),
                 limited: true,
                 reason: "five_hour".to_string(),
+                windows: vec![crate::store::AccountLimitWindow {
+                    window: "session".to_string(),
+                    used_percent: 100,
+                    resets_at: Some(now_unix() + 300),
+                    plan: None,
+                }],
             })
             .await
             .unwrap();

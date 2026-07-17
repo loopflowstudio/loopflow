@@ -13,6 +13,7 @@ use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::wave::Wave;
 mod child_sessions;
+pub(crate) mod ci_incidents;
 mod interaction_reviews;
 mod interactive_handoffs;
 pub mod migrations;
@@ -553,6 +554,34 @@ impl Store {
         .await
     }
 
+    pub async fn upsert_provider_account_limits(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        windows: &[AccountLimitWindow],
+        source: &str,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        let windows = windows.to_vec();
+        let source = source.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_provider_account_limits(&provider, &account_id, &windows, &source)
+        })
+        .await
+    }
+
+    pub async fn provider_account_limits(
+        &self,
+        provider: Option<&str>,
+    ) -> StoreResult<Vec<AccountLimitRow>> {
+        let provider = provider.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.provider_account_limits(provider.as_deref())
+        })
+        .await
+    }
+
     pub async fn upsert_profile(&self, profile: &Profile) -> StoreResult<()> {
         let profile = profile.clone();
         run_sqlite(&self.sqlite, move |store| store.upsert_profile(&profile)).await
@@ -859,6 +888,30 @@ pub struct ProviderProfileSelection {
     pub resume_requested_session: bool,
 }
 
+/// One observed subscription rate-limit window: how much of the plan's
+/// `session`/`weekly`/`weekly:<model>` window an account has consumed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountLimitWindow {
+    pub window: String,
+    pub used_percent: u8,
+    pub resets_at: Option<i64>,
+    pub plan: Option<String>,
+}
+
+/// A stored window observation for one managed account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountLimitRow {
+    pub provider: String,
+    pub account_id: ProviderAccountId,
+    pub window: String,
+    pub used_percent: u8,
+    pub resets_at: Option<i64>,
+    pub plan: Option<String>,
+    pub observed_at: i64,
+    /// 'stream' when a running harness reported it; 'poll' when asked for.
+    pub source: String,
+}
+
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
@@ -960,7 +1013,7 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::task::{
-        AfterMerge, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind,
+        AfterMerge, CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind,
         TaskGateProposal, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession, TaskSessionId,
         TaskSessionStatus,
     };
@@ -968,7 +1021,7 @@ mod tests {
     use std::env;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use time::OffsetDateTime;
+    use time::{Duration, OffsetDateTime};
 
     #[test]
     fn build_provenance_selects_separate_default_store_universes() {
@@ -1192,6 +1245,114 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[tokio::test]
+    async fn ci_incident_preserves_recovery_milestones_after_current_pr_state_moves_on() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let task = make_task_session(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task_session(&task, &pr).await.unwrap();
+
+        let observed_at = task.created_at + Duration::seconds(5);
+        let incident = CiIncident {
+            identity: "github:ci:owner/repo:42:bad-head:digest".to_string(),
+            task_session_id: task.id.clone(),
+            pr_id: pr.id.clone(),
+            repo: "owner/repo".to_string(),
+            pr_number: 42,
+            failed_head_sha: "bad-head".to_string(),
+            failure_set: vec!["test".to_string()],
+            provider_completed_at: None,
+            poll_observed_at: Some(observed_at),
+            webhook_received_at: None,
+            trigger_command_id: None,
+            responded_at: None,
+            green_at: None,
+            merged_at: None,
+            blocked_at: None,
+            blocked_reason: None,
+            created_at: observed_at,
+            updated_at: observed_at,
+        };
+        store.observe_ci_incident(&incident).await.unwrap();
+        store.observe_ci_incident(&incident).await.unwrap();
+
+        let mut command = ChildCommand::new(
+            ChildRef::Task(task.id.clone()),
+            ChildCommandSource::Human,
+            ChildCommandKind::FollowUp {
+                text: "check the repair".to_string(),
+            },
+        );
+        command.created_at = observed_at + Duration::seconds(15);
+        store.create_child_command(&command).await.unwrap();
+        // The trigger link and the response are both keyed on the identity the
+        // wake carries, so evidence names the command that woke the body.
+        assert!(store
+            .mark_ci_incident_triggered(
+                &incident.identity,
+                &command.id,
+                observed_at + Duration::seconds(8),
+            )
+            .await
+            .unwrap());
+        assert!(store
+            .mark_ci_incident_responded(&incident.identity, observed_at + Duration::seconds(10))
+            .await
+            .unwrap());
+        store
+            .mark_ci_incidents_blocked(
+                &pr.id,
+                observed_at + Duration::seconds(20),
+                "waiting for credentials",
+            )
+            .await
+            .unwrap();
+        store
+            .mark_ci_incidents_green(&pr.id, observed_at + Duration::seconds(30))
+            .await
+            .unwrap();
+        store
+            .mark_ci_incidents_merged(&pr.id, observed_at + Duration::seconds(40))
+            .await
+            .unwrap();
+
+        let rows = store
+            .ci_incidents_since(task.created_at, None, Some("owner/repo"))
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.incident.poll_observed_at, Some(observed_at));
+        assert_eq!(
+            row.incident.responded_at,
+            Some(observed_at + Duration::seconds(10))
+        );
+        assert_eq!(
+            row.incident.green_at,
+            Some(observed_at + Duration::seconds(30))
+        );
+        assert_eq!(
+            row.incident.merged_at,
+            Some(observed_at + Duration::seconds(40))
+        );
+        assert_eq!(
+            row.incident.blocked_at,
+            Some(observed_at + Duration::seconds(20))
+        );
+        assert_eq!(
+            row.incident.blocked_reason.as_deref(),
+            Some("waiting for credentials")
+        );
+        assert!(row.human_assisted);
     }
 
     #[tokio::test]
@@ -3264,7 +3425,6 @@ mod tests {
                 url: Some("https://ci/build".to_string()),
             }],
             observed_at: OffsetDateTime::now_utc(),
-            woken_failure_set: None,
         });
         pr.github_observation = Some(crate::task::GithubObservation {
             checked_at: OffsetDateTime::now_utc(),
@@ -3637,6 +3797,99 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    /// Superseding says "this never mattered". A `delivering` command's outcome is
+    /// genuinely unknown — the provider may have received it — so that claim would
+    /// be a lie, and it would erase the ambiguity
+    /// `mark_stale_child_deliveries_uncertain` exists to preserve. The helper is
+    /// generic, so it must refuse regardless of the kind reaching for it.
+    #[tokio::test]
+    async fn superseding_refuses_a_command_whose_delivery_is_already_in_flight() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("supersede".to_string());
+        let lease = store
+            .reserve_task_process(&task, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        if let Some(process) = &mut task.latest_process {
+            process.state = ChildLeaseState::Active;
+        }
+        task.set_status(TaskSessionStatus::Running, "active");
+        store.activate_task_process(&task, &lease).await.unwrap();
+
+        let target = ChildRef::Task(task.id.clone());
+        let command = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "change direction".to_string(),
+            },
+        );
+        store.create_child_command(&command).await.unwrap();
+        store.claim_child_commands(&target, 1).await.unwrap();
+
+        // Claimed but not yet delivered: moot is a truthful verdict.
+        store
+            .supersede_child_command_for_lease(&target, &lease, &command.id)
+            .await
+            .expect("a claimed command may be superseded");
+        assert_eq!(
+            store
+                .get_child_command(&command.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ChildCommandState::Superseded
+        );
+
+        // Mid-delivery: refused, and the state is left for the uncertain path.
+        let delivering = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "and again".to_string(),
+            },
+        );
+        store.create_child_command(&delivering).await.unwrap();
+        store.claim_child_commands(&target, 1).await.unwrap();
+        store
+            .mark_child_command_delivering(&delivering.id, ChildCommandEffect::LiveSteer)
+            .await
+            .unwrap();
+        let error = store
+            .supersede_child_command_for_lease(&target, &lease, &delivering.id)
+            .await
+            .expect_err("an in-flight delivery is not moot; its outcome is unknown");
+        assert!(
+            error.to_string().contains("mid-delivery"),
+            "the refusal names why, got: {error}"
+        );
+        assert_eq!(
+            store
+                .get_child_command(&delivering.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ChildCommandState::Delivering,
+            "the ambiguity survives for reconcile_stale_deliveries to resolve"
+        );
     }
 
     #[tokio::test]

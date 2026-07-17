@@ -864,16 +864,13 @@ async fn inspect_outcome(
                     .map_err(|error| anyhow!(error.to_string()))?;
             }
         } else if !task.status.is_process_active() {
-            // The PR is still open and the Task is asleep. A fresh required-check
-            // failure on the current head wakes the same Task into one bounded
-            // ci-fix turn; a healthy (pending/green) or already-woken head does
-            // not. `wake_task_ci_fix` is a no-op unless the reading warrants it.
-            let warranted = observed
-                .as_ref()
-                .and_then(|pr| pr.fresh_ci())
-                .is_some_and(crate::task::CiObservation::wake_warranted);
-            if warranted {
-                crate::ops::task::wake_task_ci_fix(store, task)
+            // The PR is still open and the Task is asleep. A required-check failure
+            // on the current head enqueues one durable ci-fix wake; a healthy
+            // (pending/green) head enqueues nothing. This observer only reports
+            // what it saw — the ledger decides whether that failure already has a
+            // wake, and owns the launch. It must not reach for a body itself.
+            if let Some(pr) = observed.as_ref() {
+                crate::ops::task::queue_ci_fix_command(store, task, pr)
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
             }

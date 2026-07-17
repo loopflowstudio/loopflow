@@ -283,13 +283,24 @@ fn parse_codex_item(v: &serde_json::Value) -> Vec<StreamEvent> {
 
 fn parse_codex_turn_completed(v: &serde_json::Value) -> Vec<StreamEvent> {
     // Codex doesn't report cost or duration in the JSON output, but it does
-    // report token usage as {"usage":{"input_tokens":_,"output_tokens":_}}.
+    // report token usage as {"usage":{"input_tokens":_,"cached_input_tokens":_,
+    // "output_tokens":_}}. Its input_tokens is gross — cache reads included —
+    // so the cached share is split out to mean the same thing Claude's does.
     let mut events = Vec::new();
     if let Some(text) = extract_codex_turn_text(v) {
         events.push(StreamEvent::Text(text));
     }
-    if let Some(usage) = v.get("usage").and_then(parse_token_usage) {
-        events.push(usage);
+    if let Some(usage) = v.get("usage") {
+        let gross_input = json_u64(usage.get("input_tokens"));
+        let cached = json_u64(usage.get("cached_input_tokens"));
+        let output_tokens = json_u64(usage.get("output_tokens"));
+        if gross_input.is_some() || cached.is_some() || output_tokens.is_some() {
+            events.push(StreamEvent::Usage {
+                input_tokens: gross_input.map(|input| input.saturating_sub(cached.unwrap_or(0))),
+                output_tokens,
+                cache_read_tokens: cached,
+            });
+        }
     }
     events.push(StreamEvent::Result {
         subtype: ResultSubtype::Success,

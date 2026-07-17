@@ -82,14 +82,50 @@ pub(super) fn map_token_usage(params: &Value) -> TurnUsage {
     }
 }
 
+/// Name a codex rate-limit window by its duration: anything under a day is
+/// the rolling session window, the rest is the weekly cap.
+pub(crate) fn window_name(duration_mins: Option<u64>) -> &'static str {
+    match duration_mins {
+        Some(mins) if mins < 1_440 => "session",
+        _ => "weekly",
+    }
+}
+
+fn limit_window(value: &Value, plan: Option<&str>) -> Option<crate::store::AccountLimitWindow> {
+    let used_percent = value.get("usedPercent").and_then(Value::as_u64)?;
+    Some(crate::store::AccountLimitWindow {
+        window: window_name(value.get("windowDurationMins").and_then(Value::as_u64)).to_string(),
+        used_percent: used_percent.min(100) as u8,
+        resets_at: value
+            .get("resetsAt")
+            .and_then(Value::as_i64)
+            .map(normalize_timestamp),
+        plan: plan.map(str::to_string),
+    })
+}
+
+fn normalize_timestamp(timestamp: i64) -> i64 {
+    if timestamp > 100_000_000_000 {
+        timestamp / 1000
+    } else {
+        timestamp
+    }
+}
+
 pub(super) fn rate_limit_signal(params: &Value) -> Option<RateLimitSignal> {
     let snapshot = params.get("rateLimits").unwrap_or(params);
     let reached = snapshot.get("rateLimitReachedType").and_then(Value::as_str);
+    let plan = snapshot.get("planType").and_then(Value::as_str);
     let primary = snapshot.get("primary").filter(|value| !value.is_null());
     let secondary = snapshot.get("secondary").filter(|value| !value.is_null());
     let individual = snapshot
         .get("individualLimit")
         .filter(|value| !value.is_null());
+    let windows = [primary, secondary]
+        .into_iter()
+        .flatten()
+        .filter_map(|window| limit_window(window, plan))
+        .collect::<Vec<_>>();
     let utilization_percent = [primary, secondary]
         .into_iter()
         .flatten()
@@ -122,6 +158,7 @@ pub(super) fn rate_limit_signal(params: &Value) -> Option<RateLimitSignal> {
         resets_at,
         limited: reached.is_some(),
         reason: reached.unwrap_or("rate limit update").to_string(),
+        windows,
     })
 }
 

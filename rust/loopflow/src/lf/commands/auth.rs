@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
+use crate::lf::commands::profile::find_provider_account;
 use crate::lf::AuthCommand;
 use crate::profile::{EmailAddress, HostId, LocalChromeProfile, ProfileId, ProfileProviderAccount};
 use crate::provider_account::{
@@ -108,6 +109,11 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             .await
         }
         AuthCommand::Reset { provider, account } => reset_account(provider, account).await,
+        AuthCommand::Exec {
+            provider,
+            account,
+            args,
+        } => exec_account(provider, account, args).await,
         AuthCommand::External(args) => {
             let provider = args
                 .first()
@@ -465,11 +471,6 @@ async fn import_account(
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
-    if provider != Provider::Claude {
-        return Err(anyhow!(
-            "existing login import is supported for Claude only"
-        ));
-    }
     let account_id = parse_account_id(raw_account)?;
     let provider_profile = ensure_account_profile(provider, &account_id)?;
     let profile_id = raw_profile
@@ -482,7 +483,12 @@ async fn import_account(
         .and_then(|profile| profile.login.as_deref())
         .map(String::from);
 
-    let login = if provider_profile.join(".credentials.json").is_file() {
+    let credentials_file = match provider {
+        Provider::Claude => ".credentials.json",
+        Provider::Codex => "auth.json",
+        _ => unreachable!("parse_managed_provider admits Claude and Codex only"),
+    };
+    let login = if provider_profile.join(credentials_file).is_file() {
         match provider_account_auth_status(provider, provider_profile.clone()).await? {
             AuthStatus::Active { login } => login,
             other => {
@@ -495,6 +501,13 @@ async fn import_account(
             }
         }
     } else {
+        if provider != Provider::Claude {
+            return Err(anyhow!(
+                "no stored {} login at {}; importing the ambient login is supported for Claude only",
+                provider.display_name(),
+                provider_profile.display()
+            ));
+        }
         let ambient = read_ambient_claude_status()?;
         if !ambient.logged_in {
             return Err(anyhow!("the ambient Claude CLI is not logged in"));
@@ -823,6 +836,52 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
     let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]")?;
     time::Date::parse(value.trim(), &format)
         .map_err(|_| anyhow!("invalid paid-through date '{value}': expected YYYY-MM-DD"))
+}
+
+/// Replace this process with the provider's CLI running on the managed
+/// account's credential home, so direct use shares the session lf routes
+/// through instead of evicting it with a fresh ambient login.
+async fn exec_account(raw_provider: &str, raw_account: &str, args: &[String]) -> Result<()> {
+    let provider = parse_managed_provider(raw_provider)?;
+    let store = open_account_store().await?;
+    let account = find_provider_account(&store, provider, raw_account).await?;
+    let home = account
+        .home
+        .clone()
+        .ok_or_else(|| anyhow!("account '{}' has no managed credential home", raw_account))?;
+    let mut command = Command::new(provider.as_str());
+    command.args(args);
+    match provider {
+        Provider::Claude => {
+            command
+                .env("CLAUDE_CONFIG_DIR", &home)
+                .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
+                .env_remove("ANTHROPIC_API_KEY");
+        }
+        Provider::Codex => {
+            command
+                .env("CODEX_HOME", &home)
+                .env_remove("CODEX_ACCESS_TOKEN")
+                .env_remove("OPENAI_API_KEY");
+        }
+        _ => unreachable!("parse_managed_provider admits Claude and Codex only"),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(anyhow!(
+            "failed to exec {}: {}",
+            provider.as_str(),
+            command.exec()
+        ))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command
+            .status()
+            .with_context(|| format!("failed to run {}", provider.as_str()))?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
 }
 
 async fn reset_account(raw_provider: &str, raw_account: &str) -> Result<()> {
@@ -1218,15 +1277,27 @@ mod tests {
         assert_eq!(format_relative_delta(172_800), "2d");
     }
 
+    // The env lock must span the awaited import so no parallel test swaps
+    // LF_HOME mid-flight; the single-threaded test runtime makes that safe.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn codex_login_cannot_be_created_by_importing_ambient_credentials() {
-        let error = import_account("codex", "engineering", None, None)
-            .await
-            .expect_err("Codex imports must require a direct login");
+    async fn codex_import_without_stored_credentials_names_the_ambient_limit() {
+        // Codex import adopts an existing auth.json in the account home; with
+        // none present there is no ambient fallback (that path is Claude's).
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("LF_HOME");
+        std::env::set_var("LF_HOME", home.path());
+        let result = import_account("codex", "engineering", None, None).await;
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
 
+        let error = result.expect_err("Codex imports must require a stored login");
         assert!(error
             .to_string()
-            .contains("existing login import is supported for Claude only"));
+            .contains("importing the ambient login is supported for Claude only"));
     }
 
     #[test]

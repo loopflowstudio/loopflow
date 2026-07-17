@@ -36,11 +36,14 @@ use crate::session_context::{
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, StoreError,
 };
+use crate::task::actions::{
+    derive_task_actions, ReviewGateState, TaskActionEvidence, TaskActionModel,
+};
 use crate::task::{
-    AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
-    GithubPr, Observation, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
-    TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
-    TaskSessionSuccession,
+    AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
+    GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
+    PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId,
+    TaskSessionStatus, TaskSessionSuccession,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -162,6 +165,7 @@ pub struct TaskSessionSnapshot {
     /// means a bounded remote read failed and the PR fields are cached, not
     /// freshly confirmed.
     pub observation: Observation,
+    pub actions: TaskActionModel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -2495,15 +2499,63 @@ pub(crate) fn decide_open_pr_status(
     )
 }
 
-/// Wake a Task sleeping on an open PR into a `ci-fix` turn. Thin re-export of the
-/// shared child-launch path so supervisors (the project loop) can trigger the
-/// wake without reaching into `ops::child`. Gated by `ci_fix_restart_bar`; a
-/// no-op unless the active PR's current head warrants it.
-pub(crate) async fn wake_task_ci_fix(
+/// The incident this PR's current reading warrants, if any.
+///
+/// The single mint point for a wake's identity. The enqueue and the arm must
+/// derive it the same way or a claimed wake could never be matched to the failure
+/// it names, so both call this rather than composing the parts themselves.
+/// `None` when the current head is not failing a required check — including when
+/// the head has moved past the reading (`fresh_ci`), which makes any wake for the
+/// old head moot.
+pub(crate) fn current_ci_incident(pr: &TaskPr) -> Option<CiIncident> {
+    let observation = pr.fresh_ci().filter(|reading| reading.wake_legal())?;
+    ci_incident(pr, observation)
+}
+
+/// Enqueue one durable `ci-fix` wake for this PR's current failed head.
+///
+/// Replaces the old direct `wake_task_ci_fix` launch. A no-op unless the current
+/// head is failing a required check — that is the legality question, and it is
+/// the only one asked here. Whether this exact failure already woke a body is the
+/// ledger's question, answered by `ensure_child_ci_fix_command` on the incident
+/// identity; a repeat observation lands on the existing command and mints
+/// nothing. `queue_command` owns the trigger link and the launch from there, in
+/// that order — the wake is attributable before anything can service it.
+pub(crate) async fn queue_ci_fix_command(
     store: &SharedStore,
-    session: &mut TaskSession,
-) -> OpsResult<bool> {
-    super::child::wake_task_ci_fix(store, session).await
+    session: &TaskSession,
+    pr: &TaskPr,
+) -> OpsResult<()> {
+    let Some(kind) = ci_fix_wake_kind(pr) else {
+        return Ok(());
+    };
+    super::child::queue_command(
+        store,
+        super::child::ChildSession::Task(Box::new(session.clone())),
+        ChildCommandSource::System,
+        kind,
+    )
+    .await?;
+    Ok(())
+}
+
+/// The wake this PR's current reading warrants, as a command payload.
+///
+/// The one place a `CiFix` payload is built. `arm_ci_fix_wake` matches a claimed
+/// command against `current_ci_incident`, so the identity minted here and the
+/// identity matched there must come from the same derivation — two that drift
+/// would match nothing and every wake would be superseded as stale.
+pub(crate) fn ci_fix_wake_kind(pr: &TaskPr) -> Option<ChildCommandKind> {
+    let incident = current_ci_incident(pr)?;
+    let observation = pr.fresh_ci()?;
+    Some(ChildCommandKind::CiFix {
+        incident_identity: incident.identity,
+        pr_number: incident.pr_number,
+        head_sha: incident.failed_head_sha,
+        // Names come from the incident; the log URLs only exist here, on the
+        // observation the incident was minted from.
+        failing_checks: observation.failing_checks.clone(),
+    })
 }
 
 pub(crate) async fn reconcile_task_pr_for_lease(
@@ -2523,7 +2575,6 @@ fn observe_required_checks(
     worktree: &Path,
     branch: &str,
     head_sha: Option<&str>,
-    prior: Option<&CiObservation>,
     now: time::OffsetDateTime,
 ) -> Option<CiObservation> {
     let head_sha = head_sha?.to_string();
@@ -2535,7 +2586,7 @@ fn observe_required_checks(
     } else {
         CiState::Passing
     };
-    let mut observation = CiObservation {
+    Some(CiObservation {
         head_sha,
         state,
         // Seed with the actionable leaf failures, never the required aggregate:
@@ -2549,20 +2600,46 @@ fn observe_required_checks(
             })
             .collect(),
         observed_at: now,
-        woken_failure_set: None,
-    };
-    // Carry the dedup marker forward across reconciles: a wake already fired for
-    // this exact `(head, failing set)` must not fire again on the next poll. The
-    // marker only survives while both the head and the failing set are unchanged;
-    // a moved head or a changed failing set is a fresh reading that re-arms.
-    if let Some(prior) = prior {
-        if prior.head_sha == observation.head_sha
-            && prior.woken_failure_set.as_deref() == Some(observation.failure_set().as_slice())
-        {
-            observation.woken_failure_set = prior.woken_failure_set.clone();
-        }
+    })
+}
+
+fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
+    if observation.state != CiState::Failing {
+        return None;
     }
-    Some(observation)
+    let identity = pr.pr_identity()?;
+    let failure_set = observation.failure_set();
+    let mut digest = Sha256::new();
+    for check in &failure_set {
+        digest.update(check.as_bytes());
+        digest.update([0]);
+    }
+    Some(CiIncident {
+        identity: format!(
+            "github:ci:{}:{}:{}:{}",
+            identity.repo,
+            identity.number,
+            observation.head_sha,
+            hex::encode(digest.finalize())
+        ),
+        task_session_id: pr.task_session_id.clone(),
+        pr_id: pr.id.clone(),
+        repo: identity.repo,
+        pr_number: identity.number,
+        failed_head_sha: observation.head_sha.clone(),
+        failure_set,
+        provider_completed_at: None,
+        poll_observed_at: Some(observation.observed_at),
+        webhook_received_at: None,
+        trigger_command_id: None,
+        responded_at: None,
+        green_at: None,
+        merged_at: None,
+        blocked_at: None,
+        blocked_reason: None,
+        created_at: observation.observed_at,
+        updated_at: observation.observed_at,
+    })
 }
 
 // Local control commands often arrive in a burst (`status`, then `follow-up`,
@@ -2692,6 +2769,9 @@ async fn reconcile_task_pr_with_authority(
         head_sha: github_pr.head_sha.clone(),
     });
 
+    let mut observed_incident = None;
+    let mut green_at = None;
+    let mut merged_at = None;
     let pr_event = match github_pr.state.as_str() {
         "merged" => {
             let merge_commit = github_pr.merge_commit.clone().ok_or_else(|| {
@@ -2702,6 +2782,7 @@ async fn reconcile_task_pr_with_authority(
             })?;
             pr.merge_commit = Some(merge_commit.clone());
             pr.ci_observation = None;
+            merged_at = Some(now);
             // Record the merge, but withhold completion while an accepted
             // directive is unincorporated — an auto-merge armed by `lf pr land`
             // must not silently erase direction accepted after it was armed.
@@ -2781,9 +2862,13 @@ async fn reconcile_task_pr_with_authority(
                 &session.worktree,
                 &pr.branch,
                 github_pr.head_sha.as_deref(),
-                pr.ci_observation.as_ref(),
                 now,
             ) {
+                if ci_observation.state == CiState::Passing {
+                    green_at = Some(ci_observation.observed_at);
+                } else {
+                    observed_incident = ci_incident(&pr, &ci_observation);
+                }
                 pr.ci_observation = Some(ci_observation);
             }
             Some(TaskEventKind::PrOpened {
@@ -2819,6 +2904,24 @@ async fn reconcile_task_pr_with_authority(
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
         }
+    }
+    if let Some(incident) = observed_incident {
+        store
+            .observe_ci_incident(&incident)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    if let Some(green_at) = green_at {
+        store
+            .mark_ci_incidents_green(&pr.id, green_at)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+    }
+    if let Some(merged_at) = merged_at {
+        store
+            .mark_ci_incidents_merged(&pr.id, merged_at)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
     }
     if !session_saved_with_pr
         && (session.status != previous_session_status
@@ -3921,6 +4024,20 @@ pub(crate) async fn reconcile_task_completion(
     Ok(())
 }
 
+fn review_gate_from(review: &InteractionReview) -> ReviewGateState {
+    match review.status {
+        InteractionReviewStatus::Requested => ReviewGateState::Requested,
+        InteractionReviewStatus::Active => ReviewGateState::Active,
+        InteractionReviewStatus::Completed => match review.disposition {
+            Some(InteractionReviewDisposition::Approved) => ReviewGateState::Approved,
+            Some(InteractionReviewDisposition::ChangesRequested) => {
+                ReviewGateState::ChangesRequested
+            }
+            None => ReviewGateState::Approved,
+        },
+    }
+}
+
 pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     let session = session.clone();
     block_on_task(async move {
@@ -3946,7 +4063,47 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .task_prs(&session.id)
             .await
             .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-        let active_pr = prs.iter().find(|pr| pr.is_active()).map(|pr| pr.id.clone());
+        let active = prs.iter().find(|pr| pr.is_active());
+        let active_pr = active.map(|pr| pr.id.clone());
+        let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
+            Some(parent_id) => store
+                .get_task_pr(parent_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
+                .map(|pr| pr.phase()),
+            None => None,
+        };
+        let review_gate = store
+            .interaction_review_at(
+                &session.id,
+                session.phase_epoch,
+                session.phase_iteration,
+                session.phase_cursor,
+            )
+            .await
+            .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
+            .map(|r| review_gate_from(&r));
+        let action_evidence = TaskActionEvidence {
+            status: session.status,
+            active_pr_phase: active.map(|pr| pr.phase()),
+            active_pr_after_merge: active
+                .and_then(|pr| pr.publication.as_ref())
+                .map(|p| p.after_merge),
+            active_pr_next_slug: active
+                .and_then(|pr| pr.publication.as_ref())
+                .and_then(|p| p.next_slug.as_deref()),
+            ci: active.and_then(|pr| pr.fresh_ci()),
+            process_alive: if session.status.is_process_active() {
+                Some(process_alive)
+            } else {
+                None
+            },
+            predecessor_phase,
+            review_gate,
+            abandon_intent: session.abandon_intent.is_some(),
+            local_progress_unsettled: None,
+        };
+        let actions = derive_task_actions(&action_evidence);
         // Resolve the live routing target for this Task's parent Project. The
         // historical project_session_id stays as provenance; the routing target
         // is its non-terminal successor when the historical session is terminal.
@@ -3995,6 +4152,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             created_at: session.created_at,
             updated_at: session.updated_at,
             observation: session.observation,
+            actions,
         })
     })
 }
@@ -7952,7 +8110,6 @@ mod tests {
                     Vec::new()
                 },
                 observed_at: now,
-                woken_failure_set: None,
             }),
             linear_attachment_id: None,
             linear_comment_id: None,

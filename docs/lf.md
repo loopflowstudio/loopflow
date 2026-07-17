@@ -343,12 +343,35 @@ lf trace 66863649 --json        # inspect the same tree and its skill launches
 lf trace 66863649 --json --content --launch <launch> --turn <turn>
 lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
-lf usage                        # additive spend by repo and provider
+lf usage                        # subscription % per account + spend by repo/provider
+lf usage --refresh              # poll every account's provider now
 lf usage --json --days 30       # additive skill/run boundary rows
+lf ci --since 7d                # CI repair attempts, latency, and outcomes
+lf ci --since 7d --json         # complete machine-wide incident receipt
 lf top                          # last-hour provider throughput + live sessions
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
+
+```bash
+lf auth exec codex engineering            # interactive codex on the managed account
+lf auth exec claude jack@loopflow.studio  # provider CLI shares the routed session
+```
+
+`lf auth exec` replaces the process with the provider's CLI running on the
+managed account's credential home. Logging into a managed account with a bare
+`codex login`/`claude` creates a second session and evicts the managed one
+("needs re-login"); exec is how direct use and lf routing share one session.
+
+`lf usage` leads with each managed account's subscription state — provider-
+reported plan, session and weekly windows as percent *used*, reset times —
+from stored observations (harness streams report them mid-run) topped up by a
+live poll when older than 15 minutes. `--refresh` polls everything now;
+`--cached` skips polling. A revoked credential shows the fix
+(`lf auth connect <provider>`), not a blank. The spend table below it sums
+per-boundary delta rows; TOTAL is input+output with cache reads their own
+column, and `% TOKENS` is each row's slice of all tokens in the window — a
+distribution across repos, not a subscription measure.
 
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a
@@ -361,6 +384,10 @@ revision; missing revision identity does not match the current-only filter.
 `lf trace --content` is the explicit
 reader for the exact prompt and normalized conversation at one immutable
 run/launch/turn address.
+
+`lf ci` reads durable CI incidents from the local Home store. One failed head is
+one attempt; later passing and merge observations close every open attempt on
+that PR. `--wave` and `--repo owner/repo` filter the same local report.
 
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print

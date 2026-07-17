@@ -506,6 +506,19 @@ impl Store {
         .await
     }
 
+    /// Create a `ci-fix` wake unless this incident identity already has one.
+    /// Returns the surviving command and whether it was created.
+    pub async fn ensure_child_ci_fix_command(
+        &self,
+        command: &ChildCommand,
+    ) -> StoreResult<(ChildCommand, bool)> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.ensure_child_ci_fix_command(&command)
+        })
+        .await
+    }
+
     pub async fn supersede_and_create_child_command(
         &self,
         command: &ChildCommand,
@@ -706,6 +719,23 @@ impl Store {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.fail_child_command(&command_id, effect, &error)
+        })
+        .await
+    }
+
+    /// Mark one claimed command superseded because circumstances made it moot.
+    /// Unlike failing it, this records no error — nothing went wrong.
+    pub(crate) async fn supersede_child_command_for_lease(
+        &self,
+        target: &ChildRef,
+        lease: &ChildWriteLease,
+        command_id: &ChildCommandId,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        let lease = lease.clone();
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.supersede_child_command_for_lease(&target, &lease, &command_id)
         })
         .await
     }

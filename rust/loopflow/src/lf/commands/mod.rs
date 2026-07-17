@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod chat;
+pub mod ci;
 pub mod context;
 pub mod desktop;
 pub mod doctor;

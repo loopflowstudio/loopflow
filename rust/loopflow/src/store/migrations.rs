@@ -296,6 +296,24 @@ const MIGRATIONS: &[Migration] = &[
         name: "capture_pruned_state",
         sql: include_str!("migrations/0.11.023_capture_pruned_state.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 24,
+        },
+        name: "ci_incidents",
+        sql: include_str!("migrations/0.11.024_ci_incidents.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 25,
+        },
+        name: "usage_deltas",
+        sql: include_str!("migrations/0.11.025_usage_deltas.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1385,7 +1403,9 @@ mod tests {
                 "0.11.020_task_pr_linear_linkage".to_string(),
                 "0.11.021_provider_deliveries".to_string(),
                 "0.11.022_task_session_successors".to_string(),
-                "0.11.023_capture_pruned_state".to_string()
+                "0.11.023_capture_pruned_state".to_string(),
+                "0.11.024_ci_incidents".to_string(),
+                "0.11.025_usage_deltas".to_string()
             ]
         );
     }
@@ -1399,9 +1419,19 @@ mod tests {
 
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.022_task_session_successors")
+            Some("0.11.024_ci_incidents")
         );
-        assert!(!capture_status_accepts(&conn, "pruned"));
+        assert!(capture_status_accepts(&conn, "pruned"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_account_limits'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -1412,7 +1442,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"

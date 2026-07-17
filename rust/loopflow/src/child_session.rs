@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 
 use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
-use crate::task::{TaskEvent, TaskEventKind, TaskSessionId};
+use crate::task::{CiCheck, TaskEvent, TaskEventKind, TaskSessionId};
 
 pub(crate) const PROJECT_LEASE_TOKEN_ENV: &str = "LF_PROJECT_LEASE_TOKEN";
 pub(crate) const PROJECT_GENERATION_ENV: &str = "LF_PROJECT_GENERATION";
@@ -383,6 +383,29 @@ pub enum ChildCommandKind {
     Abandon {
         reason: String,
     },
+    /// An automatic wake for a failed required-check head on this Task's open PR.
+    ///
+    /// Unlike every other variant this is not input to a live body: it is a
+    /// launch intent whose payload becomes the born body's seed, consumed before
+    /// a harness exists. `incident_identity` is the dedup key — minted by and
+    /// shared with [`crate::task::CiIncident`], so one (repo, PR, failed head,
+    /// failure set) mints one command, forever.
+    ///
+    /// The command stays [`ChildCommandState::Claimed`] for the whole bounded
+    /// repair turn: the claim predicate reassigns `persisted`/`claimed` rows to a
+    /// successor generation, so the reclaim *is* the durable "this body exists to
+    /// repair CI" signal across a crash. Settling it is the repair turn's job,
+    /// not the wake's.
+    ///
+    /// The repository is deliberately absent: the command's `target` fixes the
+    /// Task and therefore the repo, and `incident_identity` encodes it again. A
+    /// third copy could only drift.
+    CiFix {
+        incident_identity: String,
+        pr_number: u32,
+        head_sha: String,
+        failing_checks: Vec<CiCheck>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -585,10 +608,13 @@ impl ChildCommand {
                 replacement: Some(_),
             } => Some(ChildCommandEffect::Replacement),
             ChildCommandKind::Decide { .. } => Some(ChildCommandEffect::Decision),
+            // `CiFix` has no effect on a live turn: its effect is a launch, and
+            // its payload seeds the body that launch creates.
             ChildCommandKind::Steer { .. }
             | ChildCommandKind::Interrupt { replacement: None }
             | ChildCommandKind::Resume { message: None }
-            | ChildCommandKind::Abandon { .. } => None,
+            | ChildCommandKind::Abandon { .. }
+            | ChildCommandKind::CiFix { .. } => None,
         };
         Self {
             id: ChildCommandId::new(),
@@ -666,6 +692,7 @@ pub enum BodyOwner {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum BodyControl {
+    Attach,
     Steer,
     Interrupt,
     Stop,
@@ -1040,6 +1067,7 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
                     "alive but no meaningful progress past the deadline",
                     BodyOwner::Loopflow,
                     vec![
+                        BodyControl::Attach,
                         BodyControl::Extend,
                         BodyControl::Interrupt,
                         BodyControl::Stop,
@@ -1053,6 +1081,7 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
                     &evidence.reason,
                     BodyOwner::Session,
                     vec![
+                        BodyControl::Attach,
                         BodyControl::Steer,
                         BodyControl::Interrupt,
                         BodyControl::Stop,
@@ -1095,6 +1124,58 @@ mod tests {
         assert_eq!(json, r#"{"kind":"linear"}"#);
         let parsed: ChildCommandSource = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed, ChildCommandSource::Linear);
+    }
+
+    /// The wake rides `child_commands.kind_json`, so its shape is the migration
+    /// this change did not need. It must survive the trip intact: the payload is
+    /// the body's seed and the identity is the dedup key, and a field lost on the
+    /// wire is a repair aimed at the wrong failure.
+    #[test]
+    fn a_ci_fix_wake_round_trips_its_payload_on_the_wire() {
+        let kind = ChildCommandKind::CiFix {
+            incident_identity: "github:ci:loopflow/loopflow:1042:a1b2c3d:9f0e".to_string(),
+            pr_number: 1042,
+            head_sha: "a1b2c3d".to_string(),
+            failing_checks: vec![
+                crate::task::CiCheck {
+                    name: "cargo-fmt".to_string(),
+                    url: Some("https://ci/fmt".to_string()),
+                },
+                crate::task::CiCheck {
+                    name: "clippy".to_string(),
+                    url: None,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&kind).expect("serialize");
+        assert!(
+            json.contains(r#""kind":"ci_fix""#),
+            "the variant is tagged on `kind` like every other command, got: {json}"
+        );
+        let parsed: ChildCommandKind = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed, kind);
+    }
+
+    /// A wake is a command, not a direction. Minting a directive would bump
+    /// `current_directive_version`, and `has_pending_directive` would then block
+    /// Task completion until a body acknowledged a direction no human ever gave.
+    #[test]
+    fn a_ci_fix_wake_has_no_effect_on_a_live_turn() {
+        let command = ChildCommand::new(
+            ChildRef::Task(crate::task::TaskSessionId::new()),
+            ChildCommandSource::System,
+            ChildCommandKind::CiFix {
+                incident_identity: "github:ci:owner/repo:1:h1:d".to_string(),
+                pr_number: 1,
+                head_sha: "h1".to_string(),
+                failing_checks: vec![],
+            },
+        );
+        assert_eq!(
+            command.effect, None,
+            "a wake's effect is a launch, not a delivery into an existing turn"
+        );
+        assert_eq!(command.state, ChildCommandState::Persisted);
     }
 
     #[test]

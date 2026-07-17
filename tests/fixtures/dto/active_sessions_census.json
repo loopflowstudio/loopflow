@@ -16,7 +16,13 @@
           "endpoint": "127.0.0.1:7777",
           "created_at": "2026-07-01T00:00:00Z",
           "parent_wave_id": null,
-          "home": {"address": "jack@local", "owner": "jack", "location": {"kind": "local"}}
+          "home": {
+            "address": "jack@local",
+            "owner": "jack",
+            "location": {
+              "kind": "local"
+            }
+          }
         },
         "projects": {
           "state": "ok",
@@ -29,7 +35,12 @@
                 "name": "Mac Surface UX",
                 "summary": "Legible daily front door.",
                 "definition": "The Mac app is Loopflow's legible front door.",
-                "krs": [{"text": "Active Sessions accounts for every live body", "holds": false}]
+                "krs": [
+                  {
+                    "text": "Active Sessions accounts for every live body",
+                    "holds": false
+                  }
+                ]
               },
               "runtime": {
                 "session_id": "ps_prod",
@@ -39,62 +50,630 @@
                 "iteration": 3,
                 "pending_observations": 0,
                 "provider": "codex",
-                "process_alive": true, "observation": {"category": "working", "reason": "supervising Task Sessions", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iteration 3"}
+                "process_alive": true,
+                "observation": {
+                  "category": "working",
+                  "reason": "supervising Task Sessions",
+                  "owner": "session",
+                  "controls": [
+                    "attach",
+                    "steer",
+                    "interrupt",
+                    "stop"
+                  ],
+                  "progress_age_secs": 60,
+                  "deadline_in_secs": 1740,
+                  "step": "iteration 3"
+                }
               },
-              "next_move": {"owner": "project", "reason": "supervising Task Sessions"},
+              "next_move": {
+                "owner": "project",
+                "reason": "supervising Task Sessions"
+              },
               "section": "now",
               "tasks": [
                 {
-                  "task": {"id": "issue-alive", "identifier": "W2-176", "name": "Show Active Sessions", "description": "Census.", "rank": 4, "completed": false, "assignee": null},
-                  "reference": {"issue_url": null, "workspace": {"slug": "show-active-sessions", "branch": "jack-heart/show-active-sessions", "worktree": "/src/loopflow.show-active-sessions"}},
-                  "runtime": {"session_id": "ts_alive", "project_session_id": "ps_prod", "routing_project_session_id": "ps_prod", "status": "running", "reason": "Task flow step 2/3", "status_at": "2026-07-14T23:59:30Z", "provider": "claude", "process_alive": true, "observation": {"category": "working", "reason": "Task flow step 2/3", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iterate"}},
-                  "next_move": {"owner": "task", "reason": "Task flow step 2/3"},
-                  "attention": {"level": "green", "reason": "Task flow step 2/3: task_pursue", "observed_at": "2026-07-15T00:00:00Z", "evidence_age_secs": 30, "next_owner": "task", "controls": ["attach", "interrupt"], "pm_completed": false, "session_status": "running", "process": {"state": "observed", "alive": true, "reason": null}, "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null}, "active_pr_phase": null},
+                  "task": {
+                    "id": "issue-alive",
+                    "identifier": "W2-176",
+                    "name": "Show Active Sessions",
+                    "description": "Census.",
+                    "rank": 4,
+                    "completed": false,
+                    "assignee": null
+                  },
+                  "reference": {
+                    "issue_url": null,
+                    "workspace": {
+                      "slug": "show-active-sessions",
+                      "branch": "jack-heart/show-active-sessions",
+                      "worktree": "/src/loopflow.show-active-sessions"
+                    }
+                  },
+                  "runtime": {
+                    "session_id": "ts_alive",
+                    "project_session_id": "ps_prod",
+                    "routing_project_session_id": "ps_prod",
+                    "status": "running",
+                    "reason": "Task flow step 2/3",
+                    "status_at": "2026-07-14T23:59:30Z",
+                    "provider": "claude",
+                    "process_alive": true,
+                    "observation": {
+                      "category": "working",
+                      "reason": "Task flow step 2/3",
+                      "owner": "session",
+                      "controls": [
+                        "attach",
+                        "steer",
+                        "interrupt",
+                        "stop"
+                      ],
+                      "progress_age_secs": 60,
+                      "deadline_in_secs": 1740,
+                      "step": "iterate"
+                    }
+                  },
+                  "next_move": {
+                    "owner": "task",
+                    "reason": "Task flow step 2/3"
+                  },
+                  "attention": {
+                    "level": "green",
+                    "reason": "Task flow step 2/3: task_pursue",
+                    "observed_at": "2026-07-15T00:00:00Z",
+                    "evidence_age_secs": 30,
+                    "next_owner": "task",
+                    "actions": {
+                      "recommended": "no_action",
+                      "actions": [
+                        {
+                          "action": "recover",
+                          "available": false,
+                          "reason": "body is alive; use attach/interrupt to interact"
+                        },
+                        {
+                          "action": "resume",
+                          "available": false,
+                          "reason": "body is working; nothing to resume"
+                        },
+                        {
+                          "action": "review",
+                          "available": false,
+                          "reason": "no open PR to review"
+                        },
+                        {
+                          "action": "start_next_pr",
+                          "available": false,
+                          "reason": "no merged PR to advance from"
+                        },
+                        {
+                          "action": "complete",
+                          "available": false,
+                          "reason": "implementation not finished"
+                        },
+                        {
+                          "action": "no_action",
+                          "available": true,
+                          "reason": "Task body is working"
+                        }
+                      ]
+                    },
+                    "pm_completed": false,
+                    "session_status": "running",
+                    "process": {
+                      "state": "observed",
+                      "alive": true,
+                      "reason": null
+                    },
+                    "local_progress": {
+                      "state": "observed",
+                      "unsettled": false,
+                      "dirty": false,
+                      "authored_commits": false,
+                      "recovery_required": false,
+                      "reason": null
+                    },
+                    "active_pr_phase": null
+                  },
                   "active_pr": null,
                   "section": "now"
                 },
                 {
-                  "task": {"id": "issue-stale", "identifier": "W2-160", "name": "Roadmap census cadence", "description": "Cadence.", "rank": 5, "completed": false, "assignee": null},
-                  "reference": {"issue_url": null, "workspace": {"slug": "census-cadence", "branch": "jack-heart/census-cadence", "worktree": "/src/loopflow.census-cadence"}},
-                  "runtime": {"session_id": "ts_stale", "project_session_id": "ps_prod", "routing_project_session_id": "ps_prod", "status": "running", "reason": "iterating", "status_at": "2026-07-14T23:43:00Z", "provider": "claude", "process_alive": true, "observation": {"category": "stalled", "reason": "alive but no meaningful progress past the deadline", "owner": "loopflow", "controls": ["extend", "interrupt", "stop"], "progress_age_secs": 2400, "deadline_in_secs": -600, "step": "iterate"}},
-                  "next_move": {"owner": "task", "reason": "iterating"},
-                  "attention": {"level": "green", "reason": "iterating in the loop", "observed_at": "2026-07-15T00:00:00Z", "evidence_age_secs": 999, "next_owner": "task", "controls": ["attach"], "pm_completed": false, "session_status": "running", "process": {"state": "observed", "alive": true, "reason": null}, "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null}, "active_pr_phase": null},
+                  "task": {
+                    "id": "issue-stale",
+                    "identifier": "W2-160",
+                    "name": "Roadmap census cadence",
+                    "description": "Cadence.",
+                    "rank": 5,
+                    "completed": false,
+                    "assignee": null
+                  },
+                  "reference": {
+                    "issue_url": null,
+                    "workspace": {
+                      "slug": "census-cadence",
+                      "branch": "jack-heart/census-cadence",
+                      "worktree": "/src/loopflow.census-cadence"
+                    }
+                  },
+                  "runtime": {
+                    "session_id": "ts_stale",
+                    "project_session_id": "ps_prod",
+                    "routing_project_session_id": "ps_prod",
+                    "status": "running",
+                    "reason": "iterating",
+                    "status_at": "2026-07-14T23:43:00Z",
+                    "provider": "claude",
+                    "process_alive": true,
+                    "observation": {
+                      "category": "stalled",
+                      "reason": "alive but no meaningful progress past the deadline",
+                      "owner": "loopflow",
+                      "controls": [
+                        "attach",
+                        "extend",
+                        "interrupt",
+                        "stop"
+                      ],
+                      "progress_age_secs": 2400,
+                      "deadline_in_secs": -600,
+                      "step": "iterate"
+                    }
+                  },
+                  "next_move": {
+                    "owner": "task",
+                    "reason": "iterating"
+                  },
+                  "attention": {
+                    "level": "green",
+                    "reason": "iterating in the loop",
+                    "observed_at": "2026-07-15T00:00:00Z",
+                    "evidence_age_secs": 999,
+                    "next_owner": "task",
+                    "actions": {
+                      "recommended": "no_action",
+                      "actions": [
+                        {
+                          "action": "recover",
+                          "available": false,
+                          "reason": "body is alive; use attach/interrupt to interact"
+                        },
+                        {
+                          "action": "resume",
+                          "available": false,
+                          "reason": "body is working; nothing to resume"
+                        },
+                        {
+                          "action": "review",
+                          "available": false,
+                          "reason": "no open PR to review"
+                        },
+                        {
+                          "action": "start_next_pr",
+                          "available": false,
+                          "reason": "no merged PR to advance from"
+                        },
+                        {
+                          "action": "complete",
+                          "available": false,
+                          "reason": "implementation not finished"
+                        },
+                        {
+                          "action": "no_action",
+                          "available": true,
+                          "reason": "Task body is working"
+                        }
+                      ]
+                    },
+                    "pm_completed": false,
+                    "session_status": "running",
+                    "process": {
+                      "state": "observed",
+                      "alive": true,
+                      "reason": null
+                    },
+                    "local_progress": {
+                      "state": "observed",
+                      "unsettled": false,
+                      "dirty": false,
+                      "authored_commits": false,
+                      "recovery_required": false,
+                      "reason": null
+                    },
+                    "active_pr_phase": null
+                  },
                   "active_pr": null,
                   "section": "now"
                 },
                 {
-                  "task": {"id": "issue-dead", "identifier": "W2-149", "name": "Attention fold recovery", "description": "Recovery.", "rank": 2, "completed": false, "assignee": null},
-                  "reference": {"issue_url": null, "workspace": {"slug": "attention-recovery", "branch": "jack-heart/attention-recovery", "worktree": "/src/loopflow.attention-recovery"}},
-                  "runtime": {"session_id": "ts_dead", "project_session_id": "ps_prod", "routing_project_session_id": "ps_prod_2", "status": "waiting", "reason": "body exited before hand-back", "status_at": "2026-07-14T23:40:00Z", "provider": "codex", "process_alive": false, "observation": {"category": "needs_input", "reason": "body exited before hand-back", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}},
-                  "next_move": {"owner": "wave", "reason": "body exited before hand-back"},
-                  "attention": {"level": "red", "reason": "body exited before hand-back", "observed_at": "2026-07-15T00:00:00Z", "evidence_age_secs": 200, "next_owner": "wave", "controls": ["resume"], "pm_completed": false, "session_status": "waiting", "process": {"state": "observed", "alive": false, "reason": "no live tmux"}, "local_progress": {"state": "observed", "unsettled": true, "dirty": true, "authored_commits": true, "recovery_required": true, "reason": null}, "active_pr_phase": null},
+                  "task": {
+                    "id": "issue-dead",
+                    "identifier": "W2-149",
+                    "name": "Attention fold recovery",
+                    "description": "Recovery.",
+                    "rank": 2,
+                    "completed": false,
+                    "assignee": null
+                  },
+                  "reference": {
+                    "issue_url": null,
+                    "workspace": {
+                      "slug": "attention-recovery",
+                      "branch": "jack-heart/attention-recovery",
+                      "worktree": "/src/loopflow.attention-recovery"
+                    }
+                  },
+                  "runtime": {
+                    "session_id": "ts_dead",
+                    "project_session_id": "ps_prod",
+                    "routing_project_session_id": "ps_prod_2",
+                    "status": "waiting",
+                    "reason": "body exited before hand-back",
+                    "status_at": "2026-07-14T23:40:00Z",
+                    "provider": "codex",
+                    "process_alive": false,
+                    "observation": {
+                      "category": "needs_input",
+                      "reason": "body exited before hand-back",
+                      "owner": "human",
+                      "controls": [
+                        "decide",
+                        "resume",
+                        "abandon"
+                      ],
+                      "progress_age_secs": null,
+                      "deadline_in_secs": null,
+                      "step": "iterate"
+                    }
+                  },
+                  "next_move": {
+                    "owner": "wave",
+                    "reason": "body exited before hand-back"
+                  },
+                  "attention": {
+                    "level": "red",
+                    "reason": "body exited before hand-back",
+                    "observed_at": "2026-07-15T00:00:00Z",
+                    "evidence_age_secs": 200,
+                    "next_owner": "wave",
+                    "actions": {
+                      "recommended": "recover",
+                      "actions": [
+                        {
+                          "action": "recover",
+                          "available": true,
+                          "reason": "Task body stopped with unsettled work; recover to continue"
+                        },
+                        {
+                          "action": "resume",
+                          "available": false,
+                          "reason": "no parked step to resume — recover the body first"
+                        },
+                        {
+                          "action": "review",
+                          "available": false,
+                          "reason": "no open PR to review"
+                        },
+                        {
+                          "action": "start_next_pr",
+                          "available": false,
+                          "reason": "no merged PR to advance from"
+                        },
+                        {
+                          "action": "complete",
+                          "available": false,
+                          "reason": "implementation not finished"
+                        },
+                        {
+                          "action": "no_action",
+                          "available": false,
+                          "reason": "body is dead; recover to continue"
+                        }
+                      ]
+                    },
+                    "pm_completed": false,
+                    "session_status": "waiting",
+                    "process": {
+                      "state": "observed",
+                      "alive": false,
+                      "reason": "no live tmux"
+                    },
+                    "local_progress": {
+                      "state": "observed",
+                      "unsettled": true,
+                      "dirty": true,
+                      "authored_commits": true,
+                      "recovery_required": true,
+                      "reason": null
+                    },
+                    "active_pr_phase": null
+                  },
                   "active_pr": null,
                   "section": "needs_attention"
                 },
                 {
-                  "task": {"id": "issue-unavail", "identifier": "W2-158", "name": "Remote census probe", "description": "Probe.", "rank": 6, "completed": false, "assignee": null},
-                  "reference": {"issue_url": null, "workspace": {"slug": "remote-probe", "branch": "jack-heart/remote-probe", "worktree": "/src/loopflow.remote-probe"}},
-                  "runtime": {"session_id": "ts_unavail", "project_session_id": "ps_prod", "routing_project_session_id": "ps_prod", "status": "running", "reason": "running", "status_at": "2026-07-14T23:59:10Z", "provider": "claude", "process_alive": true, "observation": {"category": "working", "reason": "running", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iterate"}},
-                  "next_move": {"owner": "task", "reason": "running"},
-                  "attention": {"level": "green", "reason": "running", "observed_at": "2026-07-15T00:00:00Z", "evidence_age_secs": 50, "next_owner": "task", "controls": ["attach"], "pm_completed": false, "session_status": "running", "process": {"state": "unavailable", "alive": null, "reason": "process evidence could not be read"}, "local_progress": {"state": "unavailable", "unsettled": null, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": "worktree not reachable"}, "active_pr_phase": null},
+                  "task": {
+                    "id": "issue-unavail",
+                    "identifier": "W2-158",
+                    "name": "Remote census probe",
+                    "description": "Probe.",
+                    "rank": 6,
+                    "completed": false,
+                    "assignee": null
+                  },
+                  "reference": {
+                    "issue_url": null,
+                    "workspace": {
+                      "slug": "remote-probe",
+                      "branch": "jack-heart/remote-probe",
+                      "worktree": "/src/loopflow.remote-probe"
+                    }
+                  },
+                  "runtime": {
+                    "session_id": "ts_unavail",
+                    "project_session_id": "ps_prod",
+                    "routing_project_session_id": "ps_prod",
+                    "status": "running",
+                    "reason": "running",
+                    "status_at": "2026-07-14T23:59:10Z",
+                    "provider": "claude",
+                    "process_alive": true,
+                    "observation": {
+                      "category": "working",
+                      "reason": "running",
+                      "owner": "session",
+                      "controls": [
+                        "attach",
+                        "steer",
+                        "interrupt",
+                        "stop"
+                      ],
+                      "progress_age_secs": 60,
+                      "deadline_in_secs": 1740,
+                      "step": "iterate"
+                    }
+                  },
+                  "next_move": {
+                    "owner": "task",
+                    "reason": "running"
+                  },
+                  "attention": {
+                    "level": "green",
+                    "reason": "running",
+                    "observed_at": "2026-07-15T00:00:00Z",
+                    "evidence_age_secs": 50,
+                    "next_owner": "task",
+                    "actions": {
+                      "recommended": "recover",
+                      "actions": [
+                        {
+                          "action": "recover",
+                          "available": true,
+                          "reason": "Task body stopped with unsettled work; recover to continue"
+                        },
+                        {
+                          "action": "resume",
+                          "available": false,
+                          "reason": "no parked step to resume — recover the body first"
+                        },
+                        {
+                          "action": "review",
+                          "available": false,
+                          "reason": "no open PR to review"
+                        },
+                        {
+                          "action": "start_next_pr",
+                          "available": false,
+                          "reason": "no merged PR to advance from"
+                        },
+                        {
+                          "action": "complete",
+                          "available": false,
+                          "reason": "implementation not finished"
+                        },
+                        {
+                          "action": "no_action",
+                          "available": false,
+                          "reason": "body is dead; recover to continue"
+                        }
+                      ]
+                    },
+                    "pm_completed": false,
+                    "session_status": "running",
+                    "process": {
+                      "state": "unavailable",
+                      "alive": null,
+                      "reason": "process evidence could not be read"
+                    },
+                    "local_progress": {
+                      "state": "unavailable",
+                      "unsettled": null,
+                      "dirty": null,
+                      "authored_commits": null,
+                      "recovery_required": null,
+                      "reason": "worktree not reachable"
+                    },
+                    "active_pr_phase": null
+                  },
                   "active_pr": null,
                   "section": "now"
                 },
                 {
-                  "task": {"id": "issue-unstarted", "identifier": "W2-165", "name": "Run history view", "description": "Deferred.", "rank": 8, "completed": false, "assignee": null},
-                  "reference": {"issue_url": null, "workspace": null},
+                  "task": {
+                    "id": "issue-unstarted",
+                    "identifier": "W2-165",
+                    "name": "Run history view",
+                    "description": "Deferred.",
+                    "rank": 8,
+                    "completed": false,
+                    "assignee": null
+                  },
+                  "reference": {
+                    "issue_url": null,
+                    "workspace": null
+                  },
                   "runtime": null,
-                  "next_move": {"owner": "project", "reason": "ready to start"},
-                  "attention": {"level": "black", "reason": "ready to start", "observed_at": "2026-07-15T00:00:00Z", "evidence_age_secs": null, "next_owner": "project", "controls": ["start"], "pm_completed": false, "session_status": null, "process": {"state": "not_applicable", "alive": null, "reason": null}, "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null}, "active_pr_phase": null},
+                  "next_move": {
+                    "owner": "project",
+                    "reason": "ready to start"
+                  },
+                  "attention": {
+                    "level": "black",
+                    "reason": "ready to start",
+                    "observed_at": "2026-07-15T00:00:00Z",
+                    "evidence_age_secs": null,
+                    "next_owner": "project",
+                    "actions": {
+                      "recommended": null,
+                      "actions": [
+                        {
+                          "action": "recover",
+                          "available": false,
+                          "reason": "no Task Session; start one with `lf task run`"
+                        },
+                        {
+                          "action": "resume",
+                          "available": false,
+                          "reason": "no Task Session; start one with `lf task run`"
+                        },
+                        {
+                          "action": "review",
+                          "available": false,
+                          "reason": "no Task Session; start one with `lf task run`"
+                        },
+                        {
+                          "action": "start_next_pr",
+                          "available": false,
+                          "reason": "no Task Session; start one with `lf task run`"
+                        },
+                        {
+                          "action": "complete",
+                          "available": false,
+                          "reason": "no Task Session; start one with `lf task run`"
+                        },
+                        {
+                          "action": "no_action",
+                          "available": false,
+                          "reason": "no Task Session; start one with `lf task run`"
+                        }
+                      ]
+                    },
+                    "pm_completed": false,
+                    "session_status": null,
+                    "process": {
+                      "state": "not_applicable",
+                      "alive": null,
+                      "reason": null
+                    },
+                    "local_progress": {
+                      "state": "not_applicable",
+                      "unsettled": false,
+                      "dirty": null,
+                      "authored_commits": null,
+                      "recovery_required": null,
+                      "reason": null
+                    },
+                    "active_pr_phase": null
+                  },
                   "active_pr": null,
                   "section": "available"
                 },
                 {
-                  "task": {"id": "issue-done", "identifier": "W2-141", "name": "Research", "description": "Done.", "rank": 0, "completed": true, "assignee": null},
-                  "reference": {"issue_url": null, "workspace": null},
-                  "runtime": {"session_id": "ts_done", "project_session_id": "ps_prod", "routing_project_session_id": "ps_prod", "status": "completed", "reason": "merged", "status_at": "2026-07-14T21:00:00Z", "provider": "claude", "process_alive": false, "observation": {"category": "terminal", "reason": "merged", "owner": "nobody", "controls": [], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}},
-                  "next_move": {"owner": "project", "reason": "complete"},
-                  "attention": {"level": "black", "reason": "complete", "observed_at": "2026-07-15T00:00:00Z", "evidence_age_secs": 10800, "next_owner": "project", "controls": [], "pm_completed": true, "session_status": "completed", "process": {"state": "not_expected", "alive": null, "reason": null}, "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null}, "active_pr_phase": null},
+                  "task": {
+                    "id": "issue-done",
+                    "identifier": "W2-141",
+                    "name": "Research",
+                    "description": "Done.",
+                    "rank": 0,
+                    "completed": true,
+                    "assignee": null
+                  },
+                  "reference": {
+                    "issue_url": null,
+                    "workspace": null
+                  },
+                  "runtime": {
+                    "session_id": "ts_done",
+                    "project_session_id": "ps_prod",
+                    "routing_project_session_id": "ps_prod",
+                    "status": "completed",
+                    "reason": "merged",
+                    "status_at": "2026-07-14T21:00:00Z",
+                    "provider": "claude",
+                    "process_alive": false,
+                    "observation": {
+                      "category": "terminal",
+                      "reason": "merged",
+                      "owner": "nobody",
+                      "controls": [],
+                      "progress_age_secs": null,
+                      "deadline_in_secs": null,
+                      "step": "iterate"
+                    }
+                  },
+                  "next_move": {
+                    "owner": "project",
+                    "reason": "complete"
+                  },
+                  "attention": {
+                    "level": "black",
+                    "reason": "complete",
+                    "observed_at": "2026-07-15T00:00:00Z",
+                    "evidence_age_secs": 10800,
+                    "next_owner": "project",
+                    "actions": {
+                      "recommended": "no_action",
+                      "actions": [
+                        {
+                          "action": "recover",
+                          "available": false,
+                          "reason": "Task is terminal"
+                        },
+                        {
+                          "action": "resume",
+                          "available": false,
+                          "reason": "Task is terminal"
+                        },
+                        {
+                          "action": "review",
+                          "available": false,
+                          "reason": "Task is terminal"
+                        },
+                        {
+                          "action": "start_next_pr",
+                          "available": false,
+                          "reason": "Task is terminal"
+                        },
+                        {
+                          "action": "complete",
+                          "available": false,
+                          "reason": "Task is terminal"
+                        },
+                        {
+                          "action": "no_action",
+                          "available": true,
+                          "reason": "Task is completed"
+                        }
+                      ]
+                    },
+                    "pm_completed": true,
+                    "session_status": "completed",
+                    "process": {
+                      "state": "not_expected",
+                      "alive": null,
+                      "reason": null
+                    },
+                    "local_progress": {
+                      "state": "observed",
+                      "unsettled": false,
+                      "dirty": false,
+                      "authored_commits": false,
+                      "recovery_required": false,
+                      "reason": null
+                    },
+                    "active_pr_phase": null
+                  },
                   "active_pr": null,
                   "section": "later"
                 }
@@ -117,24 +696,163 @@
           "endpoint": null,
           "created_at": "2026-07-02T00:00:00Z",
           "parent_wave_id": null,
-          "home": {"address": "ssh://jack@studio.ts.net", "owner": "jack", "location": {"kind": "ssh", "host": "studio.ts.net", "port": null}}
+          "home": {
+            "address": "ssh://jack@studio.ts.net",
+            "owner": "jack",
+            "location": {
+              "kind": "ssh",
+              "host": "studio.ts.net",
+              "port": null
+            }
+          }
         },
         "projects": {
           "state": "ok",
           "truncated": false,
           "items": [
             {
-              "project": {"id": "project-r", "slug": "distributed-computing", "name": "Distributed Computing", "summary": "Move work across machines.", "definition": "Work moves across machines.", "krs": []},
-              "runtime": {"session_id": "ps_remote", "status": "running", "reason": "remote loop", "status_at": "2026-07-14T23:55:00Z", "iteration": 1, "pending_observations": 0, "provider": "codex", "process_alive": true, "observation": {"category": "working", "reason": "remote loop", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iteration 1"}},
-              "next_move": {"owner": "project", "reason": "remote loop"},
+              "project": {
+                "id": "project-r",
+                "slug": "distributed-computing",
+                "name": "Distributed Computing",
+                "summary": "Move work across machines.",
+                "definition": "Work moves across machines.",
+                "krs": []
+              },
+              "runtime": {
+                "session_id": "ps_remote",
+                "status": "running",
+                "reason": "remote loop",
+                "status_at": "2026-07-14T23:55:00Z",
+                "iteration": 1,
+                "pending_observations": 0,
+                "provider": "codex",
+                "process_alive": true,
+                "observation": {
+                  "category": "working",
+                  "reason": "remote loop",
+                  "owner": "session",
+                  "controls": [
+                    "attach",
+                    "steer",
+                    "interrupt",
+                    "stop"
+                  ],
+                  "progress_age_secs": 60,
+                  "deadline_in_secs": 1740,
+                  "step": "iteration 1"
+                }
+              },
+              "next_move": {
+                "owner": "project",
+                "reason": "remote loop"
+              },
               "section": "now",
               "tasks": [
                 {
-                  "task": {"id": "issue-remote", "identifier": "W2-170", "name": "Worker attach path", "description": "Attach.", "rank": 3, "completed": false, "assignee": null},
-                  "reference": {"issue_url": null, "workspace": {"slug": "worker-attach", "branch": "jack-heart/worker-attach", "worktree": "/home/jack/src/remote.worker-attach"}},
-                  "runtime": {"session_id": "ts_remote", "project_session_id": "ps_remote", "routing_project_session_id": "ps_remote", "status": "running", "reason": "running on the worker", "status_at": "2026-07-14T23:59:20Z", "provider": "claude", "process_alive": true, "observation": {"category": "working", "reason": "running on the worker", "owner": "session", "controls": ["steer", "interrupt", "stop"], "progress_age_secs": 60, "deadline_in_secs": 1740, "step": "iterate"}},
-                  "next_move": {"owner": "task", "reason": "running on the worker"},
-                  "attention": {"level": "green", "reason": "running on the worker", "observed_at": "2026-07-15T00:00:00Z", "evidence_age_secs": 40, "next_owner": "task", "controls": ["attach"], "pm_completed": false, "session_status": "running", "process": {"state": "observed", "alive": true, "reason": null}, "local_progress": {"state": "observed", "unsettled": false, "dirty": false, "authored_commits": false, "recovery_required": false, "reason": null}, "active_pr_phase": null},
+                  "task": {
+                    "id": "issue-remote",
+                    "identifier": "W2-170",
+                    "name": "Worker attach path",
+                    "description": "Attach.",
+                    "rank": 3,
+                    "completed": false,
+                    "assignee": null
+                  },
+                  "reference": {
+                    "issue_url": null,
+                    "workspace": {
+                      "slug": "worker-attach",
+                      "branch": "jack-heart/worker-attach",
+                      "worktree": "/home/jack/src/remote.worker-attach"
+                    }
+                  },
+                  "runtime": {
+                    "session_id": "ts_remote",
+                    "project_session_id": "ps_remote",
+                    "routing_project_session_id": "ps_remote",
+                    "status": "running",
+                    "reason": "running on the worker",
+                    "status_at": "2026-07-14T23:59:20Z",
+                    "provider": "claude",
+                    "process_alive": true,
+                    "observation": {
+                      "category": "working",
+                      "reason": "running on the worker",
+                      "owner": "session",
+                      "controls": [
+                        "attach",
+                        "steer",
+                        "interrupt",
+                        "stop"
+                      ],
+                      "progress_age_secs": 60,
+                      "deadline_in_secs": 1740,
+                      "step": "iterate"
+                    }
+                  },
+                  "next_move": {
+                    "owner": "task",
+                    "reason": "running on the worker"
+                  },
+                  "attention": {
+                    "level": "green",
+                    "reason": "running on the worker",
+                    "observed_at": "2026-07-15T00:00:00Z",
+                    "evidence_age_secs": 40,
+                    "next_owner": "task",
+                    "actions": {
+                      "recommended": "no_action",
+                      "actions": [
+                        {
+                          "action": "recover",
+                          "available": false,
+                          "reason": "body is alive; use attach/interrupt to interact"
+                        },
+                        {
+                          "action": "resume",
+                          "available": false,
+                          "reason": "body is working; nothing to resume"
+                        },
+                        {
+                          "action": "review",
+                          "available": false,
+                          "reason": "no open PR to review"
+                        },
+                        {
+                          "action": "start_next_pr",
+                          "available": false,
+                          "reason": "no merged PR to advance from"
+                        },
+                        {
+                          "action": "complete",
+                          "available": false,
+                          "reason": "implementation not finished"
+                        },
+                        {
+                          "action": "no_action",
+                          "available": true,
+                          "reason": "Task body is working"
+                        }
+                      ]
+                    },
+                    "pm_completed": false,
+                    "session_status": "running",
+                    "process": {
+                      "state": "observed",
+                      "alive": true,
+                      "reason": null
+                    },
+                    "local_progress": {
+                      "state": "observed",
+                      "unsettled": false,
+                      "dirty": false,
+                      "authored_commits": false,
+                      "recovery_required": false,
+                      "reason": null
+                    },
+                    "active_pr_phase": null
+                  },
                   "active_pr": null,
                   "section": "now"
                 }
@@ -157,9 +875,20 @@
           "endpoint": null,
           "created_at": null,
           "parent_wave_id": null,
-          "home": {"address": "ssh://jack@mini-heart", "owner": "jack", "location": {"kind": "ssh", "host": "mini-heart", "port": null}}
+          "home": {
+            "address": "ssh://jack@mini-heart",
+            "owner": "jack",
+            "location": {
+              "kind": "ssh",
+              "host": "mini-heart",
+              "port": null
+            }
+          }
         },
-        "projects": {"state": "unavailable", "reason": "no local PM snapshot for wave/context; run `lf pm sync`"}
+        "projects": {
+          "state": "unavailable",
+          "reason": "no local PM snapshot for wave/context; run `lf pm sync`"
+        }
       },
       {
         "wave": {
@@ -175,9 +904,19 @@
           "endpoint": "127.0.0.1:7788",
           "created_at": "2026-07-03T00:00:00Z",
           "parent_wave_id": null,
-          "home": {"address": "jack@local", "owner": "jack", "location": {"kind": "local"}}
+          "home": {
+            "address": "jack@local",
+            "owner": "jack",
+            "location": {
+              "kind": "local"
+            }
+          }
         },
-        "projects": {"state": "ok", "truncated": false, "items": []}
+        "projects": {
+          "state": "ok",
+          "truncated": false,
+          "items": []
+        }
       }
     ]
   },
@@ -242,10 +981,80 @@
     }
   ],
   "handoffs": [
-    {"session_id": "ih_wait_task", "parent_kind": "task", "parent_id": "ts_alive", "wave_id": "wave-product", "status": "waiting", "provider": "codex", "provider_session_id": "codex-1", "home": "jack@local", "cwd": "/src/loopflow.show-active-sessions", "reason": "OAuth login required", "created_at": "2026-07-15T00:00:00Z", "updated_at": "2026-07-15T00:00:00Z", "age_secs": 45},
-    {"session_id": "ih_attached_project", "parent_kind": "project", "parent_id": "ps_prod", "wave_id": "wave-product", "status": "attached", "provider": "codex", "provider_session_id": "codex-2", "home": "jack@local", "cwd": "/src/loopflow", "reason": "Confirm the destructive rebase", "created_at": "2026-07-15T00:00:00Z", "updated_at": "2026-07-15T00:00:20Z", "age_secs": 15},
-    {"session_id": "ih_wait_wave_ctx", "parent_kind": "wave", "parent_id": "wave-context", "wave_id": "wave-context", "status": "waiting", "provider": "claude", "provider_session_id": null, "home": "ssh://jack@mini-heart", "cwd": "/src/context", "reason": "Approve wave-level plan change", "created_at": "2026-07-15T00:00:00Z", "updated_at": "2026-07-15T00:00:00Z", "age_secs": 600},
-    {"session_id": "ih_ghost", "parent_kind": "task", "parent_id": "ts_ghost", "wave_id": "wave-ghost", "status": "waiting", "provider": "codex", "provider_session_id": null, "home": "jack@local", "cwd": "/src/ghost", "reason": "Orphaned handoff still shown", "created_at": "2026-07-15T00:00:00Z", "updated_at": "2026-07-15T00:00:00Z", "age_secs": 5},
-    {"session_id": "ih_done", "parent_kind": "task", "parent_id": "ts_stale", "wave_id": "wave-product", "status": "completed", "provider": "codex", "provider_session_id": null, "home": "jack@local", "cwd": "/src/loopflow.census-cadence", "reason": "Login completed", "created_at": "2026-07-14T00:00:00Z", "updated_at": "2026-07-14T00:10:00Z", "age_secs": 86400}
+    {
+      "session_id": "ih_wait_task",
+      "parent_kind": "task",
+      "parent_id": "ts_alive",
+      "wave_id": "wave-product",
+      "status": "waiting",
+      "provider": "codex",
+      "provider_session_id": "codex-1",
+      "home": "jack@local",
+      "cwd": "/src/loopflow.show-active-sessions",
+      "reason": "OAuth login required",
+      "created_at": "2026-07-15T00:00:00Z",
+      "updated_at": "2026-07-15T00:00:00Z",
+      "age_secs": 45
+    },
+    {
+      "session_id": "ih_attached_project",
+      "parent_kind": "project",
+      "parent_id": "ps_prod",
+      "wave_id": "wave-product",
+      "status": "attached",
+      "provider": "codex",
+      "provider_session_id": "codex-2",
+      "home": "jack@local",
+      "cwd": "/src/loopflow",
+      "reason": "Confirm the destructive rebase",
+      "created_at": "2026-07-15T00:00:00Z",
+      "updated_at": "2026-07-15T00:00:20Z",
+      "age_secs": 15
+    },
+    {
+      "session_id": "ih_wait_wave_ctx",
+      "parent_kind": "wave",
+      "parent_id": "wave-context",
+      "wave_id": "wave-context",
+      "status": "waiting",
+      "provider": "claude",
+      "provider_session_id": null,
+      "home": "ssh://jack@mini-heart",
+      "cwd": "/src/context",
+      "reason": "Approve wave-level plan change",
+      "created_at": "2026-07-15T00:00:00Z",
+      "updated_at": "2026-07-15T00:00:00Z",
+      "age_secs": 600
+    },
+    {
+      "session_id": "ih_ghost",
+      "parent_kind": "task",
+      "parent_id": "ts_ghost",
+      "wave_id": "wave-ghost",
+      "status": "waiting",
+      "provider": "codex",
+      "provider_session_id": null,
+      "home": "jack@local",
+      "cwd": "/src/ghost",
+      "reason": "Orphaned handoff still shown",
+      "created_at": "2026-07-15T00:00:00Z",
+      "updated_at": "2026-07-15T00:00:00Z",
+      "age_secs": 5
+    },
+    {
+      "session_id": "ih_done",
+      "parent_kind": "task",
+      "parent_id": "ts_stale",
+      "wave_id": "wave-product",
+      "status": "completed",
+      "provider": "codex",
+      "provider_session_id": null,
+      "home": "jack@local",
+      "cwd": "/src/loopflow.census-cadence",
+      "reason": "Login completed",
+      "created_at": "2026-07-14T00:00:00Z",
+      "updated_at": "2026-07-14T00:10:00Z",
+      "age_secs": 86400
+    }
   ]
 }

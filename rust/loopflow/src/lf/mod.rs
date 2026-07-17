@@ -286,14 +286,35 @@ pub enum Commands {
         #[arg(long, value_name = "DAYS")]
         days: Option<u32>,
     },
-    /// Show token usage and cost by repo and provider (from the local ledger)
+    /// Show subscription state per account and token spend by repo/provider
     Usage {
         /// Emit per-boundary spend (skill, provider:model, repo) as JSON
         #[arg(long)]
         json: bool,
-        /// Window for --json, in days
+        /// Spend window, in days
         #[arg(long, default_value_t = 30)]
         days: u32,
+        /// Poll every account now, even the freshly observed ones
+        #[arg(long, short = 'r')]
+        refresh: bool,
+        /// Skip polling entirely; show only stored observations
+        #[arg(long)]
+        cached: bool,
+    },
+    /// Show how failed CI is detected, repaired, and landed across this Home
+    Ci {
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Scope to one Wave
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one GitHub owner/repo
+        #[arg(long)]
+        repo: Option<String>,
+        /// Emit the complete incident report as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Graph output-token throughput for the last hour and show running lf processes
     Top,
@@ -1564,6 +1585,15 @@ pub enum AuthCommand {
     },
     /// Clear observed utilization and cooldown for an account
     Reset { provider: String, account: String },
+    /// Run the provider's CLI on a managed account's credential home
+    Exec {
+        provider: String,
+        /// Managed account id or login email
+        account: String,
+        /// Arguments passed through to the provider CLI
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1722,6 +1752,31 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn ci_report_accepts_machine_wide_filters() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "ci",
+            "--since",
+            "24h",
+            "--wave",
+            "infrastructure",
+            "--repo",
+            "loopflowstudio/loopflow",
+            "--json",
+        ])
+        .expect("parse CI report");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Ci {
+                since,
+                wave: Some(wave),
+                repo: Some(repo),
+                json: true,
+            }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
+        ));
+    }
 
     #[test]
     fn auth_help_exposes_managed_account_flows() {

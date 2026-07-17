@@ -22,6 +22,7 @@ pub mod repository;
 pub mod security;
 pub mod session_context;
 pub mod store;
+pub mod subscription;
 pub mod task;
 pub mod trace;
 pub mod wave;

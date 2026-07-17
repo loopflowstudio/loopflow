@@ -1490,8 +1490,8 @@ if [ -f "$LF_TEST_CODEX_COUNT" ]; then count=$(cat "$LF_TEST_CODEX_COUNT"); fi
 count=$((count + 1))
 printf '%s' "$count" > "$LF_TEST_CODEX_COUNT"
 printf '%s\n' "$CODEX_HOME" >> "$LF_TEST_CODEX_HOMES"
-printf '%s\n' 'https://auth.openai.com/oauth/authorize?client_id=test'
 if [ "$LF_TEST_CODEX_FAIL_FIRST" = "1" ] && [ "$count" = "1" ]; then exit 1; fi
+printf '%s\n' 'https://auth.openai.com/oauth/authorize?client_id=test'
 mkdir -p "$CODEX_HOME"
 cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
 "#,
@@ -1640,8 +1640,11 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
 
         assert_eq!(
             *TEST_OPENED_CHROME_PROFILES.lock().unwrap(),
-            ["Profile 3".to_string(), "Profile 8".to_string()]
+            ["Profile 8".to_string()]
         );
+        let failures = TEST_ACCESS_PROFILE_FAILURES.lock().unwrap();
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].starts_with("Profile 3:"));
         assert_eq!(
             fs::read_to_string(temp.path().join("codex-count")).unwrap(),
             "2"

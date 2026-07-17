@@ -246,10 +246,14 @@ fn summarize(incidents: &[CiIncidentDto]) -> CiSummaryDto {
             .iter()
             .filter(|incident| incident.outcome == "blocked")
             .count(),
+        // `!human_assisted` alone only says nobody was seen intervening, which is
+        // also true of a green that no `ci-fix` wake repaired.
         autonomous: incidents
             .iter()
             .filter(|incident| {
-                matches!(incident.outcome.as_str(), "green" | "merged") && !incident.human_assisted
+                matches!(incident.outcome.as_str(), "green" | "merged")
+                    && incident.trigger_command_id.is_some()
+                    && !incident.human_assisted
             })
             .count(),
         human_assisted: incidents
@@ -354,8 +358,53 @@ fn print_report(report: &CiReportDto) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_since, percentile};
+    use super::{parse_since, percentile, summarize, CiIncidentDto};
     use time::{Duration, OffsetDateTime};
+
+    fn green_incident(trigger: Option<&str>) -> CiIncidentDto {
+        CiIncidentDto {
+            identity: "github:ci:loopflow:1034".to_string(),
+            repo: "loopflow".to_string(),
+            wave: "infrastructure".to_string(),
+            task: "W2-293".to_string(),
+            task_status: "running".to_string(),
+            task_status_reason: String::new(),
+            pr_number: 1034,
+            attempt: 1,
+            fixes_for_pr: 1,
+            failed_head_sha: "0123456789ab".to_string(),
+            failure_set: vec!["rust-test".to_string()],
+            provider_completed_at: None,
+            observed_at: "2026-07-16T00:00:00Z".to_string(),
+            observer: "poll".to_string(),
+            trigger_command_id: trigger.map(str::to_string),
+            responded_at: None,
+            green_at: Some("2026-07-16T00:10:00Z".to_string()),
+            merged_at: None,
+            blocked_at: None,
+            blocked_reason: None,
+            outcome: "green".to_string(),
+            human_assisted: false,
+            detection_seconds: None,
+            response_seconds: None,
+            green_seconds: None,
+            merge_seconds: None,
+            task_cycle_seconds: None,
+        }
+    }
+
+    /// PR #1034: a normal Task body pushed the fix, so no `ci-fix` wake owned the
+    /// repair. Dropping the `trigger_command_id` clause makes this go red; the
+    /// triggered case below still passes, so this is the guard of the pair.
+    #[test]
+    fn an_untriggered_green_is_not_autonomous() {
+        assert_eq!(summarize(&[green_incident(None)]).autonomous, 0);
+    }
+
+    #[test]
+    fn a_triggered_green_is_autonomous() {
+        assert_eq!(summarize(&[green_incident(Some("cc_1018"))]).autonomous, 1);
+    }
 
     #[test]
     fn relative_and_absolute_since_values_parse() {

@@ -506,9 +506,8 @@ fn backup_before_migration(
     if !requires_migration_sqlite(conn)? {
         return Ok(None);
     }
-    // Nothing applied yet means no previous generation to preserve, so there is
-    // nothing to back up — and nothing to fingerprint either: the hash below
-    // reads `schema_migrations`, which an uninitialized database does not have.
+    // Nothing applied: no previous generation to preserve, and the fingerprint
+    // below reads `schema_migrations`, which does not exist yet.
     let Some(previous) = latest_applied_version_sqlite(conn)? else {
         return Ok(None);
     };
@@ -1163,18 +1162,9 @@ pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult
 
 /// Whether this database still owes migration work.
 ///
-/// An *uninitialized* database owes all of it. Both cases below are databases
-/// with no schema yet — no user tables at all, and an empty `schema_migrations`
-/// as the only table — and each answers `true` so the caller reaches
-/// `apply_sqlite_transaction` and creates the schema.
-///
-/// They used to answer `false`, which read as "nothing to do" and was true only
-/// of a *current* schema. Since `SqliteStore::new` routes on `existing_database`
-/// — which asks whether the file has bytes, not whether it holds a schema — a
-/// database killed mid-migration (the exclusive transaction rolls back, the
-/// file keeps its header, the tables are gone) took the migrate path, was told
-/// nothing was pending, and wedged permanently on `no such table: run_events`.
-/// That is reachable in exactly the fleet this predicate's caller was fixed for.
+/// An uninitialized database owes all of it — no user tables, or an empty
+/// `schema_migrations` as its only table. Neither is "nothing to do"; only a
+/// current schema is.
 pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreResult<bool> {
     let tables = user_tables(conn)?;
     if !tables.iter().any(|table| table == "schema_migrations") {
@@ -2383,19 +2373,10 @@ mod tests {
         writer.execute_batch("ROLLBACK").unwrap();
     }
 
-    /// A database file with bytes but no schema must still get one.
-    ///
-    /// `SqliteStore::new` routes to the migrate path on `existing_database`,
-    /// which asks whether the file has bytes — not whether it holds a schema. A
-    /// process killed mid-migration leaves exactly this state: the exclusive
-    /// transaction rolls back, the file keeps its header, the tables are gone.
-    /// Once the migrate path is gated on `requires_migration_sqlite`, that
-    /// predicate is the only thing standing between this file and a permanent
-    /// wedge on `no such table: run_events`.
-    ///
-    /// Reads `run_events` back through the store's own API rather than trusting
-    /// a bare `Ok` from the open, because the regression's exact face was a
-    /// successful open over a database with no tables in it.
+    /// What a process killed mid-migration leaves: the file keeps its header,
+    /// the tables are gone. `SqliteStore::new` still routes it to the migrate
+    /// path, because `existing_database` asks whether the file has bytes, not
+    /// whether it holds a schema.
     #[test]
     fn an_existing_schema_less_database_still_gets_its_schema() {
         let directory = tempfile::tempdir().unwrap();
@@ -2411,6 +2392,8 @@ mod tests {
 
         let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
 
+        // A bare `Ok` is not the proof: the regression opened fine and failed
+        // on the first read of a table it never created.
         assert!(store.list_run_events_since(0).unwrap().is_empty());
         let conn = rusqlite::Connection::open(&path).unwrap();
         assert_eq!(

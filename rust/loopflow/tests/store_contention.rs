@@ -1,26 +1,12 @@
 //! Concurrent local ledger writes stay deterministic at fleet fanout (ENG-7).
 //!
-//! On 2026-07-16/17 a fleet of ~51 concurrent Loopflow/provider processes killed
-//! live Session bodies with `sqlite error: database is locked`, parking W2-284,
-//! W2-285 and W2-287 on a manual resume.
-//!
-//! The cause was not write contention. Writes over a live connection never lost
-//! a receipt at that fanout. It was that every `SqliteStore::new` took
-//! `BEGIN EXCLUSIVE` and held it across a whole-database `PRAGMA
-//! foreign_key_check` whether or not a migration was pending — while
-//! `journal::open_ledger()` opens a connection per run event. The fleet
-//! serialized behind that lock and writers starved past `busy_timeout`. At
-//! fanout 51 that lost 426 of 1020 receipts.
-//!
-//! PR #1030 fixed it by consulting `requires_migration_sqlite` before opening
-//! the migration transaction, and carries the timing-free proof that a current
-//! schema takes no write lock (`current_schema_does_not_take_the_database_write_lock`).
-//! This is the evidence that fix did not have: the fleet-scale measurement.
+//! The open is what contends, not the write, so the probe must open per event
+//! as `journal::open_ledger()` does — writes over a live connection lost nothing
+//! even at 5100 inserts, while open-per-event lost 426 of 1020 before #1030.
 //!
 //! Each writer opens its own connection. SQLite locks per connection through
-//! file locks and the WAL's shared memory, not per process, so separate
-//! connections in one process contend exactly as separate processes do — which
-//! is what lets a fleet-scale proof run deterministically in one test binary.
+//! file locks and the WAL's shared memory, not per process, so threads here
+//! contend exactly as separate processes do.
 
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::RunEventRow;
@@ -59,9 +45,6 @@ fn run_event(run: &str, seq: i64) -> RunEventRow {
     }
 }
 
-/// Read back through a plain connection rather than a test-only accessor on the
-/// store: the ledger's contents are the thing under test, and production code
-/// owes tests no seam.
 fn count(path: &Path, sql: &str) -> i64 {
     rusqlite::Connection::open(path)
         .unwrap()
@@ -69,12 +52,8 @@ fn count(path: &Path, sql: &str) -> i64 {
         .expect("read back the ledger")
 }
 
-/// The fleet-scale proof: every requested receipt is recorded exactly once, with
-/// a fresh connection per event, at the fanout that produced the incident.
-///
-/// The row-count assertions are what stop this passing for free. "No write
-/// returned an error" is also satisfied by a ledger that recorded nothing, so
-/// the exact count and the distinct-key count are the ones that bite.
+/// The row counts are what stop this passing for free: "no write errored" also
+/// holds for a ledger that recorded nothing.
 #[test]
 fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
     let dir = tempfile::tempdir().unwrap();
@@ -110,8 +89,7 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
     assert_eq!(
         lost.load(Ordering::Relaxed),
         0,
-        "writes failed under contention; each one is a lost execution receipt, \
-         and enough of them killed live Session bodies"
+        "writes failed under contention; each one is a lost execution receipt"
     );
     assert_eq!(
         count(&path, "SELECT COUNT(*) FROM run_events"),

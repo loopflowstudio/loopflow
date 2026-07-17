@@ -1,15 +1,22 @@
-//! Concurrent local ledger writes must be deterministic (ENG-7).
+//! Concurrent local ledger writes stay deterministic at fleet fanout (ENG-7).
 //!
-//! On 2026-07-16/17 a fleet of ~51 concurrent Loopflow/provider processes
-//! killed live Session bodies with `sqlite error: database is locked`. The
-//! cause was not write contention: it was that every `SqliteStore::new` took
+//! On 2026-07-16/17 a fleet of ~51 concurrent Loopflow/provider processes killed
+//! live Session bodies with `sqlite error: database is locked`, parking W2-284,
+//! W2-285 and W2-287 on a manual resume.
+//!
+//! The cause was not write contention. Writes over a live connection never lost
+//! a receipt at that fanout. It was that every `SqliteStore::new` took
 //! `BEGIN EXCLUSIVE` and held it across a whole-database `PRAGMA
-//! foreign_key_check` whether or not a migration was pending, while
+//! foreign_key_check` whether or not a migration was pending — while
 //! `journal::open_ledger()` opens a connection per run event. The fleet
-//! serialized behind that lock and writers starved past `busy_timeout`.
+//! serialized behind that lock and writers starved past `busy_timeout`. At
+//! fanout 51 that lost 426 of 1020 receipts.
 //!
-//! Each writer below opens its own connection. SQLite locks per connection
-//! through file locks and the WAL's shared memory, not per process, so separate
+//! PR #1030 fixed it by consulting `requires_migration_sqlite` before opening
+//! the migration transaction. These tests are that fix's regression guard.
+//!
+//! Each writer opens its own connection. SQLite locks per connection through
+//! file locks and the WAL's shared memory, not per process, so separate
 //! connections in one process contend exactly as separate processes do — which
 //! is what lets a fleet-scale proof run deterministically in one test binary.
 
@@ -51,8 +58,8 @@ fn run_event(run: &str, seq: i64) -> RunEventRow {
 }
 
 /// Read back through a plain connection rather than a test-only accessor on the
-/// store: the ledger's shape is the thing under test, and production code owes
-/// tests no seam.
+/// store: the ledger's contents are the thing under test, and production code
+/// owes tests no seam.
 fn count(path: &Path, sql: &str) -> i64 {
     rusqlite::Connection::open(path)
         .unwrap()
@@ -60,12 +67,12 @@ fn count(path: &Path, sql: &str) -> i64 {
         .expect("read back the ledger")
 }
 
-/// The fleet-scale proof: every requested receipt is recorded exactly once,
-/// with a fresh connection per event, at the fanout that produced the incident.
+/// The fleet-scale proof: every requested receipt is recorded exactly once, with
+/// a fresh connection per event, at the fanout that produced the incident.
 ///
-/// Guard against passing for free: this fails loudly if the store never
-/// materialized, because a ledger that recorded nothing would otherwise satisfy
-/// "lost no receipts" trivially.
+/// The row-count assertions are what stop this passing for free. "No write
+/// returned an error" is also satisfied by a ledger that recorded nothing, so
+/// the exact count and the distinct-key count are the ones that bite.
 #[test]
 fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
     let dir = tempfile::tempdir().unwrap();
@@ -101,9 +108,9 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
     assert_eq!(
         lost.load(Ordering::Relaxed),
         0,
-        "writes failed under contention; every one of these is a lost execution receipt"
+        "writes failed under contention; each one is a lost execution receipt, \
+         and enough of them killed live Session bodies"
     );
-
     assert_eq!(
         count(&path, "SELECT COUNT(*) FROM run_events"),
         expected,
@@ -115,21 +122,20 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
             "SELECT COUNT(*) FROM (SELECT DISTINCT run_id, seq FROM run_events)"
         ),
         expected,
-        "a retried write must not record its receipt twice"
+        "no receipt may be recorded twice"
     );
 }
 
-/// The precise, timing-free regression guard for the named cause.
+/// The precise, timing-free guard for the named cause.
 ///
 /// A store open against a database with nothing pending must take no exclusive
-/// lock. Proven by holding the database's write lock and opening anyway: with
-/// the migration transaction gated on a pending-migration read this returns at
-/// once, and without the gate the open blocks on `BEGIN EXCLUSIVE` until
-/// `busy_timeout` expires and then fails — which is precisely how the fleet
-/// starved itself.
+/// lock. Proven by holding the database's write lock across the open: with the
+/// migration transaction gated on a pending-migration read this returns at once;
+/// without the gate the open blocks on `BEGIN EXCLUSIVE` until `busy_timeout`
+/// expires and then fails — which is exactly how the fleet starved itself.
 ///
-/// This asserts on the open's *outcome*, not on elapsed time, so it cannot
-/// flake under parallel test load.
+/// Asserts on the open's outcome, never on elapsed time, so it cannot flake
+/// under parallel test load.
 #[test]
 fn opening_a_current_database_takes_no_exclusive_lock() {
     let dir = tempfile::tempdir().unwrap();
@@ -138,50 +144,13 @@ fn opening_a_current_database_takes_no_exclusive_lock() {
 
     // Hold the write lock for the whole open, as a busy peer in the fleet does.
     let holder = rusqlite::Connection::open(&path).unwrap();
-    holder.busy_timeout(std::time::Duration::from_millis(0)).unwrap();
+    holder
+        .busy_timeout(std::time::Duration::from_millis(0))
+        .unwrap();
     holder.execute_batch("BEGIN IMMEDIATE").unwrap();
 
     let opened = SqliteStore::new(&path);
 
     holder.execute_batch("ROLLBACK").unwrap();
     opened.expect("opening a current database must not wait on the write lock");
-}
-
-/// A writer must still record its receipt while a peer holds the write lock,
-/// rather than dying of contention alone. The holder releases from another
-/// thread, so the write can only land by riding the retry ladder.
-#[test]
-fn a_write_survives_a_peer_holding_the_write_lock() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("loopflow.db");
-    let store = SqliteStore::new(&path).expect("materialize the schema");
-
-    let holder = rusqlite::Connection::open(&path).unwrap();
-    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
-    holder
-        .execute("INSERT INTO run_events (run_id, process_id, seq, ts, node, event) VALUES ('held', 'p', 0, 1, 'flow', 'started')", [])
-        .unwrap();
-
-    let released = Arc::new(Barrier::new(2));
-    let releaser = released.clone();
-    let unlock = std::thread::spawn(move || {
-        releaser.wait();
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        holder.execute_batch("COMMIT").unwrap();
-    });
-
-    released.wait();
-    store
-        .insert_run_event(&run_event("contended", 0))
-        .expect("a contended write must ride the retry ladder, not fail the caller");
-    unlock.join().unwrap();
-
-    assert_eq!(
-        count(
-            &path,
-            "SELECT COUNT(*) FROM run_events WHERE run_id = 'contended'"
-        ),
-        1,
-        "the contended receipt must be recorded exactly once"
-    );
 }

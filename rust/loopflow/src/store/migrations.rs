@@ -327,10 +327,10 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
-            ordinal: 27,
+            ordinal: 28,
         },
         name: "task_gate_settlement",
-        sql: include_str!("migrations/0.11.027_task_gate_settlement.sql"),
+        sql: include_str!("migrations/0.11.028_task_gate_settlement.sql"),
     },
 ];
 
@@ -1437,7 +1437,8 @@ mod tests {
                 "0.11.023_capture_pruned_state".to_string(),
                 "0.11.024_ci_incidents".to_string(),
                 "0.11.025_usage_deltas".to_string(),
-                "0.11.026_lineage_boundary".to_string()
+                "0.11.026_lineage_boundary".to_string(),
+                "0.11.028_task_gate_settlement".to_string()
             ]
         );
     }
@@ -1445,8 +1446,8 @@ mod tests {
     #[test]
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
-        // Bait for the withheld tail (`0.11.026_lineage_boundary`): a parent no
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
+        // Bait for a withheld tail (`0.11.026_lineage_boundary`): a parent no
         // row records. Its survival is what proves the tail stayed withheld.
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
@@ -1478,7 +1479,7 @@ mod tests {
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
@@ -1525,7 +1526,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 4]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 5]).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"

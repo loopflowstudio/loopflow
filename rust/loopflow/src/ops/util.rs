@@ -119,7 +119,7 @@ pub fn resolve_caller_authority(explicit_wave: Option<&Wave>) -> OpsResult<Calle
                     store.get_wave_by_name(&lookup).await
                 }
                 .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
-                row.ok_or_else(|| WaveResolveError::StaleIdentity(lookup))
+                row.ok_or(WaveResolveError::StaleIdentity(lookup))
             })
         })
         .join()

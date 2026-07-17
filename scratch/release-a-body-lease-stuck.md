@@ -13,7 +13,10 @@ resolved at the head that carries this table.
 | "tmux binary missing ⇒ identity absent" is fail-open | `0de32ffd8` | removed; unavailable or ambiguous tmux is `Unprovable` |
 | Name the fail-closed cases as executable guards | `e067f44e6` | the named-guard table in Done when |
 | pid 1's group is not a valid `EPERM` fixture (`Group(1)` is `kill(-1, 0)` broadcast; root makes it non-deterministic) | `fc002534a` | pure `classify_signal_probe` + `signal_probe_id`; no privileged host identity is a fixture; real spawned/absent groups retained for end-to-end |
-| W2-297: keep one authoritative execution identity; a recycled pid must not veto a release | this head | `Gone` = tmux-absent + **one** identity (group; pid only as fallback when no group was recorded). The all-identities conjunction is gone, and the `observe_provider` finding below explains why tmux — not the pid — carries the veto |
+| W2-297: keep one authoritative execution identity; a recycled pid must not veto a release | `6d3b54d6d` | `Gone` = tmux-absent + **one** identity (group; pid only as fallback when no group was recorded). The all-identities conjunction is gone, and the `observe_provider` finding below explains why tmux — not the pid — carries the veto |
+| v2: the four presence tests depend on the runner host having tmux | `25a006e4a` | `FakeTmux` pins tmux per test (shaped after `AmbientGuard`'s fake `gh`, replacing the script rather than deleting it). Production semantics untouched |
+| v3: the fixture's private lock is a second authority and still races every other `PATH` test | `25a006e4a` | holds `crate::journal::test_env_lock`; the swap exposed three real races, each fixed by taking that lock where its contract already required it |
+| **Found while fixing v2, not asked for:** `classify_tmux_probe_failure` did not recognize the wording tmux really prints for a vanished server | `25a006e4a` | see *Both wordings* below — this was a production defect that made the feature a no-op on the exact host shape it targets |
 
 ## Problem
 
@@ -298,8 +301,8 @@ the same value. So the release probes tmux with its own tri-state, over
 |---------|---------|
 | exit 0, recorded name in the set | `Present` |
 | exit 0, recorded name not in the set | `Absent` — the server answered authoritatively |
-| non-zero exit, stderr recognized as no-server / no-sessions | `Absent` |
-| non-zero exit, stderr unrecognized | `Unprovable` |
+| non-zero exit, stderr recognized as no-server / no-sessions (**both wordings** — see below) | `Absent` |
+| non-zero exit, stderr unrecognized, or a socket that refused us | `Unprovable` |
 | the command cannot be spawned (incl. tmux absent from `PATH`) | `Unprovable` |
 
 **"tmux binary missing ⇒ identity absent" is removed from this design.** It was
@@ -317,12 +320,31 @@ has already unbarred a second body. Reap fails open by design; release fails
 closed by design. That divergence is deliberate and is worth a comment at both
 sites.
 
-Matching tmux's stderr by string is the one soft spot here, and it is soft in
-the safe direction: if tmux rewords its no-server message, unrecognized stderr
-falls to `Unprovable`, the lease stays blocked, and the behavior is exactly
-today's status quo. There is no wording change that turns into a wrong release.
-Note also that the common case — a running tmux server — is answered by exit 0
-and set membership, and never reads the strings at all.
+**Both wordings.** tmux reports an absent server two ways, and recognizing only
+the first is what this design originally did:
+
+```text
+no server running on /tmp/tmux-501/default
+error connecting to /tmp/tmux-501/default (No such file or directory)
+```
+
+The second is what tmux 3.6a actually prints when the socket is gone, verified
+against the real binary. Missing it is not harmless conservatism: a host whose
+last body exited has no server, so every probe there reads `Unprovable` and **no
+lease ever releases** — the feature is a no-op in exactly the situation it exists
+for, since a body's tmux session dying *with* the server is W2-230's own shape.
+That is the one place the fail-closed asymmetry bites, and it is why the
+recognized set must track what tmux really prints rather than what reads tidy.
+
+The connect error is absence only when it is `ENOENT` — the socket is not there,
+so no server is. Any other connect failure (`Permission denied`, tmux 3.6a's
+`Socket operation on non-socket`) is a socket that refused us: `Unprovable`.
+
+Matching stderr by string remains the soft spot, and it stays soft in the safe
+direction — an unrecognized wording falls to `Unprovable`, the lease holds, and
+the behavior is today's. No rewording can produce a wrong release; it can only
+cost a release that should have happened. The common case — a running server —
+is answered by exit 0 and set membership and never reads the strings at all.
 
 ### 2. Release is probe-only. It never re-signals.
 

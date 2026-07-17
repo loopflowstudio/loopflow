@@ -5,25 +5,35 @@ uv run python scripts/new_migration.py add_wave_colour   # author a draft (no or
 uv run python scripts/check_migrations.py                # what CI and the release run
 ```
 
-Write the SQL, paste the printed entry into the `DRAFTS` slice in `migrations.rs`,
-and you are done. A **draft** carries a stable snake_case name and **no ordinal**;
-it lives at `migrations/drafts/<name>.sql`. Because a draft has no ordinal, two
-branches authored concurrently never contend for or renumber one, and the
-allocator performs no `git fetch` or rebase. Ordering that matters — a data
-migration that must run after another — is declared with `--depends-on`, not by a
-serial number.
+Write the SQL below the header, and you are done — there is nothing to paste into
+`migrations.rs`. A **draft** carries a stable snake_case name, an immutable
+authoring id, and **no ordinal**; it lives at `migrations/drafts/<name>__<id>.sql`.
+The draft's file *is* its registration: canonicalization discovers it by scanning
+the directory, and Rust never sees it until the release cut appends the canonical
+`Migration` entry it generates. Because a draft has no ordinal and two branches
+authoring the same name mint different ids, concurrent branches never contend,
+renumber, or share a registry edit, and the allocator performs no `git fetch` or
+rebase. Ordering that matters — a data migration that must run after another — is
+declared with `--depends-on` (naming another draft or an already-released
+migration), not by a serial number.
 
 ## The release cut assigns canonical ids
 
 The release PR is the single publication boundary that turns drafts into canonical
-migrations. Inside its worktree, `scripts/canonicalize_migrations.py` freezes the
-draft set, rejects missing or cyclic dependencies, topologically orders it (edges
-first, ties broken by name — never merge time, PR number, or wall clock), and
-assigns the next contiguous ordinals in the namespace of the version being cut
-(a patch continues the current `<major>.<minor>`; a minor bump starts a fresh
-sequence at ordinal 1). It writes `<major>.<minor>.<ordinal>_<name>.sql`, appends
-the `Migration` entry, and deletes the draft. Same drafts and version always
-produce the same ids and diff, so an aborted release regenerates identically.
+migrations. `lf release run` invokes `scripts/canonicalize_migrations.py` inside the
+release worktree, **after the version bump and before the commit**, so the generated
+files are part of the release PR and run under real Rust CI before the queue merges
+and tags. It freezes the draft set, rejects missing or cyclic dependencies (and two
+drafts sharing a readable name in one cut), topologically orders it (edges first,
+ties broken by name — never merge time, PR number, or wall clock), and assigns the
+next contiguous ordinals in the namespace of the version being cut (a patch continues
+the current `<major>.<minor>`; a minor bump starts a fresh sequence at ordinal 1). It
+plans the whole tail in memory, then installs it atomically — writing
+`<major>.<minor>.<ordinal>_<name>.sql`, appending the `Migration` entry, and deleting
+the draft — and on any failure restores the tree byte-for-byte. Same drafts and
+version always produce the same ids and diff, so an aborted release regenerates
+identically. The manual script is a `--check` preview only; the release run is the
+authority that installs.
 
 Only the merged release commit is canonical migration authority. Between releases,
 ordinary merges add drafts, so main's canonical set does not move and a branch

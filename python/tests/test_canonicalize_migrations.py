@@ -37,8 +37,35 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def draft(repo: Path, name: str, depends_on: str = "", body: str = "SELECT 1;\n") -> None:
-    (repo / DRAFTS / f"{name}.sql").write_text(f"-- name: {name}\n-- depends_on: {depends_on}\n{body}")
+def _token(name: str) -> str:
+    # Deterministic per name so re-run/two-repo tests build identical draft files.
+    import hashlib
+
+    return hashlib.sha1(name.encode()).hexdigest()[:8]
+
+
+def draft(
+    repo: Path,
+    name: str,
+    depends_on: str = "",
+    body: str = "SELECT 1;\n",
+    token: str | None = None,
+) -> None:
+    token = token or _token(name)
+    (repo / DRAFTS / f"{name}__{token}.sql").write_text(
+        f"-- name: {name}\n-- id: {token}\n-- depends_on: {depends_on}\n{body}"
+    )
+
+
+def draft_names(repo: Path) -> set[str]:
+    import re
+
+    pattern = re.compile(r"^([a-z][a-z0-9_]*)__[0-9a-f]+\.sql$")
+    return {
+        match.group(1)
+        for path in (repo / DRAFTS).glob("*.sql")
+        if (match := pattern.match(path.name))
+    }
 
 
 def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -128,7 +155,7 @@ def test_a_cycle_fails_before_writing_anything(repo: Path) -> None:
     assert "cycle" in result.stderr
     assert (repo / MIGRATIONS_RS).read_text() == before
     assert canonical_files(repo) == ["0.11.001_initial.sql"]
-    assert {p.name for p in (repo / DRAFTS).glob("*.sql")} == {"a.sql", "b.sql"}
+    assert draft_names(repo) == {"a", "b"}
 
 
 def test_check_mode_writes_nothing(repo: Path) -> None:
@@ -140,7 +167,7 @@ def test_check_mode_writes_nothing(repo: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "0.11.002_add_wave_colour" in result.stdout
     assert (repo / MIGRATIONS_RS).read_text() == before
-    assert (repo / DRAFTS / "add_wave_colour.sql").exists()
+    assert draft_names(repo) == {"add_wave_colour"}
 
 
 def test_re_running_the_same_release_is_deterministic(tmp_path: Path) -> None:
@@ -171,3 +198,63 @@ def test_an_abandoned_release_leaves_drafts_regenerable(repo: Path) -> None:
     assert "0.11.002_add_wave_colour" in run(repo, "0.11.30", "--check").stdout
     run(repo, "0.11.30")
     assert (repo / MIGRATIONS / "0.11.002_add_wave_colour.sql").exists()
+
+
+def test_a_dependency_on_a_released_migration_canonicalizes_after_it(repo: Path) -> None:
+    # `initial` is the already-released 0.11.001; depending on it across the
+    # release boundary is legal and imposes no in-cut ordering.
+    draft(repo, "add_wave_colour", depends_on="initial")
+
+    result = run(repo, "0.11.30")
+
+    assert result.returncode == 0, result.stderr
+    assert (repo / MIGRATIONS / "0.11.002_add_wave_colour.sql").exists()
+
+
+def test_a_dependency_on_an_unknown_name_fails(repo: Path) -> None:
+    draft(repo, "add_wave_colour", depends_on="nonexistent")
+    before = (repo / MIGRATIONS_RS).read_text()
+
+    result = run(repo, "0.11.30")
+
+    assert result.returncode == 1
+    assert "neither a draft" in result.stderr
+    assert (repo / MIGRATIONS_RS).read_text() == before
+    assert draft_names(repo) == {"add_wave_colour"}
+
+
+def test_two_drafts_sharing_a_readable_name_fail(repo: Path) -> None:
+    # Distinct tokens keep the files distinct at authoring; a shared readable
+    # name only ever surfaces as one release-cut failure, never a merge conflict.
+    draft(repo, "dup", token="aaaaaaaa")
+    draft(repo, "dup", token="bbbbbbbb")
+    before = (repo / MIGRATIONS_RS).read_text()
+
+    result = run(repo, "0.11.30")
+
+    assert result.returncode == 1
+    assert "share the readable name" in result.stderr
+    assert (repo / MIGRATIONS_RS).read_text() == before
+
+
+def test_a_write_failure_leaves_the_tree_byte_identical(repo: Path) -> None:
+    # Force the atomic registry replace to fail (its parent dir is read-only)
+    # after the canonical files are written, and prove the rollback restores the
+    # tree byte-for-byte: registry, canonical dir, and drafts all unchanged.
+    draft(repo, "add_wave_colour", body="ALTER TABLE waves ADD COLUMN colour TEXT;\n")
+    before_registry = (repo / MIGRATIONS_RS).read_text()
+    before_canonical = canonical_files(repo)
+    before_drafts = {p.name: p.read_text() for p in (repo / DRAFTS).glob("*.sql")}
+
+    store_dir = (repo / MIGRATIONS_RS).parent
+    store_dir.chmod(0o500)
+    try:
+        result = run(repo, "0.11.30")
+    finally:
+        store_dir.chmod(0o700)
+
+    assert result.returncode == 1
+    assert "restored byte-for-byte" in result.stderr
+    assert (repo / MIGRATIONS_RS).read_text() == before_registry
+    assert canonical_files(repo) == before_canonical
+    assert {p.name: p.read_text() for p in (repo / DRAFTS).glob("*.sql")} == before_drafts

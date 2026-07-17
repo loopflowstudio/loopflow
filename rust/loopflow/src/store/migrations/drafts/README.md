@@ -1,6 +1,9 @@
 # Draft migrations
 
 Author a schema change here with `scripts/new_migration.py <name>`. A draft carries
-a stable snake_case name and no ordinal; the release cut (`lf release run`) orders
-the accumulated drafts and assigns canonical `<major>.<minor>.<ordinal>` ids. See
+a stable snake_case name, an immutable authoring id, and no ordinal, living at
+`<name>__<id>.sql`. The file itself is the draft's registration — there is nothing to
+paste into `migrations.rs`. The release cut (`lf release run`) orders the accumulated
+drafts and assigns canonical `<major>.<minor>.<ordinal>` ids. Because two branches
+authoring the same name mint different ids, they never collide or share an edit. See
 `../MIGRATIONS.md`. This directory is empty between releases.

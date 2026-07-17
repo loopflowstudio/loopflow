@@ -2311,6 +2311,68 @@ mod tests {
         );
     }
 
+    /// The split of the real registry into "previous release" and "current tail":
+    /// every migration before the final namespace is a prior generation, and the
+    /// final namespace is the canonical tail the release cut most recently
+    /// installed. Falls back to all-but-the-last if the registry is single-namespace.
+    fn prior_generation_len() -> usize {
+        let last = MIGRATIONS.last().expect("registry is non-empty");
+        let last_namespace = (last.id.major, last.id.minor);
+        let prior = MIGRATIONS
+            .iter()
+            .take_while(|m| (m.id.major, m.id.minor) != last_namespace)
+            .count();
+        if prior == 0 {
+            MIGRATIONS.len() - 1
+        } else {
+            prior
+        }
+    }
+
+    /// A real two-generation upgrade: a database that stopped at the previous
+    /// release (a prefix of the *real* MIGRATIONS) takes the current canonical
+    /// tail exactly once, reaches the latest known version, and keeps referential
+    /// integrity. This exercises the tail the release cut actually generates, not
+    /// synthetic fixtures.
+    #[test]
+    fn a_prior_generation_database_upgrades_through_the_current_canonical_tail() {
+        let prior = prior_generation_len();
+        assert!(
+            prior >= 1 && prior < MIGRATIONS.len(),
+            "need two generations"
+        );
+
+        let conn = open();
+        apply_set(&conn, &MIGRATIONS[..prior]).unwrap();
+        assert_eq!(applied_versions(&conn).unwrap().len(), prior);
+
+        // The generated tail advances it, and applying it again is a no-op.
+        apply_set(&conn, MIGRATIONS).unwrap();
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    /// Fresh initialization over the full real registry — a brand-new database
+    /// runs the entire canonical tail from empty to the latest known version.
+    #[test]
+    fn a_fresh_database_initializes_through_the_full_canonical_tail() {
+        let conn = open();
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
     #[test]
     fn divergent_repair_publishes_the_unmodified_previous_generation() {
         let directory = tempfile::tempdir().unwrap();

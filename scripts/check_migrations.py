@@ -28,7 +28,8 @@ MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
+# A draft file is `<name>__<id>.sql`; the readable name never contains `__`.
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]+)\.sql$")
 # `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
 # value would swallow the newline and capture the next SQL line.
 DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
@@ -274,7 +275,7 @@ def _check_drafts(released_names: set[str]) -> None:
         match = DRAFT_FILE.match(path.name)
         if not match:
             _fail(
-                f"draft {path.name} is not `<snake_case_name>.sql` "
+                f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
                 "— run scripts/new_migration.py"
             )
         name = match.group(1)
@@ -286,6 +287,11 @@ def _check_drafts(released_names: set[str]) -> None:
             _fail(f"draft {path.name} header names {header.group(1)!r}, not {name!r}")
         if name in released_names:
             _fail(f"draft {name} collides with a released migration of the same name")
+        if name in drafts:
+            _fail(
+                f"two drafts share the readable name {name!r} — rename one "
+                "before releasing"
+            )
         depends = DRAFT_HEADER_DEPENDS.search(text)
         dependencies: list[str] = []
         if depends:
@@ -298,10 +304,12 @@ def _check_drafts(released_names: set[str]) -> None:
         for dependency in dependencies:
             if dependency == name:
                 _fail(f"draft {name} depends on itself")
-            if dependency not in drafts:
+            # A dependency resolves against another draft or an already-released
+            # migration (a released upstream is ordered before the whole cut).
+            if dependency not in drafts and dependency not in released_names:
                 _fail(
-                    f"draft {name} depends on {dependency!r}, which is not a draft "
-                    "(a draft depends only on other drafts)"
+                    f"draft {name} depends on {dependency!r}, which is neither a draft "
+                    "nor a released migration"
                 )
 
     cycle = _draft_cycle(drafts)

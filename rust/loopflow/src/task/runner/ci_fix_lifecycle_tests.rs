@@ -19,17 +19,24 @@
 //! mutex would not be shared. The duplication is forced by Rust's test
 //! architecture, not chosen. Do not try to DRY the two together.
 
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Mutex, MutexGuard, OnceLock,
+};
 
+use async_trait::async_trait;
 use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
+use tokio::sync::mpsc;
 
-use crate::chat::types::Lifecycle;
+use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::child_session::{
     ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
+    ChildDirective, ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
 };
+use crate::engine::agent::AgentConfig;
+use crate::harness::{Capabilities, Harness as ProviderHarness};
 use crate::id::WaveId;
 use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
 use crate::session_context::{
@@ -192,6 +199,187 @@ exit 90
 
 struct FakeGh {
     dir: std::path::PathBuf,
+}
+
+struct PushingHarness {
+    events: mpsc::UnboundedSender<ConversationEvent>,
+    gh_dir: std::path::PathBuf,
+    store: SharedStore,
+    task_id: TaskSessionId,
+    lease: ChildWriteLease,
+}
+
+struct LiveIdleHarness {
+    events: mpsc::UnboundedSender<ConversationEvent>,
+    gh_dir: std::path::PathBuf,
+    store: SharedStore,
+    task_id: TaskSessionId,
+    lease: ChildWriteLease,
+    first_turn_active: Arc<AtomicBool>,
+    repair_started_while_active: Arc<AtomicBool>,
+    sends: Arc<AtomicUsize>,
+    interrupts: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl ProviderHarness for PushingHarness {
+    async fn start(&mut self, _config: &AgentConfig) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+        let gh = FakeGh::new(self.gh_dir.clone());
+        gh.set_pr(1009, "open", "h2");
+        gh.set_checks(
+            &[("tests-result", "pending")],
+            &[("tests-result", "pending"), ("cargo-fmt", "pending")],
+        );
+
+        let mut pr = self
+            .store
+            .active_task_pr(&self.task_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("scripted repair lost its active PR"))?;
+        let observation = pr
+            .github_observation
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("scripted repair has no cached PR observation"))?;
+        observation.checked_at = OffsetDateTime::now_utc() - time::Duration::minutes(10);
+        self.store
+            .update_task_pr_for_lease(&pr, &self.lease)
+            .await?;
+
+        self.events
+            .send(ConversationEvent::TurnStarted {
+                turn_id: "ci-fix-turn".to_string(),
+            })
+            .map_err(|_| anyhow::anyhow!("runner dropped the ci-fix event stream"))?;
+        self.events
+            .send(ConversationEvent::TurnCompleted {
+                turn_id: "ci-fix-turn".to_string(),
+                status: Lifecycle::Completed,
+            })
+            .map_err(|_| anyhow::anyhow!("runner dropped the ci-fix event stream"))?;
+        Ok(())
+    }
+
+    async fn interrupt(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            supports_steer: false,
+        }
+    }
+
+    fn provider_session_id(&self) -> Option<String> {
+        Some("scripted-ci-fix".to_string())
+    }
+}
+
+#[async_trait]
+impl ProviderHarness for LiveIdleHarness {
+    async fn start(&mut self, _config: &AgentConfig) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+        match self.sends.fetch_add(1, Ordering::SeqCst) {
+            0 => {
+                let session = self
+                    .store
+                    .get_task_session(&self.task_id)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("live-idle Task disappeared"))?;
+                let pr = self
+                    .store
+                    .active_task_pr(&self.task_id)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("live-idle Task lost its PR"))?;
+                crate::ops::task::queue_ci_fix_command(&self.store, &session, &pr)
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                self.events
+                    .send(ConversationEvent::TurnStarted {
+                        turn_id: "gate-review-turn".to_string(),
+                    })
+                    .map_err(|_| anyhow::anyhow!("runner dropped the review event stream"))?;
+                let events = self.events.clone();
+                let first_turn_active = self.first_turn_active.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+                    first_turn_active.store(false, Ordering::SeqCst);
+                    let _ = events.send(ConversationEvent::TurnCompleted {
+                        turn_id: "gate-review-turn".to_string(),
+                        status: Lifecycle::Completed,
+                    });
+                });
+            }
+            1 => {
+                if self.first_turn_active.load(Ordering::SeqCst) {
+                    self.repair_started_while_active
+                        .store(true, Ordering::SeqCst);
+                }
+                let gh = FakeGh::new(self.gh_dir.clone());
+                gh.set_pr(1009, "open", "h2");
+                gh.set_checks(
+                    &[("tests-result", "pending")],
+                    &[("tests-result", "pending"), ("cargo-fmt", "pending")],
+                );
+
+                let mut pr = self
+                    .store
+                    .active_task_pr(&self.task_id)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("scripted repair lost its active PR"))?;
+                let observation = pr.github_observation.as_mut().ok_or_else(|| {
+                    anyhow::anyhow!("scripted repair has no cached PR observation")
+                })?;
+                observation.checked_at = OffsetDateTime::now_utc() - time::Duration::minutes(10);
+                self.store
+                    .update_task_pr_for_lease(&pr, &self.lease)
+                    .await?;
+
+                self.events
+                    .send(ConversationEvent::TurnStarted {
+                        turn_id: "live-idle-ci-fix".to_string(),
+                    })
+                    .map_err(|_| anyhow::anyhow!("runner dropped the ci-fix event stream"))?;
+                self.events
+                    .send(ConversationEvent::TurnCompleted {
+                        turn_id: "live-idle-ci-fix".to_string(),
+                        status: Lifecycle::Completed,
+                    })
+                    .map_err(|_| anyhow::anyhow!("runner dropped the ci-fix event stream"))?;
+            }
+            call => anyhow::bail!("unexpected provider input {}", call + 1),
+        }
+        Ok(())
+    }
+
+    async fn interrupt(&mut self) -> anyhow::Result<()> {
+        self.interrupts.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            supports_steer: false,
+        }
+    }
+
+    fn provider_session_id(&self) -> Option<String> {
+        Some("scripted-live-idle".to_string())
+    }
 }
 
 impl FakeGh {
@@ -418,8 +606,13 @@ impl Harness {
         let mut task = make_task(&wave, &project, repo.path());
         let pr_number = 1009;
         let mut pr = make_task_pr(&task);
+        let directive = ChildDirective::initial(
+            ChildRef::Task(task.id.clone()),
+            task.launch.issue.description.clone(),
+            ChildCommandSource::System,
+        );
         store
-            .create_task_session(&task, &pr)
+            .reserve_task_session_with_directive(&task, &pr, &directive)
             .await
             .expect("create task session");
         publish(&mut pr, pr_number, "h1");
@@ -618,6 +811,50 @@ impl Harness {
             .get_task_session(&self.task.id)
             .await
             .expect("read task")
+            .expect("task exists");
+        generation
+    }
+
+    async fn crash_and_reserve_successor(&mut self) -> u32 {
+        let revoked = self
+            .store
+            .revoke_task_process(
+                &self.task.id,
+                &crate::child_session::ChildBodyOutcome::Lost {
+                    reason: "body died after claiming its ci-fix wake".to_string(),
+                },
+            )
+            .await
+            .expect("revoke the predecessor generation");
+        self.store
+            .finish_revoked_task_process(&self.task.id, revoked.generation)
+            .await
+            .expect("finish the predecessor generation");
+
+        let mut successor = self
+            .store
+            .get_task_session(&self.task.id)
+            .await
+            .expect("read task")
+            .expect("task exists");
+        successor.set_status(TaskSessionStatus::Waiting, "repair body is restarting");
+        self.store
+            .update_task_session(&successor)
+            .await
+            .expect("park the task before reserving its successor");
+        let generation = successor.begin_generation("lf-ci-fix-real-runner".to_string());
+        let lease = self
+            .store
+            .reserve_task_process(&successor, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve the successor process")
+            .expect("a waiting task reserves its successor generation");
+        self.lease = lease;
+        self.task = self
+            .store
+            .get_task_session(&self.task.id)
+            .await
+            .expect("read reserved task")
             .expect("task exists");
         generation
     }
@@ -1472,6 +1709,222 @@ async fn a_repaired_head_accepts_the_wake_and_parks_without_a_gate() {
         1,
         "a repair pushes to the branch it was given; it never rotates to a successor PR"
     );
+}
+
+/// W2-280 generation 5 and W2-298 generation 3 both reached the real runner
+/// with a durable Gate cursor and an out-of-band `ci-fix` playhead. The generic
+/// completion path must finish that repair without validating or copying its
+/// cursor into `task-gate` before the dedicated settlement exit runs.
+#[tokio::test]
+async fn a_real_ci_fix_turn_preserves_the_gate_cursor_and_settles_its_wake() {
+    let mut harness = Harness::new().await;
+    let proposal = crate::task::TaskGateProposal {
+        status: TaskSessionStatus::Completed,
+        reason: "implementation is ready once CI passes".to_string(),
+    };
+    harness.task.lifecycle_phase = crate::task::TaskLifecyclePhase::Gate;
+    harness.task.phase_epoch = 4;
+    harness.task.phase_cursor = 1;
+    harness.task.phase_iteration = 2;
+    harness.task.gate_cycle = 3;
+    harness.task.gate_proposal = Some(proposal.clone());
+    harness
+        .store
+        .update_task_session_for_lease(&harness.task, &harness.lease)
+        .await
+        .expect("persist the Gate cursor before the repair");
+
+    harness.head("h1");
+    harness.checks_failing();
+    let (command, _) = harness.observe().await.expect("a red head mints a wake");
+    assert!(
+        harness.arm().await.is_some(),
+        "the predecessor generation claims and arms the wake"
+    );
+    assert_eq!(
+        harness.command_state(&command).await,
+        ChildCommandState::Claimed
+    );
+
+    let generation = harness.crash_and_reserve_successor().await;
+    let store = harness.store.clone();
+    let task_id = harness.task.id.clone();
+    let lease = harness.lease.clone();
+    let gh_dir = harness._guard.state_dir.clone();
+    let creator_store = store.clone();
+    let creator_task_id = task_id.clone();
+    let creator_lease = lease.clone();
+    super::run_task_session_with(
+        store.clone(),
+        task_id.clone(),
+        &lease,
+        Box::new(move |_name, _approval, events| {
+            Ok(Box::new(PushingHarness {
+                events,
+                gh_dir: gh_dir.clone(),
+                store: creator_store.clone(),
+                task_id: creator_task_id.clone(),
+                lease: creator_lease.clone(),
+            }))
+        }),
+    )
+    .await
+    .expect("the real runner completes and settles the ci-fix turn");
+
+    let session = store
+        .get_task_session(&task_id)
+        .await
+        .expect("read task")
+        .expect("task exists");
+    assert_eq!(
+        session.lifecycle_phase,
+        crate::task::TaskLifecyclePhase::Gate
+    );
+    assert_eq!(session.phase_epoch, 4);
+    assert_eq!(session.phase_cursor, 1);
+    assert_eq!(session.phase_iteration, 2);
+    assert_eq!(session.gate_cycle, 3);
+    assert_eq!(session.gate_proposal, Some(proposal));
+    assert_eq!(session.status, TaskSessionStatus::Waiting);
+    let process = session.latest_process.expect("the successor generation");
+    assert_eq!(process.generation, generation);
+    assert_eq!(process.state, ChildLeaseState::Finished);
+    assert_eq!(
+        process.outcome,
+        Some(crate::child_session::ChildBodyOutcome::Completed)
+    );
+    assert_eq!(
+        harness.command_state(&command).await,
+        ChildCommandState::Accepted,
+        "settlement terminates the exact wake reclaimed from the predecessor"
+    );
+}
+
+/// A red observation can arrive while the Task control body is alive and a
+/// provider turn still owns the transcript. The wake belongs to that same
+/// generation, but only after the provider turn releases ownership.
+#[tokio::test]
+async fn a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle() {
+    let mut harness = Harness::new().await;
+    harness.task.lifecycle_phase = crate::task::TaskLifecyclePhase::Gate;
+    harness.task.phase_epoch = 4;
+    harness.task.phase_cursor = 0;
+    harness.task.phase_iteration = 0;
+    harness.task.gate_cycle = 3;
+    harness.task.gate_proposal = Some(crate::task::TaskGateProposal {
+        status: TaskSessionStatus::Completed,
+        reason: "implementation waits for green CI".to_string(),
+    });
+    harness
+        .store
+        .update_task_session_for_lease(&harness.task, &harness.lease)
+        .await
+        .expect("persist the Gate waitpoint");
+
+    harness.head("h1");
+    harness.checks_failing();
+    harness.reconcile().await;
+    let incident = harness
+        .incidents()
+        .await
+        .into_iter()
+        .next()
+        .expect("the failing head opens an incident");
+    assert_eq!(incident.incident.trigger_command_id, None);
+
+    let generation = harness.crash_and_reserve_successor().await;
+    let first_turn_active = Arc::new(AtomicBool::new(true));
+    let repair_started_while_active = Arc::new(AtomicBool::new(false));
+    let sends = Arc::new(AtomicUsize::new(0));
+    let interrupts = Arc::new(AtomicUsize::new(0));
+    let store = harness.store.clone();
+    let task_id = harness.task.id.clone();
+    let lease = harness.lease.clone();
+    let gh_dir = harness._guard.state_dir.clone();
+    let creator_store = store.clone();
+    let creator_task_id = task_id.clone();
+    let creator_lease = lease.clone();
+    let creator_first_turn_active = first_turn_active.clone();
+    let creator_repair_started_while_active = repair_started_while_active.clone();
+    let creator_sends = sends.clone();
+    let creator_interrupts = interrupts.clone();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        super::run_task_session_with(
+            store.clone(),
+            task_id.clone(),
+            &lease,
+            Box::new(move |_name, _approval, events| {
+                Ok(Box::new(LiveIdleHarness {
+                    events,
+                    gh_dir: gh_dir.clone(),
+                    store: creator_store.clone(),
+                    task_id: creator_task_id.clone(),
+                    lease: creator_lease.clone(),
+                    first_turn_active: creator_first_turn_active.clone(),
+                    repair_started_while_active: creator_repair_started_while_active.clone(),
+                    sends: creator_sends.clone(),
+                    interrupts: creator_interrupts.clone(),
+                }))
+            }),
+        ),
+    )
+    .await
+    .expect("the retained wake must start after the provider becomes idle")
+    .expect("the same runner services and settles the wake");
+
+    assert_eq!(
+        sends.load(Ordering::SeqCst),
+        2,
+        "one review turn is followed by exactly one ci-fix turn"
+    );
+    assert_eq!(
+        interrupts.load(Ordering::SeqCst),
+        0,
+        "the active provider turn is never interrupted"
+    );
+    assert!(
+        !repair_started_while_active.load(Ordering::SeqCst),
+        "the repair seed reaches the provider only after its prior turn ends"
+    );
+
+    let commands = harness.ci_fix_commands().await;
+    assert_eq!(
+        commands.len(),
+        1,
+        "the failing head keeps one wake identity"
+    );
+    let command = &commands[0];
+    assert_eq!(command.state, ChildCommandState::Accepted);
+    assert_eq!(command.claimed_by_generation, Some(generation));
+
+    let incident = harness
+        .incidents()
+        .await
+        .into_iter()
+        .next()
+        .expect("the attributed incident remains recorded");
+    assert_eq!(
+        incident.incident.trigger_command_id.as_ref(),
+        Some(&command.id),
+        "the repair services the command linked by supervision"
+    );
+    assert!(incident.incident.responded_at.is_some());
+
+    let session = store
+        .get_task_session(&task_id)
+        .await
+        .expect("read Task")
+        .expect("Task exists");
+    let process = session
+        .latest_process
+        .expect("the live generation remains recorded");
+    assert_eq!(
+        process.generation, generation,
+        "ci-fix starts in the same control body, not a second generation"
+    );
+    assert_eq!(process.state, ChildLeaseState::Finished);
 }
 
 /// The repair ran and the head is still red: the wake fails with the reason a

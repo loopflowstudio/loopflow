@@ -1762,8 +1762,8 @@ fn next_move_for_task(
     ci: Option<&CiObservation>,
     reason: &str,
 ) -> NextMove {
-    // An open PR's next move is CI-derived while a fresh required-check reading
-    // exists for the current head; otherwise it is the review/merge gate.
+    // An open PR's next move is CI-derived. Review begins only once a fresh
+    // current-head reading proves required checks passed.
     if pr_phase == Some(PrPhase::Open) {
         // A Blocked task with an open PR is not auto-resumable by ci-fix: the
         // body already could not repair the head, or infrastructure is down.
@@ -1806,8 +1806,8 @@ fn next_move_for_task(
             };
         }
         return NextMove {
-            owner: NextMoveOwner::Review,
-            reason: reason.to_string(),
+            owner: NextMoveOwner::Ci,
+            reason: "required checks have not been observed for the current head".to_string(),
         };
     }
     let owner = match status {
@@ -2332,14 +2332,15 @@ mod tests {
         );
         assert_eq!(passing.owner, NextMoveOwner::Review);
 
-        // No CI reading yet: unchanged review waiting.
+        // No CI reading yet: CI still owns the proof required before review.
         let unknown = next_move_for_task(
             TaskSessionStatus::Waiting,
             Some(PrPhase::Open),
             None,
             "pull request #900 is open for review",
         );
-        assert_eq!(unknown.owner, NextMoveOwner::Review);
+        assert_eq!(unknown.owner, NextMoveOwner::Ci);
+        assert!(unknown.reason.contains("not been observed"));
     }
 
     #[test]
@@ -3154,9 +3155,9 @@ mod tests {
     fn projected_attention(
         completed: bool,
         runtime: Option<&TaskRuntimeSnapshot>,
-        owner: NextMoveOwner,
-        reason: &str,
+        next_move: NextMove,
         phase: Option<PrPhase>,
+        ci: Option<&CiObservation>,
         process: TaskProcessEvidence,
         local_progress: LocalProgressEvidence,
     ) -> TaskAttentionSnapshot {
@@ -3165,7 +3166,7 @@ mod tests {
             active_pr_phase: phase,
             active_pr_after_merge: None,
             active_pr_next_slug: None,
-            ci: None,
+            ci,
             process_alive: process.alive,
             predecessor_phase: None,
             review_gate: None,
@@ -3175,10 +3176,7 @@ mod tests {
         derive_task_attention(
             completed,
             runtime,
-            &NextMove {
-                owner,
-                reason: reason.into(),
-            },
+            &next_move,
             process,
             local_progress,
             action_evidence.as_ref(),
@@ -3192,9 +3190,12 @@ mod tests {
         let green = projected_attention(
             false,
             Some(&running),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
+            None,
             process(TaskProcessEvidenceState::Observed, Some(true)),
             local_progress(Some(false), Some(false), Some(false), Some(false)),
         );
@@ -3204,9 +3205,12 @@ mod tests {
         let human = projected_attention(
             false,
             Some(&running),
-            NextMoveOwner::Human,
-            "choose the recovery boundary",
+            NextMove {
+                owner: NextMoveOwner::Human,
+                reason: "choose the recovery boundary".into(),
+            },
             Some(PrPhase::Working),
+            None,
             process(TaskProcessEvidenceState::Observed, Some(true)),
             local_progress(Some(false), Some(false), Some(false), Some(false)),
         );
@@ -3217,21 +3221,28 @@ mod tests {
         let dirty = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
+            None,
             process(TaskProcessEvidenceState::Observed, Some(false)),
             local_progress(Some(true), Some(true), Some(false), Some(true)),
         );
         assert_eq!(dirty.level, TaskAttentionLevel::Red);
         assert_eq!(dirty.reason, "Task body stopped with uncommitted work");
 
+        let passing = ci(CiState::Passing, &[]);
         let commits = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Review,
-            "checks passed; awaiting review",
+            NextMove {
+                owner: NextMoveOwner::Review,
+                reason: "checks passed; awaiting review".into(),
+            },
             Some(PrPhase::Open),
+            Some(&passing),
             process(TaskProcessEvidenceState::NotExpected, None),
             local_progress(Some(true), Some(false), Some(true), Some(false)),
         );
@@ -3254,8 +3265,11 @@ mod tests {
         let backlog = projected_attention(
             false,
             None,
-            NextMoveOwner::Project,
-            "Task is ready to start",
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "Task is ready to start".into(),
+            },
+            None,
             None,
             process(TaskProcessEvidenceState::NotApplicable, None),
             local_progress(Some(false), None, None, None),
@@ -3268,8 +3282,11 @@ mod tests {
         let completed = projected_attention(
             true,
             Some(&completed_runtime),
-            NextMoveOwner::Project,
-            "Linear Task is complete",
+            NextMove {
+                owner: NextMoveOwner::Project,
+                reason: "Linear Task is complete".into(),
+            },
+            None,
             None,
             process(TaskProcessEvidenceState::NotExpected, None),
             local_progress(Some(false), Some(false), Some(false), Some(false)),
@@ -3280,9 +3297,12 @@ mod tests {
         let stale = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
+            None,
             process(TaskProcessEvidenceState::Observed, Some(false)),
             local_progress(Some(true), Some(false), Some(false), Some(true)),
         );
@@ -3295,9 +3315,12 @@ mod tests {
         let unavailable = projected_attention(
             false,
             Some(&dead),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
+            None,
             process(TaskProcessEvidenceState::Observed, Some(false)),
             local_progress(None, None, None, Some(true)),
         );
@@ -3307,9 +3330,12 @@ mod tests {
         let unobservable = projected_attention(
             false,
             Some(&running),
-            NextMoveOwner::Task,
-            "implementing",
+            NextMove {
+                owner: NextMoveOwner::Task,
+                reason: "implementing".into(),
+            },
             Some(PrPhase::Working),
+            None,
             process(TaskProcessEvidenceState::Unavailable, None),
             local_progress(None, Some(false), Some(false), None),
         );

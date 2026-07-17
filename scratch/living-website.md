@@ -4,6 +4,52 @@ Screenshots of loopflow, taken by loopflow, from loopflow building loopflow —
 published automatically and never stale. The website stops being a brochure
 that rots and becomes another surface the system keeps alive.
 
+## Revision 2 (2026-07-17): one good update now, a base to build on
+
+Jack's direction supersedes the install-hook model below: "remove all the
+install.py stuff and just make a simple script for capturing screenshots and
+placing them in the local branch's website with whatever Loopflow is
+currently installed … later we can add something to install the latest
+loopflow and run the whole process and then automate that … for now I just
+want to update the website once in a way that will be good to build on."
+
+Implementation reset — replace the current machinery with:
+
+1. **One script, `scripts/capture_screenshots.py`** (replacing
+   `refresh_website_screens.py`). Reads the `website:` section of
+   `scripts/screenshots.yaml`, launches the installed app
+   (`/Applications/Loopflow.app`, `--executable` to override) once per view,
+   and writes each PNG plus one sidecar
+   (`{captured_at, wave, app_version}`) directly into `website/static/` in
+   the current worktree. No `--publish`, no branch guard, no staging beyond
+   a temp file, no perceptual diff — `git status` shows what changed and a
+   human commits it like any other change.
+2. **Provenance softens to what the installed app can say.**
+   `app_version` comes from `CFBundleShortVersionString`; the
+   `LoopflowSourceCommit`/`LoopflowSourceDirty` stamping and all other
+   install.py changes (the post-promote hook, `--no-screens`) are removed —
+   restore install.py to its pre-feature shape. `app_commit` leaves the
+   sidecar.
+3. **Liveness informs, never blocks.** The script asks `lf status <wave>
+   --json`; whatever it learns (served, unserved, no registry state) is
+   printed and the capture proceeds. The human looks at the PNGs before
+   committing. `require_live_wave` and the `.status.json` sidecar go away.
+4. **Homepage renders what exists.** A figure renders when its image
+   exists; the provenance caption line appears only when the sidecar exists
+   and parses. No triple requirement.
+5. **Deploy gate shrinks to visibility.** `check_website_screens.py`: an
+   image without a parseable sidecar is an error; a stale `captured_at`
+   (>14 days) is a warning; exit 0 on warnings.
+6. **Swift stays.** The view knob, width/height/appearance envs, snapshot
+   path, and the width-pin fix are the durable base — untouched.
+7. **Tests shrink to the surviving surface**: manifest completeness,
+   capture environment, sidecar round-trip, gate behavior, caption
+   rendering (sidecar-optional).
+
+The ladder back up, explicitly later: install-latest-loopflow +
+run-the-whole-process as one command, then automation (hook or schedule),
+then the Done Whens below.
+
 ## Revision (2026-07-17): prove the process, don't chase freshness
 
 The first implementation landed (capture module, install hook, deploy gate,

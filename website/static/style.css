@@ -1279,3 +1279,14 @@ h3:hover .anchor-link,
 .mac-app-option .btn {
     margin-top: 0.75rem;
 }
+
+/* View-as-Markdown affordance on docs pages */
+.docs-md-link {
+    text-align: right;
+    margin: 0 0 0.5rem;
+}
+
+.docs-md-link .md-link {
+    font-size: 0.8rem;
+    font-family: 'JetBrains Mono', monospace;
+}

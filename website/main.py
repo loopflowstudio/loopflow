@@ -1,11 +1,15 @@
+import difflib
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 from fasthtml.common import *
 from starlette.responses import PlainTextResponse, RedirectResponse
 from starlette.routing import Route
+
+BASE_URL = "https://loopflow.studio"
 
 from internal_pages import colors_page, design_page, fonts_page
 
@@ -206,62 +210,88 @@ DOCS_NAV = [
 ]
 
 
+DOC_DESCRIPTIONS = {
+    "index": "What loopflow is, the model, and where to read next",
+    "getting-started": "Install, first commands, building features, going remote",
+    "waves": "The planning model, goals, memory, KRs, Linear, crons",
+    "authoring": "Writing skills, flows, directions, and goals",
+    "agent-api": "How agents launch, steer, and prove control of other agents",
+    "conducting": "Monitoring and steering many agents; the Mac podium",
+    "architecture": "No server: the store, the journal, Homes, lf ssh, lfd",
+    "lf": "Every command, PR/planning/release operations, the builtin catalog",
+    "config": "Config files, context assembly, models, accounts and profiles",
+    "troubleshooting": "Exact failure → cause → fix",
+}
+
+
 def generate_llms_txt() -> str:
-    """Generate machine-readable doc summary for /llms.txt from the docs nav."""
-    doc_lines = "\n".join(
-        f"/docs/{slug}".ljust(24) + title if slug != "index" else "/docs".ljust(24) + title
+    """llms.txt per llmstxt.org: H1, blockquote summary, context, H2 link sections."""
+    doc_links = "\n".join(
+        f"- [{title}]({BASE_URL}/docs/{slug}.md): {DOC_DESCRIPTIONS.get(slug, title)}"
         for title, slug in DOCS_NAV
     )
     return f"""# Loopflow
-> Persistent agents, no server. Waves hold a goal, remember what they learn, and stay steerable.
+> Persistent agents, no server. Waves hold a goal, remember what they learn, and stay steerable — and lf is the command humans type and the API agents call to launch, steer, and observe other agents.
 
-## What is Loopflow?
-Loopflow creates and runs Waves — persistent agents that work toward an outcome.
-A Wave coordinates Linear-backed Projects and Tasks, keeps one steerable
-conversation beside the live work map, and folds what it learns into memory.
-Everything is one binary: lf is the command humans type and the API agents call
-to launch, steer, and observe other agents. There is no server — state lives in
-a local SQLite store and append-only journals, shared truth lives in Linear and
-GitHub, and remote machines are reached over SSH.
-
-## Install
-curl -fsSL https://loopflow.studio/install.sh | sh && lf init
-
-## Commands
-lf <skill>            Run a skill (design, implement, gate, debug, ...)
-lf debug -c           Fix an error from the clipboard
-lf wave X             Start Wave X's resident process
-lf chat --steer "..." Steer the live wave body (humans)
-lf radio pub/sub      Agent-to-agent bus; publish is an INSERT, no broker
-lf task run ID        Start a durable Task Session from a Linear issue
-lf task steer ID ".." Redirect a running Task; receipts prove incorporation
-lf roadmap            Every open Task across every wave, bucketed by need
-lf status <wave>      One wave's live Project → Task hierarchy
-lf trace / lf context What an agent did, and exactly what it was told
-Every read surface takes --json.
-
-## Core Concepts
-Wave: a named agent with a goal — wave/<name>/GOAL.md (intent + loop prompt)
-  and wave/<name>/MEMORY.md (durable memory the wave writes).
-Project: one measured Linear-backed bet under a Wave; pursues KRs, owns no worktree.
-Task: one concrete Linear issue; its Session owns the only delivery worktree
-  and advances through serial PRs to main.
-Home: where a wave's work executes — owner plus location, local or ssh://.
-Skill: a prompt that runs a coding agent. Flow: a sequence of skills.
-Direction: composable quality intents that shape agent judgment.
+Loopflow creates and runs Waves: each coordinates Linear-backed Projects and
+Tasks, keeps one steerable conversation beside the live work map, and folds
+what it learns into memory. State lives in a local SQLite store and
+append-only journals; shared truth lives in Linear and GitHub; remote
+machines are reached over SSH. Install: `curl -fsSL
+https://loopflow.studio/install.sh | sh && lf init`. Every docs page below is
+raw markdown at its `.md` URL (or request the canonical URL with `Accept:
+text/markdown`); the complete corpus is at {BASE_URL}/llms-full.txt.
 
 ## Docs
-{doc_lines}
 
-## Links
-GitHub: https://github.com/loopflowstudio/loopflow
-Docs: https://loopflow.studio/docs
-Story: https://loopflow.studio/story
+{doc_links}
+
+## Optional
+
+- [The Story]({BASE_URL}/story): how loopflow got this shape, release by release
+- [GitHub](https://github.com/loopflowstudio/loopflow): source, releases, install.sh
+- [Release notes](https://github.com/loopflowstudio/loopflow/blob/main/RELEASE_NOTES.md): the full chronology
 """
 
 
-# Generate llms.txt content at startup for caching
-LLMS_TXT_CONTENT = generate_llms_txt()
+def generate_llms_full_txt() -> str:
+    """The whole docs corpus in one markdown file, in nav order."""
+    sections = []
+    for title, slug in DOCS_NAV:
+        body = load_doc(slug)
+        if not body:
+            continue
+        sections.append(f"<!-- {BASE_URL}/docs/{slug} -->\n\n{body.strip()}")
+    header = (
+        "# Loopflow — complete documentation\n\n"
+        f"> Concatenation of every page under {BASE_URL}/docs, in reading order. "
+        f"Curated index: {BASE_URL}/llms.txt\n"
+    )
+    return header + "\n\n---\n\n".join(sections) + "\n"
+
+
+def generate_sitemap_xml() -> str:
+    pages = ["", "/story", "/download", "/docs"] + [
+        f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index"
+    ]
+    entries = []
+    for page in pages:
+        lastmod = ""
+        slug = page.removeprefix("/docs/") if page.startswith("/docs/") else None
+        path = doc_path(slug or "index") if (slug or page == "/docs") else None
+        if path:
+            date = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).date()
+            lastmod = f"<lastmod>{date.isoformat()}</lastmod>"
+        entries.append(f"<url><loc>{BASE_URL}{page}</loc>{lastmod}</url>")
+    body = "\n".join(entries)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{body}\n</urlset>\n"
+    )
+
+
+# (Generated at startup below, after the doc-loading helpers are defined.)
 
 
 def render_markdown(content: str) -> list:
@@ -452,12 +482,71 @@ def DocsNav(current: str = "index"):
     )
 
 
-def load_doc(slug: str) -> str:
+def doc_path(slug: str) -> Path | None:
     for docs_dir in (DOCS_DIR, CANONICAL_DOCS_DIR):
         path = docs_dir / f"{slug}.md"
         if path.exists():
-            return path.read_text()
-    return ""
+            return path
+    return None
+
+
+def load_doc(slug: str) -> str:
+    path = doc_path(slug)
+    return path.read_text() if path else ""
+
+
+# Agent-facing markdown delivery: every docs page is retrievable as raw
+# markdown — /docs/<slug>.md, or Accept: text/markdown on the canonical URL.
+# Markdown is what agents actually consume; HTML is the human rendering.
+
+MARKDOWN_MEDIA_TYPE = "text/markdown; charset=utf-8"
+
+
+def _doc_title(slug: str) -> str:
+    return next((t for t, s in DOCS_NAV if s == slug), slug.title())
+
+
+def markdown_doc_response(slug: str) -> PlainTextResponse | None:
+    path = doc_path(slug)
+    if not path:
+        return None
+    updated = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    frontmatter = (
+        "---\n"
+        f"title: {_doc_title(slug)}\n"
+        f"canonical_url: {BASE_URL}/docs/{slug}\n"
+        f"last_updated: {updated.date().isoformat()}\n"
+        "---\n\n"
+    )
+    return PlainTextResponse(
+        frontmatter + path.read_text(),
+        media_type=MARKDOWN_MEDIA_TYPE,
+        headers={"Vary": "Accept"},
+    )
+
+
+def markdown_not_found(slug: str) -> PlainTextResponse:
+    """Markdown 404 with nearest-match suggestions — agents recover; HTML error shells dead-end them."""
+    slugs = [s for _, s in DOCS_NAV]
+    close = difflib.get_close_matches(slug, slugs, n=3, cutoff=0.4) or slugs
+    suggestions = "\n".join(f"- {BASE_URL}/docs/{s}.md" for s in close)
+    body = (
+        f"# Not found: /docs/{slug}\n\n"
+        f"Closest pages:\n\n{suggestions}\n\n"
+        f"Full index: {BASE_URL}/llms.txt\n"
+    )
+    return PlainTextResponse(body, status_code=404, media_type=MARKDOWN_MEDIA_TYPE)
+
+
+def wants_markdown(request) -> bool:
+    # Browsers never ask for text/markdown; any client that does gets it.
+    return "text/markdown" in request.headers.get("accept", "")
+
+
+# Generated at startup for caching
+LLMS_TXT_CONTENT = generate_llms_txt()
+LLMS_FULL_TXT_CONTENT = generate_llms_full_txt()
+SITEMAP_XML_CONTENT = generate_sitemap_xml()
 
 
 # Pages
@@ -643,47 +732,29 @@ def get():
     return RedirectResponse("/docs", status_code=302)
 
 
-@rt("/docs")
-def get():
-    content = load_doc("index")
-    return (
-        Title("Loopflow Documentation"),
-        SkipLink(),
-        Navbar(),
-        Main(
-            Section(
-                Div(
-                    DocsNav("index"),
-                    Div(*render_markdown(content), cls="docs-content"),
-                    cls="docs-layout",
-                ),
-                cls="docs-hero",
-            ),
-            id="main-content",
-        ),
-        SiteFooter(),
-    )
-
-
-@rt("/docs/{slug:path}")
-def get(slug: str):
-    # Handle .md extension if present
-    if slug.endswith(".md"):
-        slug = slug[:-3]
+def _docs_page(slug: str, title: str):
     content = load_doc(slug)
-    if not content:
-        return RedirectResponse("/docs", status_code=302)
-    # Get title from DOCS_NAV
-    title = next((t for t, s in DOCS_NAV if s == slug), slug.title())
     return (
-        Title(f"{title} — Loopflow Documentation"),
+        Title(title),
         SkipLink(),
         Navbar(),
         Main(
             Section(
                 Div(
                     DocsNav(slug),
-                    Div(*render_markdown(content), cls="docs-content"),
+                    Div(
+                        P(
+                            A(
+                                "View as Markdown",
+                                href=f"/docs/{slug}.md",
+                                cls="md-link",
+                                title="This page as raw markdown, for agents and copying",
+                            ),
+                            cls="docs-md-link",
+                        ),
+                        *render_markdown(content),
+                        cls="docs-content",
+                    ),
                     cls="docs-layout",
                 ),
                 cls="docs-hero",
@@ -692,6 +763,27 @@ def get(slug: str):
         ),
         SiteFooter(),
     )
+
+
+@rt("/docs")
+def get(request):
+    if wants_markdown(request):
+        return markdown_doc_response("index")
+    return _docs_page("index", "Loopflow Documentation")
+
+
+@rt("/docs/{slug:path}")
+def get(request, slug: str):
+    # Raw markdown: /docs/<slug>.md, or Accept: text/markdown on the canonical URL
+    if slug.endswith(".md"):
+        slug = slug[:-3]
+        return markdown_doc_response(slug) or markdown_not_found(slug)
+    if wants_markdown(request):
+        return markdown_doc_response(slug) or markdown_not_found(slug)
+    if not doc_path(slug):
+        return RedirectResponse("/docs", status_code=302)
+    title = _doc_title(slug)
+    return _docs_page(slug, f"{title} — Loopflow Documentation")
 
 
 @rt("/download")
@@ -776,8 +868,18 @@ def _llms_txt_handler(request):
     return PlainTextResponse(LLMS_TXT_CONTENT, media_type="text/plain")
 
 
-# Insert llms.txt route at the beginning to avoid being captured by static handler
+def _llms_full_txt_handler(request):
+    return PlainTextResponse(LLMS_FULL_TXT_CONTENT, media_type="text/plain")
+
+
+def _sitemap_handler(request):
+    return PlainTextResponse(SITEMAP_XML_CONTENT, media_type="application/xml")
+
+
+# Insert machine-readable routes at the beginning to avoid the static handler
 app.routes.insert(0, Route("/llms.txt", _llms_txt_handler, methods=["GET"]))
+app.routes.insert(0, Route("/llms-full.txt", _llms_full_txt_handler, methods=["GET"]))
+app.routes.insert(0, Route("/sitemap.xml", _sitemap_handler, methods=["GET"]))
 
 
 @rt("/favicon.ico")

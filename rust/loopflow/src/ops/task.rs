@@ -2675,16 +2675,46 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
     })
 }
 
+/// The PR this reconcile answers for: the active row, else the newest row GitHub
+/// could still contradict.
+///
+/// `abandoned_at` on a *published* PR is not a decision — it is a cached claim
+/// that GitHub has the PR closed. Both writers mean exactly that: `lf pr abandon`
+/// runs `gh pr close` before stamping it, and the `"closed"` arm below records
+/// what it just read. A human reopening the PR overrides both identically, so a
+/// published row stays readable until GitHub agrees it is finished.
+///
+/// A merge *is* finished: GitHub cannot unmerge, which
+/// `CHECK (merge_commit IS NULL OR abandoned_at IS NULL)` already encodes. And
+/// only the newest row is considered — the same row rotation would rotate past —
+/// so a long-settled predecessor behind a live successor is never re-read.
+async fn reconcile_subject(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<Option<TaskPr>> {
+    if let Some(active) = store
+        .active_task_pr(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+    {
+        return Ok(Some(active));
+    }
+    let prs = store
+        .task_prs(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    Ok(prs
+        .into_iter()
+        .next_back()
+        .filter(|pr| pr.phase() == PrPhase::Abandoned && pr.github().is_some()))
+}
+
 async fn reconcile_task_pr_with_authority(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: Option<&ChildWriteLease>,
 ) -> OpsResult<Option<TaskPr>> {
-    let Some(mut pr) = store
-        .active_task_pr(&session.id)
-        .await
-        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-    else {
+    let Some(mut pr) = reconcile_subject(store, session).await? else {
         return Ok(None);
     };
     // GitHub is a reconciliation input, not the Task's store of record. Read the
@@ -2856,6 +2886,12 @@ async fn reconcile_task_pr_with_authority(
             None
         }
         _ => {
+            // GitHub has the PR open, so any `abandoned_at` this row carries is a
+            // stale claim that it was closed — cleared here, which is the whole
+            // of reopening: the same row, at the same identity, returns to `Open`
+            // and to `active_task_pr`. A no-op on the ordinary path, where the
+            // field was already `None`.
+            pr.abandoned_at = None;
             if !session.status.is_process_active() {
                 session.set_status(
                     TaskSessionStatus::Waiting,
@@ -3270,6 +3306,21 @@ async fn ensure_working_pr_with_authority(
             "Task PR {} is neither active nor settled",
             settled.id
         )));
+    }
+    // An abandoned predecessor only clears the way for a successor once GitHub
+    // has confirmed it closed. The reconcile above read this exact row, so its
+    // verdict is already in `session.observation`; a degraded read leaves the
+    // claim unverified, and minting sequence N+1 on it is how an empty branch
+    // appears at `main` while the published PR is still open and red. Stop and
+    // name the PR instead — bounded by the degraded circuit's retry.
+    if let (PrPhase::Abandoned, Some(github)) = (settled.phase(), settled.github()) {
+        if let Observation::Degraded { reason, .. } = &session.observation {
+            return Err(task_error(format!(
+                "cannot confirm pull request #{} is closed before starting the next PR: {reason}. \
+                 Retry once GitHub is readable; if the PR was reopened, it continues as-is.",
+                github.number
+            )));
+        }
     }
     // A settled completing PR never rotates: completion is pending on the
     // review gate, not on a follow-up PR. `reconcile_task_completion` advances

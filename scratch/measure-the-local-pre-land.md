@@ -71,8 +71,10 @@ subtraction or log timing.
 
 ### Persist one atomic record per invocation
 
-Create one JSON record before the first selected phase runs and checkpoint it
-after every phase boundary. Store records under:
+For each verification invocation, attempt to create one JSON record before the
+first selected phase runs and checkpoint it after every phase boundary. A
+`full` run requires that creation to succeed; non-full runs follow the warning
+path below. Store successful records under:
 
 ```text
 <git-common-dir>/loopflow/pre-land/runs/<run-id>.json
@@ -97,10 +99,19 @@ new one, never an interleaved JSONL line. The record is created with status
 machine killed between checkpoints remains visibly incomplete rather than
 vanishing from the denominator.
 
-History persistence is part of the gate contract, not best-effort telemetry.
-If the initial record or a phase checkpoint cannot be written, the runner exits
-nonzero with `MEASUREMENT FAILED` and the resolved path. A passing test matrix
-must not claim a measured pass after dropping its evidence.
+History persistence is part of the `full` gate contract, not best-effort
+telemetry. If a full run's initial record or phase checkpoint cannot be
+written, the runner exits nonzero with `MEASUREMENT FAILED` and the resolved
+path. A passing landing matrix must not claim a measured pass after dropping
+the evidence the KR reads.
+
+The ordinary `changed` loop and separately invoked `required_host` gate still
+attempt the same records, but persistence failure prints one visible
+`MEASUREMENT WARNING` and leaves their underlying test exit unchanged. After
+the first write failure, that invocation disables further checkpoints rather
+than repeating the warning after every phase. These records are useful
+diagnostics, not part of the 30-day denominator, so losing one must not tax the
+fast loop or obscure a hosted test result.
 
 Use a versioned, fixed schema containing only operational facts:
 
@@ -139,9 +150,9 @@ Build `run_id` from UTC start time, pid, and a `secrets.token_hex(4)` suffix.
 The random component prevents a fast process-id reuse after restart from
 overwriting an earlier run at the same timestamp.
 
-Record every verification invocation; `--list` and the read-only `--history`
-mode do not create records and cannot be combined with run-selection flags.
-Mark `kind` as:
+Attempt to record every verification invocation; `--list` and the read-only
+`--history` mode do not create records and cannot be combined with
+run-selection flags. Mark `kind` as:
 
 - `full` for `--all`, the documented landing-verification unit;
 - `changed` for the ordinary changed-aware loop;
@@ -204,12 +215,12 @@ different correctness and retention semantics, so it gets one narrowly named
 |----------|---------|-----------------|
 | Where are the current budgets? | `scripts/test.py::PHASE_BUDGETS` names 11 command phases; `release/GATE_BUDGET.md` documents the same values. | Keep the map authoritative, copy the applied value into each historic phase, and guard the doc/map pairing with a test. |
 | Does the runner currently retain phase durations? | No. `_run_command()` returns only failure text and `_run_suite()` collapses all command time into one suite duration. | Introduce `PhaseOutcome`; do not try to reconstruct stage timing from suite totals or logs. |
-| Can existing ops telemetry carry a month? | No. `ops_metrics_path()` resolves inside each worktree's ignored `.lf/tmp`; terminal worktree pruning removes the entire worktree, and temp cleanup may remove the file sooner. The writer is also intentionally best-effort. | Reuse the privacy/event-shape idiom, not its authority or retention. Keep the existing helper untouched and give gate proof a durable, fail-loud path. |
+| Can existing ops telemetry carry a month? | No. `ops_metrics_path()` resolves inside each worktree's ignored `.lf/tmp`; terminal worktree pruning removes the entire worktree, and temp cleanup may remove the file sooner. The writer is also intentionally best-effort. | Reuse the privacy/event-shape idiom, not its authority or retention. Keep the existing helper untouched and give `full` gate proof a durable, fail-loud path. |
 | What local path survives linked-worktree removal? | `git rev-parse --path-format=absolute --git-common-dir` resolves `/Users/jack/src/loopflow/.git` from this Task worktree, while the Task itself lives at `/Users/jack/src/loopflow.measure-the-local-pre-land`. `main_repo_root()` already derives the canonical checkout from this same Git common directory. | Store evidence beneath the common directory, shared by all Task worktrees and outside their prune target. |
 | Will durable records recreate the disk-pressure incident? | Current ops telemetry across the inspected live worktrees is 30 events and under 8 KiB. A gate record has a fixed schema, no logs, and roughly 11 short phase objects; even 10,000 retained runs are tens of MiB, not the hundreds of GiB caused by temporary trees and build artifacts. | Retain the small evidence indefinitely for now; keep logs/build artifacts reapable. Add no retention service until measured volume warrants one. |
 | Can concurrent worktrees corrupt one history file? | A shared append-only JSONL file would introduce a new cross-worktree writer race; the current ops file avoids it only because it is per-worktree. | Use one atomically replaced file per run. Readers scan files; writers never share one append cursor. |
 | What happens on power loss or SIGKILL? | A single write at process exit can disappear entirely and create survivor bias. | Create the run before executing phases and checkpoint after each phase; stale `running` records are explicit evidence gaps. |
-| Should evidence writes be best effort? | No. Best effort is appropriate for tuning telemetry, but a silently dropped proof lets an unmeasured month look green. | Fail the gate loudly before claiming a measured result when durable persistence fails. |
+| Should evidence writes be best effort? | It depends on the record's authority. A silently dropped `full` record lets an unmeasured landing month look green; a dropped `changed` or `required_host` diagnostic does not enter the KR view. | Fail `full` runs loudly with `MEASUREMENT FAILED`; warn once and preserve the underlying exit for non-full runs. |
 | Does `--all` include the hosted UI gate? | Deliberately no. `ui-host` requires a permissioned macOS host and is separately named in the plan and docs. | Preserve `required_host` as a separate record kind; never count it as a phase that `--all` ran. |
 | Does this need a shared service or SQLite migration? | No. The writer and reader are one stdlib Python process, the evidence is local, and the required query is a bounded directory scan. The live registry has also experienced write contention; coupling a repository test runner to it would add risk without improving the KR proof. | Use local atomic files; no daemon, migration, network, or generic metrics API. |
 
@@ -230,9 +241,11 @@ different correctness and retention semantics, so it gets one narrowly named
   existing docs and gate skill already define it as the final local matrix.
   This Task measures that path; it does not make `lf pr land` invoke
   repo-specific tests or prove GitHub merge state.
-- **The proof path is load-bearing.** Durable-write failure is a gate failure,
-  not a warning. Otherwise the history is biased toward records that happened
-  to persist.
+- **Only the proof path is load-bearing.** A `full` durable-write failure is a
+  gate failure, not a warning, because otherwise the KR history is biased
+  toward records that happened to persist. `changed` and `required_host`
+  writes degrade visibly without changing their test result because the KR
+  never reads them.
 - **History is immutable evidence, budgets are captured values.** A future
   budget edit affects future runs only.
 - **Incomplete is a first-class state.** Absence after a crash does not become
@@ -249,10 +262,12 @@ exact phases, budgets, overruns, and observation age that make the KR hold.
 Developers use the same view to notice clippy or xcodebuild drifting weeks
 before it reaches the timeout.
 
-Wild failure is a reassuring green report assembled only from surviving
-successful exits. The create-first/checkpoint-often record, explicit
-`running`/`not_run` states, and fail-loud persistence are specifically chosen
-to make that false green impossible.
+Wild failure is one policy applied beyond its authority: either a reassuring
+green landing report assembled only from surviving successful exits, or an
+unwritable history directory blocking every changed-aware test loop while
+buying no KR evidence. The create-first/checkpoint-often full record and its
+fail-closed persistence prevent the false green; the non-full warning path
+keeps optional diagnostics from becoming developer friction.
 
 ## Scope
 
@@ -263,7 +278,8 @@ to make that false green impossible.
   - `--history DAYS` with an explicit 30-day KR verdict;
   - full, changed-aware, and required-host record kinds;
   - tests for timeout, failure, skipped phases, atomic persistence, temp-tree
-    deletion, incomplete runs, history verdicts, privacy, and budget-doc drift;
+    deletion, incomplete runs, full-vs-non-full write failure, history verdicts,
+    privacy, and budget-doc drift;
   - `TESTING.md` and `release/GATE_BUDGET.md` updates.
 - Out of scope:
   - a generic telemetry API, daemon, dashboard, or database migration;
@@ -299,14 +315,17 @@ to make that false green impossible.
    prompts, or secrets.
 8. A test proves every `PHASE_BUDGETS` label/value is stated in
    `release/GATE_BUDGET.md`.
-9. Focused verification passes:
+9. With an unwritable history root, `--all` exits nonzero and prints
+   `MEASUREMENT FAILED`; the ordinary changed-aware run prints one
+   `MEASUREMENT WARNING` and returns the underlying test result unchanged.
+10. Focused verification passes:
 
    ```bash
    uv run pytest python/tests/test_gate_bounded.py python/tests/test_release_automation.py -v
    uv run python scripts/test.py --list --all --base HEAD
    ```
 
-10. The implementation's own demo uses a temporary history root in tests to
+11. The implementation's own demo uses a temporary history root in tests to
     prove 29 days => `IN PROGRESS`, 30 clean days => `HOLDING`, and one named
     overrun => `NOT HOLDING` without running the multi-hour matrix.
 
@@ -325,7 +344,9 @@ After this lands:
 - persistent phase records per selected gate run: **all selected phases**;
 - individually retained full-gate phase durations: **10 of 10 `--all`
   phases** (`ui-host` remains a separately measured required-host run);
-- full-run budget coverage: **100% or the gate exits nonzero**;
+- full-run budget coverage: **100% or the full gate exits nonzero**;
+- changed-aware measurement coverage: **best effort with a visible warning;
+  never a new reason for the test loop to fail**;
 - KR4 clock start: timestamp of the first complete schema-1 `full` record;
 - KR4 evidence command: `uv run python scripts/test.py --history 30`.
 

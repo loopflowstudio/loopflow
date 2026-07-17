@@ -350,6 +350,10 @@ The durable reviewer outcome is:\n{}",
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
+    // Scoped to one provider turn: cleared wherever `TurnCompleted` clears
+    // `provider_turn_active`, so a review that resumes and later meets a new
+    // failing head can be preempted again.
+    let mut review_preempted = false;
     'runner: loop {
         tokio::select! {
             line = attachment_rx.recv() => {
@@ -359,20 +363,37 @@ The durable reviewer outcome is:\n{}",
             }
             _ = command_poll.tick() => {
                 let (wake, commands) = if provider_turn_active {
-                    let mut commands = claim_commands(
+                    let claimed = claim_commands(
                         &store,
                         &session,
                         lease,
                         &mut seen_commands,
                     ).await?;
-                    for command in &commands {
-                        if matches!(&command.kind, ChildCommandKind::CiFix { .. }) {
-                            seen_commands.remove(&command.id);
-                        }
+                    let (ci_fix, commands): (Vec<_>, Vec<_>) = claimed
+                        .into_iter()
+                        .partition(|command| {
+                            matches!(&command.kind, ChildCommandKind::CiFix { .. })
+                        });
+                    for command in &ci_fix {
+                        seen_commands.remove(&command.id);
                     }
-                    commands.retain(|command| {
-                        !matches!(&command.kind, ChildCommandKind::CiFix { .. })
-                    });
+                    // An interactive review turn is not ordinary work: it is the
+                    // agent waiting, so no `TurnCompleted` is coming to release
+                    // the repair the way one does for a turn that is doing
+                    // something. Take that boundary once — but only for a wake
+                    // the PR's *current* reading still names. That check is what
+                    // keeps a failure no repair can green (a land-time
+                    // precondition, which `wake_legal` refuses) from spending a
+                    // review turn: it yields no current incident, so it never
+                    // reaches here.
+                    if !review_preempted
+                        && interaction_review.is_some()
+                        && !ci_fix.is_empty()
+                        && holds_current_ci_fix_wake(&store, &session, &ci_fix).await?
+                    {
+                        harness.interrupt().await?;
+                        review_preempted = true;
+                    }
                     (None, commands)
                 } else if ci_fix_wake.is_none() {
                     claim_and_arm_ci_fix(
@@ -467,6 +488,7 @@ The durable reviewer outcome is:\n{}",
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
                         provider_turn_active = false;
+                        review_preempted = false;
                         if status == Lifecycle::Failed {
                             let reason = drain_turn_failure_reason(
                                 &mut event_rx,
@@ -2394,6 +2416,58 @@ pub(crate) struct CiFixWake {
 /// makes the repair restartable — `claim_child_commands_in` reassigns
 /// `persisted`/`claimed` rows, so a crash mid-turn hands this same command to the
 /// next generation, which lands right back here and re-selects the ci-fix flow.
+///
+/// The failure to repair is whatever the PR reads as *now*, minted through the
+/// same path the enqueue used. `None` means the head went green, moved on, the PR
+/// is gone, or the reading warrants no wake at all — every claimed wake is then
+/// stale.
+///
+/// This is the one authority for "what is this PR failing now", shared with
+/// [`holds_current_ci_fix_wake`]. Two derivations of the same fact would agree
+/// only in the common case, which is exactly the drift `ci_fix_wake_kind`'s doc
+/// warns about between the mint and the match.
+async fn current_ci_incident_identity(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> Result<Option<String>> {
+    Ok(store
+        .active_task_pr(&session.id)
+        .await?
+        .as_ref()
+        .and_then(crate::ops::task::current_ci_incident)
+        .map(|incident| incident.identity))
+}
+
+/// Whether any of these claimed wakes names the PR's *current* failure.
+///
+/// The read-only half of [`arm_ci_fix_wake`]'s selection, and the only question a
+/// live provider turn may ask about a deferred wake. The arm itself cannot answer
+/// it mid-turn: it supersedes non-matching wakes and stamps
+/// `mark_ci_incident_responded`, so asking would commit to repairing. Splitting
+/// the read out is what makes "would preempting actually reach a repair"
+/// decidable without touching the ledger.
+///
+/// Because it routes through [`current_ci_incident_identity`], it inherits
+/// `wake_legal`'s answer: a head whose failure warrants no automatic repair names
+/// no current incident and can never justify interrupting a review.
+async fn holds_current_ci_fix_wake(
+    store: &SharedStore,
+    session: &TaskSession,
+    claimed: &[ChildCommand],
+) -> Result<bool> {
+    let Some(current) = current_ci_incident_identity(store, session).await? else {
+        return Ok(false);
+    };
+    Ok(claimed.iter().any(|command| {
+        matches!(
+            &command.kind,
+            ChildCommandKind::CiFix {
+                incident_identity, ..
+            } if incident_identity == &current
+        )
+    }))
+}
+
 async fn arm_ci_fix_wake(
     store: &SharedStore,
     session: &TaskSession,
@@ -2406,15 +2480,7 @@ async fn arm_ci_fix_wake(
     {
         return Ok((None, claimed));
     }
-    // The failure to repair is whatever the PR reads as *now*, minted through the
-    // same path the enqueue used. `None` means the head went green, moved on, or
-    // the PR is gone — every claimed wake is then stale.
-    let current = store
-        .active_task_pr(&session.id)
-        .await?
-        .as_ref()
-        .and_then(crate::ops::task::current_ci_incident)
-        .map(|incident| incident.identity);
+    let current = current_ci_incident_identity(store, session).await?;
 
     let mut matched = None;
     let mut remaining = Vec::with_capacity(claimed.len());

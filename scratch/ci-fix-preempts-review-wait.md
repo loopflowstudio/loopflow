@@ -263,6 +263,51 @@ it. The unbounded case is a **human** review in a headless fleet, where nobody
 answers and `Claimed` means forever. That is a narrower claim than the directive's
 "repair never begins", and it is the true one.
 
+### W2-303's test is not ordinary work — it is the parked review (R4)
+
+Found while writing the tests, by checking the fixture instead of trusting R1–R3's
+own de-risking row. **`a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle`
+does not exercise ordinary active work. It exercises exactly the state this guard
+fires on.** Every link is in the tree:
+
+| Link | Fact |
+|---|---|
+| `make_task` (`ci_fix_lifecycle_tests.rs:493`) | `lifecycle: TaskLifecyclePlan::standard("task")` → **Gate policy = `Require`** |
+| the test (`:1809-1811`) | sets `lifecycle_phase = Gate`, `phase_cursor = 0`; **never overrides `lifecycle`** |
+| `task-gate.yaml` | step 0 is `demo` |
+| `demo.md` frontmatter | `interactive: true` |
+| `prepare_task_flow_step` (`runner.rs:1258-1275`) | interactive + `Require` → reviewer **`Human`** |
+| `start_prepared_task_step` (`runner.rs:1452-1469`) | `Human` → `apply_input` → **`provider_turn_active = true`**, review open |
+
+Its own harness names the turn `"gate-review-turn"` — the fixture author knew what
+it was. So the test asserting `interrupts == 0` on a live human-review turn is,
+under this design, asserting the defect. The directive's two sentences —
+"preserve W2-303's rule that CI must not interrupt an *ordinary* active provider
+turn" and "when a wake arrives while `provider_turn_active` and
+`interaction_review` is `Some`, interrupt the review turn exactly once" — cannot
+both hold on that fixture, because its turn is *both*. The word carrying the
+distinction is "ordinary", and nothing in the test was ever ordinary.
+
+**This is not a doctrinal conflict; it is the fixture's coordinates.** W2-303's
+intent (ordinary work holds its wake until the turn ends on its own) is right and
+must survive. It simply needs a turn that is genuinely ordinary — and the fixture's
+own default already is one: `lifecycle_phase = Iterate`, `phase_cursor = 0` →
+`task_clarify`, which carries no `interactive:` key at all, so no review opens and
+`interaction_review` is `None`. The test moved *off* that default to Gate and
+landed on the review by accident.
+
+**Resolution.** W2-303's test keeps its assertions verbatim (`interrupts == 0`,
+`sends == 2`, repair-after-idle) and moves to Iterate coordinates, where its name
+finally describes what it proves. The Gate/`demo` coordinates it vacates become
+this Task's review-wait test. Neither Task's intent changes; one fixture stops
+standing for two different things. Sabotage row 2 only becomes real *after* this
+move: today, deleting `interaction_review.is_some()` from the guard turns nothing
+red, because the one test that would catch it is itself sitting on a review.
+
+Reported rather than assumed: this is the third time in this Task that a claim I
+verified sentence-by-sentence was false as a composition — and the first two were
+caught by a reviewer, not by me.
+
 ### The change
 
 Three pieces, ~25 lines. Unchanged from v1 in mechanism; the currency check now
@@ -342,7 +387,7 @@ design doc intact.
 | Does an interrupted review turn reach the arm? | Yes. `TurnCompleted` clears `provider_turn_active`; the arm at `runner.rs:487` runs before `resume_interrupted_flow`, which is false under a review (`flow_turn_active` is false, `runner.rs:703`). | No new arming path. |
 | What if the wake goes stale between the check and `TurnCompleted`? | Benign. Nothing arms; control reaches `runner.rs:729` — `if interaction_review.is_some() { continue 'runner }`. The body idles with the review open; a follow-up restarts the turn. | No compensating logic. The fallback is a state the runner already reaches. |
 | Does the durable review survive the repair? | Yes. `interaction_review = None` at `runner.rs:508` is a local. The ci-fix body exits via `settle_ci_fix_turn` (`runner.rs:829`); the next generation reopens the `Active` record (`runner.rs:228-256`). | Assert it in the test. |
-| Does this break W2-303's rule? | No. `a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle` has no review, so the guard is false and it stays at `interrupts == 0`. | That test is the regression. |
+| Does this break W2-303's rule? | ~~No — that test has no review open.~~ **FALSE, corrected in R4.** That test sits on Gate/`demo` under `standard` policy, which *is* a Human review. See "W2-303's test is not ordinary work" below. | Its coordinates move to Iterate; the review coordinates become this Task's. |
 | Should a failed interrupt fail the body? | Yes, propagate. Matches the control path (`runner.rs:3876-3889`). Swallowing it sets no bit and re-interrupts every 200ms against a harness that cannot be interrupted. | `harness.interrupt().await?`. |
 
 ## Alternatives considered

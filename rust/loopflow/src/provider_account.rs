@@ -24,6 +24,11 @@ use crate::store::{CredentialState, RoutingState};
 pub const FORWARDED_PROFILE_BUNDLE_ENV: &str = "LF_FORWARDED_PROFILE_BUNDLE";
 pub const FORWARDED_PROFILE_STORE_ENV: &str = "LF_FORWARDED_PROFILE_STORE";
 pub const PROFILE_REPO_ID_ENV: &str = "LF_PROFILE_REPO_ID";
+/// Explicit account selection (`lf --account <email|id>`, or exported as
+/// `LF_ACCOUNT=<email|id>`): every provider resolution in this process and
+/// its children uses the named account, bypassing the repo route and health
+/// gating — an explicit human choice.
+pub const PROVIDER_ACCOUNT_ENV: &str = "LF_ACCOUNT";
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
 const LEGACY_CHROME_PROFILE_FILE: &str = ".loopflow-chrome-profile.json";
@@ -549,6 +554,11 @@ pub async fn resolve_provider_account(
     provider_session_id: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
+    if let Ok(selector) = std::env::var(PROVIDER_ACCOUNT_ENV) {
+        if !selector.trim().is_empty() {
+            return resolve_explicit_account(provider, selector.trim()).await;
+        }
+    }
     let forwarded_bundle = match std::env::var(FORWARDED_PROFILE_BUNDLE_ENV) {
         Ok(value) if !value.trim().is_empty() => Some(decode_forwarded_profile_bundle(&value)?),
         _ => None,
@@ -672,6 +682,131 @@ pub async fn resolve_provider_account(
             store,
         }));
     }
+}
+
+#[derive(Debug)]
+enum AccountMatch<'a> {
+    One(&'a ProviderAccount),
+    Ambiguous(Vec<&'a ProviderAccount>),
+    None,
+}
+
+/// An explicit selector names an account by login email or account id —
+/// exactly, or by any prefix that matches exactly one known account
+/// (`manabot` reaches `manabot-eng`). Matching is case-insensitive.
+fn match_account<'a>(accounts: &'a [ProviderAccount], selector: &str) -> AccountMatch<'a> {
+    let selector_lower = selector.to_ascii_lowercase();
+    let exact = accounts.iter().find(|account| {
+        account
+            .login_email
+            .as_ref()
+            .is_some_and(|email| email.as_str().eq_ignore_ascii_case(selector))
+            || account.account_id.as_str().eq_ignore_ascii_case(selector)
+    });
+    if let Some(account) = exact {
+        return AccountMatch::One(account);
+    }
+    let prefixed: Vec<&ProviderAccount> = accounts
+        .iter()
+        .filter(|account| {
+            account.login_email.as_ref().is_some_and(|email| {
+                email
+                    .as_str()
+                    .to_ascii_lowercase()
+                    .starts_with(&selector_lower)
+            }) || account
+                .account_id
+                .as_str()
+                .to_ascii_lowercase()
+                .starts_with(&selector_lower)
+        })
+        .collect();
+    match prefixed.as_slice() {
+        [] => AccountMatch::None,
+        [account] => AccountMatch::One(account),
+        _ => AccountMatch::Ambiguous(prefixed),
+    }
+}
+
+/// Resolve `lf --account <email|id>`: the named account, verified live, with
+/// no route lookup and no cooldown gating — refusing an explicit human choice
+/// helps nobody; a dead credential still errors with the re-login fix.
+async fn resolve_explicit_account(
+    provider: Provider,
+    selector: &str,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    let store = route_store(true).await?.ok_or_else(|| {
+        ProviderAccountError::Runtime("account store unavailable for --account".to_string())
+    })?;
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
+    let account = match match_account(&accounts, selector) {
+        AccountMatch::One(account) => account,
+        AccountMatch::Ambiguous(candidates) => {
+            return Err(ProviderAccountError::Runtime(format!(
+                "'{selector}' matches several {provider} accounts: {}",
+                candidates
+                    .iter()
+                    .map(|account| account.account_id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        AccountMatch::None => {
+            return Err(ProviderAccountError::Runtime(format!(
+                "no managed {provider} account matches '{selector}'; see `lf auth accounts`"
+            )));
+        }
+    };
+    let home = account.home.clone().ok_or_else(|| {
+        ProviderAccountError::Runtime(format!(
+            "{provider} account '{}' has no managed credential home",
+            account.account_id
+        ))
+    })?;
+    let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    ensure_account_profile_at(&operator_home, &home, provider)?;
+    let status = provider_account_auth_status(provider, home.clone())
+        .await
+        .map_err(|error| {
+            ProviderAccountError::Runtime(format!(
+                "check {provider} account '{}': {error}",
+                account.account_id
+            ))
+        })?;
+    if !retain_authenticated_account(&store, account, &status).await? {
+        return Err(ProviderAccountError::NoAuthenticatedAccount {
+            provider,
+            accounts: format!("'{}' with `lf auth connect {provider}`", account.account_id),
+        });
+    }
+    let profile_id = store
+        .list_profile_provider_accounts(None)
+        .await?
+        .into_iter()
+        .find(|mapping| mapping.provider == provider && mapping.account_id == account.account_id)
+        .map(|mapping| mapping.profile_id)
+        .or_else(|| {
+            account
+                .login_email
+                .as_ref()
+                .and_then(|email| ProfileId::parse(email.as_str()).ok())
+        })
+        .ok_or_else(|| {
+            ProviderAccountError::Runtime(format!(
+                "{provider} account '{}' has no profile or login email to record the session under",
+                account.account_id
+            ))
+        })?;
+    Ok(Some(ProviderAccountRoute {
+        provider,
+        profile_id,
+        account_id: account.account_id.clone(),
+        credential: AccountCredential::NativeHome(home),
+        resume_requested_session: false,
+        store,
+    }))
 }
 
 async fn retain_authenticated_account(
@@ -945,6 +1080,51 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+
+    #[test]
+    fn explicit_account_selector_matches_exactly_or_by_unique_prefix() {
+        let temp = tempdir().unwrap();
+        let accounts = vec![
+            new_account(
+                Provider::Codex,
+                parse_account_id("engineering").unwrap(),
+                temp.path().join("engineering"),
+                Some(crate::profile::EmailAddress::parse("loopflow-eng@loopflow.studio").unwrap()),
+            ),
+            new_account(
+                Provider::Codex,
+                parse_account_id("manabot-eng").unwrap(),
+                temp.path().join("manabot-eng"),
+                None,
+            ),
+            new_account(
+                Provider::Codex,
+                parse_account_id("manabot-ops").unwrap(),
+                temp.path().join("manabot-ops"),
+                None,
+            ),
+        ];
+        let one = |selector: &str| match match_account(&accounts, selector) {
+            AccountMatch::One(account) => account.account_id.as_str().to_string(),
+            other => panic!("expected one match for '{selector}', got {other:?}"),
+        };
+
+        assert_eq!(one("LoopFlow-Eng@loopflow.studio"), "engineering");
+        assert_eq!(one("manabot-eng"), "manabot-eng");
+        // A unique prefix reaches its account; email prefixes count too.
+        assert_eq!(one("manabot-e"), "manabot-eng");
+        assert_eq!(one("loopflow-eng@"), "engineering");
+        // An exact id wins even when it prefixes nothing else and another
+        // account's id shares its prefix.
+        assert!(matches!(
+            match_account(&accounts, "manabot"),
+            AccountMatch::Ambiguous(candidates) if candidates.len() == 2
+        ));
+        assert!(matches!(
+            match_account(&accounts, "nobody@example.com"),
+            AccountMatch::None
+        ));
+    }
 
     #[test]
     fn account_ids_are_shell_and_path_safe() {

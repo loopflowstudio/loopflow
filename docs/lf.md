@@ -354,14 +354,18 @@ lf doctor --json                # machine-readable audit
 ```
 
 ```bash
-lf auth exec codex engineering            # interactive codex on the managed account
-lf auth exec claude jack@loopflow.studio  # provider CLI shares the routed session
+lf -m codex --account manabot-eng : "fix the tests"   # this account, this run
+lf -m codex --account manabot-eng --tui               # interactive codex, same session
+LF_ACCOUNT=jack@loopflow.studio lf implement          # exported form, inherited by children
 ```
 
-`lf auth exec` replaces the process with the provider's CLI running on the
-managed account's credential home. Logging into a managed account with a bare
-`codex login`/`claude` creates a second session and evicts the managed one
-("needs re-login"); exec is how direct use and lf routing share one session.
+`--account <email|id>` (or `LF_ACCOUNT=`) makes every provider resolution in
+the invocation — and its child lf processes — use the named managed account,
+bypassing the repo route and cooldown gating. The credential is still
+verified, so a revoked account errors with the re-login fix. Use it for
+interactive vendor sessions too (`--tui`): logging into a managed account
+with a bare `codex login` creates a second session and evicts the managed
+one ("needs re-login"); entering through lf shares one session.
 
 `lf usage` leads with each managed account's subscription state — provider-
 reported plan, session and weekly windows as percent *used*, reset times —

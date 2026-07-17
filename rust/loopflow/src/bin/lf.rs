@@ -1377,6 +1377,14 @@ fn main() -> anyhow::Result<()> {
             wave.name().to_string(),
         )
     });
+    // Explicit account selection rides the environment so every provider
+    // resolution in this invocation — and its child lf processes — honors it.
+    let _explicit_account_env = cli.account.as_deref().map(|account| {
+        EnvGuard::set(
+            loopflow::provider_account::PROVIDER_ACCOUNT_ENV,
+            account.to_string(),
+        )
+    });
     debug!(?cli, "parsed CLI arguments");
 
     // Route repo/PR/release/PM commands to the Wave's execution home before local

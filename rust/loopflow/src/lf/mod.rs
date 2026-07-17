@@ -43,6 +43,13 @@ pub struct Cli {
     #[arg(short = 'm', long = "model", short_alias = 'M')]
     pub model: Option<String>,
 
+    /// Run as this managed provider account (login email or account id),
+    /// overriding the repo's route for this invocation and its children.
+    /// Accounts spend; a profile is only the Chrome venue accounts log in
+    /// through, so it is never a run-time selector.
+    #[arg(long = "account")]
+    pub account: Option<String>,
+
     /// Skip permission prompts
     #[arg(long)]
     pub yolo: bool,
@@ -1599,15 +1606,6 @@ pub enum AuthCommand {
     },
     /// Clear observed utilization and cooldown for an account
     Reset { provider: String, account: String },
-    /// Run the provider's CLI on a managed account's credential home
-    Exec {
-        provider: String,
-        /// Managed account id or login email
-        account: String,
-        /// Arguments passed through to the provider CLI
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
     /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),

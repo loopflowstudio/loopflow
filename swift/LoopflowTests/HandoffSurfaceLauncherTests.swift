@@ -75,22 +75,44 @@ struct HandoffSurfaceLauncherTests {
         #expect(yaml.contains(#"'it'\\''s fine'"#))
     }
 
-    @Test("an IDE bears no session action — it is only ever worktree-only")
-    func ideBearsNoSessionAction() {
-        // With both IDEs installed and a proven local workspace, reach still
-        // refuses to promote them to attach: there is no launch that resumes the
-        // Session.
-        let capability = HandoffSurfaceCapability(
+    @Test("an IDE without Claude or a known session is worktree-only")
+    func ideWithoutClaudeOrSessionIsWorktreeOnly() {
+        // With both IDEs installed and a proven local workspace, but a non-Claude
+        // provider: reach refuses to promote them to attach.
+        let nonClaude = HandoffSurfaceCapability(
             installedApps: [.vscode, .cursor],
             workspaceProven: true,
             warpCommandBearing: false,
-            isRemoteHome: false
+            isRemoteHome: false,
+            providerIsClaude: false,
+            providerSessionKnown: true
         )
-        #expect(capability.reach(.vscode) == .worktreeOnly)
-        #expect(capability.reach(.cursor) == .worktreeOnly)
-        let ideOptions = capability.offeredOptions.filter { $0.surface.isIDE }
-        #expect(!ideOptions.isEmpty)
-        #expect(ideOptions.allSatisfy { $0.reach == .worktreeOnly })
+        #expect(nonClaude.reach(.vscode) == .worktreeOnly)
+        #expect(nonClaude.reach(.cursor) == .worktreeOnly)
+
+        // Claude but no known session id: still worktree-only.
+        let noSession = HandoffSurfaceCapability(
+            installedApps: [.vscode, .cursor],
+            workspaceProven: true,
+            warpCommandBearing: false,
+            isRemoteHome: false,
+            providerIsClaude: true,
+            providerSessionKnown: false
+        )
+        #expect(noSession.reach(.vscode) == .worktreeOnly)
+        #expect(noSession.reach(.cursor) == .worktreeOnly)
+
+        // Claude + known session id: IDEs attach.
+        let claudeWithSession = HandoffSurfaceCapability(
+            installedApps: [.vscode, .cursor],
+            workspaceProven: true,
+            warpCommandBearing: false,
+            isRemoteHome: false,
+            providerIsClaude: true,
+            providerSessionKnown: true
+        )
+        #expect(claudeWithSession.reach(.vscode) == .attach)
+        #expect(claudeWithSession.reach(.cursor) == .attach)
     }
 
     @Test("descriptor host classifies local versus remote Home")
@@ -108,7 +130,12 @@ struct HandoffSurfaceLauncherTests {
     func remoteHomeIsNeverLocallyProven() {
         // Even pointed at a directory that exists on this machine, a remote Home
         // yields no local workspace proof, so IDEs stay unavailable.
-        let capability = HandoffSurfaceLauncher.capability(host: "ssh://jack@mini", cwd: "/tmp")
+        let capability = HandoffSurfaceLauncher.capability(
+            host: "ssh://jack@mini",
+            cwd: "/tmp",
+            provider: "claude",
+            providerSessionId: "sess_1"
+        )
         #expect(capability.isRemoteHome)
         #expect(!capability.workspaceProven)
         #expect(capability.reach(.vscode) == .unavailable)
@@ -152,6 +179,103 @@ struct HandoffSurfaceLauncherTests {
             "cd '/remote/repo' && exec 'env' 'LF_WAVE_ID=w_42' 'TERM=xterm-256color' "
                 + "'claude' '--resume' 'sess_abc123' '--cwd' '/src/repo'",
         ])
+    }
+
+    // MARK: - IDE attach: the exact shared command in the IDE's terminal
+
+    @Test("the IDE shell command runs the exact provider-session-bearing argv")
+    func ideShellCommandCarriesTheSessionArgv() {
+        let command = HandoffSurfaceLauncher.Command(
+            cwd: "/src/repo",
+            argv: argv,
+            environment: [:]
+        )
+        let shell = HandoffSurfaceLauncher.ideShellCommand(from: command)
+        // The command cds to the worktree and execs the exact argv — the session
+        // id rides through, so the IDE's terminal attaches the same Session.
+        #expect(shell == "cd '/src/repo' && exec 'claude' '--resume' 'sess_abc123' '--cwd' '/src/repo'")
+    }
+
+    @Test("the IDE shell command preserves the descriptor environment")
+    func ideShellCommandPreservesEnvironment() {
+        let command = HandoffSurfaceLauncher.Command(
+            cwd: "/src/repo",
+            argv: argv,
+            environment: ["LF_WAVE_ID": "w_42", "TERM": "xterm-256color"]
+        )
+        let shell = HandoffSurfaceLauncher.ideShellCommand(from: command)
+        // The environment rides an `env KEY=VALUE …` prefix, sorted for
+        // determinism, ahead of the exact argv.
+        #expect(shell == "cd '/src/repo' && exec 'env' 'LF_WAVE_ID=w_42' 'TERM=xterm-256color' "
+            + "'claude' '--resume' 'sess_abc123' '--cwd' '/src/repo'")
+    }
+
+    @Test("the IDE AppleScript activates the app and runs the command in a terminal")
+    func ideAttachAppleScriptStructure() {
+        let script = HandoffSurfaceLauncher.ideAttachAppleScript(
+            bundleName: "Cursor",
+            shellCommand: "cd '/src/repo' && exec 'claude' '--resume' 'sess_abc123'"
+        )
+        // The script activates the IDE, opens the command palette, creates a
+        // terminal, and types the exact shell command.
+        #expect(script.contains("tell application \"Cursor\" to activate"))
+        #expect(script.contains("Terminal: Create New Integrated Terminal"))
+        #expect(script.contains("cd '/src/repo' && exec 'claude' '--resume' 'sess_abc123'"))
+    }
+
+    @Test("the IDE AppleScript escapes double quotes in the shell command")
+    func ideAttachAppleScriptEscapesQuotes() {
+        let script = HandoffSurfaceLauncher.ideAttachAppleScript(
+            bundleName: "VS Code",
+            shellCommand: "echo \"hello\""
+        )
+        // Double quotes are escaped for the AppleScript string literal.
+        #expect(script.contains("echo \\\"hello\\\""))
+    }
+
+    @Test("Claude with a known session id makes IDE reach attach")
+    func claudeSessionKnownMakesIDEAttach() {
+        let capability = HandoffSurfaceCapability(
+            installedApps: [.vscode, .cursor],
+            workspaceProven: true,
+            warpCommandBearing: false,
+            isRemoteHome: false,
+            providerIsClaude: true,
+            providerSessionKnown: true
+        )
+        #expect(capability.reach(.vscode) == .attach)
+        #expect(capability.reach(.cursor) == .attach)
+        let ideOptions = capability.offeredOptions.filter { $0.surface.isIDE }
+        #expect(ideOptions.allSatisfy { $0.reach == .attach })
+        #expect(ideOptions.allSatisfy { $0.label == $0.surface.appName })
+    }
+
+    @Test("a non-Claude provider keeps IDE at worktree-only")
+    func nonClaudeProviderKeepsIDEWorktreeOnly() {
+        let capability = HandoffSurfaceCapability(
+            installedApps: [.cursor],
+            workspaceProven: true,
+            warpCommandBearing: false,
+            isRemoteHome: false,
+            providerIsClaude: false,
+            providerSessionKnown: true
+        )
+        #expect(capability.reach(.cursor) == .worktreeOnly)
+        let option = capability.offeredOptions.first { $0.surface == .cursor }
+        #expect(option?.label == "Cursor (open worktree)")
+    }
+
+    @Test("Claude without a known session id keeps IDE at worktree-only")
+    func claudeWithoutSessionKeepsIDEWorktreeOnly() {
+        let capability = HandoffSurfaceCapability(
+            installedApps: [.cursor],
+            workspaceProven: true,
+            warpCommandBearing: false,
+            isRemoteHome: false,
+            providerIsClaude: true,
+            providerSessionKnown: false
+        )
+        #expect(capability.reach(.cursor) == .worktreeOnly)
     }
 }
 #endif

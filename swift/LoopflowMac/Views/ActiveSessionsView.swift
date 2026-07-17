@@ -465,8 +465,15 @@ private struct HandoffAttachSheet: View {
             let descriptor = try await query.attachHandoff(sessionId: handoff.sessionId)
             attach = descriptor
             // Consume the descriptor's Home, not a local-only assumption: a remote
-            // worktree makes local editors and plain windows unavailable.
-            let cap = HandoffSurfaceLauncher.capability(host: descriptor.host, cwd: descriptor.cwd)
+            // worktree makes local editors and plain windows unavailable. The
+            // provider and session id determine whether an IDE can attach (Claude
+            // with a known session id) or is worktree-only.
+            let cap = HandoffSurfaceLauncher.capability(
+                host: descriptor.host,
+                cwd: descriptor.cwd,
+                provider: handoff.provider,
+                providerSessionId: handoff.providerSessionId
+            )
             capability = cap
             let resolution = HandoffSurfaceResolver.resolve(
                 provider: handoff.provider,
@@ -509,20 +516,24 @@ private struct HandoffAttachSheet: View {
             return
         }
 
-        let launched = await HandoffSurfaceLauncher.launch(
+        let result = await HandoffSurfaceLauncher.launch(
             target,
             attach: attach,
             home: handoff.home,
             reach: reach
         )
-        if launched {
+        switch result {
+        case .attached:
             surface = target
-            externalNote = reach == .attach
-                ? "Attached in \(target.appName). Complete or hand back from there."
-                : "Opened the worktree in \(target.appName) — this does not attach the Session."
+            externalNote = "Attached in \(target.appName). Complete or hand back from there."
             if userInitiated { fallbackNotice = nil }
             recordIfEarned(target, reach: reach, userInitiated: userInitiated, launched: true)
-        } else {
+        case .worktreeOnly:
+            surface = target
+            externalNote = "Opened the worktree in \(target.appName) — this does not attach the Session."
+            if userInitiated { fallbackNotice = nil }
+            // A worktree-only outcome never overwrites the last attach preference.
+        case .failed:
             // Visible fallback: embed Ghostty and leave the preference untouched.
             surface = .ghostty
             externalNote = nil

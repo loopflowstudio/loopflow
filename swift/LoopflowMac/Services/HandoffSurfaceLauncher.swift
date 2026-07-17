@@ -48,6 +48,15 @@ final class HandoffSurfacePreferences {
     }
 }
 
+/// The outcome of launching a surface for a handoff. A launch can fully attach
+/// (the exact shared command ran), partially succeed (the app opened but the
+/// command could not run — worktree-only), or fail (nothing opened, fall back).
+enum HandoffLaunchResult: Equatable, Sendable {
+    case attached
+    case worktreeOnly
+    case failed
+}
+
 /// Detects which surfaces the current machine can present and opens them. The
 /// pure resolver decides *which* surface; this is the side effect that reaches
 /// out to `NSWorkspace` and the filesystem. It never creates or names a Session
@@ -115,8 +124,14 @@ enum HandoffSurfaceLauncher {
 
     /// Probe the machine and handoff into the pure capability the resolver reads.
     /// The worktree is only probed on a local Home; a remote worktree is never
-    /// locally proven.
-    static func capability(host: String, cwd: String) -> HandoffSurfaceCapability {
+    /// locally proven. The provider and session id determine whether an IDE can
+    /// attach (Claude with a known session id) or is worktree-only.
+    static func capability(
+        host: String,
+        cwd: String,
+        provider: String,
+        providerSessionId: String?
+    ) -> HandoffSurfaceCapability {
         let installed = installedApps()
         let remote = isRemoteHome(host)
         var isDirectory: ObjCBool = false
@@ -129,28 +144,34 @@ enum HandoffSurfaceLauncher {
             // A command-bearing Warp launch needs only that Warp is installed; the
             // launch configuration is written on demand.
             warpCommandBearing: installed.contains(.warp),
-            isRemoteHome: remote
+            isRemoteHome: remote,
+            providerIsClaude: provider == "claude",
+            providerSessionKnown: providerSessionId != nil
         )
     }
 
     /// Launch an external surface for a handoff. Ghostty is embedded and never
-    /// routed here. Returns whether the launch succeeded; the caller records the
-    /// preference only on success and falls back visibly otherwise.
+    /// routed here. Returns whether the launch attached, opened worktree-only,
+    /// or failed; the caller records the preference only on `.attached` and
+    /// falls back visibly on `.failed`.
     @MainActor
     static func launch(
         _ surface: HandoffSurface,
         attach: InteractiveHandoffAttach,
         home: String,
         reach: HandoffSurfaceReach
-    ) async -> Bool {
+    ) async -> HandoffLaunchResult {
         switch surface {
         case .ghostty:
             // Embedded terminal is presented by the view, not launched here.
-            return true
+            return .attached
         case .warp:
             return launchWarp(attach: attach, home: home, attaching: reach == .attach)
         case .vscode, .cursor:
-            return await openWorkspace(surface, cwd: attach.cwd)
+            if reach == .attach {
+                return await launchIDEAttach(surface, attach: attach, home: home)
+            }
+            return await openWorkspace(surface, cwd: attach.cwd) ? .worktreeOnly : .failed
         }
     }
 
@@ -158,13 +179,13 @@ enum HandoffSurfaceLauncher {
         attach: InteractiveHandoffAttach,
         home: String,
         attaching: Bool
-    ) -> Bool {
+    ) -> HandoffLaunchResult {
         if attaching {
             // Attach only if the command-bearing config actually gets written; a
-            // failed write returns false so the caller falls back to the embedded
+            // failed write returns .failed so the caller falls back to the embedded
             // terminal rather than opening a bare window and calling it "attached".
-            guard let launchURL = writeWarpLaunchConfig(attach: attach, home: home) else { return false }
-            return NSWorkspace.shared.open(launchURL)
+            guard let launchURL = writeWarpLaunchConfig(attach: attach, home: home) else { return .failed }
+            return NSWorkspace.shared.open(launchURL) ? .attached : .failed
         }
         // Worktree-only: open a window at the worktree with no command. Weaker,
         // and labeled as such by the option that offered it.
@@ -173,8 +194,8 @@ enum HandoffSurfaceLauncher {
         components.host = "action"
         components.path = "/new_window"
         components.queryItems = [URLQueryItem(name: "path", value: attach.cwd)]
-        guard let url = components.url else { return false }
-        return NSWorkspace.shared.open(url)
+        guard let url = components.url else { return .failed }
+        return NSWorkspace.shared.open(url) ? .worktreeOnly : .failed
     }
 
     /// The name of the Warp launch configuration for a handoff.
@@ -259,6 +280,73 @@ enum HandoffSurfaceLauncher {
         } catch {
             return false
         }
+    }
+
+    /// Open the IDE at the worktree, then run the exact shared attach command in
+    /// its integrated terminal via AppleScript. The IDE is opened first so the
+    /// `--ide` flag (if present in the argv) can auto-connect. If the AppleScript
+    /// cannot run the command (e.g. Accessibility permission denied), the IDE is
+    /// already open at the worktree — the launch is worktree-only, not failed,
+    /// so the user sees the honest weaker action instead of a fallback.
+    @MainActor
+    private static func launchIDEAttach(
+        _ surface: HandoffSurface,
+        attach: InteractiveHandoffAttach,
+        home: String
+    ) async -> HandoffLaunchResult {
+        guard await openWorkspace(surface, cwd: attach.cwd) else { return .failed }
+        let command = command(for: attach, home: home)
+        let script = ideAttachAppleScript(
+            bundleName: surface.appName,
+            shellCommand: ideShellCommand(from: command)
+        )
+        let appleScript = NSAppleScript(source: script)
+        var errorInfo: NSDictionary?
+        appleScript?.executeAndReturnError(&errorInfo)
+        if errorInfo != nil { return .worktreeOnly }
+        return .attached
+    }
+
+    /// Build the shell command that runs in the IDE's integrated terminal: set
+    /// the environment (if any), cd to the worktree, and exec the exact argv.
+    static func ideShellCommand(from command: Command) -> String {
+        var tokens: [String] = []
+        if !command.environment.isEmpty {
+            tokens.append("env")
+            for key in command.environment.keys.sorted() {
+                tokens.append("\(key)=\(command.environment[key] ?? "")")
+            }
+        }
+        tokens.append(contentsOf: command.argv)
+        let execCommand = tokens.map(shellQuote).joined(separator: " ")
+        if command.cwd != "/" {
+            return "cd \(shellQuote(command.cwd)) && exec \(execCommand)"
+        }
+        return execCommand
+    }
+
+    /// AppleScript that activates the IDE, opens a new integrated terminal via
+    /// the command palette, and runs the shell command in it. The command
+    /// palette path is reliable across keybinding customizations — "Terminal:
+    /// Create New Integrated Terminal" always creates a fresh terminal.
+    static func ideAttachAppleScript(bundleName: String, shellCommand: String) -> String {
+        let escaped = shellCommand
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        tell application "\(bundleName)" to activate
+        delay 0.5
+        tell application "System Events"
+            keystroke "p" using {command down, shift down}
+            delay 0.3
+            keystroke "Terminal: Create New Integrated Terminal"
+            delay 0.2
+            key code 36
+            delay 0.5
+            keystroke "\(escaped)"
+            key code 36
+        end tell
+        """
     }
 
     private static func shellQuote(_ value: String) -> String {

@@ -370,6 +370,76 @@ scope is unchanged.
    it completes exactly once, staying completed. Reported with the command and
    output, not asserted.
 
+## Verification — measured, not expected
+
+Run before the host degraded (see *Host* below). Results are observed output.
+
+**The three regressions pass** (`cargo test -p loopflow --lib`):
+
+```
+test ops::task::tests::a_re_mint_after_main_advances_records_the_base_its_branch_forks_from ... ok
+test ops::task::tests::a_re_mint_holding_committed_work_still_reads_range ... ok
+test ops::task::tests::an_incoherent_recorded_base_is_healed_when_the_active_pr_is_adopted ... ok
+```
+
+**Sabotage proof.** Reverting the mint to the old upstream-tip read
+(`let base_commit = rev_parse(&session.worktree, &base_ref)`) turns both re-mint
+regressions red:
+
+```
+assertion `left == right` failed: a re-mint must record the fork point of the
+branch it reused, not the current upstream tip
+failures:
+    a_re_mint_after_main_advances_records_the_base_its_branch_forks_from
+    a_re_mint_holding_committed_work_still_reads_range
+test result: FAILED. 0 passed; 2 failed
+```
+
+**The trap, proven empirically rather than asserted.** With the bug fully
+restored, the entire pre-existing suite stays green — **74 passed**, including
+every first-mint rotation test (`settled_pr_rotates_the_same_worktree_from_fetched_main`,
+`rotate_forward_carries_uncommitted_follow_up_edits`,
+`rotate_carries_committed_follow_up_and_dirty_edits_after_an_out_of_band_merge`,
+`a_completing_pr_rotates_only_to_carry_committed_follow_up`). Only the two
+re-mint tests catch it. That is exactly why this survived W2-300 and W2-304: a
+first mint cuts the branch at its base, so the pair agrees by accident.
+
+### Pre-existing flakes, not this branch's
+
+`cargo test -p loopflow --lib ops::task` inside a Task Session fails a *varying*
+set. Two runs of **identical** code:
+
+| Run | Failures |
+|---|---|
+| A | `recover_abandoned_task_adopts…`, `recover_refuses_a_non_abandoned_task`, `resume_revokes_a_dead_active_lease_on_a_failed_task`, `resume_revokes_a_dead_legacy_lease_on_a_waiting_task` (4) |
+| B | `recover_abandoned_task_adopts…`, `recover_refuses_a_non_abandoned_task`, `reconcile_process_liveness_consumes_queued_resume_before_settling` (3) |
+
+A failure set that changes across runs of the same code is a flake by
+definition. The constant pair is the known ambient-`LF_WAVE_ID` leak (they lack
+the `AMBIENT_TASK_ENV` scrub and pass in CI, which has no ambient Wave). The
+intermittent ones seed `pid: None` + a tmux name, so they probe ambient tmux —
+and this Session *runs inside* tmux.
+
+`reconcile_process_liveness_consumes_queued_resume_before_settling` is provably
+not mine on two independent grounds: it passes 3/3 in isolation on this code,
+and `reconcile_process_liveness` reaches none of `ensure_working_pr`,
+`heal_incoherent_base`, `fork_point`, or `resolve_upstream_base` — my change
+cannot touch its path. A single stash-and-compare initially suggested otherwise;
+one run each was coincidence, which is the same one-sample trap this Task's own
+regression exists to avoid.
+
+### Host: local proof is unavailable past this point
+
+`syspolicyd` is pegged at **98.1% CPU** (pid 5063, 13d uptime) and stalls every
+newly linked binary, so `cargo clippy`/`cargo test` no longer complete here.
+`cargo fmt` is clean (rustfmt links nothing). The results above were measured
+before that; anything further is left to hosted CI rather than narrated.
+
+**CI condition:** every leaf check green **except `scratch-clear`**, which is red
+by construction on any PR carrying its design doc (`ci.yml` gives `tests-result`
+`needs: scratch-clear`) and which `lf pr land` clears as its first act. Never
+wait for `tests-result`; never delete the design doc to green it.
+
 ## Measure
 
 Baseline, now: W2-300 `status=waiting`, sequence 2 `base=3e9df0677` vs branch

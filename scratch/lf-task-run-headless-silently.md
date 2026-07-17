@@ -70,6 +70,25 @@ Keep the existing conversion path and repair only the persistence boundary.
 No migration is needed. The columns already exist, INSERT already writes them,
 and reads already reconstruct the lifecycle plan.
 
+## Source of truth and consumers
+
+The six flow/policy columns on the `task_sessions` row are authoritative.
+`TaskSession.lifecycle` is reconstructed from that row; `lf task run` mutates
+and persists it, while the Task runner derives future reviewer routing from the
+current phase plan. No wire DTO, app surface, schema, or launch-time INSERT
+changes.
+
+For an existing idle Task, no review at the current coordinates means convert.
+A completed or parent-owned current review also permits conversion. A
+nonterminal Human review refuses with its id before mutation. Store read or
+write failure remains an error, and the existing active-body and terminal-Task
+guards remain unchanged. An already-deferred Task remains an idempotent
+success.
+
+The conversion adds at most one indexed current-coordinate review read and
+retains one control UPDATE. It adds no network call, subprocess, retry loop,
+runtime readback, migration, or generalized persistence machinery.
+
 ## De-risking
 
 | Question | Finding | Impact on design |

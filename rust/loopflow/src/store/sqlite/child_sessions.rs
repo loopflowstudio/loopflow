@@ -4027,7 +4027,18 @@ fn same_task_pr(left: &TaskPr, right: &TaskPr) -> bool {
         && left.base_commit == right.base_commit
         && left.publication == right.publication
         && left.merge_commit == right.merge_commit
-        && left.abandoned_at == right.abandoned_at
+        && same_settle_instant(left.abandoned_at, right.abandoned_at)
+}
+
+/// The column stores unix seconds, so a settle re-presented with the same
+/// wall-clock instant but nanosecond precision is the same settle, not a
+/// conflicting one.
+fn same_settle_instant(
+    left: Option<time::OffsetDateTime>,
+    right: Option<time::OffsetDateTime>,
+) -> bool {
+    left.map(time::OffsetDateTime::unix_timestamp)
+        == right.map(time::OffsetDateTime::unix_timestamp)
 }
 
 fn invalid_column(

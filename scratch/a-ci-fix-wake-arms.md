@@ -28,22 +28,66 @@ as its roll-up (`ci.yml:172` gives it `needs: scratch-clear`).
 
 ## The demo
 
-This PR is its own demo. It carries this design doc, so its head fails
-`scratch-clear` exactly like #1055 and #1060 did. On main that head arms a
-ci-fix wake; with this change, `lf ci` and `lf task status` still report the head
+This PR is its own demo, and main has already performed half of it. This PR
+carries this design doc, so its head fails `scratch-clear` exactly like #1055 and
+#1060 did — and on 2026-07-17 main duly **armed a third wake against head
+`904185190`**, waking a body to repair the design doc under review. That body
+refused and reported the structure instead. The "before" is measured, not argued.
+
+The "after": with this change, `lf ci` and `lf task status` still report the head
 failing `scratch-clear` — the observation stays honest — and `lf task status`
 shows **no ci-fix command queued and no body woken**. The failure is visible; the
 repair is not attempted.
 
+## Who asks "is this failure actionable?"
+
+**Five** consumers, and every one of them computes the answer as
+`ci.state == Failing`. That expression conflates *red* with *a body can fix
+this*, so on a design-carrying PR — every Task PR pre-land — all five are wrong
+in the same direction, for the same reason.
+
+| # | Asker | What it does on a scratch-clear-only head | Owned by |
+|---|-------|-------------------------------------------|----------|
+| 1 | `current_ci_incident` → `wake_legal` (`ops/task.rs:2686`) | Mints the wake identity, arming a body | **PR 1** |
+| 2 | `ci_fix_restart_bar` → `wake_legal` (`task/mod.rs:761`) | Permits an automated restart of a submitted Task | **PR 1** |
+| 3 | `open_pr_model` (`actions.rs:256`) | Recommends `Resume` ("fix failing required checks"), **blocks `Review`** | PR 2 |
+| 4 | `next_move` (`waves.rs:1805,1817`) | Routes ownership to `Ci`; labels a live body "fixing CI" | PR 2 |
+| 5 | `decide_open_pr_status` (`ops/task.rs:2663`) | `failing && !head_advanced` → **Blocked**, "the Task body did not repair the head. Needs a new directive or human review" | PR 1 defuses in practice |
+
+Consumers 3 and 4 are live on **this PR right now**. `lf task status W2-309`:
+
+```
+action: resume  (required checks failed: scratch-clear)
+  blocked: review  (required checks failed)
+```
+
+Consumer 5 is the sting in the tail, and it inverts the cost. A ci-fix body that
+does the *right* thing — refuses to delete the design doc — leaves the head
+unmoved, so `decide_open_pr_status` blocks the Task and demands "a new directive
+or human review". The honest refusal is punished; the only unpunished move is the
+destructive one. That is the avoidable-human-step KR violated by the machinery
+that exists to avoid human steps.
+
+It defuses in practice once PR 1 lands: 5 only bites when a turn ends without
+pushing, and with no wake armed, no turn runs that has nothing to push. (A
+kickoff/iterate body pushes its design, so `head_advanced` is true and the arm
+never fires.) So PR 1 is load-bearing for 5 without touching it.
+
+**How I got this wrong the first time.** This design originally asserted
+`wake_legal` "has exactly the two callers that matter". False — I grepped the
+*callers of a function* when the question was *who asks this question*. One
+`grep -rn "CiState::Failing"` found three more askers, one of which blocks the
+Task. Same trap wave memory records twice: grep for the **shape**, not the symbol
+you're standing on.
+
 ## Approach
 
-One predicate, at the one place that already answers the legality question.
+One predicate, shared; each consumer keeps its own policy.
 
-`CiObservation::wake_legal()` (`task/mod.rs:326`) is documented as *the* question
-"does this reading make a ci-fix wake legal", and it has exactly the two callers
-that matter: `current_ci_incident` (the single mint point for a wake's identity,
-`ops/task.rs:2685`) and `ci_fix_restart_bar` (`task/mod.rs:761`, the one
-automated path allowed to restart a submitted Task). Today it asks only
+The class belongs to the *check*, so it is named once on `CiCheck` and every
+asker can reuse it. PR 1 routes consumers 1 and 2 through it via
+`CiObservation::wake_legal()` (`task/mod.rs:326`) — documented as *the* legality
+question and the shared entry point for both. Today it asks only
 `state == Failing`. It gains one clause:
 
 ```rust
@@ -84,6 +128,11 @@ show the red head), and only the *wake* is refused. Filtering earlier — inside
 `merge_gate_state` — would have deleted the failure from the observation and left
 status reporting `Failing` with nothing named.
 
+`land_time_precondition` lives on `CiCheck`, not inside `wake_legal`, precisely
+so consumers 3–5 can adopt it in PR 2 without re-deriving the class. PR 1 does
+not change them; it makes their fix a one-line question rather than a second
+opinion.
+
 ## De-risking
 
 | Question | Finding | Impact on design |
@@ -94,6 +143,8 @@ status reporting `Failing` with nothing named.
 | "A name list rots" — what stops the rot? | The workflow is in-repo. A unit test can read `.github/workflows/ci.yml` and assert a job named by the const exists. Renaming the job then turns the test red at the const, instead of silently re-arming wakes in production. | Include the pin test. It is the only mechanism that makes the literal self-detecting; without it the const is exactly the drifting name list the seed warned about. |
 | Does refusing the wake strand the incident? | `mark_ci_incidents_green(&pr.id, …)` (`ops/task.rs:3129`) settles by PR, not by wake, and land's scratch clear moves the head green — so a recorded scratch-clear incident closes on its own. Nothing retries arming from recorded incidents: `runner.rs:2396` re-derives through `current_ci_incident`, which respects `wake_legal`. | Safe to keep recording the incident. No sweeper, no `blocked_at` bookkeeping. |
 | Does the second `wake_legal` caller change behavior correctly? | `ci_fix_restart_bar` permits an automated restart of a submitted Task only when `wake_legal`. A scratch-clear-only head now stays barred by `open_pr_bar` — the same bar the plain supervisor restart already applies. | Correct by construction: the one automated restart path is closed for exactly the heads that warrant no repair. |
+| Are those two the only askers? | **No** — the original claim was false. `grep -rn "CiState::Failing"` finds three more: `open_pr_model`, `next_move`, `decide_open_pr_status`. Each re-derives "actionable" from `state == Failing` independently. | Named in "Who asks this question"; PR 2 owns 3 and 4. The predicate is placed on `CiCheck` so they adopt rather than re-derive. |
+| Does leaving 3–5 unfixed in PR 1 leave the KR unmet? | Partly. 5 defuses in practice (no wake → no empty turn → no block). 3 and 4 stay wrong: they are **read** surfaces, so they burn nothing themselves — but they invite a supervisor to Resume, which does. | PR 1 as directed; PR 2 immediately after. The serial split is the directive's ("smallest honest classification before CI wake creation"), not a deferral of the finding. |
 | Does a failing-but-unnamed reading exist, and what should it do? | `merge_gate_state` falls back to `gate.failing_checks` when the full read is empty, so `failing_checks` is normally non-empty on a real gate failure; an empty set means we could not name the failure. | Fail toward waking. `failing_checks.is_empty()` stays legal — conservatism has a direction, and a filter that suppresses unknown failures is a mute button. |
 
 ## Alternatives considered
@@ -129,15 +180,27 @@ which does not consult `wake_legal`); it simply never gains a
 
 ## Scope
 
-- **In scope:** `CiCheck::land_time_precondition` + the const on `task/mod.rs`;
-  the `wake_legal` clause; a doc pointer on `ops::land::clear_scratch`; unit
-  regressions on `wake_legal` and `ci_fix_restart_bar`; a lifecycle regression
-  through the real read path proving both directions; the workflow-name pin.
+- **In scope (PR 1, this PR):** `CiCheck::land_time_precondition` + the const on
+  `task/mod.rs`; the `wake_legal` clause; a doc pointer on
+  `ops::land::clear_scratch`; unit regressions on `wake_legal` and
+  `ci_fix_restart_bar`; a lifecycle regression through the real read path proving
+  both directions; the workflow-name pin.
+- **Next serial PR (PR 2, `ci-fix-actionable-consumers`):** consumers 3 and 4 —
+  `open_pr_model` stops recommending `Resume` and stops blocking `Review` on a
+  head whose only failures are land-time preconditions; `next_move` stops routing
+  ownership to `Ci`. Both adopt `land_time_precondition`; neither re-derives it.
+  The reviewable question PR 2 raises, and PR 1 deliberately does not: **should a
+  design-carrying PR be reviewable while `scratch-clear` is red?** Wave doctrine
+  says yes ("state the approval condition as *every check green except
+  scratch-clear*"), and today the action model says no. That is a product call
+  worth making explicitly rather than smuggling into a wake fix.
 - **Out of scope:** `scratch-clear` itself and all `scratch/` handling; the
   `tests-result` roll-up's `needs: scratch-clear` structure (a design-carrying PR
   is red by construction pre-land — structural, not a defect); the publish path's
   mislabelled M<B diagnostic (ae4775c7); `blocked_at` bookkeeping; any change to
-  `merge_gate_state`'s aggregate/leaf rule.
+  `merge_gate_state`'s aggregate/leaf rule; `decide_open_pr_status` (consumer 5),
+  which PR 1 defuses in practice — reopen it only if a scratch-clear Blocked is
+  measured after PR 1 lands.
 
 ## Done when
 
@@ -170,9 +233,11 @@ nothing here.
 
 ## Measure
 
-Baseline (2026-07-17): **2 measured armings** on structurally-red heads — ENG-4
-/#1055/`4041c795e` and W2-297/#1060/`58c47028c` — each burning one agent body on
-an impossible repair, whose only "successful" action would have been destructive.
+Baseline (2026-07-17): **3 measured armings** on structurally-red heads — ENG-4
+/#1055/`4041c795e`, W2-297/#1060/`58c47028c`, and W2-309/#1062/`904185190` (this
+PR, i.e. the fix's own design armed the defect it removes) — each burning one
+agent body on an impossible repair, whose only "successful" action would have
+been destructive.
 
 After: zero `ChildCommandKind::CiFix` commands whose incident `failure_set` is
 exactly `["scratch-clear"]`.
@@ -186,3 +251,15 @@ WHERE failure_set = '["scratch-clear"]' AND trigger_command_id IS NOT NULL;
 
 Incidents with `failure_set = ["scratch-clear"]` and a NULL `trigger_command_id`
 are the healthy shape, not a gap: the head was red, and no repair was warranted.
+
+## Review log
+
+A reviewer's observation head can lag the current one by a revision, so this
+table says which sha resolved what. If a finding below is quoted back as
+outstanding, the head being read is older than the sha named here.
+
+| Finding | Resolved at |
+|---------|-------------|
+| Design claimed `wake_legal` "has exactly the two callers that matter" — false; three more askers exist (`open_pr_model`, `next_move`, `decide_open_pr_status`) | this head — see "Who asks this question" |
+| Measure baseline said 2 armings | this head — 3, incl. this PR's own `904185190` |
+| Consumers 3/4 (Resume recommended, Review blocked on a scratch-clear head) unowned | this head — PR 2 `ci-fix-actionable-consumers`, scoped in "Scope" |

@@ -31,33 +31,23 @@ wave.rs's private duplicate collapsed onto it, `run_task_session` builds the
 default while `run_task_session_inner` takes it as a value. No trait, no
 factory, no registry, no `HarnessKind` test variant. It never wanted one.
 
-**Still open — this is what blocks #1048:** the test itself. See §8.
+**Resolved:** the runner-driving test and sabotage evidence are recorded in §8.
 
-## 8. OPEN, BLOCKING PR 3: the test does not exist yet
+## 8. RESOLVED: the runner owns a behavioral usage proof
 
-The seam makes it possible; nothing yet proves it. Done-When #1 is unmet, so
-#1048 is not landable — a proof that cannot fail in CI is not a guard, and right
-now there is no proof at all.
+`task_runner_records_reported_turn_usage` invokes `run_task_session_inner` with
+a scripted harness, a real git worktree, an active PR, a current directive, and
+a journal run context. The emitted `TurnUsage` reaches the persisted
+`agent_turns` row with input 321 and output 45. Capture metadata keeps the
+existing `PreparedHarnessTurn` semantics (`codex`, model absent).
 
-The remaining fixture work, verified as the actual cost:
+Sabotage was performed at the required runner seam: deleting
+`capture.record_conversation(event.clone())` made the test fail because
+`provider_input_tokens` was `None` instead of `Some(321)`. Restoring the call
+returned the focused test and the Rust gate to green.
 
-- `run_task_session_inner` needs a real worktree with a loadable skill
-  (`load_skill`, runner.rs:1114), an active PR (`prepare_task_flow_step`
-  hard-fails without one, :1096), and a journal run context for
-  `trace_capture_context`.
-- `task/runner/ci_fix_lifecycle_tests.rs` builds store + task + lease (its
-  `Harness` fixture, :384) but never drives the loop, so it is a starting point,
-  not a solution.
-
-**Sabotage target (do not get this wrong):** delete the runner's
-`capture.record_conversation(event.clone())` call and confirm red. Do **not**
-sabotage `TraceCapture` — `flowloop/wave.rs` exercises that layer in production,
-so a TraceCapture-level test stays green through the deletion and pins the layer
-below. Same shape as ENG-7's retry-ladder test that `busy_timeout` absorbed.
-
-Dogfood evidence (run a Task, query `agent_turns ⋈ agent_launches`) is worth
-carrying in the PR body as the end-to-end demo, but it is evidence, not a test,
-and it cannot be Done-When #1.
+No capture metadata semantics changed and no additional production seam was
+introduced.
 
 ## 0. PR boundary after the failed recovery (CLOSED 2026-07-17)
 

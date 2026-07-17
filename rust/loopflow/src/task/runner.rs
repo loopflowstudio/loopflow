@@ -2555,14 +2555,16 @@ mod tests {
 
     use anyhow::Result;
     use async_trait::async_trait;
+    use loopflow_test_support::TestRepo;
     use time::OffsetDateTime;
 
     use super::{
         absorb_commands, apply_input, apply_next_pending, ci_fix_seed, handle_attachment,
         handle_body_failure, human_interaction_review_protocol, infra_blocked_reason,
         interaction_review_prompt, prepare_task_flow_step, progress_summary, resume_task_phase,
-        start_prepared_task_step, task_seed, CommandStop, PreparedTaskStep,
+        run_task_session_inner, start_prepared_task_step, task_seed, CommandStop, PreparedTaskStep,
     };
+    use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
     use crate::child_session::{
         ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
         ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildRef,
@@ -2591,6 +2593,71 @@ mod tests {
         interrupts: usize,
         fail_send: bool,
         fail_interrupt: bool,
+    }
+
+    struct RunnerUsageHarness {
+        events: tokio::sync::mpsc::UnboundedSender<ConversationEvent>,
+        inputs: usize,
+    }
+
+    #[async_trait]
+    impl Harness for RunnerUsageHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            self.inputs += 1;
+            if self.inputs == 1 {
+                self.events
+                    .send(ConversationEvent::TurnStarted {
+                        turn_id: "spending-turn".to_string(),
+                    })
+                    .unwrap();
+                self.events
+                    .send(ConversationEvent::TurnCompleted {
+                        turn_id: "spending-turn".to_string(),
+                        status: Lifecycle::Completed,
+                    })
+                    .unwrap();
+                self.events
+                    .send(ConversationEvent::TurnUsage {
+                        turn_id: "spending-turn".to_string(),
+                        usage: TurnUsage {
+                            input_tokens: 321,
+                            output_tokens: 45,
+                            ..TurnUsage::default()
+                        },
+                    })
+                    .unwrap();
+            } else {
+                self.events
+                    .send(ConversationEvent::Error {
+                        code: "script_complete".to_string(),
+                        message: "end the runner fixture".to_string(),
+                    })
+                    .unwrap();
+            }
+            Ok(())
+        }
+
+        async fn interrupt(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                supports_steer: false,
+            }
+        }
+
+        fn provider_session_id(&self) -> Option<String> {
+            Some("runner-provider-session".to_string())
+        }
     }
 
     impl ScriptedHarness {
@@ -2642,10 +2709,12 @@ mod tests {
         }
     }
 
-    async fn conformance_session(provider: &str) -> (SharedStore, TaskSession, ChildWriteLease) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.keep().join("registry.db");
-        let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
+    async fn seed_conformance_session(
+        store: SharedStore,
+        provider: &str,
+        worktree: PathBuf,
+        directive_text: Option<&str>,
+    ) -> (TaskSession, ChildWriteLease) {
         let wave = Wave::new(
             WaveId::new(),
             format!("wave-{provider}"),
@@ -2704,7 +2773,7 @@ mod tests {
             status: TaskSessionStatus::Waiting,
             status_reason: "ready for provider".to_string(),
             status_at: now,
-            worktree: PathBuf::from(format!("/repo.{provider}")),
+            worktree,
             workspace_slug: format!("test-{provider}"),
             lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
             lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
@@ -2742,18 +2811,108 @@ mod tests {
             linear_link_error: None,
         };
         store.create_task_session(&session, &pr).await.unwrap();
+        if let Some(text) = directive_text {
+            let command = ChildCommand::new(
+                ChildRef::Task(session.id.clone()),
+                ChildCommandSource::Human,
+                ChildCommandKind::Steer {
+                    text: text.to_string(),
+                },
+            );
+            let directive = ChildDirective::replacement(
+                ChildRef::Task(session.id.clone()),
+                1,
+                text.to_string(),
+                command.source.clone(),
+                command.id.clone(),
+            );
+            store
+                .create_child_command_with_directive(&command, &directive)
+                .await
+                .unwrap();
+            session.current_directive_version = 1;
+            store.update_task_session(&session).await.unwrap();
+        }
         session.begin_generation(format!("task-{provider}"));
         let lease = store
             .reserve_task_process(&session, TaskSessionStatus::Waiting)
             .await
             .unwrap()
             .unwrap();
+        (session, lease)
+    }
+
+    async fn conformance_session(provider: &str) -> (SharedStore, TaskSession, ChildWriteLease) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.keep().join("registry.db");
+        let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
+        let (mut session, lease) = seed_conformance_session(
+            store.clone(),
+            provider,
+            PathBuf::from(format!("/repo.{provider}")),
+            None,
+        )
+        .await;
         if let Some(process) = &mut session.latest_process {
             process.state = crate::child_session::ChildLeaseState::Active;
         }
         session.set_status(TaskSessionStatus::Running, "provider active");
         store.activate_task_process(&session, &lease).await.unwrap();
         (store, session, lease)
+    }
+
+    #[tokio::test]
+    async fn task_runner_records_reported_turn_usage() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let repo = TestRepo::new();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(ledger.home().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let (session, lease) = seed_conformance_session(
+            store,
+            "codex",
+            repo.path().to_path_buf(),
+            Some("record this provider turn"),
+        )
+        .await;
+        crate::journal::emit(
+            repo.path(),
+            crate::journal::LfNode::Run,
+            crate::journal::LfEventType::Started,
+            crate::journal::LfEventFields::default(),
+        );
+
+        run_task_session_inner(
+            session.id,
+            &lease,
+            Box::new(|name, _approval, events| {
+                assert_eq!(name, "codex");
+                Ok(Box::new(RunnerUsageHarness { events, inputs: 0 }))
+            }),
+        )
+        .await
+        .unwrap();
+
+        let trace_store = crate::journal::open_ledger().unwrap();
+        let launches = trace_store.agent_launches_since(0).unwrap();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].provider, "codex");
+        assert_eq!(launches[0].model, None);
+        let turns = trace_store
+            .agent_turns_for_launches(&[launches[0].id.clone()])
+            .unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].provider_input_tokens, Some(321));
+        assert_eq!(turns[0].provider_output_tokens, Some(45));
+
+        crate::journal::emit(
+            repo.path(),
+            crate::journal::LfNode::Run,
+            crate::journal::LfEventType::Completed,
+            crate::journal::LfEventFields::default(),
+        );
     }
 
     async fn prepared_gate_review(

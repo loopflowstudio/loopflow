@@ -224,15 +224,26 @@ set -g @plugin 'loopflowstudio/loopflow.tmux'
 run '~/.tmux/plugins/tpm/tpm'
 ```
 
-Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`.
+Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Customize with `@loopflow_status_format` (variables: `#{status}`, `#{branch}`, `#{skill}`, `#{waves}`, `#{wave}`):
+
+```bash
+# .tmux.conf
+set -g @loopflow_status_format '[lf: #{status}]'    # default
+```
 
 | Key | Action |
 |-----|--------|
 | `prefix+l r` | Run skill/wave |
 | `prefix+l s` | Stop |
 | `prefix+l o` | Open logs |
+| `prefix+l p` | Open PR |
+| `prefix+l n` | New worktree |
+| `prefix+l d` | Land PR |
 | `prefix+l w` | Pick wave/worktree |
 | `prefix+l L` | Pick layout |
+| `prefix+l ?` | Help |
+
+Works without `lf` installed — status shows a placeholder and keybindings explain themselves.
 
 Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
 

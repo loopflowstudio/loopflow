@@ -109,6 +109,16 @@ lf release tag 1.2.3          # create + push git tag
 lf release status             # workflow + GitHub Release status
 ```
 
+| Path | What it holds |
+|------|--------------|
+| `release/unreleased/DECISIONS.md` | Append-only ledger of release-worthy intent and policy decisions during the current cycle |
+| `release/vX.Y.Z/DECISIONS.md` | Archived decision ledger for a shipped version |
+| `release/vX.Y.Z/NOTES.md` | Snapshot of the release notes generated for that version |
+| `RELEASE_NOTES.md` | Always-latest release notes at the repo root |
+
+Interactive runs append to `release/unreleased/DECISIONS.md` when they make a
+durable product or process decision; headless runs do not.
+
 Keep release-cycle rationale in `release/unreleased/DECISIONS.md` when you want narrative-first notes. `lf release notes` and the full release workflow promote it to `release/v<version>/`, use `DECISIONS.md` as the intent source, use merged PRs/diffs as the shipped-behavior source, and archive the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`. If the ledger is absent, Loopflow falls back to merged PR history.
 
 Headless release automation does not require a runner-local agent CLI. If the `release-notes` skill cannot start Claude, Codex, or OpenCode, Loopflow writes deterministic notes from the same release context and keeps the archive contract intact.

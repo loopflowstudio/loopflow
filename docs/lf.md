@@ -62,6 +62,72 @@ lf implement: add user authentication
 
 Inside skill files, `{args}` is replaced with whatever comes after the colon.
 
+### Builtin Catalog
+
+Skills and flows are organized into three categories by agency: **build**
+(manual work you drive), **govern** (autonomous coordination the system
+drives), **ops** (side-channel utilities). Run `lf --list` for the live
+catalog.
+
+Build skills — you invoke these, often interactively:
+
+| Skill | What it does |
+|------|--------------|
+| `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
+| `research` | Map the territory — architecture, complexity, quality, potential |
+| `iterate` | Read research, write design to address it |
+| `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
+| `reduce` | Find simplification opportunities |
+| `polish` | Find polish priorities |
+| `expand` | Find expansion opportunities |
+| `5whys` | Root cause analysis on a bug fix |
+| `implement` | Build from a design doc |
+| `compress` | Simplify touched code |
+| `gate` | Ship-ready code and reviewer-friendly docs |
+| `debug` | Fix an error |
+| `ci-fix` | Fix failing CI checks for the current PR |
+| `integrate-upstream` | Adapt wave code after rebasing onto main |
+| `qa` | Thorough quality assessment of the current branch |
+| `triage` | Assess QA findings, separate blocking from polish |
+| `design` | Interactive design session |
+| `explore` | Investigate the codebase |
+| `demo` | Experience-first walkthrough of observable changes |
+| `code-review` | Walk through structural and architectural decisions |
+| `review-design` | Reshape AI-elaborated design into user intent |
+| `refine` | Refine existing work |
+| `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
+
+Govern skills — crons and waves-watching-waves drive these:
+
+| Skill | What it does |
+|------|--------------|
+| `scan` | Read member wave state — PRs, blocks, progress, git activity |
+| `assess` | Judge wave health and identify pressure points |
+| `wave-report` | Read health signals across all waves |
+| `mutate` | Compose and apply coordinated mutations across member waves |
+| `review` | Review mutations, amend or revert if needed |
+| `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
+| `s3-scan` / `s3-assess` | Control: live health, velocity, CI, retries, worker-pool size |
+| `s4-scan` / `s4-assess` | Intelligence: dependencies, advisories, upstream APIs, what they imply |
+| `s5-scan` / `s5-assess` | Identity: wave roster, policy, boundary and autonomy drift |
+
+Ops skills — wrappers around git, PR, release, and wave state:
+
+| Skill | What it does |
+|------|--------------|
+| `init` | Set up loopflow in this repo |
+| `commit` | Commit with generated message |
+| `rebase` | Rebase onto main |
+| `pr` | Generate PR title/body and call `lf pr publish --title --body` |
+| `land` | Land the PR and prune its merged worker worktree |
+| `lint` | Run linter, fix issues |
+| `update-wave` | Create, update, or delete wave state |
+| `split-wave` | Split a wave into smaller independent waves |
+| `release` | Run the full release workflow (notes, PR, tag, status) |
+| `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
+| `token-compress` | Compress text into a token budget without silently dropping information |
+| `validate` | Validate flows, skills, and directions |
+
 ## Context Flags
 
 Write global flags before a built-in subcommand. Unambiguous flags also work
@@ -147,6 +213,66 @@ lf ship -w feature-branch
 | `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
+
+### Builtin Flows
+
+| Flow | Steps |
+|------|-------|
+| `build` | kickoff → review-design → implement → compress → lint → xor(demo, code-review) → gate |
+| `code` | implement → compress → lint → gate |
+| `pair` | design → code |
+| `ship` | refresh-plan → implement → gate → op: pr publish → op: pr land |
+| `deploy` | gate → op: pr land --create-pr |
+| `design-and-ship` | design → implement → reduce → polish → deploy |
+| `incident` | debug → 5whys → code → deploy |
+| `queue` | compress → update-wave → gate |
+| `garden` | scan → assess → xor(garden-act, silence) |
+| `govern-coordination` | s2-scan → s2-assess → mutate |
+| `govern-control` | s3-scan → s3-assess → mutate |
+| `govern-intelligence` | s4-scan → s4-assess → mutate |
+| `govern-identity` | s5-scan → s5-assess → mutate |
+| `release` | op: release run patch |
+| `sync` | rebase → integrate-upstream |
+
+Flows can include mechanical ops items directly:
+
+```yaml
+- implement
+- gate
+- op: pr land --create-pr
+```
+
+`sync` rebases the current branch and refreshes the default branch. The
+default-branch refresh is safe from sibling worktrees: it stashes dirty edits
+on the checked-out default branch, syncs, then restores them — unless they
+collide with paths the sync rewrote, in which case they stay in a
+`sync_main: auto-stash` stash so a sync can never silently revert just-landed
+work.
+
+### Branches (xor)
+
+Branches route a flow based on an agent's assessment of the current state.
+Exactly one path runs.
+
+```yaml
+# flow: garden
+- scan
+- assess
+- xor:
+    router: assess
+    paths:
+      act:
+        flow: garden-act
+        description: "Adjustments needed — mutate waves, then review"
+      silence:
+        description: "Everything is healthy"
+```
+
+The `xor` construct runs a router skill that reads scratch/ and chooses a
+path; routing instructions are appended to the router's prompt automatically.
+A path with no `flow:` or `skill:` (like `silence`) is a clean no-op exit.
+If no `router:` is specified, a generic routing agent picks a path from
+scratch/ contents.
 
 ## Running Waves, Projects, and Tasks
 

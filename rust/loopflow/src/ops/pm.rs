@@ -177,7 +177,8 @@ pub struct PmReteamResult {
     pub team_key: String,
     /// True when moves were executed; false for a dry run.
     pub applied: bool,
-    /// Projects re-teamed onto the wave's team (moved ahead of their issues).
+    /// Projects narrowed onto the wave's team (narrowed after their issues moved
+    /// off the legacy team).
     pub project_moves: Vec<PmReteamProjectMove>,
     pub moves: Vec<PmReteamMove>,
     pub deferrals: Vec<PmReteamDeferral>,
@@ -185,8 +186,6 @@ pub struct PmReteamResult {
     pub already: usize,
     /// Durable Task Sessions whose cached display identifier was reconciled.
     pub session_updates: usize,
-    /// Completed issues left in the shared team as historical.
-    pub historical: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -494,6 +493,21 @@ impl PmClient {
     async fn comment(&self, item_id: &str, body: &str) -> PmResult<String> {
         match self {
             Self::Linear(client) => client.comment(item_id, body).await,
+        }
+    }
+
+    /// The bodies of an issue's existing comments, newest page first. `reteam`
+    /// reads these to make its traceability comment idempotent: it re-posts only
+    /// when this migration's marker is absent.
+    async fn issue_comment_bodies(&self, item_id: &str) -> PmResult<Vec<String>> {
+        match self {
+            Self::Linear(client) => Ok(client
+                .observe_issue(item_id)
+                .await?
+                .comments
+                .into_iter()
+                .map(|comment| comment.body)
+                .collect()),
         }
     }
 
@@ -1656,14 +1670,12 @@ async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<Pm
 /// without a live Linear.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReteamClass {
-    /// Completed → leave in the shared team as historical (shipped references to
-    /// `W2-N` are immutable; renumbering them buys nothing).
-    Historical,
-    /// Already carries the target team key → skip (idempotency key).
+    /// Already carries the target team key → skip the move; only reconcile a
+    /// stale cached Session identifier.
     Already,
     /// A writing Task body owns it → defer until that process generation exits.
     Defer(String),
-    /// Open, not yet in the team, and not being written → move.
+    /// On the legacy team and not being written → move onto the wave's team.
     Move,
 }
 
@@ -1699,18 +1711,18 @@ impl ReteamSessionState<'_> {
     }
 }
 
-/// Open issues move unless a Task body can still write the old identifier back.
-/// Waiting-for-review, blocked, and failed Sessions are durable intent without a
-/// process lease, so renumbering them is safe once their cached identifier is
-/// updated atomically.
+/// Every foreign-team issue moves — completed included — unless a Task body can
+/// still write the old identifier back. Completion is not a shield: a Project
+/// cannot narrow to one team while any of its issues (completed or not) stay on
+/// the legacy team, so completed issues migrate like the rest. Protection keys on
+/// *session state* (a live writing lease), not on Linear completion; waiting,
+/// blocked, and failed Sessions are durable intent without a lease, so renumbering
+/// them is safe once their cached identifier is reconciled.
 fn classify_reteam_item(
     item: &PmItem,
     team_key: &str,
     session: Option<ReteamSessionState<'_>>,
 ) -> ReteamClass {
-    if item.completed {
-        return ReteamClass::Historical;
-    }
     let already = identifier_has_team_prefix(&item.identifier, team_key);
     let session_needs_update = session.is_some_and(|session| session.identifier != item.identifier);
     if let Some(reason) = session

@@ -3468,8 +3468,31 @@ fn unpublished_work(worktree: &Path, pr: &TaskPr) -> OpsResult<CommittedFollowUp
 /// A directive was accepted (its version advanced) but the body has not yet
 /// acknowledged it. Completion — manual or an armed auto-merge — must not fire
 /// while this holds, or the accepted direction is silently erased.
-fn has_pending_directive(session: &TaskSession) -> bool {
+pub(crate) fn has_pending_directive(session: &TaskSession) -> bool {
     session.current_directive_version > session.incorporated_directive_version
+}
+
+pub(crate) fn no_active_pr_resume_refusal(
+    identifier: &str,
+    active: Option<&TaskPr>,
+    latest: Option<&TaskPr>,
+) -> Option<String> {
+    if active.is_some() {
+        return None;
+    }
+    let suffix = match latest {
+        Some(pr) => {
+            let which = pr
+                .github()
+                .map(|github| format!("pull request #{}", github.number))
+                .unwrap_or_else(|| format!("PR sequence {}", pr.sequence));
+            format!("{which} {}", pr.phase().as_str())
+        }
+        None => "no PR history recorded".to_string(),
+    };
+    Some(format!(
+        "Task {identifier} has no active PR to resume; {suffix}"
+    ))
 }
 
 fn roll_back_failed_rotation(
@@ -3537,13 +3560,15 @@ async fn ensure_working_pr_with_authority(
     let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
     // A settled completing PR normally never rotates: completion is pending on
     // the review gate, not on a follow-up PR. `reconcile_task_completion`
-    // advances the Session to `Completed` once the gate closes. The one exception
-    // is follow-up committed past the merged tip: the completion gate refuses to
-    // settle over it, so one more serial PR is the only way it lands.
+    // advances the Session to `Completed` once the gate closes. Two things
+    // independently authorize one more serial PR: follow-up committed past the
+    // merged tip, which the completion gate refuses to settle over, and a
+    // pending directive, which the successor exists to incorporate.
     if settled
         .publication
         .as_ref()
         .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+        && !has_pending_directive(session)
         && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
     {
         return Ok(None);
@@ -3816,15 +3841,11 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
         // review approved before the Task can be completed in the PM. Do not
         // weaken the review gate or infer merge from a green head.
         let gate = task_completion_gate(&store, &session).await?;
-        if !gate.satisfied {
+        if let Some(refusal) = gate.refusal(&session.launch.issue.identifier) {
             // Nothing has been written. A refusal here — an open review, a
             // committed follow-up, anything — leaves a discardable successor
             // active, so the Task keeps its PR and no rotation is provoked.
-            return Err(task_error(format!(
-                "Task {} cannot complete until its gates close: {}",
-                session.launch.issue.identifier,
-                gate.reason()
-            )));
+            return Err(task_error(refusal));
         }
         let from = session.status;
         session.set_status(TaskSessionStatus::Completed, summary.clone());
@@ -4049,6 +4070,15 @@ impl CompletionGate {
         } else {
             self.blockers.join("; ")
         }
+    }
+
+    pub(crate) fn refusal(&self, identifier: &str) -> Option<String> {
+        (!self.satisfied).then(|| {
+            format!(
+                "Task {identifier} cannot complete until its gates close: {}",
+                self.reason()
+            )
+        })
     }
 }
 
@@ -4423,6 +4453,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .task_prs(&session.id)
             .await
             .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+        let latest = prs.last();
         let active = prs.iter().find(|pr| pr.is_active());
         let active_pr = active.map(|pr| pr.id.clone());
         let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
@@ -4443,15 +4474,22 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .await
             .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
             .map(|r| review_gate_from(&r));
+        let completion_gate = task_completion_gate(&store, &session).await?;
+        let completion_refusal = completion_gate.refusal(&session.launch.issue.identifier);
+        let resume_refusal =
+            no_active_pr_resume_refusal(&session.launch.issue.identifier, active, latest);
         let action_evidence = TaskActionEvidence {
             status: session.status,
-            active_pr_phase: active.map(|pr| pr.phase()),
-            active_pr_after_merge: active
+            latest_pr_phase: latest.map(|pr| pr.phase()),
+            latest_pr_after_merge: latest
                 .and_then(|pr| pr.publication.as_ref())
                 .map(|p| p.after_merge),
-            active_pr_next_slug: active
+            latest_pr_next_slug: latest
                 .and_then(|pr| pr.publication.as_ref())
                 .and_then(|p| p.next_slug.as_deref()),
+            completion_refusal: completion_refusal.as_deref(),
+            resume_refusal: resume_refusal.as_deref(),
+            pending_directive: has_pending_directive(&session),
             ci: active.and_then(|pr| pr.fresh_ci()),
             process_alive: if session.status.is_process_active() {
                 Some(process_alive)
@@ -4959,6 +4997,17 @@ pub(crate) async fn resume_task_async(
     // before PR rotation rejects an unrelated branch.
     task_recovery_adoption(&store, &session).await?;
     reconcile_task_pr(&store, &mut session).await?;
+    let prs = store
+        .task_prs(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    let latest = prs.last();
+    let active = prs.iter().find(|pr| pr.is_active());
+    if let Some(refusal) =
+        no_active_pr_resume_refusal(&session.launch.issue.identifier, active, latest)
+    {
+        return Err(task_error(refusal));
+    }
     // Reconcile may settle an active PR that merged out of band, moving the
     // worktree into a between-PR state; refuse a dirty between-PR before the
     // lease is reaped or a successor body is launched.
@@ -5377,9 +5426,9 @@ mod tests {
         reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
         recover_stranded_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
         require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
-        succession_workspace_slug, supervise_project_task_bodies, task_recovery_adoption,
-        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult,
-        TaskRecoveryAdoption, TaskWorkspace,
+        resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
+        task_recovery_adoption, task_snapshot, verify_task_pr_range_with_authority, RotateOptions,
+        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -5394,6 +5443,7 @@ mod tests {
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::task::actions::TaskAction;
     use crate::task::{
         AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
         GithubPr, Observation, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
@@ -5482,6 +5532,50 @@ mod tests {
                 match value {
                     Some(value) => std::env::set_var(key, value),
                     None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    /// Point the store at a temp home, and nothing else. Tests that only read
+    /// persisted state must not borrow `TaskLaunchEnv`: it puts a fake tmux on
+    /// the process-global `PATH`, which reads as a live body to any concurrent
+    /// test resolving tmux.
+    struct StoreEnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl StoreEnvGuard {
+        fn new(home: &Path) -> Self {
+            let lock = crate::journal::test_env_lock();
+            let names = [
+                "LF_HOME",
+                "LF_DB_PATH",
+                crate::store::CONTROL_HOME_ENV,
+                crate::store::CONTROL_DB_PATH_ENV,
+            ];
+            let previous = names
+                .into_iter()
+                .map(|name| (name, std::env::var_os(name)))
+                .collect();
+            std::env::set_var("LF_HOME", home);
+            std::env::set_var("LF_DB_PATH", home.join("loopflow.db"));
+            std::env::remove_var(crate::store::CONTROL_HOME_ENV);
+            std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
+            Self {
+                _lock: lock,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for StoreEnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.previous {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
                 }
             }
         }
@@ -5860,6 +5954,129 @@ mod tests {
         pr.merge_commit = Some(merge.to_string());
         pr.updated_at = OffsetDateTime::now_utc();
         store.settle_task_pr(&pr, None).await.expect("settle PR");
+    }
+
+    async fn settle_completing_pr(store: &SharedStore, mut pr: TaskPr, merge: &str) {
+        pr.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 1037,
+                url: "https://example.com/pr/1037".to_string(),
+                head_sha: None,
+            }),
+        });
+        pr.merge_commit = Some(merge.to_string());
+        pr.updated_at = OffsetDateTime::now_utc();
+        store.settle_task_pr(&pr, None).await.expect("settle PR");
+    }
+
+    #[tokio::test]
+    async fn merged_task_resume_refuses_before_reserving_a_generation() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/no-doomed-resume";
+        repo.create_branch(branch);
+        let (home, store, session, pr) = rotation_task(&repo, branch, &base).await;
+        settle_completing_pr(&store, pr, "merge-1037").await;
+        let _env = StoreEnvGuard::new(home.path());
+
+        let before = store
+            .get_task_session(&session.id)
+            .await
+            .expect("read before")
+            .expect("Task exists")
+            .latest_process;
+        let error = resume_task_async(
+            &session.launch.issue.identifier,
+            None,
+            None,
+            Some("status recommended Resume".to_string()),
+        )
+        .await
+        .expect_err("merged Task has no active PR to resume");
+        let after = store
+            .get_task_session(&session.id)
+            .await
+            .expect("read after")
+            .expect("Task exists")
+            .latest_process;
+
+        assert_eq!(
+            error.to_string(),
+            "Task INF-ROTATE has no active PR to resume; pull request #1037 merged"
+        );
+        assert_eq!(after, before, "a refusal must not reserve a generation");
+    }
+
+    #[tokio::test]
+    async fn pending_directive_authorizes_a_completing_pr_successor() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/pending-direction";
+        repo.create_branch(branch);
+        let (_home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
+        settle_completing_pr(&store, pr, "merge-pending").await;
+        session.current_directive_version = 2;
+        session.incorporated_directive_version = 1;
+
+        let next =
+            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
+                .await
+                .expect("pending direction may rotate")
+                .expect("serial successor");
+
+        assert_eq!(next.sequence, 2);
+        assert_ne!(next.branch, branch);
+    }
+
+    #[test]
+    fn merged_snapshot_routes_the_persisted_directive_gate() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let branch = "jack/persisted-action-proof";
+        repo.create_branch(branch);
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, expected_complete_refusal, session) = runtime.block_on(async {
+            let (home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
+            settle_completing_pr(&store, pr, "merge-pending").await;
+            session.current_directive_version = 2;
+            session.incorporated_directive_version = 1;
+            store
+                .update_task_session(&session)
+                .await
+                .expect("persist pending directive");
+            let gate = task_completion_gate(&store, &session)
+                .await
+                .expect("completion gate");
+            let refusal = gate
+                .refusal(&session.launch.issue.identifier)
+                .expect("pending directive refuses completion");
+            (home, refusal, session)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+
+        let snapshot = task_snapshot(&session).expect("snapshot merged Task");
+        assert_eq!(snapshot.active_pr, None);
+        assert_eq!(snapshot.actions.recommended, Some(TaskAction::StartNextPr));
+        assert_eq!(
+            snapshot
+                .actions
+                .status(TaskAction::Complete)
+                .expect("Complete action")
+                .reason,
+            expected_complete_refusal
+        );
+        assert_eq!(
+            snapshot
+                .actions
+                .status(TaskAction::Resume)
+                .expect("Resume action")
+                .reason,
+            "Task INF-ROTATE has no active PR to resume; pull request #1037 merged"
+        );
     }
 
     /// Create a parent Task with a published (not merged) PR, then a child Task
@@ -6827,7 +7044,11 @@ mod tests {
     }
 
     #[tokio::test]
+    // Liveness resolves tmux off the process-global PATH, which a concurrent
+    // `TaskLaunchEnv` test replaces with a fake that answers "alive".
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
     async fn resume_revokes_a_dead_legacy_lease_on_a_waiting_task() {
+        let _env_lock = crate::journal::test_env_lock();
         // W2-135: a Waiting Task still pinned by a Legacy lease whose body vanished.
         let repo = TestRepo::new();
         let base = repo.head_sha();
@@ -6863,7 +7084,11 @@ mod tests {
     }
 
     #[tokio::test]
+    // Liveness resolves tmux off the process-global PATH, which a concurrent
+    // `TaskLaunchEnv` test replaces with a fake that answers "alive".
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
     async fn resume_revokes_a_dead_active_lease_on_a_failed_task() {
+        let _env_lock = crate::journal::test_env_lock();
         // W2-122: a Failed Task still holding an Active lease whose body vanished.
         let repo = TestRepo::new();
         let base = repo.head_sha();
@@ -8046,7 +8271,11 @@ mod tests {
     /// must relaunch (consuming the Resume) instead of settling to `Waiting`.
     /// Without a queued Resume, the existing settle-to-Waiting behavior holds.
     #[tokio::test]
+    // Liveness resolves tmux off the process-global PATH, which a concurrent
+    // `TaskLaunchEnv` test replaces with a fake that answers "alive".
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
     async fn reconcile_process_liveness_consumes_queued_resume_before_settling() {
+        let _env_lock = crate::journal::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         let store: SharedStore = Arc::new(
             open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -8996,6 +9225,86 @@ mod tests {
             .await
             .expect("open gate review");
         review.id
+    }
+
+    #[test]
+    fn merged_snapshot_routes_the_persisted_review_gate() {
+        let repo = TestRepo::new();
+        let branch = "jack/merged-review-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, expected_complete_refusal, review_id, session) = runtime.block_on(async {
+            let (home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+            let review_id = open_gate_review(&store, &mut session, &pr).await;
+            let gate = task_completion_gate(&store, &session)
+                .await
+                .expect("completion gate");
+            let refusal = gate
+                .refusal(&session.launch.issue.identifier)
+                .expect("required review refuses completion");
+            (home, refusal, review_id, session)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+
+        let snapshot = task_snapshot(&session).expect("snapshot review-blocked Task");
+        assert_eq!(snapshot.active_pr, None);
+        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Review));
+        assert_eq!(
+            snapshot
+                .actions
+                .status(TaskAction::Complete)
+                .expect("Complete action")
+                .reason,
+            expected_complete_refusal
+        );
+        assert!(
+            expected_complete_refusal.contains(review_id.as_str()),
+            "completion refusal must name the actual required review"
+        );
+        assert_eq!(
+            snapshot
+                .actions
+                .status(TaskAction::Resume)
+                .expect("Resume action")
+                .reason,
+            "Task INF-GATE has no active PR to resume; pull request #912 merged"
+        );
+    }
+
+    #[test]
+    fn merged_snapshot_with_a_clear_gate_recommends_completion() {
+        let repo = TestRepo::new();
+        let branch = "jack/merged-complete-proof";
+        repo.create_branch(branch);
+        let base = repo.head_sha();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, session) = runtime.block_on(async {
+            let (home, _store, session, _pr) = gate_task(&repo, branch, &base).await;
+            (home, session)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+
+        let snapshot = task_snapshot(&session).expect("snapshot completable Task");
+        assert_eq!(snapshot.active_pr, None);
+        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Complete));
+        assert!(
+            snapshot
+                .actions
+                .status(TaskAction::Complete)
+                .expect("Complete action")
+                .available
+        );
+        assert_eq!(
+            snapshot
+                .actions
+                .status(TaskAction::Resume)
+                .expect("Resume action")
+                .reason,
+            "Task INF-GATE has no active PR to resume; pull request #912 merged"
+        );
     }
 
     #[tokio::test]

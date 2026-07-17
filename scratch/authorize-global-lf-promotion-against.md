@@ -98,21 +98,38 @@ rebuilds the global binary — an implicit fleet replacement with no promotion a
 all (wave memory, 2026-07-17: "An active symlink into a mutable worktree makes a
 later local build an implicit fleet replacement").
 
-Promotion instead **copies** the candidate into a content-addressed, immutable
-store path and points the global symlink at *that*:
+Promotion instead **copies** the candidate into a **content-addressed**,
+immutable store path and points the global symlink at *that*:
 
 ```
-~/.lf/bin/lf-<source_revision>      # 0o555, never rewritten in place
-~/.local/bin/lf -> ~/.lf/bin/lf-<source_revision>
+~/.lf/bin/lf-<sha256-of-binary-bytes>   # 0o555, never rewritten in place
+~/.local/bin/lf -> ~/.lf/bin/lf-<digest>
 ```
 
-The previously-pointed binary is retained as the rollback candidate. A worktree
-rebuild now changes only `local-bin/`, never the global — branch-local builds
-are isolated by default, which is Outcome line 1. `lf install rollback`
-re-runs the same preflight against the retained binary before repointing
-(memory: "validate its latest-known migration against the live store before
-activation; version labels and source freshness alone do not prove
-compatibility").
+The path is the byte digest of the staged binary, **not** `source_revision`: a
+dirty build appends `-dirty` but two dirty builds at one sha differ byte-for-byte,
+and a published vs validation-only build at the same sha are distinct binaries —
+`lf-<source_revision>` would collide across all three. Content addressing makes
+reuse safe and idempotent: if the digest path already exists it is verified
+byte-for-byte and reused; a byte mismatch at an existing path is a hard refusal,
+and a retained rollback artifact is **never overwritten**. `source_revision`,
+authority, and package version ride the preview and the rollback metadata, not
+the filename.
+
+The previously-pointed binary path is retained as the rollback candidate. A
+worktree rebuild now changes only `local-bin/`, never the global — branch-local
+builds are isolated by default, which is Outcome line 1.
+
+**Rollback is revalidated and may refuse.** `lf install rollback` re-runs the
+full preflight against the retained binary before repointing (memory: "validate
+its latest-known migration against the live store before activation; version
+labels and source freshness alone do not prove compatibility"). If a
+frontier-advancing migration ran since that binary was promoted (the
+`PromoteAndMigrate` path), the retained older binary no longer recognizes the
+advanced store, so rollback **fails closed** with the same
+`UnknownApplied(version)` reason a forward promotion would — rollback is not a
+privileged escape from compatibility. Stated plainly so no operator expects a
+guaranteed undo after a migration.
 
 ## The promotion decision
 
@@ -139,18 +156,14 @@ Orthogonal to the table and checked for **every** promotion:
   it. Promotion never stops bodies — the operator drains them.
 
 Live = a Task/Project session whose current write **lease state is `Active` or
-`Reserved`** and whose status `is_process_active()`. The lease is the
-authoritative fencing token (`ChildLeaseState`, child_session.rs:190); status
-alone is too coarse (wave memory repeatedly: parked sessions read
-`is_process_active` while their body is dead). A revoked/finished/legacy lease
-is not a live body. Conservative bias is correct: a false "live" only delays a
-promotion; a false "dead" is the disaster we are removing.
-
-Compatibility guarantees the residual race is benign: because we only ever
-promote a candidate that recognizes the frontier, a body launched in the
-microsecond after the under-lock re-check runs a compatible global either way.
-The live-body gate exists to avoid yanking the binary out from under a *running*
-turn, not to prove a compatible swap safe.
+`Reserved`** — the lease is the *sole* authority (`ChildLeaseState`,
+child_session.rs:190). A `Reserved` lease is a body that has claimed a
+generation but not yet booted (memory: new boots strand *before* mark-booted),
+so it counts as live. Projected Task/Project status may **enrich** the report
+but must never veto the lease fence: `is_process_active()` is not part of the
+gate. A revoked/finished/legacy lease is not a live body. Conservative bias is
+correct: a false "live" only delays a promotion; a false "dead" is the disaster
+we are removing.
 
 ## The promotion boundary (structured, one owner)
 
@@ -177,26 +190,78 @@ it makes no decision. Every global entry point
 bundled `lf`) routes through this one function, so the checks live in exactly
 one place.
 
-### Publish is atomic and locked
+### `lf install` dispatches before home routing, journal, and store open
 
-Hold one exclusive `flock` on `~/.lf/promotion.lock` across the whole
-critical section:
+`main` today runs `home::route` (bin/lf.rs:1391) and then wraps most commands in
+`in_repo_runtime`, which emits a run-`started` journal event (bin/lf.rs:439) that
+opens the store. A candidate that does not know the live frontier would fail
+*there* — during trace/store capture — never reaching the preflight, which is
+exactly the 2026-07-17 symptom (`lf code-review` died in trace capture). So
+`Commands::Install` is matched **immediately after CLI parse, before
+`home::route` and outside `in_repo_runtime`** (alongside the direct-dispatch
+commands like `Desktop`). It performs no journal emission and opens the store
+only through its own read-only preflight. A regression drives a candidate that
+does not know the frontier and asserts it reaches the **preflight refusal**, not
+a store-capture error.
 
-1. Re-read frontier and live-body count **under the lock** (closes the
-   preview→publish TOCTOU).
-2. If `PromoteAndMigrate`: apply pending migration via `apply_sqlite_with_backup`
-   (which takes its own migration lock and writes the backup) — still holding
-   the promotion lock, still gated on zero live bodies.
-3. Copy candidate → `~/.lf/bin/lf-<rev>` (0o555), `fsync`, atomic-`rename` the
-   `~/.local/bin/lf` symlink via a temp link, `rmtree`+`copytree` the app +
-   bundled helper, then `sync-skills`. CLI, app, bundled helper, and skills are
-   one accepted operation.
-4. Record the prior CLI target as the rollback candidate.
+### The launch/promotion fence (shared vs exclusive)
 
-Any failure leaves every target byte-for-byte / link-for-link unchanged: build
-the new symlink at a temp name and `rename` it over the old only after the copy
-`fsync`s; never `unlink` the live target first (the current `_promote` unlinks
-then symlinks — a crash between them leaves no global `lf` at all).
+A promotion-only lock plus an under-lock recount is not enough: a new
+old-binary body could reserve a generation between the recount and a migration
+write, recreating the incompatible-writer incident. So the fence spans both the
+promotion and the reservation:
+
+- **Reservation takes `LOCK_SH`** on `~/.lf/promotion.lock`, held only across the
+  lease-reserving CAS. The two choke points are the async wrappers
+  `store.reserve_task_process` / `store.reserve_project_process`
+  (store/child_sessions.rs:221, :1028) — every launch, successor rotation, and
+  recovery reservation funnels through them, so wrapping the CAS covers all
+  callers. The blocking `flock` runs on `spawn_blocking` to stay off the async
+  runtime.
+- **Promotion takes `LOCK_EX`** on the same file across its whole critical
+  section. While it holds exclusive, no reservation can acquire shared, so no new
+  body can start; while reservations hold shared, promotion waits.
+
+This makes "recount live bodies, then act" atomic against launches, not merely
+narrowed. A regression holds the promotion `LOCK_EX` at a failpoint, attempts a
+`reserve_task_process` concurrently, and asserts it blocks until promotion
+releases — the exact interval the reviewer named.
+
+### Publish: stage, then ordered failure-preserving commits
+
+The old "one atomic all-target operation" claim was false — a symlink swap, a
+directory `rmtree`+`copytree`, and a skill sync cannot be one atomic op. The
+honest contract is **stage everything beside its destination, then commit in a
+fixed order where each commit is individually atomic and failure-preserving**,
+holding `LOCK_EX` throughout steps 1–4:
+
+1. **Re-check** frontier + live-body count under the lock (TOCTOU close).
+2. **Migrate (only `PromoteAndMigrate`, only zero live bodies):** apply the one
+   pending migration via `apply_sqlite_with_backup` (its own migration lock +
+   backup), nested under the promotion lock.
+3. **Stage** (no destination mutated): copy candidate → its content-addressed
+   path + `fsync`; build the new CLI symlink at a temp name in the same dir;
+   `copytree` the app + bundled helper to a temp dir beside `/Applications` +
+   `fsync`.
+4. **Commit, in order, each atomic:**
+   - *Commit A (CLI, safety-critical, first):* `rename` the temp symlink over
+     `~/.local/bin/lf`. `rename` never leaves the target absent — unlike the
+     current `_promote`, which `unlink`s then `symlink_to`s (a crash between
+     leaves no global `lf`).
+   - *Commit B (app):* `rename` the existing app aside to a `.superseded`
+     sidecar, `rename` the staged app into place, then remove the sidecar.
+   - Record the prior CLI target as the rollback candidate at the moment of
+     Commit A.
+5. **Post-commit, best-effort (not part of the atomicity claim):** `sync-skills`,
+   matching install.py's existing contract that a skill-sync failure warns and
+   does not fail the install.
+
+Failpoints are injectable after each commit stage so the regression asserts the
+invariant at every torn state: after a failure at any stage, targets are either
+fully old or fully new *for that stage*, and there is never a window with no
+global `lf`. If Commit B fails after Commit A, the CLI is correct and the app is
+left recoverable (staged temp + sidecar both present) and the failure is
+reported — the two are genuinely separate commits, not one lie about atomicity.
 
 ## De-risking
 
@@ -210,6 +275,9 @@ then symlinks — a crash between them leaves no global `lf` at all).
 | Will "no replacement while any body is live" make promotion impossible during dogfooding? | Likely blocks often; but that is the intended, safe behavior — the refusal names each body so the operator drains a quiet window. The task is explicit: "Do not stop live bodies as part of promotion." | Accept the operational cost; document it; refusal is actionable, not a dead end. |
 | Does copy-vs-symlink break the "rebuild takes effect" workflow? | Yes — intentionally. That auto-effect is the implicit-fleet-replacement footgun. Developers who want the new build re-run `--use` (which now previews). | Key decision, called out below; net safety win. |
 | Is there a promotion-lock deadlock with the migration lock? | Promotion lock is a distinct file (`promotion.lock`); migration application nests the migration lock under it, always in that order; no other path takes both. | No cycle. |
+| Can a body launch between the under-lock recount and the migration write? | Only via `store.reserve_task_process`/`reserve_project_process` (store/child_sessions.rs:221, :1028) — a single choke point per kind. | Reservation takes `LOCK_SH` on `promotion.lock`; promotion's `LOCK_EX` blocks it for the whole critical section. Fence, not a narrowed window. |
+| Where must `lf install` dispatch to avoid the store-capture failure? | `home::route` (bin/lf.rs:1391) and `in_repo_runtime`'s run-`started` journal emit (bin/lf.rs:439) both precede command bodies and open the store. | Match `Commands::Install` right after CLI parse, before `home::route`, outside `in_repo_runtime`; it opens the store only read-only in its own preflight. |
+| Does `lf-<source_revision>` uniquely name a binary? | No — `-dirty` collapses distinct dirty builds, and published vs validation-only at one sha are different binaries. | Name by sha256 of the binary bytes; verify-and-reuse on hit, refuse on byte mismatch, never overwrite a rollback artifact. |
 
 ## Alternatives considered
 
@@ -230,12 +298,20 @@ then symlinks — a crash between them leaves no global `lf` at all).
    Isolates branch builds by default and removes the implicit-fleet-replacement
    hazard that was W2-319's mechanism. Cost: `--use` no longer auto-applies later
    rebuilds; re-run `--use` (now safe) to re-promote.
-3. **One blanket live-body gate for all global replacement**, stricter for the
-   migration-apply case (which additionally writes the store). Named refusals.
-4. **Reuse `store::migrations` and the ledger verbatim; zero Python migration
+3. **The lease fence is the sole live-body authority** (Active/Reserved), for all
+   global replacement; status only enriches the report. Named refusals.
+4. **A shared/exclusive fence spans promotion *and* reservation**, so the recount
+   is atomic against a launch, not merely narrowed by an under-lock recheck.
+5. **`lf install` dispatches before home routing, journal, and store open**, so a
+   frontier-incompatible candidate reaches the preflight refusal, not a
+   store-capture crash.
+6. **Reuse `store::migrations` and the ledger verbatim; zero Python migration
    knowledge.** The reject reasons are the store's own error strings.
-5. **Fail closed** on any missing/unreadable evidence, before any target moves.
-6. **Atomic, lock-guarded publish** with a preserved, re-validated rollback.
+7. **Fail closed** on any missing/unreadable evidence, before any target moves.
+8. **Staged, ordered, failure-preserving publish** (CLI commit first, app second,
+   skill sync post-commit best-effort) with a content-addressed immutable binary
+   and a preserved, re-validated rollback that may itself refuse after a
+   migration.
 
 ## Scope
 
@@ -267,10 +343,28 @@ and proves:
 - every global entry point **rejects** the older/divergent candidate and the
   live-body case **before** the CLI or app target changes (assert targets are
   byte-for-byte / link-for-link identical after the refusal);
-- the exact-frontier validation-only candidate **promotes atomically** and
-  retains a rollback binary;
+- the exact-frontier validation-only candidate **promotes** and retains a
+  rollback binary;
 - the canonical candidate **applies `N+1` only with no live bodies** and retains
   a rollback binary;
+- a **`Reserved` lease with no live process** blocks promotion — the lease
+  fence is not vetoed by projected status (boundary 3);
+- a `reserve_task_process` attempted while promotion holds `LOCK_EX` at a
+  failpoint **blocks** until promotion releases, and cannot slip a body in before
+  the migration (boundary 1);
+- a candidate that **does not know frontier `N`** reaches the **preflight
+  refusal**, not a trace/store-capture error, because `install` dispatched before
+  home/journal/store-open (boundary 4);
+- injecting a **failpoint after Commit A (CLI) but before Commit B (app)** leaves
+  a correct global `lf` and a recoverable app, never a torn state with no global
+  `lf`; a failpoint after staging but before Commit A leaves every target
+  unchanged (boundary 2);
+- `lf install rollback` after the `N+1` migration **refuses** with
+  `UnknownApplied` because the retained binary predates the advanced frontier
+  (boundary 6);
+- two byte-distinct builds do **not** collide on `~/.lf/bin/`, and re-promoting an
+  identical binary reuses its digest path without overwriting a retained rollback
+  (boundary 5);
 - **sabotaging any supported path to call the old direct copy/symlink** (i.e.
   reintroducing `_promote`'s unlink+symlink, or bypassing the boundary) makes the
   regression fail — the guard is load-bearing, not decorative.

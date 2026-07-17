@@ -156,7 +156,9 @@ pub struct Epoch {
     pub number: u32,
     pub state: EpochState,
     pub current_basis: Basis,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub terminal_at: Option<OffsetDateTime>,
 }
 
@@ -184,12 +186,25 @@ impl RunState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunTrigger {
-    Input { basis: Basis },
-    Time { scheduled_at: OffsetDateTime },
-    Event { event: EventRef },
-    Child { work: WorkRef },
-    CiIncident { incident_id: String },
-    Recovery { prior_run_id: RunId },
+    Input {
+        basis: Basis,
+    },
+    Time {
+        #[serde(with = "time::serde::rfc3339")]
+        scheduled_at: OffsetDateTime,
+    },
+    Event {
+        event: EventRef,
+    },
+    Child {
+        work: WorkRef,
+    },
+    CiIncident {
+        incident_id: String,
+    },
+    Recovery {
+        prior_run_id: RunId,
+    },
     User,
 }
 
@@ -202,7 +217,9 @@ pub struct Run {
     pub state: RunState,
     pub trigger: RunTrigger,
     pub retry_of: Option<RunId>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
 }
 
@@ -210,19 +227,34 @@ pub struct Run {
 pub struct Home {
     pub id: HomeId,
     pub route: String,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub observed_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WaitOn {
-    Input { after: Basis },
-    Time { not_before: OffsetDateTime },
-    Event { event: EventRef },
-    Child { work: WorkRef },
-    Capability { capability: CapabilityRef },
-    Effect { effect: EffectRef },
+    Input {
+        after: Basis,
+    },
+    Time {
+        #[serde(with = "time::serde::rfc3339")]
+        not_before: OffsetDateTime,
+    },
+    Event {
+        event: EventRef,
+    },
+    Child {
+        work: WorkRef,
+    },
+    Capability {
+        capability: CapabilityRef,
+    },
+    Effect {
+        effect: EffectRef,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,7 +281,9 @@ pub struct Wait {
     pub work: WorkRef,
     pub epoch_id: EpochId,
     pub on: WaitOn,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub resolved_at: Option<OffsetDateTime>,
 }
 
@@ -402,7 +436,9 @@ pub struct Turn {
     pub state: BoundaryState,
     pub provider_turn_id: Option<String>,
     pub root_output: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
     pub started_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
 }
 
@@ -461,6 +497,7 @@ pub struct Steer {
     pub basis: Basis,
     pub author: Author,
     pub text: String,
+    #[serde(with = "time::serde::rfc3339")]
     pub issued_at: OffsetDateTime,
 }
 
@@ -519,7 +556,9 @@ pub struct Send {
     pub state: SendState,
     pub provider_turn_id: Option<String>,
     pub reason: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
     pub attempted_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub finished_at: Option<OffsetDateTime>,
 }
 
@@ -567,6 +606,7 @@ pub struct ToolResponseReceipt {
     pub basis: Basis,
     pub request_id: String,
     pub choice: String,
+    #[serde(with = "time::serde::rfc3339")]
     pub responded_at: OffsetDateTime,
 }
 
@@ -661,6 +701,7 @@ pub struct DoneProposal {
     pub id: DoneProposalId,
     pub run_id: RunId,
     pub basis: Basis,
+    #[serde(with = "time::serde::rfc3339")]
     pub proposed_at: OffsetDateTime,
 }
 
@@ -683,6 +724,7 @@ pub struct FlowPosition {
     pub step_index: u32,
     pub iteration: u32,
     pub feedback: bool,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
 }
 
@@ -805,7 +847,7 @@ pub enum ControlCtx<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Basis, BoundarySeed, EpochId, LaunchSurface, Steer};
+    use super::{Basis, BoundarySeed, EpochId, LaunchSurface, Steer, WaitOn, WorkStatus};
     use crate::durable::{Author, ProjectId, SteerId, WorkRef};
 
     #[test]
@@ -855,5 +897,74 @@ mod tests {
         let encoded = serde_json::to_string(&surface).unwrap();
         let decoded: LaunchSurface = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, surface);
+    }
+
+    #[test]
+    fn work_status_fixture_round_trips_every_variant() {
+        let fixture = include_str!("../../../tests/fixtures/dto/work_statuses.json");
+        let statuses: Vec<WorkStatus> = serde_json::from_str(fixture).unwrap();
+
+        assert!(matches!(statuses[0], WorkStatus::Ready));
+        assert!(matches!(statuses[1], WorkStatus::Running { .. }));
+        assert!(matches!(
+            statuses[2],
+            WorkStatus::Waiting {
+                wait: super::Wait {
+                    on: WaitOn::Input { .. },
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(
+            statuses[3],
+            WorkStatus::Waiting {
+                wait: super::Wait {
+                    on: WaitOn::Time { .. },
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(
+            statuses[4],
+            WorkStatus::Waiting {
+                wait: super::Wait {
+                    on: WaitOn::Event { .. },
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(
+            statuses[5],
+            WorkStatus::Waiting {
+                wait: super::Wait {
+                    on: WaitOn::Child { .. },
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(
+            statuses[6],
+            WorkStatus::Waiting {
+                wait: super::Wait {
+                    on: WaitOn::Capability { .. },
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(
+            statuses[7],
+            WorkStatus::Waiting {
+                wait: super::Wait {
+                    on: WaitOn::Effect { .. },
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(statuses[8], WorkStatus::Done));
+        assert!(matches!(statuses[9], WorkStatus::Abandoned));
+
+        let encoded = serde_json::to_string(&statuses).unwrap();
+        let decoded: Vec<WorkStatus> = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, statuses);
     }
 }

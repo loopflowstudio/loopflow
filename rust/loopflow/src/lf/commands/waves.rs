@@ -23,7 +23,7 @@ use crate::child_session::{
 };
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
-use crate::durable::AttentionRoute;
+use crate::durable::{AttentionRoute, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
@@ -36,30 +36,6 @@ use crate::task::{
 use crate::wave::server::live_endpoint;
 use crate::wave::Wave;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WavePresence {
-    Idle,
-    Running,
-    Paused,
-}
-
-impl WavePresence {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Idle => "idle",
-            Self::Running => "running",
-            Self::Paused => "paused",
-        }
-    }
-}
-
-impl std::fmt::Display for WavePresence {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
 /// `lf status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
@@ -67,10 +43,8 @@ impl std::fmt::Display for WavePresence {
 pub struct WaveSnapshot {
     pub id: String,
     pub name: String,
-    /// Wave presence (`idle | running | paused`). Detailed resident condition
-    /// is reported separately by `WaveDetailSnapshot::loop_state`.
-    pub status: WavePresence,
-    pub paused: bool,
+    /// Current Work lifecycle derived from Epoch, Run, and Wait facts.
+    pub status: WorkStatus,
     pub goal: String,
     /// Primary repo path.
     pub repo: String,
@@ -982,27 +956,18 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         .into_iter()
         .filter(|session| !session.status.is_terminal())
         .count() as u32;
-    let config = crate::engine::wave_config::read_wave_config(Path::new(&repo), wave.name());
-    let home = WaveHomeDto::from(
-        &config
-            .as_ref()
-            .and_then(|config| config.home_authored())
-            .unwrap_or_else(|| crate::engine::wave_config::default_local_home(Path::new(&repo))),
-    );
-    let paused = config.and_then(|config| config.paused).unwrap_or(false);
-    let live = endpoint.is_some();
-    let status = if paused {
-        WavePresence::Paused
-    } else if live {
-        WavePresence::Running
-    } else {
-        WavePresence::Idle
-    };
+    let home = WaveHomeDto::from(&crate::engine::wave_config::read_wave_home(
+        Path::new(&repo),
+        wave.name(),
+    ));
+    let status = store
+        .work_status(&WorkRef::Wave(wave.id().clone()))
+        .await
+        .map_err(|error| anyhow!("failed to read Wave Work status: {error}"))?;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
         name: wave.name().to_string(),
         status,
-        paused,
         goal: crate::engine::wave_config::read_wave_summary(Path::new(&repo), wave.name())
             .unwrap_or_else(|_| wave.name().to_string()),
         repo,
@@ -1903,13 +1868,23 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
         println!(
             "{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
-            status = wave.status,
+            status = work_status_label(&wave.status),
             live = if wave.live { "yes" } else { "no" },
             tasks = wave.active_tasks,
             projects = wave.active_projects,
             home = truncate(&wave.home.address, 16),
             endpoint = wave.endpoint.as_deref().unwrap_or("-"),
         );
+    }
+}
+
+fn work_status_label(status: &WorkStatus) -> &'static str {
+    match status {
+        WorkStatus::Ready => "ready",
+        WorkStatus::Running { .. } => "running",
+        WorkStatus::Waiting { .. } => "waiting",
+        WorkStatus::Done => "done",
+        WorkStatus::Abandoned => "abandoned",
     }
 }
 
@@ -1939,7 +1914,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
-        status = wave.status,
+        status = work_status_label(&wave.status),
         loop_state = status
             .loop_state
             .as_deref()
@@ -2171,7 +2146,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             bold = colors.bold,
             reset = colors.reset,
             name = wave.wave.name,
-            status = wave.wave.status,
+            status = work_status_label(&wave.wave.status),
         );
         let details = match &wave.projects {
             Evidence::Unavailable { reason } => {
@@ -2926,8 +2901,10 @@ mod tests {
         let snapshot = WaveSnapshot {
             id: "wave-1".into(),
             name: "goals".into(),
-            status: WavePresence::Running,
-            paused: false,
+            status: WorkStatus::Running {
+                run_id: crate::durable::RunId::parse("run_00000000000000000000000000000001")
+                    .unwrap(),
+            },
             goal: "ship the roadmap".into(),
             repo: "/repo".into(),
             active_tasks: 2,
@@ -2942,7 +2919,12 @@ mod tests {
         };
         let value: serde_json::Value = serde_json::to_value(&snapshot).expect("serialize");
         assert_eq!(value["name"], "goals");
-        assert_eq!(value["status"], "running");
+        assert_eq!(
+            value["status"],
+            serde_json::json!({
+                "running": {"run_id": "run_00000000000000000000000000000001"}
+            })
+        );
         assert_eq!(value["live"], true);
         assert_eq!(value["endpoint"], "127.0.0.1:5678");
         assert_eq!(value["active_tasks"], 2);
@@ -2964,8 +2946,7 @@ mod tests {
             wave: WaveSnapshot {
                 id: "wave-1".into(),
                 name: "goals".into(),
-                status: WavePresence::Idle,
-                paused: false,
+                status: WorkStatus::Ready,
                 goal: "g".into(),
                 repo: "/repo".into(),
                 active_tasks: 0,

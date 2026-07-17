@@ -12,11 +12,15 @@ struct PortfolioRepoStateTests {
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo)
 
-        let mine = makeWave(id: "mine", repoPath: repo.path, status: .running)
+        let mine = makeWave(
+            id: "mine",
+            repoPath: repo.path,
+            status: .running(runID: "run_mine")
+        )
         let other = makeWave(
             id: "other",
             repoPath: URL(fileURLWithPath: "/tmp/portfolio-other").normalizedFilePath,
-            status: .running
+            status: .running(runID: "run_other")
         )
         state.applyConnectedWaves([mine, other])
 
@@ -32,10 +36,10 @@ struct PortfolioRepoStateTests {
         // Status varies, but the row's lens carries state — so the list stays in
         // one alphabetical order and never reorders as processes start and stop.
         state.applyConnectedWaves([
-            makeWave(id: "running-b", repoPath: repo.path, status: .running),
-            makeWave(id: "idle", repoPath: repo.path, status: .idle),
-            makeWave(id: "paused", repoPath: repo.path, status: .paused),
-            makeWave(id: "running-a", repoPath: repo.path, status: .running),
+            makeWave(id: "running-b", repoPath: repo.path, status: .running(runID: "run_b")),
+            makeWave(id: "idle", repoPath: repo.path, status: .ready),
+            makeWave(id: "paused", repoPath: repo.path, status: .done),
+            makeWave(id: "running-a", repoPath: repo.path, status: .running(runID: "run_a")),
         ])
 
         #expect(state.waves.map(\.id) == ["idle", "paused", "running-a", "running-b"])
@@ -52,12 +56,11 @@ struct PortfolioRepoStateTests {
     }
 
     @Test("a worktree path names the same tmux session the launcher creates")
-    func worktreeProbeNameMatchesLaunchName() throws {
+    func worktreePathUsesLaunchSessionName() throws {
         // The launcher resolves a worktree to its origin before naming the
-        // session; the rail's status probe and the attach hint must land on
-        // that same name from the raw worktree path — otherwise a running
-        // wave shows idle in a worktree rail. Real git, like WaveOriginTests:
-        // the whole point is the origin resolution.
+        // session; launch guards and attach hints must land on that same name
+        // from the raw worktree path. Real git, like WaveOriginTests: the whole
+        // point is the origin resolution.
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("session-name-\(UUID().uuidString)", isDirectory: true)
         let origin = root.appendingPathComponent("repo", isDirectory: true)
@@ -83,19 +86,23 @@ struct PortfolioRepoStateTests {
         )
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
-        let probeName = PortfolioRepoState.waveAgentSessionName(
+        let sessionName = PortfolioRepoState.waveAgentSessionName(
             repoPath: worktree.path, waveName: "goals"
         )
         let launchName = PortfolioRepoState.waveAgentSessionName(
             repoPath: WaveOrigin.resolve(worktree.path), waveName: "goals"
         )
-        #expect(probeName == launchName)
-        #expect(probeName == "lf-repo-goals", "named after the origin, not the worktree")
+        #expect(sessionName == launchName)
+        #expect(sessionName == "lf-repo-goals", "named after the origin, not the worktree")
 
         let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo)
         state.applyConnectedWaves([
-            makeWave(id: "goals", repoPath: origin.path.normalizedFilePath, status: .running),
+            makeWave(
+                id: "goals",
+                repoPath: origin.path.normalizedFilePath,
+                status: .running(runID: "run_goals")
+            ),
         ])
         #expect(state.waves.map(\.id) == ["goals"], "a dev worktree sees its origin's registry row")
     }
@@ -142,7 +149,7 @@ struct PortfolioRepoStateTests {
         #expect(!FileManager.default.fileExists(atPath: worktreeGoal.path), "nothing written into the worktree")
     }
 
-    private func makeWave(id: String, repoPath: String, status: WaveStatus) -> Wave {
+    private func makeWave(id: String, repoPath: String, status: WorkStatus) -> Wave {
         Wave(
             id: id,
             name: id,

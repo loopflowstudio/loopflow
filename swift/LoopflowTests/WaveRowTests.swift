@@ -11,7 +11,7 @@ import ViewInspector
 struct WaveRowViewTests {
     private func makeWave(
         name: String = "swift-falcon",
-        status: WaveStatus = .idle,
+        status: WorkStatus = .ready,
         live: Bool = false,
         activeTasks: Int = 0,
         activeProjects: Int = 0
@@ -53,7 +53,7 @@ struct WaveRowViewTests {
 
     @Test("Row renders an operational lens")
     func showsLens() throws {
-        let wave = makeWave(status: .running, live: true)
+        let wave = makeWave(status: .running(runID: "run_test"), live: true)
         let row = makeRow(wave: wave)
 
         // The lens is present, and its accessibility names the reason.

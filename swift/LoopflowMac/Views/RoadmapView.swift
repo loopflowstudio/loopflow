@@ -522,7 +522,7 @@ private struct RoadmapWaveCard: View {
                         Text(roadmap.wave.name)
                             .font(Typography.sectionTitle(18))
                             .foregroundStyle(palette.text)
-                        Text(roadmap.wave.status.rawValue)
+                        Text(roadmap.wave.status.label)
                             .font(Typography.caption(10))
                             .foregroundStyle(palette.textSecondary)
                     }

@@ -12,7 +12,6 @@ enum RepoFilter: Hashable {
 
 private struct AuthoredWaveSnapshot: Hashable {
     let name: String
-    let status: WaveStatus
 }
 
 struct WavesView: View {
@@ -100,7 +99,7 @@ struct WavesView: View {
             id: "\(Self.authoredIdPrefix)\(repoPath)#\(snapshot.name)",
             name: snapshot.name,
             repo: repoPath,
-            status: snapshot.status
+            status: .ready
         ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)],
         isRegistered: false)
     }
@@ -475,20 +474,16 @@ struct WavesView: View {
         if AppTestMode.shouldBypassRegistry { return }
         let paths = repos.map(\.path)
         authoredWavesByRepo = await Task.detached {
-            let liveSessions = LocalWaveAgentLauncher.tmuxSessionNames()
             var result: [String: [AuthoredWaveSnapshot]] = [:]
             for path in paths {
-                result[path] = Self.authoredWaves(inRepo: path, liveTmuxSessionNames: liveSessions)
+                result[path] = Self.authoredWaves(inRepo: path)
             }
             return result
         }.value
     }
 
     /// Wave names authored on disk at `<repo>/wave/<name>/GOAL.md`, sorted.
-    private nonisolated static func authoredWaves(
-        inRepo repoPath: String,
-        liveTmuxSessionNames: Set<String>
-    ) -> [AuthoredWaveSnapshot] {
+    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [AuthoredWaveSnapshot] {
         let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent("wave", isDirectory: true)
         let fm = FileManager.default
         guard let children = try? fm.contentsOfDirectory(
@@ -504,14 +499,7 @@ struct WavesView: View {
                 let goal = url.appendingPathComponent("GOAL.md")
                 return fm.fileExists(atPath: goal.path, isDirectory: &isDir) && !isDir.boolValue
             }
-            .map { url in
-                let name = url.lastPathComponent
-                let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: name)
-                let status: WaveStatus = liveTmuxSessionNames.contains(sessionName)
-                    ? .running
-                    : .idle
-                return AuthoredWaveSnapshot(name: name, status: status)
-            }
+            .map { AuthoredWaveSnapshot(name: $0.lastPathComponent) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 

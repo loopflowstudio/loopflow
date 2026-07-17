@@ -2,8 +2,7 @@
   "wave": {
     "id": "wave-1",
     "name": "infrastructure",
-    "status": "running",
-    "paused": false,
+    "status": {"running":{"run_id":"run_00000000000000000000000000000001"}},
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
     "active_tasks": 1,

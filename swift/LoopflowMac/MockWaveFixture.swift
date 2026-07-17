@@ -55,13 +55,15 @@ enum MockWaveFixture {
     /// (parent set) to exercise future-ancestry row indentation.
     static var waves: [Wave] {
         [
-            Wave(id: "wave-1", name: "infrastructure", repo: repoPath, status: .running,
+            Wave(id: "wave-1", name: "infrastructure", repo: repoPath,
+                 status: .running(runID: "run_infrastructure"),
                  live: true, activeTasks: 1, activeProjects: 1),
-            Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .idle,
+            Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
                  live: false, activeTasks: 2, activeProjects: 1),
-            Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .idle,
+            Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
                  live: false, activeTasks: 0, activeProjects: 0),
-            Wave(id: "wave-4", name: "cadenza", repo: repoPath, status: .running,
+            Wave(id: "wave-4", name: "cadenza", repo: repoPath,
+                 status: .running(runID: "run_cadenza"),
                  live: true, activeTasks: 0, activeProjects: 0, parentWaveId: "wave-1"),
         ]
     }
@@ -123,8 +125,7 @@ enum MockWaveFixture {
       "wave": {
         "id": "wave-1",
         "name": "infrastructure",
-        "status": "running",
-        "paused": false,
+        "status": {"running":{"run_id":"run_00000000000000000000000000000004"}},
         "goal": "Make releases boring.",
         "repo": "/src/loopflow",
         "active_tasks": 1,

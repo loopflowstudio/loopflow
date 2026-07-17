@@ -158,6 +158,10 @@ lf runs --task INF-123 --json
 lf trace <exec-id> --json
 ```
 
+Wave lifecycle uses the same durable `WorkStatus` as Project and Task work:
+`ready`, `running`, `waiting`, `done`, or `abandoned`. `live` stays separate —
+it is reachability evidence, not lifecycle state.
+
 [Conducting →](conducting.md) covers the full monitoring surface. The Mac app is
 built on exactly these calls — it keeps no second database.
 

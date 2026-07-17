@@ -408,8 +408,7 @@ public struct HomeStartResult: Decodable, Sendable, Equatable {
 public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let id: String
     public let name: String
-    public let status: WaveStatus
-    public let paused: Bool
+    public let status: WorkStatus
     public let goal: String
     public let repo: String
     public let activeTasks: Int
@@ -421,7 +420,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let home: WaveHome
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, paused, goal, repo, live, endpoint, home
+        case id, name, status, goal, repo, live, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"

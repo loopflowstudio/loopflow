@@ -354,19 +354,6 @@ enum LocalWaveAgentLauncher {
             && run([lfPath, "help", "stop"])?.status == 0
     }
 
-    static func tmuxSessionNames() -> Set<String> {
-        guard let result = run(["tmux", "list-sessions", "-F", "#S"]) else {
-            return []
-        }
-        guard result.status == 0 else {
-            return []
-        }
-        return Set(result.stdout
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty })
-    }
-
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless `lf` over the local store, not by streaming

@@ -17,7 +17,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var repo: String { api.repo }
 
-    public var status: WaveStatus { api.status }
+    public var status: WorkStatus { api.status }
 
     public var displayName: String { name }
 

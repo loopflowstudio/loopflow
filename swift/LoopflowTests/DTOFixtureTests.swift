@@ -164,6 +164,64 @@ struct DTOFixtureTests {
         #expect(decoded == surface)
     }
 
+    @Test("Work status fixture preserves every status and wait kind")
+    func workStatusFixtureRoundTrips() throws {
+        let data = try loadFixtureData("work_statuses.json")
+        let statuses = try JSONDecoder().decode([WorkStatus].self, from: data)
+
+        #expect(statuses[0] == .ready)
+        #expect(statuses[1] == .running(runID: "run_00000000000000000000000000000001"))
+        if case .waiting(let wait) = statuses[2] {
+            #expect(wait.on == .input(after: WorkBasis(
+                epochID: "epoch_00000000000000000000000000000004",
+                revision: 7
+            )))
+        } else {
+            Issue.record("expected input wait")
+        }
+        if case .waiting(let wait) = statuses[3] {
+            #expect(wait.on == .time(notBefore: "2026-07-17T13:00:00Z"))
+        } else {
+            Issue.record("expected time wait")
+        }
+        if case .waiting(let wait) = statuses[4] {
+            #expect(wait.on == .event(WorkEventReference(source: "github", id: "check-42")))
+        } else {
+            Issue.record("expected event wait")
+        }
+        if case .waiting(let wait) = statuses[5] {
+            #expect(wait.on == .child(WorkReference(
+                kind: .task,
+                id: "task_0000000000000000000000000000000e"
+            )))
+        } else {
+            Issue.record("expected child wait")
+        }
+        if case .waiting(let wait) = statuses[6] {
+            #expect(wait.on == .capability(WorkCapabilityReference(
+                kind: "deploy",
+                key: "production"
+            )))
+        } else {
+            Issue.record("expected capability wait")
+        }
+        if case .waiting(let wait) = statuses[7] {
+            #expect(wait.on == .effect(WorkEffectReference(
+                kind: "message",
+                idempotencyKey: "release-ready"
+            )))
+            #expect(wait.resolvedAt == "2026-07-17T12:06:00Z")
+        } else {
+            Issue.record("expected effect wait")
+        }
+        #expect(statuses[8] == .done)
+        #expect(statuses[9] == .abandoned)
+
+        let encoded = try JSONEncoder().encode(statuses)
+        let decoded = try JSONDecoder().decode([WorkStatus].self, from: encoded)
+        #expect(decoded == statuses)
+    }
+
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {
         let data = try loadFixtureData(name, sourceFile: sourceFile)
         let json = try JSONSerialization.jsonObject(with: data)

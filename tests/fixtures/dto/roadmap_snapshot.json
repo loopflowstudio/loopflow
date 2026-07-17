@@ -5,8 +5,7 @@
       "wave": {
         "id": "wave-1",
         "name": "product",
-        "status": "running",
-        "paused": false,
+        "status": {"running":{"run_id":"run_00000000000000000000000000000002"}},
         "goal": "Conduct goal-authored work everywhere.",
         "repo": "/src/loopflow",
         "active_tasks": 2,
@@ -490,8 +489,7 @@
       "wave": {
         "id": "wave-2",
         "name": "context",
-        "status": "idle",
-        "paused": false,
+        "status": "ready",
         "goal": "context",
         "repo": "/src/context",
         "active_tasks": 0,

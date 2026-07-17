@@ -10,7 +10,7 @@ struct WaveTests {
             id: "wave-123",
             name: "infrastructure",
             repo: "/tmp/repo",
-            status: .running,
+            status: .running(runID: "run_test"),
             live: true
         ))
 
@@ -28,7 +28,7 @@ struct WaveTests {
                 id: "authored:/tmp/repo#infrastructure",
                 name: "infrastructure",
                 repo: "/tmp/repo",
-                status: .idle
+                status: .ready
             ),
             isRegistered: false
         )
@@ -47,7 +47,7 @@ struct WaveTests {
                 id: "wave-123",
                 name: "infrastructure",
                 repo: "/tmp/repo",
-                status: .idle
+                status: .ready
             ),
             plan: WavePlan(objective: "\nMake releases boring.\nKeep them observable.")
         )
@@ -57,8 +57,8 @@ struct WaveTests {
 
     @Test("status owns its visual treatment")
     func statusOwnsVisualTreatment() {
-        #expect(WaveStatus.running.icon == "circle.fill")
-        #expect(WaveStatus.running.color == .statusSuccess)
-        #expect(WaveStatus.paused.icon == "pause.circle")
+        #expect(WorkStatus.running(runID: "run_test").icon == "circle.fill")
+        #expect(WorkStatus.running(runID: "run_test").color == .statusSuccess)
+        #expect(WorkStatus.ready.icon == "circle")
     }
 }

@@ -6,9 +6,9 @@ homepage:
     tagline: "Living software, conducted by you."
     subline: >-
       Waves are persistent agents that hold a goal, remember what they learn,
-      and stay steerable — and they launch and steer each other. The
-      organization is recursive: waves conduct projects, projects conduct
-      tasks, and nothing sits at the center.
+      and stay steerable. The organization is recursive — waves conduct
+      projects, projects conduct tasks, agents launch agents — and nothing
+      sits at the center.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
   screenshot:

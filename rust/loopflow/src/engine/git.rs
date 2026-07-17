@@ -125,9 +125,41 @@ pub fn fetch(repo: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
 
 /// Check if `commit` is an ancestor of `descendant`.
 /// Returns true if commit is fully merged into descendant.
+///
+/// A `false` means "git said no", which covers both "not an ancestor" (exit 1)
+/// and "git could not answer" (exit 128 for an object this repo does not hold).
+/// Callers that must tell those apart — anything deciding a fact about the
+/// commit rather than about the answer — establish the object with
+/// [`commit_exists`] first.
 pub fn is_ancestor(repo: &Path, commit: &str, descendant: &str) -> Result<bool, GitError> {
     let output = run_git(repo, &["merge-base", "--is-ancestor", commit, descendant])?;
     Ok(output.status.success())
+}
+
+/// Whether this repo holds `revision` as a commit object.
+///
+/// Exists so callers can separate "this repo does not have that commit" from
+/// "that commit is not an ancestor", which [`is_ancestor`] alone collapses.
+pub fn commit_exists(repo: &Path, revision: &str) -> Result<bool, GitError> {
+    let object = format!("{revision}^{{commit}}");
+    let output = run_git(repo, &["cat-file", "-e", &object])?;
+    Ok(output.status.success())
+}
+
+/// Commits reachable from `to` but not from `from`, oldest first, as
+/// `(revision, subject)`.
+pub fn commits_between(
+    repo: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<(String, String)>, GitError> {
+    let range = format!("{from}..{to}");
+    let stdout = git_stdout(repo, &["log", "--reverse", "--format=%H %s", &range])?;
+    Ok(stdout
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .map(|(revision, subject)| (revision.to_string(), subject.to_string()))
+        .collect())
 }
 
 /// Find the merge-base (common ancestor) of two refs.

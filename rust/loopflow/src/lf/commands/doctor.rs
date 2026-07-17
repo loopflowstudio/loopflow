@@ -80,6 +80,11 @@ struct StoreReport {
     migration_authority: String,
     build_source_identity: String,
     build_source_root: Option<String>,
+    /// The commit this binary was built from. The identity block reported every
+    /// other build field for months while omitting this one, so the only way to
+    /// learn whether a merged fix was running was to guess from a version string
+    /// that does not move between releases.
+    build_source_revision: String,
     database_path: String,
     latest_known_migration: String,
     latest_applied_migration: Option<String>,
@@ -90,7 +95,7 @@ pub fn run(json: bool) -> Result<()> {
     let database_path = crate::store::database_path_from_env()?;
     let opened = crate::store::sqlite::SqliteStore::new(&database_path);
     let mut store_report = inspect_store(&database_path);
-    let (events, checks) = match opened {
+    let (events, mut checks) = match opened {
         Ok(store) => {
             let events = store.list_run_events_since(0)?;
             let mut checks = audit(&events);
@@ -105,6 +110,9 @@ pub fn run(json: bool) -> Result<()> {
             (Vec::new(), vec![Check::fail("store", detail)])
         }
     };
+    // Runs even when the store refused to open: a binary old enough to disagree
+    // with the store's schema is exactly when its age is worth reporting.
+    checks.push(check_binary_freshness());
     if json {
         println!(
             "{}",
@@ -122,6 +130,98 @@ pub fn run(json: bool) -> Result<()> {
         return Err(anyhow!("run ledger audit failed"));
     }
     Ok(())
+}
+
+/// The line that answers "is the fix I merged actually running?".
+const FRESHNESS: &str = "binary-freshness";
+const UPSTREAM: &str = "origin/main";
+
+/// Report whether the running binary predates merged upstream work.
+///
+/// Reports only. A rebuild decides to restart bodies mid-flight, which is an
+/// operator's call and deliberately not this check's — the signal is the whole
+/// deliverable.
+fn check_binary_freshness() -> Check {
+    let revision = crate::build_info::source_revision();
+    let Some(repo) = freshness_repo() else {
+        return Check::warn(
+            FRESHNESS,
+            format!(
+                "cannot compare build revision {}: no git checkout at this binary's source root \
+                 or working directory. Run `lf doctor` from a loopflow checkout to learn whether \
+                 the running binary is current",
+                crate::build_info::short_revision(revision)
+            ),
+        );
+    };
+
+    // Comparing against a stale `origin/main` under-reports the gap, which is
+    // the silence this check exists to break — so a failed refresh is named in
+    // the answer rather than swallowed.
+    let caveat = match crate::engine::git::fetch(&repo, "origin", "main") {
+        Ok(()) => String::new(),
+        Err(error) => format!(
+            "; could not refresh {UPSTREAM} ({error}), so this compares a possibly stale local ref"
+        ),
+    };
+
+    match crate::build_info::classify_revision(revision, &repo, UPSTREAM) {
+        crate::build_info::BuildFreshness::Current { revision } => Check::ok(
+            FRESHNESS,
+            format!(
+                "running lf is built from {}, current with {UPSTREAM}{caveat}",
+                crate::build_info::short_revision(&revision)
+            ),
+        ),
+        crate::build_info::BuildFreshness::Behind {
+            revision,
+            upstream,
+            missing,
+        } => {
+            let commits = missing
+                .iter()
+                .map(|commit| format!("{} {}", commit.short_revision(), commit.subject))
+                .collect::<Vec<_>>()
+                .join("; ");
+            Check::warn(
+                FRESHNESS,
+                format!(
+                    "running lf is built from {} and is {} merged commit(s) behind {upstream}, so \
+                     these fixes are not running: {commits}. Rebuilding is an operator action; \
+                     this check installs nothing{caveat}",
+                    crate::build_info::short_revision(&revision),
+                    missing.len(),
+                ),
+            )
+        }
+        crate::build_info::BuildFreshness::OffMain { revision } => Check::ok(
+            FRESHNESS,
+            format!(
+                "running lf is built from {}, which is not on {UPSTREAM}; nothing to compare{caveat}",
+                crate::build_info::short_revision(&revision)
+            ),
+        ),
+        crate::build_info::BuildFreshness::Unprovable { reason } => Check::warn(
+            FRESHNESS,
+            format!("cannot prove whether the running lf is current: {reason}{caveat}"),
+        ),
+    }
+}
+
+/// The checkout to compare against: this binary's own source root when it still
+/// exists, otherwise the working directory's repo. Whether that repo is the
+/// right one is not assumed — `classify_revision` establishes that it holds the
+/// build revision, which is a fact rather than a guess about paths.
+fn freshness_repo() -> Option<std::path::PathBuf> {
+    if let Some(root) = crate::build_info::source_root() {
+        if root.join(".git").exists() {
+            return Some(root.to_path_buf());
+        }
+    }
+    let cwd = std::env::current_dir().ok()?;
+    cwd.ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(Path::to_path_buf)
 }
 
 fn inspect_store(path: &Path) -> StoreReport {
@@ -153,6 +253,7 @@ fn inspect_store(path: &Path) -> StoreReport {
         .to_string(),
         build_source_identity: crate::build_info::source_identity(),
         build_source_root: crate::build_info::source_root().map(|root| root.display().to_string()),
+        build_source_revision: crate::build_info::source_revision().to_string(),
         database_path: path.display().to_string(),
         latest_known_migration: crate::store::migrations::latest_known_version(),
         latest_applied_migration,
@@ -833,6 +934,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
         "build: {} ({}) · migrations {}",
         store.build_provenance, store.build_source_identity, store.migration_authority
     );
+    println!("revision: {}", store.build_source_revision);
     if let Some(root) = &store.build_source_root {
         println!("source: {root}");
     }

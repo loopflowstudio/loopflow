@@ -1414,6 +1414,7 @@ mod tests {
                 version: "0.12.0".to_string(),
                 provenance: "release".to_string(),
                 source_identity: "release".to_string(),
+                source_revision: None,
             }),
         });
         store
@@ -1456,6 +1457,7 @@ mod tests {
                 version: "0.12.1".to_string(),
                 provenance: "development".to_string(),
                 source_identity: "loopflow-deadbeef".to_string(),
+                source_revision: None,
             });
         }
         let lease = store
@@ -1510,6 +1512,7 @@ mod tests {
             version: "A-0.0.0".to_string(),
             provenance: "release".to_string(),
             source_identity: "launcher-A".to_string(),
+            source_revision: None,
         };
         let mut task = make_task_session(&wave, &project);
         task.set_status(TaskSessionStatus::Waiting, "ready");
@@ -1577,6 +1580,7 @@ mod tests {
                 version: "0.12.0".to_string(),
                 provenance: "release".to_string(),
                 source_identity: "release".to_string(),
+                source_revision: None,
             }),
         });
         store.create_project_session(&project).await.unwrap();
@@ -1614,6 +1618,7 @@ mod tests {
                 version: "0.12.1".to_string(),
                 provenance: "development".to_string(),
                 source_identity: "loopflow-cafe".to_string(),
+                source_revision: None,
             });
         }
         let lease = store

@@ -172,11 +172,19 @@ readable. Not a wire DTO: `BinaryProvenance` appears only in Rust
 (`grep -rln BinaryProvenance` finds no Swift and no `tests/fixtures/dto` entry),
 so the no-defaults DTO rule does not apply and no mirror needs updating.
 
-Then a `fleet-freshness` doctor check reads live Task and Project session
-generations (`list_task_sessions` / `list_project_sessions`), groups by distinct
-`source_revision`, and classifies each through the **same** classifier from (2).
-Today it reports every live body as unstamped, which is itself the true answer
-and resolves on the next rebuild.
+**Scope change during implementation (was: a `fleet-freshness` doctor check).**
+The design proposed a doctor check aggregating distinct revisions across live
+sessions. Implementation found `format_child_body` (`bin/lf.rs:582`), which
+already prints `binary 0.11.3 (release)` on every `lf task status` — **that is
+the exact line the seed read to conclude "every live Task body reports binary
+0.11.3"**. The revision belongs there, on the surface supervisors already use,
+rather than in a second aggregate that answers the same question one command
+away. `lf task status` now reads `binary 0.11.3 (release) from 3e9df0677`, or
+`revision unstamped` for a body booted by a binary that carried no stamp.
+
+That is a reduction, not a deferral: the aggregate check would have duplicated a
+read that already exists, and until the fleet rebuilds it would have reported
+every body as unstamped anyway.
 
 ## De-risking
 
@@ -239,7 +247,8 @@ block. Adding a second surface doubles the fetch question for no new answer.
 - `build_source_revision` in `lf doctor`'s identity block.
 - `BuildFreshness` classifier in `build_info` + `binary-freshness` doctor check.
 - `source_revision: Option<String>` on `BinaryProvenance`, stamped at boot.
-- `fleet-freshness` doctor check over live Task/Project session generations.
+- The revision on `lf task status`'s body line (`format_child_body`), replacing
+  the planned aggregate fleet check — see the scope change above.
 - Rustdoc contract on `BuildFreshness`.
 
 **Out of scope**

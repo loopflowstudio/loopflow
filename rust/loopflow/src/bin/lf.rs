@@ -8,7 +8,7 @@ use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{
-    Cli, Commands, ProjectCommand, ProjectReviewCommand, RunsCommand, TaskCommand,
+    Cli, Commands, InstallCommand, ProjectCommand, ProjectReviewCommand, RunsCommand, TaskCommand,
     TaskReviewCommand,
 };
 
@@ -1387,6 +1387,17 @@ fn main() -> anyhow::Result<()> {
     });
     debug!(?cli, "parsed CLI arguments");
 
+    // Global-promotion commands dispatch before home routing, journal emission,
+    // and any ordinary store open: a candidate that does not know the live
+    // migration frontier must reach the preflight refusal, not fail in
+    // trace/store capture. `lf install` opens the store only read-only, inside
+    // its own preflight.
+    if let Some(Commands::Install { cmd }) = &cli.command {
+        return match cmd {
+            InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
+        };
+    }
+
     // Route repo/PR/release/PM commands to the Wave's execution home before local
     // dispatch. A remote (SSH) home forwards over `lf ssh`; a local or absent home
     // falls through and runs in-process exactly as before.
@@ -1672,6 +1683,9 @@ fn main() -> anyhow::Result<()> {
                     loopflow::lf::commands::sub::run(channel.as_deref(), *json)
                 }
             },
+            Some(Commands::Install { .. }) => {
+                unreachable!("install dispatches before home routing")
+            }
             Some(Commands::RetiredSub { .. }) => unreachable!("retired sub cannot parse"),
             Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
             Some(Commands::Memory { cmd, target }) => {

@@ -144,6 +144,11 @@ pub enum Commands {
     },
     /// Open or focus Loopflow.app
     Desktop,
+    /// Authorize global lf promotion against the shared migration frontier
+    Install {
+        #[command(subcommand)]
+        cmd: InstallCommand,
+    },
     /// Pull request lifecycle
     Pr {
         #[command(subcommand)]
@@ -1194,6 +1199,19 @@ pub enum TaskCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum InstallCommand {
+    /// Preview whether this build may replace the global lf (read-only).
+    /// Reads the shared store's migration frontier and live-body count against
+    /// this binary's own registry; mutates nothing and exits non-zero on a
+    /// refusal so a caller can gate on it.
+    Preflight {
+        /// Emit the structured PromotionPreview as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum PrCommand {
     /// Show current branch's PR state
     Status,

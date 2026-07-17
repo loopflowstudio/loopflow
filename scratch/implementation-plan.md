@@ -136,6 +136,17 @@ That is adapter groundwork, not the core cutover. Current state against the phas
     account; access profiles are verified login venues owned by accounts.
     Preserve migration 0.11.027 before spend/input migrations and never put a
     profile id back on Work, Run, or Launch as the account identity.
+23. **Selection evidence and settlement evidence have different freshness.**
+    Main PR #1070 now records both `failed_head_sha` and first-write
+    `repaired_head_sha`, settling from a fresh GitHub read rather than the warm
+    snapshot that triggered ci-fix. Keep that distinction in typed evidence: a
+    cached observation may choose control work but cannot prove its effect.
+24. **The current Run reservation bridge still guesses facts.**
+    `reserve_run_for_child` selects the first Home row and labels every child
+    generation `RunTrigger::Input`. That is enough to satisfy new NOT NULL
+    columns, not enough to establish authority or provenance. The Home runtime
+    must supply its own stable Home identity and the caller must persist the
+    actual trigger; row order and a generic Input label cannot survive the cut.
 
 No more behavior should be adapted around `ChildCommand`, `InteractionReview`,
 or Handoff. The next checkpoint is the large core-control cutover specified in
@@ -356,6 +367,7 @@ The goal is not only fewer files. Each normalization must remove a class of repr
 | Steer is the only authored direction | CI evidence, lifecycle, decisions, and prose compete in one command enum | ENG-19, ENG-20; PRD-8 | Type-level API has no path to encode CI incident as Steer or replacement as Interrupt |
 | Unique Steer revision and immutable Send attempts | Retrying an unknown delivery mutates history or live-sends twice to one Turn | child delivery ambiguity | Unique `(steer, turn, via=live)`; Unknown remains immutable and next seed still contains Steer |
 | Typed `RunTrigger::CiIncident` plus incident/head uniqueness | One CI failure falls through into ordinary iterate/gate or launches two repair bodies | ENG-19, ENG-20; PRD-8 | Duplicate webhook produces one incident; it joins the active Run when present and otherwise reserves exactly one repair Run |
+| Immutable failed/repaired CI heads with explicit freshness | A repair is credited to the stale head that triggered it or another push | W2-320 | Settlement bypasses observation caches and records the first fresh repaired head exactly once |
 | One durable flow position advanced in the boundary transaction | A completed review/gate is re-entered, or duplicate reconciliation emits empty serial work | W2-296, W2-297, W2-300 | Reconcile the same evidence repeatedly; flow position advances at most once and then waits/runs from the resulting state |
 | Review derived from flow + Launch + attention | A Task is “waiting on Project review” while its live body is idle and the Project is busy or cannot boot | dogfood parent bottleneck; interaction debt | Review needs no row/id/disposition; parent control-lane test services it before background work on every provider shape |
 | Parent control lane before background flow | Project/Wave starts another pursue Turn while a child remains synchronously blocked on it | dogfood parent bottleneck | Child Review during live and seed-only background Turns becomes the parent's next handled input; FIFO among child Reviews |
@@ -569,6 +581,8 @@ Done when:
 - CI failures enter only through `CiIncident`; an active Run claims the
   incident as its next control boundary, while idle Work reserves exactly one
   bounded repair Run;
+- CI repair settlement records an immutable fresh repaired head distinct from
+  the failed head; cached selection evidence cannot settle it;
 - `ChildCommandKind`, `ChildDirective`, `Replacement`, `FollowUp`, command `Resume`, and command `Decide` have no production references.
 - changing any authored Work field changes the next rendered seed without a second copy/update path.
 
@@ -651,7 +665,7 @@ Route provider usage through `ConversationEvent::TurnUsage` into the observed Tu
 
 Keep `provider_account_limits` as a separate latest quota snapshot. Keep raw provider events only as audit artifacts. Remove spend from process/run-event rows and rename trace ids that collide with product Run ids.
 
-**Store landed (2026-07-17).** `run_events` lost its seven spend columns, `agent_turns` is the only additive grain, and `usage`/`top`/`trace` read one `turn_spend_since` join. `PendingUsage`, `record_usage`, `record_result`, `record_agent`, `record_stream_usage`, and `boundary_spans` are gone. Migration `0.11.029_one_spend_grain` drops the columns and `trace_capture_meta`.
+**Store landed (2026-07-17).** `run_events` lost its seven spend columns, `agent_turns` is the only additive grain, and `usage`/`top`/`trace` read one `turn_spend_since` join. `PendingUsage`, `record_usage`, `record_result`, `record_agent`, `record_stream_usage`, and `boundary_spans` are gone. Migration `0.11.030_one_spend_grain` drops the columns and `trace_capture_meta`; main's `0.11.029_ci_incident_repaired_head` precedes it.
 
 The dogfood ledger settled the coverage question empirically rather than by argument — see `scratch/questions.md`. `run_events` held 103 usage rows to `agent_turns`' 779, over the same span, with every one of its 75 usage-bearing processes also holding a captured turn. It was a strict subset carrying ~40% of the spend, and it mis-attributed: the thread-local stamped whichever agent launched last in the process, so one process's claude tokens were reported under `provider = opencode`.
 
@@ -846,6 +860,7 @@ Provider adapter internals may still say provider session/thread id. Production 
 - actionable CI incident × active Run and parked Review;
 - land-time-only CI evidence × active Run and parked Review;
 - duplicate CI webhook × crash after reserve or active-Run claim;
+- cached failed-head observation × fresh repaired-head settlement;
 - Wait resolution × duplicate external event;
 - fifty SQLite writers × receipt persistence.
 

@@ -332,6 +332,11 @@ evidence but never enters the control lane. Duplicate observations can neither
 reserve a second Run nor claim the same incident twice. A User saying “fix CI
 now” is a separate Steer.
 
+Incident settlement records both the failed head and the first authoritative
+repaired head. The repaired head comes from a fresh external observation after
+the repair boundary, not from the warm PR snapshot that triggered it. A cached
+head may select work; it cannot prove what that work shipped.
+
 ## Authority
 
 **Decision.** Authorization is non-serializable request context:
@@ -804,6 +809,8 @@ It is done when:
   next control boundary; it never reserves an overlapping repair Run;
 - a land-time-only or stale CI incident neither interrupts a Review nor enters
   the control lane;
+- CI settlement cannot attribute a cached pre-repair head as the repaired head;
+  the first fresh repaired-head receipt is immutable;
 - Run authority is released only after positive containment absence; an
   unprovable probe remains fenced;
 - a narrow typed tool response, where one exists, resolves before optional

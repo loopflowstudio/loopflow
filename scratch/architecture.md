@@ -5,7 +5,7 @@ This file names the current executable cut for `lf code`.
 
 ## Why this cut is next
 
-Migration `0.11.030_durable_input_spine` already removes
+Migration `0.11.031_durable_input_spine` already removes
 `child_directives`, but production Project/Task control and runners still read
 and write it. The branch compiles and then fails behavioral tests with `no such
 table: child_directives`. Adding compatibility storage would preserve the

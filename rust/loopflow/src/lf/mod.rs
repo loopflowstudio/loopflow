@@ -1226,9 +1226,31 @@ pub enum InstallCommand {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
         cli_target: PathBuf,
+        /// A staged Loopflow.app bundle to install alongside the CLI.
+        #[arg(long)]
+        app_source: Option<PathBuf>,
+        /// The global Loopflow.app path to replace atomically.
+        #[arg(long)]
+        app_target: Option<PathBuf>,
+        /// A retired app bundle to remove after the new app commits.
+        #[arg(long)]
+        legacy_app_target: Option<PathBuf>,
+        /// Regenerate global skills after the promotion commits.
+        #[arg(long)]
+        sync_skills: bool,
         /// Validate and print the preview but change nothing.
         #[arg(long)]
         preview: bool,
+    },
+    /// Repoint the global CLI at retained prior bytes only after that binary's
+    /// own preflight proves it recognizes the current store frontier.
+    Rollback {
+        /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
+        #[arg(long)]
+        cli_target: PathBuf,
+        /// The immutable content-addressed prior executable to activate.
+        #[arg(long)]
+        candidate: PathBuf,
     },
 }
 

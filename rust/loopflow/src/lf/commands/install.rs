@@ -20,10 +20,11 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 use rusqlite::OpenFlags;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -87,7 +88,7 @@ pub struct LiveBody {
 
 /// The promotion decision. `Reject` carries every failing reason at once so one
 /// preflight names all blockers, not just the first.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Verdict {
     Promote,
@@ -491,12 +492,11 @@ mod tests {
 
 // -- Promotion publication (PR2) ---------------------------------------------
 //
-// The mutating half consumes the merged `decide()` verdict and performs the CLI
-// swap under the same exclusive promotion lock whose shared side fences every
-// Task and Project body reservation. This slice owns the immutable candidate +
-// prior binaries and activates the candidate before any frontier advance; the
-// app-bundle swap and `install.py` cutover follow as the next serial PRs (see
-// scratch/questions.md).
+// The mutating half consumes the merged `decide()` verdict and performs every
+// machine-global install mutation under the same exclusive promotion lock whose
+// shared side fences every Task and Project body reservation. Python stages
+// branch-local artifacts only; Rust owns CLI activation, app replacement,
+// migration advancement, rollback validation, and post-commit skill sync.
 
 /// The machine-global, content-addressed binary store.
 fn lf_bin_dir() -> PathBuf {
@@ -618,6 +618,142 @@ fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<()> {
     Ok(())
 }
 
+fn remove_path(path: &Path) -> Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).with_context(|| format!("inspect {}", path.display())),
+    };
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path).with_context(|| format!("remove directory {}", path.display()))
+    } else {
+        fs::remove_file(path).with_context(|| format!("remove file {}", path.display()))
+    }
+}
+
+/// Copy one directory tree without following symlinks. Every copied file and
+/// directory is fsynced before the staged bundle may become global.
+fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(source)
+        .with_context(|| format!("inspect app source {}", source.display()))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(anyhow!(
+            "app source {} is not a directory",
+            source.display()
+        ));
+    }
+    fs::create_dir(destination)
+        .with_context(|| format!("create staged app directory {}", destination.display()))?;
+    fs::set_permissions(destination, metadata.permissions())?;
+
+    for entry in fs::read_dir(source).with_context(|| format!("read {}", source.display()))? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = destination.join(entry.file_name());
+        let metadata = fs::symlink_metadata(&from)?;
+        if metadata.file_type().is_symlink() {
+            let target = fs::read_link(&from)?;
+            std::os::unix::fs::symlink(target, &to)?;
+        } else if metadata.is_dir() {
+            copy_tree(&from, &to)?;
+        } else if metadata.is_file() {
+            fs::copy(&from, &to)
+                .with_context(|| format!("copy app file {} -> {}", from.display(), to.display()))?;
+            fs::set_permissions(&to, metadata.permissions())?;
+            fs::File::open(&to).and_then(|file| file.sync_all())?;
+        } else {
+            return Err(anyhow!("unsupported app entry {}", from.display()));
+        }
+    }
+    fs::File::open(destination).and_then(|directory| directory.sync_all())?;
+    Ok(())
+}
+
+#[derive(Debug)]
+struct AppPromotion<'a> {
+    source: &'a Path,
+    target: &'a Path,
+    legacy_target: Option<&'a Path>,
+}
+
+fn stage_app_bundle(plan: &AppPromotion<'_>) -> Result<PathBuf> {
+    let parent = plan.target.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    let name = plan
+        .target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Loopflow.app");
+    let staged = plan.target.with_file_name(format!(
+        ".{name}.promote.{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    let result = copy_tree(plan.source, &staged);
+    if result.is_err() {
+        let _ = remove_path(&staged);
+    }
+    result.map(|()| staged)
+}
+
+/// Commit a fully staged app by rename. The old app first moves to a unique
+/// sidecar; a failed staged rename restores it, while a crash leaves either the
+/// old target or the sidecar recoverable and never a partially copied bundle.
+fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<()> {
+    let parent = plan.target.parent().unwrap_or_else(|| Path::new("."));
+    let name = plan
+        .target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Loopflow.app");
+    let superseded = plan.target.with_file_name(format!(
+        ".{name}.superseded.{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    let had_target = fs::symlink_metadata(plan.target).is_ok();
+    if had_target {
+        fs::rename(plan.target, &superseded).with_context(|| {
+            format!(
+                "preserve installed app {} as {}",
+                plan.target.display(),
+                superseded.display()
+            )
+        })?;
+    }
+
+    if let Err(error) = fs::rename(staged, plan.target) {
+        if had_target {
+            let _ = fs::rename(&superseded, plan.target);
+        }
+        return Err(error).with_context(|| {
+            format!(
+                "commit staged app {} -> {}",
+                staged.display(),
+                plan.target.display()
+            )
+        });
+    }
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .with_context(|| format!("persist app commit in {}", parent.display()))?;
+
+    if had_target {
+        remove_path(&superseded)?;
+    }
+    if let Some(legacy) = plan.legacy_target {
+        remove_path(legacy)?;
+        if let Some(legacy_parent) = legacy.parent() {
+            fs::File::open(legacy_parent)
+                .and_then(|directory| directory.sync_all())
+                .with_context(|| {
+                    format!("persist legacy app removal in {}", legacy_parent.display())
+                })?;
+        }
+    }
+    Ok(())
+}
+
 /// Where a CLI promotion writes: the candidate binary to stage, the global
 /// symlink to repoint, and the content-addressed store to stage into.
 struct CliPromotion<'a> {
@@ -657,13 +793,144 @@ fn activate_cli_then_advance(
     Ok(published)
 }
 
+fn activate_install_then_advance(
+    verdict: &Verdict,
+    cli: &CliPromotion<'_>,
+    app: Option<&AppPromotion<'_>>,
+    advance_frontier: impl FnOnce() -> Result<()>,
+) -> Result<(PathBuf, Option<PathBuf>)> {
+    if matches!(verdict, Verdict::Reject { .. }) {
+        return publish_cli(verdict, cli);
+    }
+
+    // Stage every fallible app copy before the safety-critical CLI commit. A
+    // missing or unreadable bundle therefore leaves every global target old.
+    let staged_app = app.map(stage_app_bundle).transpose()?;
+    let published = match activate_cli_then_advance(verdict, cli, advance_frontier) {
+        Ok(published) => published,
+        Err(error) => {
+            if let Some(staged) = &staged_app {
+                let _ = remove_path(staged);
+            }
+            return Err(error);
+        }
+    };
+
+    if let (Some(staged), Some(app)) = (staged_app.as_deref(), app) {
+        if let Err(error) = commit_app_bundle(staged, app) {
+            let _ = remove_path(staged);
+            return Err(error);
+        }
+    }
+    Ok(published)
+}
+
+#[derive(Debug, Deserialize)]
+struct RollbackPreflight {
+    verdict: Verdict,
+}
+
+fn read_rollback_verdict(candidate: &Path) -> Result<Verdict> {
+    let output = Command::new(candidate)
+        .args(["install", "preflight", "--json"])
+        .output()
+        .with_context(|| format!("run retained binary {} preflight", candidate.display()))?;
+    let preview: RollbackPreflight = serde_json::from_slice(&output.stdout).with_context(|| {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        format!(
+            "retained binary {} did not return a promotion preflight: {}",
+            candidate.display(),
+            stderr.trim()
+        )
+    })?;
+    Ok(preview.verdict)
+}
+
+fn validate_rollback_verdict(verdict: &Verdict) -> Result<()> {
+    match verdict {
+        Verdict::Promote => Ok(()),
+        Verdict::PromoteAndMigrate => Err(anyhow!(
+            "retained executable is ahead of the current store; rollback never advances migrations"
+        )),
+        Verdict::Reject { reasons } => Err(anyhow!(
+            "retained executable is not rollback-compatible with the current store:\n  - {}",
+            reasons.join("\n  - ")
+        )),
+    }
+}
+
+fn activate_rollback(cli_target: &Path, candidate: &Path, verdict: &Verdict) -> Result<()> {
+    validate_rollback_verdict(verdict)?;
+    commit_cli_symlink(cli_target, candidate)
+}
+
+fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
+    let candidate = fs::canonicalize(candidate)
+        .with_context(|| format!("resolve retained executable {}", candidate.display()))?;
+    let bin_dir = fs::canonicalize(bin_dir)
+        .with_context(|| format!("resolve immutable binary store {}", bin_dir.display()))?;
+    if candidate.parent() != Some(bin_dir.as_path()) {
+        return Err(anyhow!(
+            "rollback candidate {} is outside the immutable binary store {}",
+            candidate.display(),
+            bin_dir.display()
+        ));
+    }
+    let digest = binary_digest(&candidate)?;
+    let expected = format!("lf-{digest}");
+    if candidate.file_name().and_then(|name| name.to_str()) != Some(expected.as_str()) {
+        return Err(anyhow!(
+            "retained executable {} does not match its content address {expected}",
+            candidate.display()
+        ));
+    }
+    Ok(candidate)
+}
+
+fn render_retained_prior(prior: &Path) {
+    match read_rollback_verdict(prior).and_then(|verdict| {
+        validate_rollback_verdict(&verdict)?;
+        Ok(verdict)
+    }) {
+        Ok(_) => println!(
+            "rollback available: lf install rollback --cli-target <path> --candidate {}",
+            prior.display()
+        ),
+        Err(error) => println!(
+            "prior executable retained as historical bytes (not rollback-compatible): {} ({error})",
+            prior.display()
+        ),
+    }
+}
+
 /// Run `lf install promote`. The candidate is the running binary; under the
 /// exclusive promotion lock it reads the shared store's frontier and live-body
 /// count, decides via the merged `decide()`, and — unless refused or preview —
 /// content-addresses itself into `~/.lf/bin` and atomically repoints `cli_target`.
 /// A refusal leaves every target unchanged.
-pub fn promote(cli_target: &Path, preview_only: bool) -> Result<()> {
-    let _lock = crate::promotion_lock::acquire_exclusive()
+pub fn promote(
+    cli_target: &Path,
+    app_source: Option<&Path>,
+    app_target: Option<&Path>,
+    legacy_app_target: Option<&Path>,
+    sync_skills: bool,
+    preview_only: bool,
+) -> Result<()> {
+    let app = match (app_source, app_target) {
+        (Some(source), Some(target)) => Some(AppPromotion {
+            source,
+            target,
+            legacy_target: legacy_app_target,
+        }),
+        (None, None) if legacy_app_target.is_none() => None,
+        _ => {
+            return Err(anyhow!(
+                "--app-source and --app-target must be supplied together; --legacy-app-target requires both"
+            ))
+        }
+    };
+
+    let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     let store_path = crate::store::production_database_path();
     let preview = build_preview(&store_path);
@@ -686,13 +953,14 @@ pub fn promote(cli_target: &Path, preview_only: bool) -> Result<()> {
     // both the current and pending frontiers, so every later failure leaves a
     // compatible machine-global command. The exclusive lock keeps reservations
     // out through the under-lock recount, activation, and migration.
-    let (dest, rollback) = activate_cli_then_advance(
+    let (dest, rollback) = activate_install_then_advance(
         &preview.verdict,
         &CliPromotion {
             candidate_binary: candidate.as_path(),
             cli_target,
             bin_dir: bin_dir.as_path(),
         },
+        app.as_ref(),
         || {
             crate::store::sqlite::SqliteStore::new(&store_path)
                 .map(|_| ())
@@ -704,21 +972,67 @@ pub fn promote(cli_target: &Path, preview_only: bool) -> Result<()> {
 
     println!("promoted: {} -> {}", cli_target.display(), dest.display());
     match rollback {
-        Some(prior) => println!("rollback candidate retained: {}", prior.display()),
+        Some(prior) => render_retained_prior(&prior),
         None => println!("no prior binary retained (target did not exist)"),
     }
+    if let Some(app) = &app {
+        println!(
+            "installed app: {} -> {}",
+            app.source.display(),
+            app.target.display()
+        );
+    }
+    drop(lock);
+    if sync_skills {
+        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false) {
+            eprintln!(
+                "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Activate retained immutable bytes only when that binary's own preflight
+/// recognizes the current store exactly. The exclusive lock keeps the frontier
+/// and live-body set stable between the preflight and symlink commit.
+pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
+    let _lock = crate::promotion_lock::acquire_exclusive()
+        .context("acquire the exclusive promotion lock")?;
+    let candidate = retained_binary_path(candidate, &lf_bin_dir())?;
+    let verdict = read_rollback_verdict(&candidate)?;
+    activate_rollback(cli_target, &candidate, &verdict)?;
+    println!(
+        "rolled back: {} -> {}",
+        cli_target.display(),
+        candidate.display()
+    );
     Ok(())
 }
 
 #[cfg(test)]
 mod promote_tests {
     use super::{
-        activate_cli_then_advance, commit_cli_symlink, preserve_prior_binary, publish_cli,
-        stage_binary, CliPromotion, Verdict,
+        activate_cli_then_advance, activate_install_then_advance, activate_rollback,
+        commit_app_bundle, commit_cli_symlink, copy_tree, preserve_prior_binary, publish_cli,
+        read_rollback_verdict, retained_binary_path, stage_app_bundle, stage_binary,
+        validate_rollback_verdict, AppPromotion, CliPromotion, Verdict,
     };
     use anyhow::anyhow;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+
+    /// Write an executable stand-in for a retained `lf` whose `install preflight
+    /// --json` prints `verdict`, so rollback validation can be exercised without a
+    /// real binary or the shared store.
+    fn fake_preflight_binary(path: &std::path::Path, verdict_json: &str) {
+        fs::write(
+            path,
+            format!("#!/bin/sh\ncat <<'JSON'\n{{\"verdict\": {verdict_json}}}\nJSON\n"),
+        )
+        .unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
 
     #[test]
     fn staging_is_content_addressed_and_refuses_a_byte_mismatch() {
@@ -877,5 +1191,263 @@ mod promote_tests {
             .find(|path| fs::read(path).ok().as_deref() == Some(b"old-compatible"))
             .expect("prior compatible bytes retained before activation");
         assert_eq!(fs::read(retained).unwrap(), b"old-compatible");
+    }
+
+    #[test]
+    fn validate_rollback_verdict_accepts_only_an_exact_promote() {
+        validate_rollback_verdict(&Verdict::Promote).expect("an exact-compatible prior rolls back");
+
+        let ahead = validate_rollback_verdict(&Verdict::PromoteAndMigrate).unwrap_err();
+        assert!(
+            ahead.to_string().contains("ahead of the current store"),
+            "{ahead}"
+        );
+
+        let reject = validate_rollback_verdict(&Verdict::Reject {
+            reasons: vec!["database migration 0.11.027 is unknown to lf".to_string()],
+        })
+        .unwrap_err();
+        assert!(
+            reject.to_string().contains("not rollback-compatible"),
+            "{reject}"
+        );
+        assert!(reject.to_string().contains("0.11.027"), "{reject}");
+    }
+
+    #[test]
+    fn an_incompatible_retained_binary_is_never_activated_for_rollback() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli_target = dir.path().join("lf");
+
+        // The W2-319 incident binary: its own preflight reports the store carries a
+        // migration it cannot operate. Rollback must refuse and touch nothing.
+        let incompatible = dir.path().join("lf-incompatible");
+        fake_preflight_binary(
+            &incompatible,
+            r#"{"kind": "reject", "reasons": ["database migration 0.11.027_accounts_first is unknown to lf"]}"#,
+        );
+        let verdict = read_rollback_verdict(&incompatible).unwrap();
+        assert!(matches!(verdict, Verdict::Reject { .. }));
+        let refused = activate_rollback(&cli_target, &incompatible, &verdict).unwrap_err();
+        assert!(
+            refused.to_string().contains("not rollback-compatible"),
+            "{refused}"
+        );
+        assert!(
+            !cli_target.exists(),
+            "an incompatible rollback must not repoint the CLI"
+        );
+
+        // A prior that recognizes the store exactly is a real rollback candidate.
+        let compatible = dir.path().join("lf-compatible");
+        fake_preflight_binary(&compatible, r#"{"kind": "promote"}"#);
+        let verdict = read_rollback_verdict(&compatible).unwrap();
+        activate_rollback(&cli_target, &compatible, &verdict)
+            .expect("compatible rollback activates");
+        assert_eq!(fs::read_link(&cli_target).unwrap(), compatible);
+    }
+
+    #[test]
+    fn retained_binary_path_rejects_out_of_store_and_mismatched_content_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        let candidate = dir.path().join("lf");
+        fs::write(&candidate, b"retained-bytes").unwrap();
+        let staged = stage_binary(&candidate, &bin_dir).unwrap();
+
+        // A correctly content-addressed member of the store resolves.
+        assert_eq!(retained_binary_path(&staged, &bin_dir).unwrap(), staged);
+
+        // A binary outside the immutable store is refused.
+        let outside = retained_binary_path(&candidate, &bin_dir).unwrap_err();
+        assert!(
+            outside
+                .to_string()
+                .contains("outside the immutable binary store"),
+            "{outside}"
+        );
+
+        // A file inside the store whose name is not its digest is refused.
+        let renamed = bin_dir.join("lf-deadbeef");
+        fs::copy(&staged, &renamed).unwrap();
+        let mismatch = retained_binary_path(&renamed, &bin_dir).unwrap_err();
+        assert!(
+            mismatch.to_string().contains("content address"),
+            "{mismatch}"
+        );
+    }
+
+    #[test]
+    fn copy_tree_preserves_symlinks_and_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("Loopflow.app");
+        fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
+        let helper = source.join("Contents/MacOS/lf");
+        fs::write(&helper, b"bundled-lf").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o555)).unwrap();
+        std::os::unix::fs::symlink("MacOS/lf", source.join("Contents/current")).unwrap();
+
+        let dest = dir.path().join("staged.app");
+        copy_tree(&source, &dest).unwrap();
+
+        assert_eq!(
+            fs::read(dest.join("Contents/MacOS/lf")).unwrap(),
+            b"bundled-lf"
+        );
+        assert_eq!(
+            fs::metadata(dest.join("Contents/MacOS/lf"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o555
+        );
+        let link = dest.join("Contents/current");
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_link(&link).unwrap(),
+            std::path::Path::new("MacOS/lf")
+        );
+    }
+
+    fn stage_app_source(root: &std::path::Path, marker: &[u8]) -> std::path::PathBuf {
+        let source = root.join("built.app");
+        fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
+        fs::write(source.join("Contents/MacOS/lf"), b"bundled-lf").unwrap();
+        fs::write(source.join("Contents/marker"), marker).unwrap();
+        source
+    }
+
+    #[test]
+    fn commit_app_bundle_replaces_the_old_app_and_removes_the_legacy_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = stage_app_source(dir.path(), b"new-app");
+        let target = dir.path().join("Applications/Loopflow.app");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("old"), b"old-app").unwrap();
+        let legacy = dir.path().join("Applications/Concerto.app");
+        fs::create_dir_all(&legacy).unwrap();
+
+        let plan = AppPromotion {
+            source: &source,
+            target: &target,
+            legacy_target: Some(&legacy),
+        };
+        let staged = stage_app_bundle(&plan).unwrap();
+        commit_app_bundle(&staged, &plan).unwrap();
+
+        assert_eq!(
+            fs::read(target.join("Contents/marker")).unwrap(),
+            b"new-app"
+        );
+        assert!(!target.join("old").exists(), "old app contents replaced");
+        assert!(!legacy.exists(), "legacy bundle removed");
+        // No superseded sidecar or staging leftover survives a clean commit.
+        let leftovers: Vec<_> = fs::read_dir(dir.path().join("Applications"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "unexpected leftovers: {leftovers:?}");
+    }
+
+    #[test]
+    fn commit_app_bundle_restores_the_old_app_when_the_staged_rename_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("Applications/Loopflow.app");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("marker"), b"old-app").unwrap();
+
+        // A staged path that does not exist forces the staged -> target rename to
+        // fail *after* the old app has already moved to its sidecar — exactly the
+        // window between old-app->sidecar and staged->target. The old app must be
+        // restored in place, not stranded in the sidecar.
+        let missing_staged = dir.path().join("Applications/.never-staged");
+        let plan = AppPromotion {
+            source: dir.path(), // unused on the commit path
+            target: &target,
+            legacy_target: None,
+        };
+        let error = commit_app_bundle(&missing_staged, &plan).unwrap_err();
+        assert!(error.to_string().contains("commit staged app"), "{error}");
+
+        // Removing the `fs::rename(&superseded, plan.target)` restore branch
+        // leaves the target absent and the old bytes stranded in the sidecar, so
+        // both assertions below go red — this is the restore's sabotage proof.
+        assert!(
+            target.exists(),
+            "old app must be restored to the target on a failed commit"
+        );
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"old-app");
+        let sidecars: Vec<_> = fs::read_dir(dir.path().join("Applications"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("superseded"))
+            .collect();
+        assert!(
+            sidecars.is_empty(),
+            "superseded sidecar leaked: {sidecars:?}"
+        );
+    }
+
+    #[test]
+    fn a_frontier_failure_leaves_the_cli_new_and_the_app_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli_target = dir.path().join("lf");
+        let candidate = dir.path().join("cand");
+        fs::write(&cli_target, b"old-compatible").unwrap();
+        fs::write(&candidate, b"candidate-knows-pending-frontier").unwrap();
+        let bin_dir = dir.path().join("bin");
+
+        let source = stage_app_source(dir.path(), b"new-app");
+        let app_target = dir.path().join("Applications/Loopflow.app");
+        fs::create_dir_all(&app_target).unwrap();
+        fs::write(app_target.join("marker"), b"old-app").unwrap();
+        let app = AppPromotion {
+            source: &source,
+            target: &app_target,
+            legacy_target: None,
+        };
+
+        let error = activate_install_then_advance(
+            &Verdict::PromoteAndMigrate,
+            &CliPromotion {
+                candidate_binary: &candidate,
+                cli_target: &cli_target,
+                bin_dir: &bin_dir,
+            },
+            Some(&app),
+            || Err(anyhow!("migration fsync failed")),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("migration fsync failed"),
+            "{error}"
+        );
+
+        // The CLI is already the compatible candidate; the app never committed, so
+        // its old bytes remain and no staged bundle leaks.
+        let active = fs::read_link(&cli_target).unwrap();
+        assert_eq!(
+            fs::read(active).unwrap(),
+            b"candidate-knows-pending-frontier"
+        );
+        assert_eq!(fs::read(app_target.join("marker")).unwrap(), b"old-app");
+        assert!(
+            !app_target.join("Contents").exists(),
+            "app not committed on failure"
+        );
+        let leftovers: Vec<_> = fs::read_dir(dir.path().join("Applications"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "staged app leaked: {leftovers:?}");
     }
 }

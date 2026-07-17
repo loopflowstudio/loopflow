@@ -146,7 +146,18 @@ set -euo pipefail
 printf '%s\n' "$*" > {cargo_log}
 repo="$PWD"
 mkdir -p "$repo/target/release"
-printf '#!/usr/bin/env bash\necho lf fake\n' > "$repo/target/release/lf"
+cat > "$repo/target/release/lf" <<'LF'
+#!/usr/bin/env bash
+if [ "$1" = "install" ] && [ "$2" = "promote" ]; then
+    shift 2
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = "--cli-target" ]; then mkdir -p "$(dirname "$2")"; ln -sf "$0" "$2"; fi
+        shift
+    done
+    exit 0
+fi
+echo lf fake
+LF
 chmod +x "$repo/target/release/lf"
 """
     )

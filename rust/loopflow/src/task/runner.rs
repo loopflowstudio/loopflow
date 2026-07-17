@@ -657,11 +657,7 @@ The durable reviewer outcome is:\n{}",
                                 .and_then(|pr| pr.head_sha().map(str::to_string));
                             // Merged, not merely settled: the branch below reports
                             // this PR as merged and waits on its review gate, which
-                            // is true of a merge and false of an abandoned PR. The
-                            // distinction went unnoticed while an abandoned row was
-                            // unreadable after the turn that closed it; now that a
-                            // published row stays readable, `is_settled()` here
-                            // would report a closed PR as merged on every turn.
+                            // is false of an abandoned one.
                             let merged_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
                                 pr.phase() == crate::task::PrPhase::Merged
                                     && pr

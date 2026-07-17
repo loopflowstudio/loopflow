@@ -5543,12 +5543,12 @@ mod tests {
         verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions,
         TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
-    use crate::engine::git::is_ancestor;
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
         ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
         ChildProcessGeneration, ChildRef, ChildWriteLease, MAX_RECOVERY_ATTEMPTS,
     };
+    use crate::engine::git::is_ancestor;
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
@@ -7728,8 +7728,14 @@ mod tests {
             .expect("adopt the active PR")
             .expect("working PR");
 
-        assert_eq!(adopted.id, incoherent.id, "the same row, healed — not a new one");
-        assert_eq!(adopted.base_commit, b1, "healed to the branch's true fork point");
+        assert_eq!(
+            adopted.id, incoherent.id,
+            "the same row, healed — not a new one"
+        );
+        assert_eq!(
+            adopted.base_commit, b1,
+            "healed to the branch's true fork point"
+        );
         assert!(
             matches!(
                 unpublished_work(&session.worktree, &adopted).expect("classify"),

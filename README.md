@@ -31,6 +31,15 @@ The Mac app — wave chat, the machine-wide roadmap, every task's worktree — i
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
 It bundles `lf`; `lf` (bare) opens it.
 
+Give an external agent harness the Loopflow operating skill:
+
+```bash
+npx skills add loopflowstudio/loopflow --skill loopflow -g -y
+```
+
+The harness acts as a User over the same `lf` API. See
+[The Agent API](docs/agent-api.md).
+
 ## A taste
 
 Fix a bug from the clipboard:

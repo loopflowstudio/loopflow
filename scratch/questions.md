@@ -2,6 +2,14 @@
 
 ## Architecture contract
 
+- PR #1073 currently exposes the `WorkStatus` enum but no
+  `status(work) -> WorkStatus` derivation/query. Agent-api cannot replace
+  `waves.rs` status or return shared start results until that controller API
+  exists; it must not derive the same state independently.
+- PR #1073 stores `HomeId` on `Run` and `Launch`, but exposes no authoritative
+  pre-Run `WorkRef -> HomeId` placement. `lf start` cannot select local versus
+  SSH execution for a never-run Wave until architecture owns that relation.
+
 - What exact typed event replaces the shipped per-Wave process
   `lf stop <wave>` after one Home resident hosts many Work endpoints?
   Agent-api proposes `UserStart` through existing `WaitOn::Event`, resolved by

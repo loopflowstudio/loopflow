@@ -98,6 +98,17 @@ call it a merger.
 
 ### PR1 — close the coverage holes (writers)
 
+**Status: opencode fix SHIPPED on PR #1036. Session-runner capture remains.**
+
+Two corrections the implementation found, both already applied:
+- `complete_turn` was not the only defaulted-`TurnUsage` minting site.
+  `ReaderState::close_orphaned_turn` built a `TurnUsage::default()` directly and
+  needed the same fix. Grep for the defaulted *constructor*, not the function.
+- The value-asserting conformance test does **not** guard the clobber. Its
+  fixture reports usage, so `unwrap_or_default()` returns the same numbers and
+  it stays green under sabotage (verified). The **absence**-asserting sibling is
+  the real guard. Both ship; a doc comment says which is which.
+
 1. **Session runners capture turns.** Give `task/runner.rs` and
    `project_session/runner.rs` a `CaptureHandle`, following the
    `flowloop/wave.rs:675-691` pattern (both already call the same

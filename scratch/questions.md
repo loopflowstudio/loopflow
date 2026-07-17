@@ -1,5 +1,33 @@
 # Open questions / assumptions — W2-281
 
+## Implementation status (design approved cf3870f0)
+
+Shipped in PR #1079 (rust-lint green; rust-test in flight):
+- Move 1 — `CallerAuthority` + `resolve_caller_authority` (fail-closed;
+  Project→`route.current`); `command_source`/`project_command_source` rewired.
+- Move 2 — fast bar before `Resume` creation; `reject_persisted_child_command`
+  store primitive; terminalize-on-launch-error for a just-created `Resume`.
+- Move 3 — audience-correct `open_pr_bar`.
+- Tests: funnel matrix (adds stray-marker fail-closed, all-absent Operator);
+  `project_caller_is_validated_against_the_live_route`; store-primitive
+  persisted→failed + claimed-refused; `a_supervisor_resume_of_an_open_pr_
+  refuses_before_creating_a_command` (steady-Open, ledger empty).
+
+**Known test gap — the injected phase-flip end-to-end.** The terminalize-on-race
+path is only reachable when the fast bar passes (PR `Working`) and `launch` then
+bars (PR flipped to `Open`) — a genuine TOCTOU. The two PR reads hit the same
+store row inside one `queue_command` call with no test-controllable interpose
+point, and `launch` spawns a real tmux process (the existing lifecycle harness
+deliberately never reaches it). So the flip is not cleanly unit-testable without
+a process-spawn / PR-observation seam the harness lacks. What *is* proven
+deterministically: the `reject_persisted_child_command` predicate + its
+`fail_child_command` sabotage (the reviewer's persisted-state assertion), and
+the fast-bar steady-Open refusal. The remaining ~12 lines (launch `Err` →
+reject + `Failed` event, `Resume`-only) are composed from the tested primitive.
+Note the wiring fires on *any* launch error for a `Resume`, not only the bar — a
+strict superset that also clears a spawn-failure orphan. If review wants the
+injected flip asserted, it needs a harness seam (follow-up).
+
 ## Assumptions (proceeding on these)
 
 - **Trust model is local, single-operator.** A caller who scrubs *all* identity

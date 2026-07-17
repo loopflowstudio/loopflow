@@ -33,23 +33,25 @@ locally (syspolicyd wedge), so each PR must be independently CI-verifiable.
   This branch carries `scratch/` (design) again, so `scratch-clear` is
   structurally red until PR2 lands — not a repair item.
 
-  PR2 is itself sliced (no local cargo on this host → each slice must be
-  independently CI-verifiable):
-  - **2a (shipped on this branch):** `lf install promote --cli-target <p>
+  PR2 remains serial relative to later app/Python work, but Project review made
+  the CLI activation boundary indivisible: the mutating command, Task+Project
+  reservation fence, immutable prior retention, candidate staging, CLI commit,
+  and migration ordering must share one head.
+  - **2a+2c (this review iteration):** `lf install promote --cli-target <p>
     [--preview]` — the CLI half. Content-addressed immutable binary
     (`~/.lf/bin/lf-<sha256>`, verify-and-reuse, refuse byte mismatch), exclusive
-    `~/.lf/promotion.lock` held across the under-lock decide + swap, atomic
-    temp-symlink→rename commit (never leaves the target absent), rollback
-    candidate retained + printed, `PromoteAndMigrate` applies the pending
-    migration via `SqliteStore::new` (the store's backed-up path). Filesystem
-    unit tests cover content-addressing, atomic commit, and refuse-leaves-
-    unchanged. The live-body *gate* rides in the merged `decide()`.
+    `~/.lf/promotion.lock` held across the under-lock decide + swap, matching
+    `LOCK_SH` across both reservation CASes, atomic temp-symlink→rename commit
+    (never leaves the target absent), and immutable rollback bytes retained for
+    both symlink and regular-file targets. Candidate and prior bytes are staged
+    before the candidate becomes global; only then may `PromoteAndMigrate`
+    advance the store via `SqliteStore::new`. Thus a post-migration failure
+    always leaves a frontier-compatible global command. Filesystem tests cover
+    content addressing and both prior target shapes; the fence regression proves
+    Task and Project reservations block behind `LOCK_EX`.
   - **2b:** the app-bundle swap (`--app-source`/`--app-target`, `.superseded`
     sidecar) + post-commit best-effort `sync-skills`, and `lf install rollback`
     (re-exec the retained binary's `preflight --json`, refuse on `Reject`).
-  - **2c:** the reservation `LOCK_SH` launch fence in
-    `store.reserve_task_process`/`reserve_project_process` + its under-lock
-    interval regression.
   - **2d:** Python cutover — delete `install.py._promote`, route `local --use`/
     `refresh`/`--install-dir`/app through `lf install promote` — plus the
     two-worktree end-to-end regression and the sabotage guard.

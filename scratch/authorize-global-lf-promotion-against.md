@@ -227,41 +227,50 @@ narrowed. A regression holds the promotion `LOCK_EX` at a failpoint, attempts a
 `reserve_task_process` concurrently, and asserts it blocks until promotion
 releases — the exact interval the reviewer named.
 
-### Publish: stage, then ordered failure-preserving commits
+### Publish: preserve, activate, then advance the frontier
 
 The old "one atomic all-target operation" claim was false — a symlink swap, a
-directory `rmtree`+`copytree`, and a skill sync cannot be one atomic op. The
-honest contract is **stage everything beside its destination, then commit in a
-fixed order where each commit is individually atomic and failure-preserving**,
-holding `LOCK_EX` throughout steps 1–4:
+directory `rmtree`+`copytree`, and a skill sync cannot be one atomic op. More
+importantly, migration cannot precede filesystem staging or the CLI commit: a
+later copy, fsync, or rename failure would leave the old global `lf` active
+against a frontier it cannot read. The honest contract is **preserve both
+compatible binaries, activate the candidate, then advance the frontier**, while
+holding `LOCK_EX` throughout:
 
 1. **Re-check** frontier + live-body count under the lock (TOCTOU close).
-2. **Migrate (only `PromoteAndMigrate`, only zero live bodies):** apply the one
-   pending migration via `apply_sqlite_with_backup` (its own migration lock +
-   backup), nested under the promotion lock.
-3. **Stage** (no destination mutated): copy candidate → its content-addressed
-   path + `fsync`; build the new CLI symlink at a temp name in the same dir;
-   `copytree` the app + bundled helper to a temp dir beside `/Applications` +
-   `fsync`.
-4. **Commit, in order, each atomic:**
-   - *Commit A (CLI, safety-critical, first):* `rename` the temp symlink over
-     `~/.local/bin/lf`. `rename` never leaves the target absent — unlike the
-     current `_promote`, which `unlink`s then `symlink_to`s (a crash between
-     leaves no global `lf`).
-   - *Commit B (app):* `rename` the existing app aside to a `.superseded`
-     sidecar, `rename` the staged app into place, then remove the sidecar.
-   - Record the prior CLI target as the rollback candidate at the moment of
-     Commit A.
-5. **Post-commit, best-effort (not part of the atomicity claim):** `sync-skills`,
+2. **Preserve the prior CLI bytes:** resolve either a symlink target (including
+   a relative or mutable-worktree link) or a regular-file target, copy its
+   bytes into `~/.lf/bin/lf-<sha256>`, verify the copied digest, `fsync`, and
+   never overwrite an existing content address. A link pathname alone is not a
+   rollback artifact.
+3. **Stage the candidate:** copy it into its own verified content-addressed path
+   and `fsync`; build the new CLI symlink at a temp name in the target directory;
+   stage the app + bundled helper beside `/Applications` and `fsync`.
+4. **Commit A (CLI, safety-critical):** `rename` the temp symlink over
+   `~/.local/bin/lf`. `rename` never leaves the target absent — unlike the
+   current `_promote`, which `unlink`s then `symlink_to`s (a crash between
+   leaves no global `lf`). At this point the global command is the published
+   candidate, which recognizes both the old frontier and its own pending one.
+   `fsync` the target directory before proceeding so the CLI activation is
+   durable before any store write.
+5. **Migrate (only `PromoteAndMigrate`, only zero live bodies):** apply pending
+   migrations via `apply_sqlite_with_backup` (its own migration lock + backup),
+   nested under the promotion lock. Every failure after the store advances now
+   leaves the compatible candidate active globally; failures before the CLI
+   commit leave the compatible prior command and old frontier intact.
+6. **Commit B (app):** `rename` the existing app aside to a `.superseded`
+   sidecar, `rename` the staged app into place, then remove the sidecar.
+7. **Post-commit, best-effort (not part of the atomicity claim):** `sync-skills`,
    matching install.py's existing contract that a skill-sync failure warns and
    does not fail the install.
 
 Failpoints are injectable after each commit stage so the regression asserts the
 invariant at every torn state: after a failure at any stage, targets are either
 fully old or fully new *for that stage*, and there is never a window with no
-global `lf`. If Commit B fails after Commit A, the CLI is correct and the app is
-left recoverable (staged temp + sidecar both present) and the failure is
-reported — the two are genuinely separate commits, not one lie about atomicity.
+global `lf`. If migration or Commit B fails after Commit A, the compatible
+candidate remains active and the app is left recoverable (staged temp + sidecar
+both present). The immutable prior binary remains available for a later
+revalidated rollback, though rollback may refuse once the frontier advances.
 
 ## De-risking
 
@@ -312,6 +321,11 @@ reported — the two are genuinely separate commits, not one lie about atomicity
    skill sync post-commit best-effort) with a content-addressed immutable binary
    and a preserved, re-validated rollback that may itself refuse after a
    migration.
+9. **The mutating command and the reservation fence ship together.** A reachable
+   `lf install promote` is not a safe intermediate slice while Task or Project
+   reservations can bypass `LOCK_SH`; the shared/exclusive fence, immutable
+   prior retention, candidate staging, CLI activation, and frontier advance are
+   one review boundary.
 
 ## Scope
 

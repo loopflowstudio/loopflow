@@ -15,6 +15,7 @@ pub mod ops;
 pub mod pm;
 pub mod profile;
 pub mod project_session;
+pub(crate) mod promotion_lock;
 pub mod provider_account;
 pub mod provider_auth;
 pub mod receipt;

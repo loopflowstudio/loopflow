@@ -7,11 +7,11 @@
 //! `0.11.027`, and every subsequent invocation — including live bodies mid-turn
 //! — hit a store its own binary could not read.
 //!
-//! This slice owns the **read-only preflight**: the candidate binary (the one
-//! running this command) reads the shared store's applied frontier and its own
-//! migration registry, counts live Task/Project bodies, and renders a verdict.
-//! The mutating `promote`/`rollback` publication lands in the next serial PR;
-//! the decision here is the source of truth it will consume.
+//! The candidate binary (the one running this command) reads the shared store's
+//! applied frontier and its own migration registry, counts live Task/Project
+//! bodies, and renders a verdict. `promote` consumes that verdict under the
+//! machine-global reservation fence, retains immutable rollback bytes, and
+//! activates the candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
 //! `store::migrations` functions the runtime trusts at open time, so a reject
@@ -22,10 +22,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use fs2::FileExt;
 use rusqlite::OpenFlags;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
@@ -492,34 +492,11 @@ mod tests {
 // -- Promotion publication (PR2) ---------------------------------------------
 //
 // The mutating half consumes the merged `decide()` verdict and performs the CLI
-// swap under one exclusive promotion lock. This slice owns the content-addressed
-// immutable binary and the atomic, failure-preserving CLI commit; the app-bundle
-// swap, the reservation launch fence, and the `install.py` cutover follow as the
-// next serial PRs (see scratch/questions.md).
-
-/// The exclusive promotion lock, released when the file closes on drop.
-struct PromotionLock {
-    _file: fs::File,
-}
-
-fn acquire_promotion_lock() -> Result<PromotionLock> {
-    let path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lf/promotion.lock");
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&path)
-        .with_context(|| format!("open promotion lock {}", path.display()))?;
-    file.lock_exclusive()
-        .context("acquire the exclusive promotion lock")?;
-    Ok(PromotionLock { _file: file })
-}
+// swap under the same exclusive promotion lock whose shared side fences every
+// Task and Project body reservation. This slice owns the immutable candidate +
+// prior binaries and activates the candidate before any frontier advance; the
+// app-bundle swap and `install.py` cutover follow as the next serial PRs (see
+// scratch/questions.md).
 
 /// The machine-global, content-addressed binary store.
 fn lf_bin_dir() -> PathBuf {
@@ -534,41 +511,92 @@ fn binary_digest(path: &Path) -> Result<String> {
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
-/// Copy `candidate` into `bin_dir` under its byte digest and return the path.
+/// Copy `source` into `bin_dir` under its byte digest and return the path.
 /// An existing digest path is reused after a byte-for-byte check; a mismatch is
 /// refused rather than overwrite a retained (possibly rollback) artifact. The
-/// staged file is read-only (`0o555`) and published by atomic rename.
-fn stage_binary(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
-    let digest = binary_digest(candidate)?;
+/// staged file is read-only (`0o555`), fsynced, digested from the copied bytes,
+/// and published by atomic rename.
+fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
     fs::create_dir_all(bin_dir).with_context(|| format!("create {}", bin_dir.display()))?;
-    let dest = bin_dir.join(format!("lf-{digest}"));
-    if dest.exists() {
-        if binary_digest(&dest)? != digest {
-            return Err(anyhow!(
-                "content-addressed binary {} exists with different bytes; refusing to overwrite a retained artifact",
-                dest.display()
-            ));
+    let tmp = bin_dir.join(format!(
+        ".lf-stage-{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    let result = (|| {
+        fs::copy(source, &tmp)
+            .with_context(|| format!("stage {} -> {}", source.display(), tmp.display()))?;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o555))?;
+        fs::File::open(&tmp).and_then(|file| file.sync_all())?;
+
+        let digest = binary_digest(&tmp)?;
+        let dest = bin_dir.join(format!("lf-{digest}"));
+        if dest.exists() {
+            if binary_digest(&dest)? != digest {
+                return Err(anyhow!(
+                    "content-addressed binary {} exists with different bytes; refusing to overwrite a retained artifact",
+                    dest.display()
+                ));
+            }
+            fs::set_permissions(&dest, fs::Permissions::from_mode(0o555))?;
+            fs::File::open(&dest).and_then(|file| file.sync_all())?;
+            fs::remove_file(&tmp)?;
+            return Ok(dest);
         }
-        return Ok(dest);
+
+        fs::rename(&tmp, &dest)
+            .with_context(|| format!("publish staged binary {}", dest.display()))?;
+        fs::File::open(bin_dir).and_then(|directory| directory.sync_all())?;
+        Ok(dest)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    let tmp = bin_dir.join(format!(".lf-{digest}.tmp.{}", std::process::id()));
-    fs::copy(candidate, &tmp)
-        .with_context(|| format!("stage {} -> {}", candidate.display(), tmp.display()))?;
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o555))?;
-    fs::File::open(&tmp).and_then(|file| file.sync_all())?;
-    fs::rename(&tmp, &dest).with_context(|| format!("publish staged binary {}", dest.display()))?;
-    Ok(dest)
+    result
+}
+
+/// Copy the prior global executable into immutable content-addressed storage.
+/// Symlink targets are resolved relative to the link's parent; regular files are
+/// copied directly. The returned path owns rollback bytes independently of a
+/// mutable worktree or a target that is about to be replaced.
+fn preserve_prior_binary(cli_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
+    let metadata = match fs::symlink_metadata(cli_target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("inspect prior CLI {}", cli_target.display()))
+        }
+    };
+    let source = if metadata.file_type().is_symlink() {
+        let target = fs::read_link(cli_target)
+            .with_context(|| format!("read prior CLI symlink {}", cli_target.display()))?;
+        if target.is_absolute() {
+            target
+        } else {
+            cli_target
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(target)
+        }
+    } else if metadata.is_file() {
+        cli_target.to_path_buf()
+    } else {
+        return Err(anyhow!(
+            "prior CLI {} is neither a file nor a symlink",
+            cli_target.display()
+        ));
+    };
+    stage_binary(&source, bin_dir)
+        .map(Some)
+        .with_context(|| format!("preserve prior compatible binary from {}", source.display()))
 }
 
 /// Point `cli_target` at `dest_binary` by an atomic temp-symlink + rename, so the
-/// target is never absent (unlike an unlink-then-symlink). Returns the prior
-/// symlink target — the retained rollback candidate — or `None` if the target was
-/// not a managed symlink.
-fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<Option<PathBuf>> {
-    let prior = fs::read_link(cli_target).ok();
-    if let Some(parent) = cli_target.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
+/// target is never absent (unlike an unlink-then-symlink).
+fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<()> {
+    let parent = cli_target.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     let name = cli_target
         .file_name()
         .and_then(|name| name.to_str())
@@ -584,7 +612,10 @@ fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<Option<Pa
             dest_binary.display()
         )
     })?;
-    Ok(prior)
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .with_context(|| format!("persist CLI commit in {}", parent.display()))?;
+    Ok(())
 }
 
 /// Where a CLI promotion writes: the candidate binary to stage, the global
@@ -597,9 +628,10 @@ struct CliPromotion<'a> {
 
 /// The CLI half of a promotion for an already-decided verdict. `Reject` changes
 /// nothing and returns the reasons as an error; `Promote`/`PromoteAndMigrate`
-/// stage the content-addressed binary and atomically repoint the target,
-/// returning the staged path and retained rollback candidate. Migration
-/// application (for `PromoteAndMigrate`) is the caller's job and must precede it.
+/// preserve the prior executable, stage the candidate, and atomically repoint
+/// the target, returning both immutable paths. Migration application (for
+/// `PromoteAndMigrate`) is the caller's job and must follow activation so no
+/// advanced frontier is ever left behind an incompatible global command.
 fn publish_cli(verdict: &Verdict, plan: &CliPromotion) -> Result<(PathBuf, Option<PathBuf>)> {
     if let Verdict::Reject { reasons } = verdict {
         return Err(anyhow!(
@@ -607,9 +639,22 @@ fn publish_cli(verdict: &Verdict, plan: &CliPromotion) -> Result<(PathBuf, Optio
             reasons.join("\n  - ")
         ));
     }
+    let rollback = preserve_prior_binary(plan.cli_target, plan.bin_dir)?;
     let dest = stage_binary(plan.candidate_binary, plan.bin_dir)?;
-    let rollback = commit_cli_symlink(plan.cli_target, &dest)?;
+    commit_cli_symlink(plan.cli_target, &dest)?;
     Ok((dest, rollback))
+}
+
+fn activate_cli_then_advance(
+    verdict: &Verdict,
+    plan: &CliPromotion,
+    advance_frontier: impl FnOnce() -> Result<()>,
+) -> Result<(PathBuf, Option<PathBuf>)> {
+    let published = publish_cli(verdict, plan)?;
+    if matches!(verdict, Verdict::PromoteAndMigrate) {
+        advance_frontier()?;
+    }
+    Ok(published)
 }
 
 /// Run `lf install promote`. The candidate is the running binary; under the
@@ -618,7 +663,8 @@ fn publish_cli(verdict: &Verdict, plan: &CliPromotion) -> Result<(PathBuf, Optio
 /// content-addresses itself into `~/.lf/bin` and atomically repoints `cli_target`.
 /// A refusal leaves every target unchanged.
 pub fn promote(cli_target: &Path, preview_only: bool) -> Result<()> {
-    let _lock = acquire_promotion_lock()?;
+    let _lock = crate::promotion_lock::acquire_exclusive()
+        .context("acquire the exclusive promotion lock")?;
     let store_path = crate::store::production_database_path();
     let preview = build_preview(&store_path);
     render_human(&preview);
@@ -634,36 +680,43 @@ pub fn promote(cli_target: &Path, preview_only: bool) -> Result<()> {
         return Ok(());
     }
 
-    // A published candidate that is ahead applies its one pending migration
-    // through the store's own backed-up path by opening it read-write; the
-    // live-body gate in `decide()` already guaranteed no bodies are live.
-    if matches!(preview.verdict, Verdict::PromoteAndMigrate) {
-        crate::store::sqlite::SqliteStore::new(&store_path)
-            .map_err(|error| anyhow!("apply the pending migration before promotion: {error}"))?;
-    }
-
     let candidate = std::env::current_exe().context("resolve the running candidate binary")?;
     let bin_dir = lf_bin_dir();
-    let (dest, rollback) = publish_cli(
+    // Activate the published candidate before advancing the store. It knows
+    // both the current and pending frontiers, so every later failure leaves a
+    // compatible machine-global command. The exclusive lock keeps reservations
+    // out through the under-lock recount, activation, and migration.
+    let (dest, rollback) = activate_cli_then_advance(
         &preview.verdict,
         &CliPromotion {
             candidate_binary: candidate.as_path(),
             cli_target,
             bin_dir: bin_dir.as_path(),
         },
+        || {
+            crate::store::sqlite::SqliteStore::new(&store_path)
+                .map(|_| ())
+                .map_err(|error| {
+                    anyhow!("apply pending migration after activating compatible CLI: {error}")
+                })
+        },
     )?;
 
     println!("promoted: {} -> {}", cli_target.display(), dest.display());
     match rollback {
         Some(prior) => println!("rollback candidate retained: {}", prior.display()),
-        None => println!("no prior binary retained (target was not a managed symlink)"),
+        None => println!("no prior binary retained (target did not exist)"),
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod promote_tests {
-    use super::{commit_cli_symlink, publish_cli, stage_binary, CliPromotion, Verdict};
+    use super::{
+        activate_cli_then_advance, commit_cli_symlink, preserve_prior_binary, publish_cli,
+        stage_binary, CliPromotion, Verdict,
+    };
+    use anyhow::anyhow;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
@@ -677,7 +730,12 @@ mod promote_tests {
         let first = stage_binary(&candidate, &bin_dir).unwrap();
         assert!(first.exists());
         // Re-staging identical bytes reuses the same digest path.
+        fs::set_permissions(&first, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(stage_binary(&candidate, &bin_dir).unwrap(), first);
+        assert_eq!(
+            fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+            0o555
+        );
 
         // A retained artifact corrupted to different bytes is refused, not
         // silently overwritten.
@@ -688,7 +746,7 @@ mod promote_tests {
     }
 
     #[test]
-    fn commit_symlink_is_atomic_and_returns_the_prior_target() {
+    fn commit_symlink_is_atomic() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("lf");
         let a = dir.path().join("lf-a");
@@ -696,11 +754,43 @@ mod promote_tests {
         fs::write(&a, b"a").unwrap();
         fs::write(&b, b"b").unwrap();
 
-        assert_eq!(commit_cli_symlink(&target, &a).unwrap(), None);
+        commit_cli_symlink(&target, &a).unwrap();
         assert_eq!(fs::read_link(&target).unwrap(), a);
 
-        assert_eq!(commit_cli_symlink(&target, &b).unwrap(), Some(a));
+        commit_cli_symlink(&target, &b).unwrap();
         assert_eq!(fs::read_link(&target).unwrap(), b);
+    }
+
+    #[test]
+    fn prior_symlink_bytes_survive_a_mutable_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        let worktree_binary = dir.path().join("worktree-lf");
+        let cli_target = dir.path().join("lf");
+        fs::write(&worktree_binary, b"old-compatible").unwrap();
+        std::os::unix::fs::symlink("worktree-lf", &cli_target).unwrap();
+
+        let retained = preserve_prior_binary(&cli_target, &bin_dir)
+            .unwrap()
+            .unwrap();
+        fs::set_permissions(&worktree_binary, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::write(&worktree_binary, b"rebuilt-in-place").unwrap();
+
+        assert_eq!(fs::read(retained).unwrap(), b"old-compatible");
+    }
+
+    #[test]
+    fn prior_regular_file_bytes_are_retained_before_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        let cli_target = dir.path().join("lf");
+        fs::write(&cli_target, b"old-compatible").unwrap();
+
+        let retained = preserve_prior_binary(&cli_target, &bin_dir)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(fs::read(retained).unwrap(), b"old-compatible");
     }
 
     #[test]
@@ -749,5 +839,43 @@ mod promote_tests {
         assert_eq!(rollback, None);
         assert_eq!(fs::read_link(&target).unwrap(), dest);
         assert_eq!(fs::read(&dest).unwrap(), b"candidate-bytes");
+    }
+
+    #[test]
+    fn a_frontier_failure_leaves_the_compatible_candidate_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("lf");
+        let candidate = dir.path().join("cand");
+        fs::write(&target, b"old-compatible").unwrap();
+        fs::write(&candidate, b"candidate-knows-pending-frontier").unwrap();
+        let bin_dir = dir.path().join("bin");
+
+        let error = activate_cli_then_advance(
+            &Verdict::PromoteAndMigrate,
+            &CliPromotion {
+                candidate_binary: &candidate,
+                cli_target: &target,
+                bin_dir: &bin_dir,
+            },
+            || Err(anyhow!("migration fsync failed")),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("migration fsync failed"),
+            "{error}"
+        );
+        let active = fs::read_link(&target).unwrap();
+        assert_eq!(
+            fs::read(active).unwrap(),
+            b"candidate-knows-pending-frontier"
+        );
+        let retained = fs::read_dir(&bin_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| fs::read(path).ok().as_deref() == Some(b"old-compatible"))
+            .expect("prior compatible bytes retained before activation");
+        assert_eq!(fs::read(retained).unwrap(), b"old-compatible");
     }
 }

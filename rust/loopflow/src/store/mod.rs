@@ -4186,6 +4186,85 @@ mod tests {
         assert_eq!(process.state, ChildLeaseState::Reserved);
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn task_and_project_reservations_wait_for_promotion() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.status_reason = "ready".to_string();
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        project.begin_generation("project-reservation".to_string());
+
+        let mut task = make_task_session(&wave, &project);
+        task.set_status(TaskSessionStatus::Waiting, "ready");
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        task.begin_generation("task-reservation".to_string());
+
+        let promotion = crate::promotion_lock::acquire_exclusive().unwrap();
+        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let task_store = Arc::clone(&store);
+        let task_started = started_tx.clone();
+        let mut task_reservation = tokio::spawn(async move {
+            task_started.send(()).unwrap();
+            task_store
+                .reserve_task_process(&task, TaskSessionStatus::Waiting)
+                .await
+        });
+
+        let project_store = Arc::clone(&store);
+        let mut project_reservation = tokio::spawn(async move {
+            started_tx.send(()).unwrap();
+            project_store
+                .reserve_project_process(&project, ProjectSessionStatus::Created)
+                .await
+        });
+
+        started_rx.recv().await.unwrap();
+        started_rx.recv().await.unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut task_reservation)
+                .await
+                .is_err(),
+            "Task reservation crossed the exclusive promotion fence"
+        );
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                &mut project_reservation
+            )
+            .await
+            .is_err(),
+            "Project reservation crossed the exclusive promotion fence"
+        );
+
+        drop(promotion);
+        let task_lease = tokio::time::timeout(std::time::Duration::from_secs(2), task_reservation)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let project_lease =
+            tokio::time::timeout(std::time::Duration::from_secs(2), project_reservation)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        assert!(task_lease.is_some());
+        assert!(project_lease.is_some());
+    }
+
     #[tokio::test]
     async fn task_process_resume_reserves_each_session_generation_once() {
         let dir = tempfile::tempdir().unwrap();

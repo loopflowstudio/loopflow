@@ -17,11 +17,15 @@
 //! `store::migrations` functions the runtime trusts at open time, so a reject
 //! reason is the store's own error string, never a second registry.
 
-use std::path::Path;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use fs2::FileExt;
 use rusqlite::OpenFlags;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
@@ -482,5 +486,268 @@ mod tests {
         );
         assert_eq!(live[0].kind, "task");
         assert_eq!(live[1].kind, "project");
+    }
+}
+
+// -- Promotion publication (PR2) ---------------------------------------------
+//
+// The mutating half consumes the merged `decide()` verdict and performs the CLI
+// swap under one exclusive promotion lock. This slice owns the content-addressed
+// immutable binary and the atomic, failure-preserving CLI commit; the app-bundle
+// swap, the reservation launch fence, and the `install.py` cutover follow as the
+// next serial PRs (see scratch/questions.md).
+
+/// The exclusive promotion lock, released when the file closes on drop.
+struct PromotionLock {
+    _file: fs::File,
+}
+
+fn acquire_promotion_lock() -> Result<PromotionLock> {
+    let path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lf/promotion.lock");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("open promotion lock {}", path.display()))?;
+    file.lock_exclusive()
+        .context("acquire the exclusive promotion lock")?;
+    Ok(PromotionLock { _file: file })
+}
+
+/// The machine-global, content-addressed binary store.
+fn lf_bin_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lf/bin")
+}
+
+/// SHA-256 of a file's bytes, hex-encoded — the content address of a binary.
+fn binary_digest(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("read binary {}", path.display()))?;
+    Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+/// Copy `candidate` into `bin_dir` under its byte digest and return the path.
+/// An existing digest path is reused after a byte-for-byte check; a mismatch is
+/// refused rather than overwrite a retained (possibly rollback) artifact. The
+/// staged file is read-only (`0o555`) and published by atomic rename.
+fn stage_binary(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
+    let digest = binary_digest(candidate)?;
+    fs::create_dir_all(bin_dir).with_context(|| format!("create {}", bin_dir.display()))?;
+    let dest = bin_dir.join(format!("lf-{digest}"));
+    if dest.exists() {
+        if binary_digest(&dest)? != digest {
+            return Err(anyhow!(
+                "content-addressed binary {} exists with different bytes; refusing to overwrite a retained artifact",
+                dest.display()
+            ));
+        }
+        return Ok(dest);
+    }
+    let tmp = bin_dir.join(format!(".lf-{digest}.tmp.{}", std::process::id()));
+    fs::copy(candidate, &tmp)
+        .with_context(|| format!("stage {} -> {}", candidate.display(), tmp.display()))?;
+    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o555))?;
+    fs::File::open(&tmp).and_then(|file| file.sync_all())?;
+    fs::rename(&tmp, &dest).with_context(|| format!("publish staged binary {}", dest.display()))?;
+    Ok(dest)
+}
+
+/// Point `cli_target` at `dest_binary` by an atomic temp-symlink + rename, so the
+/// target is never absent (unlike an unlink-then-symlink). Returns the prior
+/// symlink target — the retained rollback candidate — or `None` if the target was
+/// not a managed symlink.
+fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<Option<PathBuf>> {
+    let prior = fs::read_link(cli_target).ok();
+    if let Some(parent) = cli_target.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let name = cli_target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("lf");
+    let tmp = cli_target.with_file_name(format!(".{name}.promote.{}", std::process::id()));
+    let _ = fs::remove_file(&tmp);
+    std::os::unix::fs::symlink(dest_binary, &tmp)
+        .with_context(|| format!("stage symlink {}", tmp.display()))?;
+    fs::rename(&tmp, cli_target).with_context(|| {
+        format!(
+            "commit {} -> {}",
+            cli_target.display(),
+            dest_binary.display()
+        )
+    })?;
+    Ok(prior)
+}
+
+/// Where a CLI promotion writes: the candidate binary to stage, the global
+/// symlink to repoint, and the content-addressed store to stage into.
+struct CliPromotion<'a> {
+    candidate_binary: &'a Path,
+    cli_target: &'a Path,
+    bin_dir: &'a Path,
+}
+
+/// The CLI half of a promotion for an already-decided verdict. `Reject` changes
+/// nothing and returns the reasons as an error; `Promote`/`PromoteAndMigrate`
+/// stage the content-addressed binary and atomically repoint the target,
+/// returning the staged path and retained rollback candidate. Migration
+/// application (for `PromoteAndMigrate`) is the caller's job and must precede it.
+fn publish_cli(verdict: &Verdict, plan: &CliPromotion) -> Result<(PathBuf, Option<PathBuf>)> {
+    if let Verdict::Reject { reasons } = verdict {
+        return Err(anyhow!(
+            "promotion refused; every target is unchanged:\n  - {}",
+            reasons.join("\n  - ")
+        ));
+    }
+    let dest = stage_binary(plan.candidate_binary, plan.bin_dir)?;
+    let rollback = commit_cli_symlink(plan.cli_target, &dest)?;
+    Ok((dest, rollback))
+}
+
+/// Run `lf install promote`. The candidate is the running binary; under the
+/// exclusive promotion lock it reads the shared store's frontier and live-body
+/// count, decides via the merged `decide()`, and — unless refused or preview —
+/// content-addresses itself into `~/.lf/bin` and atomically repoints `cli_target`.
+/// A refusal leaves every target unchanged.
+pub fn promote(cli_target: &Path, preview_only: bool) -> Result<()> {
+    let _lock = acquire_promotion_lock()?;
+    let store_path = crate::store::production_database_path();
+    let preview = build_preview(&store_path);
+    render_human(&preview);
+
+    if let Verdict::Reject { reasons } = &preview.verdict {
+        return Err(anyhow!(
+            "promotion refused; ~/.local/bin/lf and the app are unchanged:\n  - {}",
+            reasons.join("\n  - ")
+        ));
+    }
+    if preview_only {
+        println!("  (preview only: no target changed)");
+        return Ok(());
+    }
+
+    // A published candidate that is ahead applies its one pending migration
+    // through the store's own backed-up path by opening it read-write; the
+    // live-body gate in `decide()` already guaranteed no bodies are live.
+    if matches!(preview.verdict, Verdict::PromoteAndMigrate) {
+        crate::store::sqlite::SqliteStore::new(&store_path)
+            .map_err(|error| anyhow!("apply the pending migration before promotion: {error}"))?;
+    }
+
+    let candidate = std::env::current_exe().context("resolve the running candidate binary")?;
+    let bin_dir = lf_bin_dir();
+    let (dest, rollback) = publish_cli(
+        &preview.verdict,
+        &CliPromotion {
+            candidate_binary: candidate.as_path(),
+            cli_target,
+            bin_dir: bin_dir.as_path(),
+        },
+    )?;
+
+    println!("promoted: {} -> {}", cli_target.display(), dest.display());
+    match rollback {
+        Some(prior) => println!("rollback candidate retained: {}", prior.display()),
+        None => println!("no prior binary retained (target was not a managed symlink)"),
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod promote_tests {
+    use super::{commit_cli_symlink, publish_cli, stage_binary, CliPromotion, Verdict};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn staging_is_content_addressed_and_refuses_a_byte_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        let candidate = dir.path().join("lf");
+        fs::write(&candidate, b"BINARY-A").unwrap();
+
+        let first = stage_binary(&candidate, &bin_dir).unwrap();
+        assert!(first.exists());
+        // Re-staging identical bytes reuses the same digest path.
+        assert_eq!(stage_binary(&candidate, &bin_dir).unwrap(), first);
+
+        // A retained artifact corrupted to different bytes is refused, not
+        // silently overwritten.
+        fs::set_permissions(&first, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::write(&first, b"CORRUPT").unwrap();
+        let error = stage_binary(&candidate, &bin_dir).unwrap_err();
+        assert!(error.to_string().contains("different bytes"), "{error}");
+    }
+
+    #[test]
+    fn commit_symlink_is_atomic_and_returns_the_prior_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("lf");
+        let a = dir.path().join("lf-a");
+        let b = dir.path().join("lf-b");
+        fs::write(&a, b"a").unwrap();
+        fs::write(&b, b"b").unwrap();
+
+        assert_eq!(commit_cli_symlink(&target, &a).unwrap(), None);
+        assert_eq!(fs::read_link(&target).unwrap(), a);
+
+        assert_eq!(commit_cli_symlink(&target, &b).unwrap(), Some(a));
+        assert_eq!(fs::read_link(&target).unwrap(), b);
+    }
+
+    #[test]
+    fn a_rejected_verdict_stages_nothing_and_moves_no_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("lf");
+        let candidate = dir.path().join("cand");
+        fs::write(&candidate, b"x").unwrap();
+        let bin_dir = dir.path().join("bin");
+
+        let error = publish_cli(
+            &Verdict::Reject {
+                reasons: vec!["a live body blocks replacement".to_string()],
+            },
+            &CliPromotion {
+                candidate_binary: &candidate,
+                cli_target: &target,
+                bin_dir: &bin_dir,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("refused"), "{error}");
+        assert!(!target.exists(), "target must be untouched on refusal");
+        assert!(!bin_dir.exists(), "nothing staged on refusal");
+    }
+
+    #[test]
+    fn a_promote_verdict_stages_and_repoints() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("lf");
+        let candidate = dir.path().join("cand");
+        fs::write(&candidate, b"candidate-bytes").unwrap();
+        let bin_dir = dir.path().join("bin");
+
+        let (dest, rollback) = publish_cli(
+            &Verdict::Promote,
+            &CliPromotion {
+                candidate_binary: &candidate,
+                cli_target: &target,
+                bin_dir: &bin_dir,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(rollback, None);
+        assert_eq!(fs::read_link(&target).unwrap(), dest);
+        assert_eq!(fs::read(&dest).unwrap(), b"candidate-bytes");
     }
 }

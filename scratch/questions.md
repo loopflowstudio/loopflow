@@ -33,6 +33,27 @@ locally (syspolicyd wedge), so each PR must be independently CI-verifiable.
   This branch carries `scratch/` (design) again, so `scratch-clear` is
   structurally red until PR2 lands — not a repair item.
 
+  PR2 is itself sliced (no local cargo on this host → each slice must be
+  independently CI-verifiable):
+  - **2a (shipped on this branch):** `lf install promote --cli-target <p>
+    [--preview]` — the CLI half. Content-addressed immutable binary
+    (`~/.lf/bin/lf-<sha256>`, verify-and-reuse, refuse byte mismatch), exclusive
+    `~/.lf/promotion.lock` held across the under-lock decide + swap, atomic
+    temp-symlink→rename commit (never leaves the target absent), rollback
+    candidate retained + printed, `PromoteAndMigrate` applies the pending
+    migration via `SqliteStore::new` (the store's backed-up path). Filesystem
+    unit tests cover content-addressing, atomic commit, and refuse-leaves-
+    unchanged. The live-body *gate* rides in the merged `decide()`.
+  - **2b:** the app-bundle swap (`--app-source`/`--app-target`, `.superseded`
+    sidecar) + post-commit best-effort `sync-skills`, and `lf install rollback`
+    (re-exec the retained binary's `preflight --json`, refuse on `Reject`).
+  - **2c:** the reservation `LOCK_SH` launch fence in
+    `store.reserve_task_process`/`reserve_project_process` + its under-lock
+    interval regression.
+  - **2d:** Python cutover — delete `install.py._promote`, route `local --use`/
+    `refresh`/`--install-dir`/app through `lf install promote` — plus the
+    two-worktree end-to-end regression and the sabotage guard.
+
 Still open / reviewable:
 
 1. **Blanket live-body gate obstructiveness.** Any Active/Reserved lease blocks

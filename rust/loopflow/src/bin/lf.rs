@@ -1395,6 +1395,10 @@ fn main() -> anyhow::Result<()> {
     if let Some(Commands::Install { cmd }) = &cli.command {
         return match cmd {
             InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
+            InstallCommand::Promote {
+                cli_target,
+                preview,
+            } => loopflow::lf::commands::install::promote(cli_target, *preview),
         };
     }
 

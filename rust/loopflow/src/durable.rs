@@ -60,12 +60,6 @@ pub enum DurableDataError {
     InvalidEpochState(String),
     #[error("invalid send state: {0}")]
     InvalidSendState(String),
-    #[error("invalid run state: {0}")]
-    InvalidRunState(String),
-    #[error("invalid launch state: {0}")]
-    InvalidLaunchState(String),
-    #[error("invalid boundary state: {0}")]
-    InvalidBoundaryState(String),
 }
 
 durable_id!(ProjectId, "proj_");
@@ -158,27 +152,6 @@ pub enum RunState {
     Active,
     Stopping,
     Ended,
-}
-
-impl RunState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Reserved => "reserved",
-            Self::Active => "active",
-            Self::Stopping => "stopping",
-            Self::Ended => "ended",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
-        match value {
-            "reserved" => Ok(Self::Reserved),
-            "active" => Ok(Self::Active),
-            "stopping" => Ok(Self::Stopping),
-            "ended" => Ok(Self::Ended),
-            value => Err(DurableDataError::InvalidRunState(value.to_string())),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,27 +249,6 @@ pub enum LaunchState {
     Ended,
 }
 
-impl LaunchState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Live => "live",
-            Self::Stopping => "stopping",
-            Self::Ended => "ended",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
-        match value {
-            "starting" => Ok(Self::Starting),
-            "live" => Ok(Self::Live),
-            "stopping" => Ok(Self::Stopping),
-            "ended" => Ok(Self::Ended),
-            value => Err(DurableDataError::InvalidLaunchState(value.to_string())),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Launch {
     pub id: LaunchId,
@@ -323,29 +275,6 @@ pub enum BoundaryState {
 }
 
 impl BoundaryState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Active => "active",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-            Self::Interrupted => "interrupted",
-            Self::Unknown => "unknown",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
-        match value {
-            "starting" => Ok(Self::Starting),
-            "active" => Ok(Self::Active),
-            "succeeded" => Ok(Self::Succeeded),
-            "failed" => Ok(Self::Failed),
-            "interrupted" => Ok(Self::Interrupted),
-            "unknown" => Ok(Self::Unknown),
-            value => Err(DurableDataError::InvalidBoundaryState(value.to_string())),
-        }
-    }
-
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
@@ -545,7 +474,7 @@ pub struct RunLease {
     pub run_id: RunId,
     pub work: WorkRef,
     pub basis: Basis,
-    token: RunLeaseToken,
+    _token: RunLeaseToken,
 }
 
 impl RunLease {
@@ -554,12 +483,8 @@ impl RunLease {
             run_id,
             work,
             basis,
-            token,
+            _token: token,
         }
-    }
-
-    pub(crate) fn token(&self) -> &RunLeaseToken {
-        &self.token
     }
 }
 
@@ -568,10 +493,6 @@ impl RunLease {
 pub(crate) struct RunLeaseToken(String);
 
 impl RunLeaseToken {
-    pub(crate) fn new() -> Self {
-        Self(format!("rl_{}", uuid::Uuid::new_v4().simple()))
-    }
-
     pub(crate) fn from_child(value: &str) -> Self {
         Self(format!("rl_child_{value}"))
     }

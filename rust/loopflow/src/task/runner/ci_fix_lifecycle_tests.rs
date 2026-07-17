@@ -21,7 +21,7 @@
 
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc, Mutex, MutexGuard, OnceLock,
+    Arc, MutexGuard,
 };
 
 use async_trait::async_trait;
@@ -86,13 +86,8 @@ const AMBIENT_TASK_ENV: [&str; 6] = [
 // redirect was not merely redundant — it was harmful: `trace.rs` reads `LF_HOME`
 // and the lib test binary runs its ~1400 tests in threads, so pointing that var
 // at a temp dir failed `trace::tests::capture_persists_private_artifacts_and_
-// queryable_rows` from another thread. Mutate the minimum; a private mutex
-// serializes this guard against itself, never against the rest of the binary.
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
+// queryable_rows` from another thread. Mutate the minimum and share the one
+// process-environment lock with every other in-crate test that changes PATH.
 
 /// Puts a fake `gh` on `PATH`, clears the ambient Task identity, and points the
 /// store home at a temp dir. Env is process-global and the lib test binary runs
@@ -108,7 +103,7 @@ struct AmbientGuard {
 
 impl AmbientGuard {
     fn new(gh_script: &str) -> Self {
-        let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+        let lock = crate::journal::test_env_lock();
         let bin = TempDir::new().expect("temp bin dir");
         let state = TempDir::new().expect("temp gh state dir");
 
@@ -512,8 +507,6 @@ fn make_project(wave: &Wave) -> ProjectSession {
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        current_directive_version: 0,
-        incorporated_directive_version: 0,
         status: ProjectSessionStatus::Waiting,
         status_reason: "ci-fix lifecycle fixture".to_string(),
         status_at: now,
@@ -548,8 +541,6 @@ fn make_task(wave: &Wave, project: &ProjectSession, worktree: &std::path::Path) 
         pm_writeback: crate::task::PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_session_id: project.id.clone(),
-        current_directive_version: 1,
-        incorporated_directive_version: 1,
         status: TaskSessionStatus::Waiting,
         status_reason: "waiting on review".to_string(),
         status_at: now,
@@ -1524,52 +1515,26 @@ async fn a_crash_after_arm_reclaims_the_same_command_and_reselects_ci_fix() {
     );
 }
 
-/// A wake is a command, not a direction — the sharpest trap in the change.
-///
-/// Minting a `ChildDirective` would bump `current_directive_version`, and
-/// `has_pending_directive` gates `task_completion_gate` on
-/// `current > incorporated`. A wake that minted one would block Task completion
-/// until a body acknowledged a direction no human ever gave.
+/// A CI wake is lifecycle evidence, not authored direction.
 #[tokio::test]
-async fn a_ci_fix_wake_mints_no_directive() {
+async fn a_ci_fix_wake_mints_no_steer() {
     let mut harness = Harness::new().await;
-    let before = harness
+    let work = harness
         .store
-        .get_task_session(&harness.task.id)
+        .work_for_child(&ChildRef::Task(harness.task.id.clone()))
         .await
-        .expect("read task")
-        .expect("task exists");
+        .expect("read Work");
+    let before = harness.store.boundary_seed(&work).await.expect("read seed");
 
     harness.head("h1");
     harness.checks_failing();
     harness.observe().await.expect("a red head mints a wake");
     harness.arm().await.expect("the wake arms a body");
 
-    let after = harness
-        .store
-        .get_task_session(&harness.task.id)
-        .await
-        .expect("read task")
-        .expect("task exists");
+    let after = harness.store.boundary_seed(&work).await.expect("read seed");
     assert_eq!(
-        after.current_directive_version, before.current_directive_version,
-        "a wake must not version a direction nobody gave"
-    );
-    assert_eq!(
-        after.incorporated_directive_version, before.incorporated_directive_version,
-        "so nothing is left pending incorporation, and completion stays reachable"
-    );
-    let wake_id = harness.ci_fix_commands().await[0].id.clone();
-    let directives = harness
-        .store
-        .child_directives(&ChildRef::Task(harness.task.id.clone()))
-        .await
-        .expect("read directives");
-    assert!(
-        directives
-            .iter()
-            .all(|directive| directive.command_id.as_ref() != Some(&wake_id)),
-        "no directive is bound to the wake command"
+        after.steers, before.steers,
+        "a CI wake must not author direction"
     );
 }
 

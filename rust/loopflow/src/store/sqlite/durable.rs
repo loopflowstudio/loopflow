@@ -32,6 +32,31 @@ impl SqliteStore {
         boundary_seed_in(&conn, work)
     }
 
+    pub(crate) fn boundary_seed_for_child(&self, target: &ChildRef) -> StoreResult<BoundarySeed> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let work = work_for_child_in(&conn, target)?;
+        let (epoch_id, revision) = match target {
+            ChildRef::Project(session_id) => conn.query_row(
+                "SELECT epoch_id, e.current_rev
+                 FROM project_sessions s JOIN epochs e ON e.id=s.epoch_id
+                 WHERE s.id=?1",
+                [session_id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )?,
+            ChildRef::Task(session_id) => conn.query_row(
+                "SELECT epoch_id, e.current_rev
+                 FROM task_sessions s JOIN epochs e ON e.id=s.epoch_id
+                 WHERE s.id=?1",
+                [session_id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )?,
+        };
+        let epoch_id = EpochId::parse(&epoch_id).map_err(|error| {
+            StoreError::InvalidData(format!("invalid stored Epoch id: {error}"))
+        })?;
+        boundary_seed_for_epoch_in(&conn, &work, epoch_id, revision as u64)
+    }
+
     pub fn append_steer(
         &self,
         work: &WorkRef,
@@ -54,20 +79,6 @@ impl SqliteStore {
         let receipt = Self::append_steer_in(&tx, work, author, text)?;
         tx.commit()?;
         Ok(receipt)
-    }
-
-    pub fn steer(
-        &self,
-        context: &crate::durable::ControlCtx<'_>,
-        work: &WorkRef,
-        text: &str,
-        if_basis: Option<&Basis>,
-    ) -> StoreResult<SteerReceipt> {
-        let author = match context {
-            crate::durable::ControlCtx::User(_) => Author::User,
-            crate::durable::ControlCtx::Run(lease) => Author::Run(lease.run_id.clone()),
-        };
-        self.append_steer(work, &author, text, if_basis)
     }
 
     pub(crate) fn append_steer_in(
@@ -307,14 +318,25 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         require_child_write_lease(&conn, target, lease)?;
         let work = work_for_child_in(&conn, target)?;
-        let epoch = current_epoch_in(&conn, &work)?;
-        let run_id = conn
+        let (run_id, epoch_id, revision) = conn
             .query_row(
-                "SELECT id FROM runs
-                 WHERE epoch_id=?1 AND lease_generation=?2 AND state IN ('reserved', 'active')
-                 ORDER BY created_at DESC LIMIT 1",
-                params![epoch.id.as_str(), i64::from(lease.generation)],
-                |row| row.get::<_, String>(0),
+                "SELECT r.id, r.epoch_id, e.current_rev
+                 FROM runs r JOIN epochs e ON e.id=r.epoch_id
+                 WHERE r.source_kind=?1 AND r.source_id=?2
+                   AND r.lease_generation=?3 AND r.state IN ('reserved', 'active')
+                 ORDER BY r.created_at DESC LIMIT 1",
+                params![
+                    target.target_kind(),
+                    target.target_id(),
+                    i64::from(lease.generation)
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
             )
             .optional()?
             .ok_or_else(|| {
@@ -329,13 +351,21 @@ impl SqliteStore {
                 StoreError::InvalidData(format!("invalid stored Run id: {error}"))
             })?,
             work,
-            epoch.current_basis,
+            Basis {
+                epoch_id: EpochId::parse(&epoch_id).map_err(|error| {
+                    StoreError::InvalidData(format!("invalid stored Epoch id: {error}"))
+                })?,
+                revision: revision as u64,
+            },
             crate::durable::RunLeaseToken::from_child(lease.token.as_str()),
         ))
     }
 }
 
-pub(crate) fn create_project_spine(tx: &Connection, session: &ProjectSession) -> StoreResult<()> {
+pub(crate) fn create_project_spine(
+    tx: &Transaction<'_>,
+    session: &ProjectSession,
+) -> StoreResult<()> {
     let project_id = tx
         .query_row(
             "SELECT id FROM projects WHERE external_project_id=?1",
@@ -392,10 +422,11 @@ pub(crate) fn create_project_spine(tx: &Connection, session: &ProjectSession) ->
         "UPDATE project_sessions SET epoch_id=?2 WHERE id=?1",
         params![session.id.as_str(), epoch_id.as_str()],
     )?;
+    import_project_run(tx, session)?;
     Ok(())
 }
 
-pub(crate) fn create_task_spine(tx: &Connection, session: &TaskSession) -> StoreResult<()> {
+pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> StoreResult<()> {
     let project_id: String = tx.query_row(
         "SELECT id FROM projects WHERE external_project_id=?1",
         [session.launch.project.id.as_str()],
@@ -458,6 +489,83 @@ pub(crate) fn create_task_spine(tx: &Connection, session: &TaskSession) -> Store
         "UPDATE task_sessions SET epoch_id=?2 WHERE id=?1",
         params![session.id.as_str(), epoch_id.as_str()],
     )?;
+    import_task_run(tx, session)?;
+    Ok(())
+}
+
+fn import_project_run(tx: &Transaction<'_>, session: &ProjectSession) -> StoreResult<()> {
+    let Some(process) = session.latest_process.as_ref() else {
+        return Ok(());
+    };
+    import_run_for_child(
+        tx,
+        &ChildRef::Project(session.id.clone()),
+        process.generation,
+        process.state,
+    )
+}
+
+fn import_task_run(tx: &Transaction<'_>, session: &TaskSession) -> StoreResult<()> {
+    let Some(process) = session.latest_process.as_ref() else {
+        return Ok(());
+    };
+    import_run_for_child(
+        tx,
+        &ChildRef::Task(session.id.clone()),
+        process.generation,
+        process.state,
+    )
+}
+
+fn import_run_for_child(
+    tx: &Transaction<'_>,
+    target: &ChildRef,
+    generation: u32,
+    lease_state: crate::child_session::ChildLeaseState,
+) -> StoreResult<()> {
+    use crate::child_session::ChildLeaseState;
+
+    let state = match lease_state {
+        ChildLeaseState::Legacy | ChildLeaseState::Active => "active",
+        ChildLeaseState::Reserved => "reserved",
+        ChildLeaseState::Revoked => "stopping",
+        ChildLeaseState::Finished => return Ok(()),
+    };
+    let work = work_for_child_in(tx, target)?;
+    let epoch = current_epoch_in(tx, &work)?;
+    let home_id: String = tx.query_row(
+        "SELECT id FROM homes ORDER BY created_at LIMIT 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let trigger_json = serde_json::to_string(&RunTrigger::Input {
+        basis: epoch.current_basis,
+    })
+    .expect("run trigger must serialize");
+    let imported_lease = format!(
+        "imported:{}:{}:{generation}",
+        target.target_kind(),
+        target.target_id()
+    );
+    let lease_hash = crate::durable::RunLeaseToken::from_child(&imported_lease).hash();
+    tx.execute(
+        "INSERT INTO runs (
+            id, epoch_id, home_id, state, trigger_json, lease_hash,
+            lease_generation, source_kind, source_id, created_at, ended_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL)",
+        params![
+            RunId::new().as_str(),
+            epoch.id.as_str(),
+            home_id,
+            state,
+            trigger_json,
+            lease_hash,
+            i64::from(generation),
+            target.target_kind(),
+            target.target_id(),
+            now_unix(),
+        ],
+    )?;
     Ok(())
 }
 
@@ -505,12 +613,15 @@ pub(crate) fn activate_run_for_child(
     target: &ChildRef,
     generation: u32,
 ) -> StoreResult<()> {
-    let work = work_for_child_in(tx, target)?;
-    let epoch = current_epoch_in(tx, &work)?;
     if tx.execute(
         "UPDATE runs SET state='active'
-         WHERE epoch_id=?1 AND lease_generation=?2 AND state='reserved'",
-        params![epoch.id.as_str(), i64::from(generation)],
+         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
+           AND state='reserved'",
+        params![
+            target.target_kind(),
+            target.target_id(),
+            i64::from(generation)
+        ],
     )? == 0
     {
         return Err(StoreError::InvalidData(format!(
@@ -526,12 +637,16 @@ pub(crate) fn end_run_for_child(
     target: &ChildRef,
     generation: u32,
 ) -> StoreResult<()> {
-    let work = work_for_child_in(conn, target)?;
-    let epoch = current_epoch_in(conn, &work)?;
     conn.execute(
-        "UPDATE runs SET state='ended', ended_at=?3
-         WHERE epoch_id=?1 AND lease_generation=?2 AND state != 'ended'",
-        params![epoch.id.as_str(), i64::from(generation), now_unix()],
+        "UPDATE runs SET state='ended', ended_at=?4
+         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
+           AND state != 'ended'",
+        params![
+            target.target_kind(),
+            target.target_id(),
+            i64::from(generation),
+            now_unix()
+        ],
     )?;
     Ok(())
 }
@@ -541,13 +656,15 @@ pub(crate) fn fence_run_for_child(
     target: &ChildRef,
     generation: u32,
 ) -> StoreResult<()> {
-    let work = work_for_child_in(conn, target)?;
-    let epoch = current_epoch_in(conn, &work)?;
     if conn.execute(
         "UPDATE runs SET state='stopping'
-         WHERE epoch_id=?1 AND lease_generation=?2
+         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
            AND state IN ('reserved', 'active')",
-        params![epoch.id.as_str(), i64::from(generation)],
+        params![
+            target.target_kind(),
+            target.target_id(),
+            i64::from(generation)
+        ],
     )? == 0
     {
         return Err(StoreError::InvalidData(format!(
@@ -811,7 +928,21 @@ fn applied_basis_in(conn: &Connection, epoch_id: &EpochId) -> StoreResult<Option
 
 fn boundary_seed_in(conn: &Connection, work: &WorkRef) -> StoreResult<BoundarySeed> {
     let epoch = current_epoch_in(conn, work)?;
-    let applied = applied_basis_in(conn, &epoch.id)?
+    boundary_seed_for_epoch_in(
+        conn,
+        work,
+        epoch.current_basis.epoch_id,
+        epoch.current_basis.revision,
+    )
+}
+
+fn boundary_seed_for_epoch_in(
+    conn: &Connection,
+    work: &WorkRef,
+    epoch_id: EpochId,
+    revision: u64,
+) -> StoreResult<BoundarySeed> {
+    let applied = applied_basis_in(conn, &epoch_id)?
         .map(|basis| basis.revision as i64)
         .unwrap_or(-1);
     let mut statement = conn.prepare(
@@ -819,11 +950,7 @@ fn boundary_seed_in(conn: &Connection, work: &WorkRef) -> StoreResult<BoundarySe
          FROM steers WHERE epoch_id=?1 AND rev > ?2 AND rev <= ?3 ORDER BY rev",
     )?;
     let rows = statement.query_map(
-        params![
-            epoch.id.as_str(),
-            applied,
-            epoch.current_basis.revision as i64
-        ],
+        params![epoch_id.as_str(), applied, revision as i64],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -855,7 +982,7 @@ fn boundary_seed_in(conn: &Connection, work: &WorkRef) -> StoreResult<BoundarySe
             })?,
             work: work.clone(),
             basis: Basis {
-                epoch_id: epoch.id.clone(),
+                epoch_id: epoch_id.clone(),
                 revision: revision as u64,
             },
             author,
@@ -866,7 +993,7 @@ fn boundary_seed_in(conn: &Connection, work: &WorkRef) -> StoreResult<BoundarySe
         });
     }
     Ok(BoundarySeed {
-        basis: epoch.current_basis,
+        basis: Basis { epoch_id, revision },
         steers,
     })
 }

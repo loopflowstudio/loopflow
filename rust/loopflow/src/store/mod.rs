@@ -1018,7 +1018,6 @@ pub async fn open_registry_for_authority() -> Result<Store, RegistryUnavailable>
 }
 
 pub type SharedStore = Arc<Store>;
-
 #[cfg(test)]
 mod tests {
     use super::sqlite::SqliteStore;
@@ -1030,9 +1029,10 @@ mod tests {
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child_session::{
         BinaryProvenance, BoundaryResult, ChildBodyOutcome, ChildCommand, ChildCommandEffect,
-        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective,
-        ChildLeaseState, ChildProcessGeneration, ChildRef, ObservationRecipient,
+        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildLeaseState,
+        ChildProcessGeneration, ChildRef, ObservationRecipient,
     };
+    use crate::durable::{Author, SendState};
     use crate::id::WaveId;
     use crate::interaction_review::{
         InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
@@ -1051,6 +1051,7 @@ mod tests {
         TaskGateProposal, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession, TaskSessionId,
         TaskSessionStatus,
     };
+    use crate::trace::{AgentLaunchRow, AgentTurnRow};
     use crate::wave::Wave;
     use std::env;
     use std::path::PathBuf;
@@ -1224,8 +1225,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_session_id: project.id.clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status: TaskSessionStatus::Created,
             status_reason: "task session reserved".to_string(),
             status_at: now,
@@ -1286,8 +1285,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Running,
             status_reason: "project turn active".to_string(),
             status_at: now,
@@ -1314,6 +1311,223 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn trace_launch(id: &str) -> AgentLaunchRow {
+        AgentLaunchRow {
+            id: id.to_string(),
+            run_id: format!("run-{id}"),
+            process_id: format!("process-{id}"),
+            started_at: 1,
+            ended_at: None,
+            repo: "/repo".to_string(),
+            worktree: "/repo".to_string(),
+            wave: None,
+            flow: None,
+            skill: None,
+            project: None,
+            task: None,
+            provider: "codex".to_string(),
+            model: None,
+            surface: "headless".to_string(),
+            capture_status: "capturing".to_string(),
+            incomplete_reason: None,
+            outcome: "running".to_string(),
+            artifact_dir: format!("trace/{id}"),
+            conversation_path: format!("trace/{id}/conversation.jsonl"),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 0,
+            conversation_bytes: 0,
+        }
+    }
+
+    fn trace_turn(
+        id: &str,
+        launch_id: &str,
+        ordinal: i64,
+        status: &str,
+        basis: crate::durable::Basis,
+    ) -> AgentTurnRow {
+        AgentTurnRow {
+            id: id.to_string(),
+            launch_id: launch_id.to_string(),
+            ordinal,
+            provider_turn_id: None,
+            started_at: ordinal,
+            ended_at: (status != "running").then_some(ordinal + 1),
+            status: status.to_string(),
+            input_op: "initial".to_string(),
+            context_coverage: "unknown".to_string(),
+            tokenizer: "unknown".to_string(),
+            system_prompt_path: None,
+            task_prompt_path: format!("trace/{id}/prompt.md"),
+            system_tokens: 0,
+            task_tokens: 0,
+            supplied_context_tokens: 0,
+            provider_input_tokens: None,
+            provider_total_input_tokens: None,
+            peak_input_tokens: None,
+            context_window_tokens: None,
+            provider_output_tokens: None,
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            cost_usd: None,
+            context_gather_ms: 0,
+            context_render_ms: 0,
+            context_persist_ms: 0,
+            first_event_seq: None,
+            last_event_seq: None,
+            basis: Some(basis),
+        }
+    }
+
+    #[tokio::test]
+    async fn steers_are_one_ordered_basis_checked_input_stream() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let task = make_task_session(&wave, &project);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let target = ChildRef::Task(task.id.clone());
+        let work = store.work_for_child(&target).await.unwrap();
+        let initial = store.current_epoch(&work).await.unwrap().current_basis;
+
+        let first = store
+            .append_steer(
+                &work,
+                Author::User,
+                "inspect the failing test",
+                Some(&initial),
+            )
+            .await
+            .unwrap();
+        let second = store
+            .append_steer(
+                &work,
+                Author::User,
+                "preserve the public behavior",
+                Some(&first.steer.basis),
+            )
+            .await
+            .unwrap();
+        let stale = store
+            .append_steer(&work, Author::User, "stale write", Some(&initial))
+            .await
+            .expect_err("an old Basis cannot append direction");
+        assert!(matches!(stale, super::StoreError::StaleBasis { .. }));
+
+        let seed = store.boundary_seed(&work).await.unwrap();
+        assert_eq!(seed.basis, second.steer.basis);
+        assert_eq!(
+            seed.steers
+                .iter()
+                .map(|steer| steer.text.as_str())
+                .collect::<Vec<_>>(),
+            ["inspect the failing test", "preserve the public behavior"]
+        );
+        assert!(store.list_child_commands(&target).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn live_send_never_advances_fixed_turn_basis_or_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let task = make_task_session(&wave, &project);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let basis_zero = store.current_epoch(&work).await.unwrap().current_basis;
+        let launch = trace_launch("fixed-basis");
+        let completed = trace_turn(
+            "turn-completed",
+            &launch.id,
+            1,
+            "completed",
+            basis_zero.clone(),
+        );
+        store
+            .sqlite
+            .insert_trace_capture(&launch, &completed, &[], &[])
+            .unwrap();
+        let running = trace_turn("turn-running", &launch.id, 2, "running", basis_zero.clone());
+        store
+            .sqlite
+            .insert_agent_turn_capture(&running, &[], &[])
+            .unwrap();
+        store
+            .validate_completion_basis(&work, &basis_zero)
+            .await
+            .unwrap();
+
+        let receipt = store
+            .append_steer(&work, Author::User, "change course", Some(&basis_zero))
+            .await
+            .unwrap();
+        let live = store
+            .begin_live_send(&receipt.steer.id, &running.id)
+            .await
+            .unwrap()
+            .expect("the active Turn can receive the Steer");
+        store
+            .finish_send(
+                &live.id,
+                SendState::Unknown,
+                None,
+                Some("provider receipt lost"),
+            )
+            .await
+            .unwrap();
+
+        let stored_turn = store
+            .sqlite
+            .agent_turn(&running.id)
+            .unwrap()
+            .expect("stored Turn");
+        assert_eq!(stored_turn.basis, Some(basis_zero.clone()));
+        assert!(store
+            .validate_completion_basis(&work, &basis_zero)
+            .await
+            .is_err());
+        assert_eq!(store.boundary_seed(&work).await.unwrap().steers.len(), 1);
+
+        let applied = trace_turn(
+            "turn-applied",
+            &launch.id,
+            3,
+            "completed",
+            receipt.steer.basis.clone(),
+        );
+        store
+            .sqlite
+            .insert_agent_turn_capture(&applied, &[], &[])
+            .unwrap();
+        store
+            .validate_completion_basis(&work, &receipt.steer.basis)
+            .await
+            .unwrap();
+        assert!(store.boundary_seed(&work).await.unwrap().steers.is_empty());
     }
 
     #[tokio::test]
@@ -1358,9 +1572,7 @@ mod tests {
         let mut command = ChildCommand::new(
             ChildRef::Task(task.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "check the repair".to_string(),
-            },
+            ChildCommandKind::Resume,
         );
         command.created_at = observed_at + Duration::seconds(15);
         store.create_child_command(&command).await.unwrap();
@@ -1626,7 +1838,6 @@ mod tests {
             "provenance must not be the launcher's (A)"
         );
     }
-
     #[tokio::test]
     async fn project_session_provenance_round_trips_through_insert() {
         let dir = tempfile::tempdir().unwrap();
@@ -1982,11 +2193,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(matches!(command.kind, ChildCommandKind::FollowUp { .. }));
-        assert_eq!(
-            command.source,
-            ChildCommandSource::Project(project.id.clone())
-        );
+        assert!(command.steer.text.contains("Show the stored state"));
         let second_command = store
             .send_project_interaction_review_message(
                 &opened.id,
@@ -1996,17 +2203,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let claimed = store
-            .claim_child_commands(&ChildRef::Task(task.id.clone()), task_lease.generation)
-            .await
-            .unwrap();
-        assert_eq!(
-            claimed
-                .iter()
-                .map(|command| command.id.clone())
-                .collect::<Vec<_>>(),
-            vec![command.id, second_command.id]
-        );
+        assert!(second_command.steer.text.contains("Then connect that row"));
         store
             .reply_to_interaction_review(
                 &opened.id,
@@ -2044,17 +2241,16 @@ mod tests {
             .await
             .unwrap();
         assert!(!changed);
-        let commands = store
-            .list_child_commands(&ChildRef::Task(task.id.clone()))
+        let work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
             .unwrap();
-        assert_eq!(commands.len(), 3);
-        assert!(matches!(
-            &commands[2].kind,
-            ChildCommandKind::FollowUp { text }
-                if text.contains("interaction_review_completed")
-                    && text.contains("disposition=\"approved\"")
-        ));
+        let seed = store.boundary_seed(&work).await.unwrap();
+        assert_eq!(seed.steers.len(), 3);
+        assert_eq!(seed.steers[0].id, command.steer.id);
+        assert_eq!(seed.steers[1].id, second_command.steer.id);
+        assert!(seed.steers[2].text.contains("interaction_review_completed"));
+        assert!(seed.steers[2].text.contains("disposition=\"approved\""));
 
         let events = store.task_events_after(&task.id, 0).await.unwrap();
         let messages = events
@@ -2195,24 +2391,18 @@ mod tests {
             )
             .await
             .unwrap();
-        let claimed = store
-            .claim_child_commands(&ChildRef::Task(task.id.clone()), task_lease.generation)
+        let work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
             .unwrap();
-        let human_dialogue = claimed
+        let seed = store.boundary_seed(&work).await.unwrap();
+        let steer_ids = seed
+            .steers
             .iter()
-            .filter(|command| {
-                matches!(
-                    command.source,
-                    ChildCommandSource::Human | ChildCommandSource::Attachment
-                )
-            })
-            .map(|command| command.id.clone())
+            .map(|steer| steer.id.clone())
             .collect::<Vec<_>>();
-        assert_eq!(
-            human_dialogue,
-            vec![first_human_message.id, attached_message.id]
-        );
+        assert_eq!(steer_ids.len(), 5);
+        assert!(steer_ids.ends_with(&[first_human_message.steer.id, attached_message.steer.id,]));
         store
             .reply_to_interaction_review(
                 &human_review.id,
@@ -2285,6 +2475,8 @@ mod tests {
 
         let mut predecessor = make_project_session(&wave);
         predecessor.set_status(ProjectSessionStatus::Abandoned, "legacy Session ended");
+        predecessor.latest_process = None;
+        predecessor.provider_session_id = None;
         store.create_project_session(&predecessor).await.unwrap();
 
         let mut successor = make_project_session(&wave);
@@ -2342,7 +2534,11 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
 
         // A live Project Session routes to itself — no successor needed.
-        let predecessor = make_project_session(&wave);
+        let mut predecessor = make_project_session(&wave);
+        predecessor.status = ProjectSessionStatus::Created;
+        predecessor.status_reason = "available for routing".to_string();
+        predecessor.latest_process = None;
+        predecessor.provider_session_id = None;
         store.create_project_session(&predecessor).await.unwrap();
         let task = make_task_session(&wave, &predecessor);
         store
@@ -2363,7 +2559,10 @@ mod tests {
         abandoned.set_status(ProjectSessionStatus::Abandoned, "replaced append-only");
         store.update_project_session(&abandoned).await.unwrap();
         let mut successor = make_project_session(&wave);
+        successor.status = ProjectSessionStatus::Created;
         successor.status_reason = format!("successor to {}", predecessor.id);
+        successor.latest_process = None;
+        successor.provider_session_id = None;
         successor.created_at += time::Duration::SECOND;
         successor.updated_at = successor.created_at;
         store.create_project_session(&successor).await.unwrap();
@@ -2397,7 +2596,11 @@ mod tests {
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
 
-        let predecessor = make_project_session(&wave);
+        let mut predecessor = make_project_session(&wave);
+        predecessor.status = ProjectSessionStatus::Created;
+        predecessor.status_reason = "available for observations".to_string();
+        predecessor.latest_process = None;
+        predecessor.provider_session_id = None;
         store.create_project_session(&predecessor).await.unwrap();
         let task = make_task_session(&wave, &predecessor);
         store
@@ -2407,15 +2610,15 @@ mod tests {
 
         // Enqueue a project-observable event while the predecessor is live. The
         // observation is addressed to the historical predecessor (provenance).
-        // DecisionRequested is project-observable but not root-wave-observable,
-        // so it enqueues exactly one Project observation without nudging the Wave.
+        // A lifecycle boundary is project-observable, so it enqueues exactly
+        // one Project observation without changing the historical addressee.
         store
             .append_task_event(
                 &task.id,
-                &TaskEventKind::DecisionRequested {
-                    decision_id: ChildDecisionId::new(),
-                    prompt: "pick a path".to_string(),
-                    options: vec!["a".to_string(), "b".to_string()],
+                &TaskEventKind::StatusChanged {
+                    from: TaskSessionStatus::Waiting,
+                    to: TaskSessionStatus::Running,
+                    reason: "child needs attention".to_string(),
                 },
             )
             .await
@@ -2605,7 +2808,16 @@ mod tests {
         // Abandon the predecessor and stand up a successor for the same project.
         let mut abandoned = predecessor.clone();
         abandoned.set_status(ProjectSessionStatus::Abandoned, "replaced append-only");
-        store.update_project_session(&abandoned).await.unwrap();
+        if let Some(process) = &mut abandoned.latest_process {
+            process.state = ChildLeaseState::Finished;
+            process.outcome = Some(crate::child_session::ChildBodyOutcome::Superseded {
+                reason: "replaced append-only".to_string(),
+            });
+        }
+        store
+            .finish_project_process(&abandoned, &predecessor_lease)
+            .await
+            .unwrap();
         let mut successor = make_project_session(&wave);
         successor.status = ProjectSessionStatus::Created;
         successor.status_reason = "successor".to_string();
@@ -2677,146 +2889,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_directives_reserve_replace_and_incorporate_atomically() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-
-        let mut project = make_project_session(&wave);
-        project.current_directive_version = 1;
-        let project_target = ChildRef::Project(project.id.clone());
-        let project_initial = ChildDirective::initial(
-            project_target.clone(),
-            "Pursue onboarding first".to_string(),
-            ChildCommandSource::Wave(wave.id().clone()),
-        );
-        store
-            .create_project_session_with_steer(
-                &project,
-                crate::durable::Author::User,
-                &project_initial.text,
-            )
-            .await
-            .unwrap();
-        let stale_project = project.clone();
-
-        let mut task = make_task_session(&wave, &project);
-        task.current_directive_version = 1;
-        let task_target = ChildRef::Task(task.id.clone());
-        let task_initial = ChildDirective::initial(
-            task_target.clone(),
-            "Fix the parser before the docs".to_string(),
-            ChildCommandSource::Wave(wave.id().clone()),
-        );
-        store
-            .create_task_session_with_steer(
-                &task,
-                &make_task_pr(&task),
-                crate::durable::Author::User,
-                &task_initial.text,
-            )
-            .await
-            .unwrap();
-        assert_eq!(store.child_directives(&task_target).await.unwrap().len(), 1);
-        let stale_task = task.clone();
-
-        let task_command = ChildCommand::new(
-            ChildRef::Task(task.id.clone()),
-            ChildCommandSource::Wave(wave.id().clone()),
-            ChildCommandKind::Steer {
-                text: "Fix the parser before the docs or tests".to_string(),
-            },
-        );
-        let task_replacement = ChildDirective::replacement(
-            task_target.clone(),
-            2,
-            "Fix the parser before the docs or tests".to_string(),
-            task_command.source.clone(),
-            task_command.id.clone(),
-        );
-        store
-            .create_child_command_with_directive(&task_command, &task_replacement)
-            .await
-            .unwrap();
-        store
-            .mark_child_directive_applied(&task_target, 2)
-            .await
-            .unwrap();
-        store
-            .incorporate_child_directive(&task_target, 2, "Parser remains first")
-            .await
-            .unwrap();
-        store.update_task_session(&stale_task).await.unwrap();
-        let persisted_task = store.get_task_session(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted_task.current_directive_version, 2);
-        assert_eq!(persisted_task.incorporated_directive_version, 2);
-
-        let command = ChildCommand::new(
-            ChildRef::Project(project.id.clone()),
-            ChildCommandSource::Wave(wave.id().clone()),
-            ChildCommandKind::Steer {
-                text: "Prove the parser path first".to_string(),
-            },
-        );
-        let replacement = ChildDirective::replacement(
-            project_target.clone(),
-            2,
-            "Prove the parser path first".to_string(),
-            command.source.clone(),
-            command.id.clone(),
-        );
-        store
-            .create_child_command_with_directive(&command, &replacement)
-            .await
-            .unwrap();
-        let persisted = store
-            .get_project_session(&project.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(persisted.current_directive_version, 2);
-        assert_eq!(
-            store.child_directives(&project_target).await.unwrap().len(),
-            2
-        );
-        assert!(store
-            .incorporate_child_directive(&project_target, 1, "stale")
-            .await
-            .is_err());
-        store
-            .mark_child_directive_applied(&project_target, 2)
-            .await
-            .unwrap();
-        assert!(
-            store
-                .incorporate_child_directive(&project_target, 2, "Parser is now first")
-                .await
-                .unwrap()
-                .1
-        );
-        assert!(
-            !store
-                .incorporate_child_directive(&project_target, 2, "Parser is now first")
-                .await
-                .unwrap()
-                .1
-        );
-        store.update_project_session(&stale_project).await.unwrap();
-        assert_eq!(
-            store
-                .get_project_session(&project.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .incorporated_directive_version,
-            2
-        );
-    }
-
-    #[tokio::test]
     async fn project_sessions_persist_commands_and_receive_task_observations() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -2826,13 +2898,10 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project_session(&wave);
         store.create_project_session(&project).await.unwrap();
-
         let command = ChildCommand::new(
             ChildRef::Project(project.id.clone()),
             ChildCommandSource::Wave(wave.id().clone()),
-            ChildCommandKind::FollowUp {
-                text: "audit the parser".to_string(),
-            },
+            ChildCommandKind::Resume,
         );
         store.create_child_command(&command).await.unwrap();
         let claimed = store
@@ -2847,31 +2916,6 @@ mod tests {
         let stored = store.get_child_command(&command.id).await.unwrap().unwrap();
         assert_eq!(stored.state, ChildCommandState::Accepted);
         assert_eq!(stored.target, ChildRef::Project(project.id.clone()));
-        let decision = ChildDecisionId::new();
-        let decision_command = ChildCommand::new(
-            ChildRef::Project(project.id.clone()),
-            ChildCommandSource::Wave(wave.id().clone()),
-            ChildCommandKind::Decide {
-                decision_id: decision,
-                choice: "approve".to_string(),
-                message: None,
-            },
-        );
-        assert!(
-            store
-                .ensure_child_decision_command(&decision_command)
-                .await
-                .unwrap()
-                .1
-        );
-        assert!(
-            !store
-                .ensure_child_decision_command(&decision_command)
-                .await
-                .unwrap()
-                .1
-        );
-
         let task = make_task_session(&wave, &project);
         store
             .create_task_session(&task, &make_task_pr(&task))
@@ -2972,93 +3016,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_supervision_routes_task_decisions_through_one_escalation_boundary() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let task = make_task_session(&wave, &project);
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-
-        let task_decision_id = ChildDecisionId::new();
-        store
-            .sqlite
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::DecisionRequested {
-                    decision_id: task_decision_id.clone(),
-                    prompt: "Use the strict parser?".to_string(),
-                    options: vec!["strict".to_string(), "permissive".to_string()],
-                },
-            )
-            .unwrap();
-
-        let project_observations = store
-            .pending_observations(&ObservationRecipient::Project {
-                session_id: project.id.clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(project_observations.len(), 1);
-        assert!(matches!(
-            &project_observations[0].payload,
-            ChildEventPayload::Task {
-                event: TaskEventKind::DecisionRequested { decision_id, .. }
-            } if decision_id == &task_decision_id
-        ));
-        assert!(store
-            .pending_observations(&ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap()
-            .is_empty());
-        assert!(store
-            .consume_task_observation_for_project(&project.id, &project_observations[0])
-            .await
-            .unwrap());
-        assert!(!store
-            .consume_task_observation_for_project(&project.id, &project_observations[0])
-            .await
-            .unwrap());
-
-        let project_decision_id = ChildDecisionId::new();
-        store
-            .append_project_event(
-                &project.id,
-                &ProjectEventKind::DecisionRequested {
-                    decision_id: project_decision_id.clone(),
-                    prompt: format!(
-                        "Task decision {task_decision_id} needs Wave judgment: use the strict parser?"
-                    ),
-                    options: vec!["strict".to_string(), "permissive".to_string()],
-                },
-            )
-            .await
-            .unwrap();
-        let wave_observations = store
-            .pending_observations(&ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(wave_observations.len(), 1);
-        assert!(matches!(
-            &wave_observations[0].payload,
-            ChildEventPayload::Project {
-                event: ProjectEventKind::DecisionRequested { decision_id, .. }
-            } if decision_id == &project_decision_id
-        ));
-    }
-
-    #[tokio::test]
     async fn task_session_commands_reclaim_by_generation_and_events_are_durable() {
         let dir = tempfile::tempdir().unwrap();
         let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -3084,9 +3041,7 @@ mod tests {
         let command = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "rename the flag".to_string(),
-            },
+            ChildCommandKind::Resume,
         );
         store.create_child_command(&command).await.unwrap();
         let first_claim = store
@@ -3106,53 +3061,41 @@ mod tests {
                 .claimed_by_generation,
             Some(2)
         );
-        store
-            .accept_child_command(&command.id, Some(ChildCommandEffect::LiveSteer))
-            .await
-            .unwrap();
+        store.accept_child_command(&command.id, None).await.unwrap();
         let accepted = store.get_child_command(&command.id).await.unwrap().unwrap();
         assert_eq!(accepted.state, ChildCommandState::Accepted);
-        assert_eq!(accepted.effect, Some(ChildCommandEffect::LiveSteer));
+        assert_eq!(accepted.effect, None);
         assert!(store
             .claim_child_commands(&ChildRef::Task(session.id.clone()), 3)
             .await
             .unwrap()
             .is_empty());
 
-        let follow_up_a = ChildCommand::new(
+        let resume_a = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "A".to_string(),
-            },
+            ChildCommandKind::Resume,
         );
-        let follow_up_b = ChildCommand::new(
+        let resume_b = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "B".to_string(),
-            },
+            ChildCommandKind::Resume,
         );
-        store.create_child_command(&follow_up_a).await.unwrap();
-        store.create_child_command(&follow_up_b).await.unwrap();
+        store.create_child_command(&resume_a).await.unwrap();
+        store.create_child_command(&resume_b).await.unwrap();
         let interrupt = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::Interrupt {
-                replacement: Some("C".to_string()),
-            },
+            ChildCommandKind::Interrupt,
         );
         let superseded = store
             .supersede_and_create_child_command(&interrupt)
             .await
             .unwrap();
-        assert_eq!(
-            superseded,
-            vec![follow_up_a.id.clone(), follow_up_b.id.clone()]
-        );
+        assert_eq!(superseded, vec![resume_a.id.clone(), resume_b.id.clone()]);
         assert_eq!(
             store
-                .get_child_command(&follow_up_a.id)
+                .get_child_command(&resume_a.id)
                 .await
                 .unwrap()
                 .unwrap()
@@ -3377,19 +3320,14 @@ mod tests {
         store.create_project_session(&project).await.unwrap();
 
         let mut predecessor = make_task_session(&wave, &project);
-        predecessor.current_directive_version = 1;
         let pr = make_task_pr(&predecessor);
-        let initial = ChildDirective::initial(
-            ChildRef::Task(predecessor.id.clone()),
-            "preserve the existing work and PR".to_string(),
-            ChildCommandSource::Human,
-        );
+        let initial = "preserve the existing work and PR";
         store
             .create_task_session_with_steer(
                 &predecessor,
                 &pr,
                 crate::durable::Author::User,
-                &initial.text,
+                initial,
             )
             .await
             .unwrap();
@@ -3401,22 +3339,15 @@ mod tests {
         successor.status = TaskSessionStatus::Waiting;
         successor.status_reason = "recovered; resume to continue".to_string();
         successor.status_at = OffsetDateTime::now_utc();
-        successor.incorporated_directive_version = 0;
         successor.latest_process = None;
         successor.created_at = OffsetDateTime::now_utc();
         successor.updated_at = successor.created_at;
-        let carried = ChildDirective::initial(
-            ChildRef::Task(successor.id.clone()),
-            initial.text.clone(),
-            initial.source.clone(),
-        );
-
         let created = store
             .recover_task_session_successor(
                 &predecessor,
                 &successor,
                 crate::durable::Author::User,
-                &carried.text,
+                initial,
             )
             .await
             .unwrap();
@@ -3435,14 +3366,16 @@ mod tests {
         let adopted = store.task_prs(&successor.id).await.unwrap();
         assert_eq!(adopted.len(), 1);
         assert_eq!(adopted[0].id, pr.id);
-        assert_eq!(
-            store
-                .child_directives(&ChildRef::Task(successor.id.clone()))
-                .await
-                .unwrap()[0]
-                .text,
-            initial.text
-        );
+        let successor_work = store
+            .work_for_child(&ChildRef::Task(successor.id.clone()))
+            .await
+            .unwrap();
+        assert!(store
+            .boundary_seed(&successor_work)
+            .await
+            .unwrap()
+            .render()
+            .contains(initial));
         assert_eq!(
             store
                 .task_session_chain_neighbors(&successor.id)
@@ -3456,7 +3389,7 @@ mod tests {
                 &predecessor,
                 &successor,
                 crate::durable::Author::User,
-                &carried.text,
+                initial,
             )
             .await
             .unwrap();
@@ -3964,207 +3897,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_delivery_is_never_replayed_after_an_ambiguous_crash() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let session = make_task_session(&wave, &project);
-        store
-            .create_task_session(&session, &make_task_pr(&session))
-            .await
-            .unwrap();
-        let target = ChildRef::Task(session.id.clone());
-        let command = ChildCommand::new(
-            target.clone(),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "change direction".to_string(),
-            },
-        );
-        store.create_child_command(&command).await.unwrap();
-        store.claim_child_commands(&target, 1).await.unwrap();
-        store
-            .mark_child_command_delivering(&command.id, ChildCommandEffect::LiveSteer)
-            .await
-            .unwrap();
-
-        assert!(store
-            .claim_child_commands(&target, 2)
-            .await
-            .unwrap()
-            .is_empty());
-        let uncertain = store
-            .mark_stale_child_deliveries_uncertain(&target, 2)
-            .await
-            .unwrap();
-        assert_eq!(uncertain.len(), 1);
-        assert_eq!(uncertain[0].state, ChildCommandState::Uncertain);
-        assert!(uncertain[0].state.is_terminal());
-        assert!(store
-            .mark_stale_child_deliveries_uncertain(&target, 3)
-            .await
-            .unwrap()
-            .is_empty());
-    }
-
-    /// Superseding says "this never mattered". A `delivering` command's outcome is
-    /// genuinely unknown — the provider may have received it — so that claim would
-    /// be a lie, and it would erase the ambiguity
-    /// `mark_stale_child_deliveries_uncertain` exists to preserve. The helper is
-    /// generic, so it must refuse regardless of the kind reaching for it.
-    #[tokio::test]
-    async fn superseding_refuses_a_command_whose_delivery_is_already_in_flight() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let mut task = make_task_session(&wave, &project);
-        task.set_status(TaskSessionStatus::Waiting, "ready");
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        task.begin_generation("supersede".to_string());
-        let lease = store
-            .reserve_task_process(&task, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .unwrap();
-        if let Some(process) = &mut task.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        task.set_status(TaskSessionStatus::Running, "active");
-        store.activate_task_process(&task, &lease).await.unwrap();
-
-        let target = ChildRef::Task(task.id.clone());
-        let command = ChildCommand::new(
-            target.clone(),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "change direction".to_string(),
-            },
-        );
-        store.create_child_command(&command).await.unwrap();
-        store.claim_child_commands(&target, 1).await.unwrap();
-
-        // Claimed but not yet delivered: moot is a truthful verdict.
-        store
-            .supersede_child_command_for_lease(&target, &lease, &command.id)
-            .await
-            .expect("a claimed command may be superseded");
-        assert_eq!(
-            store
-                .get_child_command(&command.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .state,
-            ChildCommandState::Superseded
-        );
-
-        // Mid-delivery: refused, and the state is left for the uncertain path.
-        let delivering = ChildCommand::new(
-            target.clone(),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "and again".to_string(),
-            },
-        );
-        store.create_child_command(&delivering).await.unwrap();
-        store.claim_child_commands(&target, 1).await.unwrap();
-        store
-            .mark_child_command_delivering(&delivering.id, ChildCommandEffect::LiveSteer)
-            .await
-            .unwrap();
-        let error = store
-            .supersede_child_command_for_lease(&target, &lease, &delivering.id)
-            .await
-            .expect_err("an in-flight delivery is not moot; its outcome is unknown");
-        assert!(
-            error.to_string().contains("mid-delivery"),
-            "the refusal names why, got: {error}"
-        );
-        assert_eq!(
-            store
-                .get_child_command(&delivering.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .state,
-            ChildCommandState::Delivering,
-            "the ambiguity survives for reconcile_stale_deliveries to resolve"
-        );
-    }
-
-    /// The pre-delivery rejection primitive Move 2 uses to terminalize a
-    /// supervisor `Resume` barred by a post-creation PR flip. It matches only
-    /// `persisted`, so it clears a never-claimed command and refuses anything a
-    /// body has since taken — this is exactly what `fail_child_command` (which
-    /// matches only `claimed`/`delivering`) cannot do.
-    #[tokio::test]
-    async fn reject_persisted_terminalizes_only_a_persisted_command() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let mut task = make_task_session(&wave, &project);
-        task.set_status(TaskSessionStatus::Waiting, "ready");
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        let target = ChildRef::Task(task.id.clone());
-
-        // A still-`persisted` Resume: rejection terminalizes it to Failed and
-        // records the bar text as its error.
-        let resume = ChildCommand::new(
-            target.clone(),
-            ChildCommandSource::Wave(wave.id().clone()),
-            ChildCommandKind::Resume { message: None },
-        );
-        store.create_child_command(&resume).await.unwrap();
-        store
-            .reject_persisted_child_command(&resume.id, "open PR; nothing queued".to_string())
-            .await
-            .expect("a persisted command is rejectable");
-        let rejected = store.get_child_command(&resume.id).await.unwrap().unwrap();
-        assert_eq!(rejected.state, ChildCommandState::Failed);
-        assert!(rejected.state.is_terminal());
-        assert_eq!(rejected.error.as_deref(), Some("open PR; nothing queued"));
-
-        // A claimed command is past the pre-delivery window: rejection refuses
-        // rather than racing the body that owns it.
-        let claimed = ChildCommand::new(
-            target.clone(),
-            ChildCommandSource::Wave(wave.id().clone()),
-            ChildCommandKind::Resume { message: None },
-        );
-        store.create_child_command(&claimed).await.unwrap();
-        store.claim_child_commands(&target, 1).await.unwrap();
-        let error = store
-            .reject_persisted_child_command(&claimed.id, "too late".to_string())
-            .await
-            .expect_err("a claimed command is not persisted");
-        assert!(
-            error.to_string().contains("not persisted"),
-            "the refusal names why, got: {error}"
-        );
-    }
-
-    #[tokio::test]
     async fn task_boundary_atomically_claims_work_or_stops_the_generation() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -4185,9 +3917,7 @@ mod tests {
         let command = ChildCommand::new(
             ChildRef::Task(with_command.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "arrived at the boundary".to_string(),
-            },
+            ChildCommandKind::Resume,
         );
         store.create_child_command(&command).await.unwrap();
 
@@ -4239,60 +3969,6 @@ mod tests {
         };
         assert_eq!(stopped.status, TaskSessionStatus::Waiting);
         assert_eq!(stopped.status_reason, "turn complete");
-    }
-
-    #[tokio::test]
-    async fn duplicate_task_decision_reuses_one_durable_command() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let session = make_task_session(&wave, &project);
-        store
-            .create_task_session(&session, &make_task_pr(&session))
-            .await
-            .unwrap();
-        let decision_id = ChildDecisionId::new();
-        let first = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Decide {
-                decision_id: decision_id.clone(),
-                choice: "revise".to_string(),
-                message: Some("cover the boundary".to_string()),
-            },
-        );
-        let duplicate = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Decide {
-                decision_id,
-                choice: "approve".to_string(),
-                message: None,
-            },
-        );
-
-        let (stored, created) = store.ensure_child_decision_command(&first).await.unwrap();
-        assert!(created);
-        assert_eq!(stored.id, first.id);
-        let (stored, created) = store
-            .ensure_child_decision_command(&duplicate)
-            .await
-            .unwrap();
-        assert!(!created);
-        assert_eq!(stored.id, first.id);
-        assert_eq!(
-            store
-                .list_child_commands(&ChildRef::Task(session.id.clone()))
-                .await
-                .unwrap()
-                .len(),
-            1
-        );
     }
 
     #[tokio::test]
@@ -4563,16 +4239,6 @@ mod tests {
                     &TaskEventKind::Progress {
                         summary: "stale progress".to_string(),
                     },
-                )
-                .await,
-            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
-        ));
-        assert!(matches!(
-            store
-                .mark_child_directive_applied_for_lease(
-                    &ChildRef::Task(session.id.clone()),
-                    &lease,
-                    session.current_directive_version,
                 )
                 .await,
             Err(super::StoreError::LeaseRevoked { generation: 1, .. })

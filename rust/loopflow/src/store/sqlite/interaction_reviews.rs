@@ -3,9 +3,8 @@ use std::str::FromStr;
 
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
-use crate::child_session::{
-    ChildCommand, ChildCommandKind, ChildCommandSource, ChildRef, ChildWriteLease,
-};
+use crate::child_session::{ChildCommandSource, ChildRef, ChildWriteLease};
+use crate::durable::{Author, SteerReceipt};
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
 use crate::interaction_review::{
@@ -19,8 +18,7 @@ use crate::store::{StoreError, StoreResult};
 use crate::task::{TaskEventKind, TaskLifecyclePhase, TaskSession, TaskSessionId};
 
 use super::child_sessions::{
-    insert_child_command, insert_task_event_in, map_task_session_row, require_child_write_lease,
-    TASK_SESSION_SELECT,
+    insert_task_event_in, map_task_session_row, require_child_write_lease, TASK_SESSION_SELECT,
 };
 use super::SqliteStore;
 
@@ -175,8 +173,10 @@ impl SqliteStore {
         project_session_id: &ProjectSessionId,
         lease: &ChildWriteLease,
         text: &str,
-    ) -> StoreResult<ChildCommand> {
+    ) -> StoreResult<SteerReceipt> {
         let text = require_text("review message", text)?;
+        let run =
+            self.run_for_child_lease(&ChildRef::Project(project_session_id.clone()), lease)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_child_write_lease(
@@ -185,15 +185,15 @@ impl SqliteStore {
             lease,
         )?;
         let review = require_open_project_review(&transaction, review_id, project_session_id)?;
-        let command = _send_interaction_review_message(
+        let steer = _send_interaction_review_message(
             &transaction,
             &review,
-            ChildCommandSource::Project(project_session_id.clone()),
+            &Author::Run(run.run_id),
             Some(lease.generation),
             &text,
         )?;
         transaction.commit()?;
-        Ok(command)
+        Ok(steer)
     }
 
     pub(crate) fn activate_human_interaction_review(
@@ -234,7 +234,7 @@ impl SqliteStore {
         review_id: &InteractionReviewId,
         source: ChildCommandSource,
         text: &str,
-    ) -> StoreResult<ChildCommand> {
+    ) -> StoreResult<SteerReceipt> {
         if !matches!(
             source,
             ChildCommandSource::Human | ChildCommandSource::Attachment
@@ -247,9 +247,10 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let review = require_open_human_review(&transaction, review_id)?;
-        let command = _send_interaction_review_message(&transaction, &review, source, None, &text)?;
+        let steer =
+            _send_interaction_review_message(&transaction, &review, &Author::User, None, &text)?;
         transaction.commit()?;
-        Ok(command)
+        Ok(steer)
     }
 
     pub(crate) fn reply_to_interaction_review(
@@ -312,6 +313,8 @@ impl SqliteStore {
         outcome: &str,
     ) -> StoreResult<(InteractionReview, bool)> {
         let outcome = require_text("review outcome", outcome)?;
+        let run =
+            self.run_for_child_lease(&ChildRef::Project(project_session_id.clone()), lease)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_child_write_lease(
@@ -340,7 +343,7 @@ impl SqliteStore {
         let result = _complete_interaction_review(
             &transaction,
             review,
-            ChildCommandSource::Project(project_session_id.clone()),
+            &Author::Run(run.run_id),
             Some(lease.generation),
             disposition,
             &outcome,
@@ -374,7 +377,7 @@ impl SqliteStore {
         let result = _complete_interaction_review(
             &transaction,
             review,
-            ChildCommandSource::Human,
+            &Author::User,
             None,
             disposition,
             &outcome,
@@ -387,10 +390,10 @@ impl SqliteStore {
 fn _send_interaction_review_message(
     transaction: &rusqlite::Transaction<'_>,
     review: &InteractionReview,
-    source: ChildCommandSource,
+    author: &Author,
     reviewer_generation: Option<u32>,
     text: &str,
-) -> StoreResult<ChildCommand> {
+) -> StoreResult<SteerReceipt> {
     let session = transaction.query_row(
         TASK_SESSION_SELECT,
         [review.task_session_id.as_str()],
@@ -413,26 +416,18 @@ fn _send_interaction_review_message(
             )?;
         }
     }
-    let command = ChildCommand::new(
-        ChildRef::Task(review.task_session_id.clone()),
-        source,
-        ChildCommandKind::FollowUp {
-            text: format!(
-                "<interaction_review_message review_id=\"{}\" from=\"reviewer\">\n{text}\n\nReply with `lf task review reply {} \"<answer and evidence>\"`.\n</interaction_review_message>",
-                review.id, review.id
-            ),
-        },
-    );
-    insert_child_command(transaction, &command)?;
-    insert_task_event_in(
+    let work = super::durable::work_for_child_in(
         transaction,
-        &session,
-        &TaskEventKind::CommandChanged {
-            command_id: command.id.clone(),
-            state: crate::child_session::ChildCommandState::Persisted,
-            effect: command.effect,
-            error: None,
-        },
+        &ChildRef::Task(review.task_session_id.clone()),
+    )?;
+    let steer = SqliteStore::append_steer_in(
+        transaction,
+        &work,
+        author,
+        &format!(
+            "<interaction_review_message review_id=\"{}\" from=\"reviewer\">\n{text}\n\nReply with `lf task review reply {} \"<answer and evidence>\"`.\n</interaction_review_message>",
+            review.id, review.id
+        ),
     )?;
     insert_task_event_in(
         transaction,
@@ -443,13 +438,13 @@ fn _send_interaction_review_message(
             text: text.to_string(),
         },
     )?;
-    Ok(command)
+    Ok(steer)
 }
 
 fn _complete_interaction_review(
     transaction: &rusqlite::Transaction<'_>,
     review: InteractionReview,
-    source: ChildCommandSource,
+    author: &Author,
     reviewer_generation: Option<u32>,
     disposition: InteractionReviewDisposition,
     outcome: &str,
@@ -481,32 +476,24 @@ fn _complete_interaction_review(
             completed_at.unix_timestamp(),
         ],
     )?;
-    let command = ChildCommand::new(
-        ChildRef::Task(review.task_session_id.clone()),
-        source,
-        ChildCommandKind::FollowUp {
-            text: format!(
-                "<interaction_review_completed review_id=\"{}\" disposition=\"{}\">\n{outcome}\n</interaction_review_completed>",
-                review.id,
-                disposition.as_str()
-            ),
-        },
-    );
-    insert_child_command(transaction, &command)?;
     let session = transaction.query_row(
         TASK_SESSION_SELECT,
         [review.task_session_id.as_str()],
         map_task_session_row,
     )?;
-    insert_task_event_in(
+    let work = super::durable::work_for_child_in(
         transaction,
-        &session,
-        &TaskEventKind::CommandChanged {
-            command_id: command.id.clone(),
-            state: crate::child_session::ChildCommandState::Persisted,
-            effect: command.effect,
-            error: None,
-        },
+        &ChildRef::Task(review.task_session_id.clone()),
+    )?;
+    SqliteStore::append_steer_in(
+        transaction,
+        &work,
+        author,
+        &format!(
+            "<interaction_review_completed review_id=\"{}\" disposition=\"{}\">\n{outcome}\n</interaction_review_completed>",
+            review.id,
+            disposition.as_str()
+        ),
     )?;
     insert_task_event_in(
         transaction,

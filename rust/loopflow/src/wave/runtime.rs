@@ -1465,7 +1465,6 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     }
 }
 
-/// Current time as an RFC3339 string for `op` frame timestamps.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1623,10 +1622,8 @@ mod tests {
             issue_identifier: "INF-123".to_string(),
             event_id: 7,
             control_source: None,
-            event: crate::task::TaskEventKind::DecisionRequested {
-                decision_id: crate::child_session::ChildDecisionId::new(),
-                prompt: "Approve the plan?".to_string(),
-                options: vec!["approve".to_string(), "revise".to_string()],
+            event: crate::task::TaskEventKind::Progress {
+                summary: "Task needs parent attention".to_string(),
             },
         };
 

@@ -11,15 +11,15 @@ use tokio::sync::mpsc;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input,
-    reconcile_stale_deliveries, take_current_input as take_child_input, ChildTarget, CommandStop,
-    PendingInput,
+    reconcile_stale_deliveries, send_outstanding_steers, take_current_input as take_child_input,
+    ChildTarget, CommandStop, PendingInput,
 };
 use crate::child_session::{
-    project_write_lease_from_env, unincorporated_directive_version, BoundaryResult,
-    ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
-    ChildRef, ChildWriteLease,
+    project_write_lease_from_env, BoundaryResult, ChildBodyHandoffRequest, ChildBodyOutcome,
+    ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildLeaseState, ChildRef, ChildWriteLease,
 };
+use crate::durable::{Basis, BoundarySeed};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
@@ -36,6 +36,12 @@ use crate::wave::playhead::{
 use crate::wave::Wave;
 
 const TASK_SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Debug)]
+struct PreparedProjectStep {
+    turn: crate::lf::commands::run::PreparedHarnessTurn,
+    basis: Basis,
+}
 
 pub async fn run_project_session(session_id: ProjectSessionId, generation: u32) -> Result<()> {
     let lease = project_write_lease_from_env().map_err(|error| anyhow!(error))?;
@@ -118,7 +124,7 @@ async fn run_project_session_inner(
     store
         .validate_child_write_lease(&ChildRef::Project(session.id.clone()), lease)
         .await?;
-    harness.start(&prepared.config).await?;
+    harness.start(&prepared.turn.config).await?;
     session.provider = harness_name;
     session.provider_session_id = harness.provider_session_id();
     if let Some(process) = &mut session.latest_process {
@@ -135,6 +141,37 @@ async fn run_project_session_inner(
         let _ = harness.stop().await;
         return Err(error.into());
     }
+    let capture = flow.current().and_then(|step| {
+        let context = crate::journal::trace_capture_context(
+            Path::new(wave.repo()),
+            Some(step.flow.clone()),
+            Some(step.step.clone()),
+        )?;
+        match crate::trace::CaptureHandle::begin(
+            context,
+            prepared.turn.context.clone(),
+            crate::trace::CaptureStart {
+                provider: prepared.turn.harness.clone(),
+                model: prepared.turn.model.clone(),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: prepared.turn.context_gather_ms,
+                render_ms: prepared.turn.context_render_ms,
+                raw_provider: true,
+                basis: Some(prepared.basis.clone()),
+            },
+        ) {
+            Ok(capture) => Some(capture),
+            Err(error) => {
+                tracing::warn!(%error, "failed to establish Project trace capture");
+                None
+            }
+        }
+    });
+    if let Some(capture) = &capture {
+        capture.set_provider_session_id(session.provider_session_id.clone());
+    }
+    let mut active_basis = prepared.basis.clone();
 
     let mut pending = VecDeque::new();
     let mut seen_commands = HashSet::new();
@@ -162,6 +199,7 @@ async fn run_project_session_inner(
             lease,
             harness.as_mut(),
             &mut flow,
+            None,
             prepared,
         )
         .await?;
@@ -178,7 +216,7 @@ async fn run_project_session_inner(
         }
     });
     println!(
-        "project {}> attached; /status, /interrupt [message], /detach, or type an instruction",
+        "project {}> attached; /status, /interrupt, /detach, or type an instruction",
         session.launch.project.slug
     );
     let mut poll = tokio::time::interval(Duration::from_millis(200));
@@ -212,6 +250,18 @@ async fn run_project_session_inner(
                 ).await? {
                     return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
                 }
+                if flow_turn_active {
+                    if let Some(capture) = &capture {
+                        send_outstanding_steers(
+                            &store,
+                            ChildTarget::Project(&session.id, lease),
+                            harness.as_mut(),
+                            &capture.current_turn_id(),
+                            &active_basis,
+                        )
+                        .await?;
+                    }
+                }
             }
             _ = task_supervision.tick() => {
                 if let Err(error) = crate::ops::task::supervise_project_task_bodies(
@@ -229,6 +279,9 @@ async fn run_project_session_inner(
                 let Some(event) = event else {
                     return finish_failed(&store, &mut session, lease, harness.as_mut(), "provider event stream closed").await;
                 };
+                if let Some(capture) = &capture {
+                    capture.record_conversation(event.clone());
+                }
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != session.provider_session_id {
                     session.provider_session_id = provider_session_id;
@@ -255,6 +308,15 @@ async fn run_project_session_inner(
                         }
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
+                        if let Some(capture) = &capture {
+                            let outcome = match status {
+                                Lifecycle::Completed => "completed",
+                                Lifecycle::Interrupted => "interrupted",
+                                Lifecycle::Failed => "failed",
+                                _ => "failed",
+                            };
+                            capture.finish_turn(outcome)?;
+                        }
                         if status == Lifecycle::Failed {
                             let reason = drain_turn_failure_reason(
                                 &mut event_rx,
@@ -326,12 +388,14 @@ async fn run_project_session_inner(
                                 &[],
                             )
                             .await?;
+                            active_basis = prepared.basis.clone();
                             start_project_flow_turn(
                                 &store,
                                 &mut session,
                                 lease,
                                 harness.as_mut(),
                                 &mut flow,
+                                capture.as_ref(),
                                 prepared,
                             )
                             .await?;
@@ -350,26 +414,10 @@ async fn run_project_session_inner(
                                 },
                             ).await?;
                         }
-                        let latest = store
-                            .get_project_session(&session.id)
-                            .await?
-                            .ok_or_else(|| anyhow!("Project Session {} disappeared", session.id))?;
-                        session.current_directive_version = latest.current_directive_version;
-                        session.incorporated_directive_version =
-                            latest.incorporated_directive_version;
                         let mut outcome = inspect_outcome(&store, &session, &wave).await?;
                         if status == Lifecycle::Interrupted {
                             outcome.status = ProjectSessionStatus::Waiting;
                             outcome.reason = "Project flow step interrupted; waiting for resume or another instruction".to_string();
-                        }
-                        if let Some(version) = unincorporated_directive_version(
-                            session.current_directive_version,
-                            session.incorporated_directive_version,
-                        ) {
-                            outcome.status = ProjectSessionStatus::Blocked;
-                            outcome.reason = format!(
-                                "current directive v{version} was applied but not incorporated; resume the Project flow and acknowledge it before settling"
-                            );
                         }
                         if outcome.status == ProjectSessionStatus::Running {
                             session.last_state_fingerprint = Some(outcome.fingerprint);
@@ -385,12 +433,14 @@ async fn run_project_session_inner(
                                 &[],
                             )
                             .await?;
+                            active_basis = prepared.basis.clone();
                             start_project_flow_turn(
                                 &store,
                                 &mut session,
                                 lease,
                                 harness.as_mut(),
                                 &mut flow,
+                                capture.as_ref(),
                                 prepared,
                             )
                             .await?;
@@ -399,6 +449,12 @@ async fn run_project_session_inner(
                         }
                         session.last_state_fingerprint = Some(outcome.fingerprint);
                         store.update_project_session_for_lease(&session, lease).await?;
+                        if outcome.status == ProjectSessionStatus::Completed {
+                            let work = store
+                                .work_for_child(&ChildRef::Project(session.id.clone()))
+                                .await?;
+                            store.validate_completion_basis(&work, &active_basis).await?;
+                        }
                         let boundary = store
                             .claim_project_commands_or_stop_for_lease(
                                 &session.id,
@@ -473,12 +529,14 @@ async fn run_project_session_inner(
                                     &[],
                                 )
                                 .await?;
+                                active_basis = prepared.basis.clone();
                                 start_project_flow_turn(
                                     &store,
                                     &mut session,
                                     lease,
                                     harness.as_mut(),
                                     &mut flow,
+                                    capture.as_ref(),
                                     prepared,
                                 )
                                 .await?;
@@ -523,26 +581,11 @@ async fn prepare_project_flow_step(
     wave: &Wave,
     flow: &Playhead,
     observations: &[String],
-) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
-    let latest = store
-        .get_project_session(&session.id)
-        .await?
-        .ok_or_else(|| anyhow!("Project Session {} disappeared", session.id))?;
-    session.current_directive_version = latest.current_directive_version;
-    session.incorporated_directive_version = latest.incorporated_directive_version;
-    let directives = store
-        .child_directives(&ChildRef::Project(session.id.clone()))
+) -> Result<PreparedProjectStep> {
+    let work = store
+        .work_for_child(&ChildRef::Project(session.id.clone()))
         .await?;
-    let directive = directives
-        .iter()
-        .find(|directive| directive.version == session.current_directive_version)
-        .ok_or_else(|| {
-            anyhow!(
-                "Project Session {} has no current directive v{}",
-                session.id,
-                session.current_directive_version
-            )
-        })?;
+    let boundary = store.boundary_seed(&work).await?;
     let step = flow
         .current()
         .ok_or_else(|| anyhow!("Project flow has no current step"))?;
@@ -563,11 +606,14 @@ async fn prepare_project_flow_step(
     store
         .update_project_session_for_lease(session, lease)
         .await?;
-    let seed = project_seed(session, wave.name(), directive, observations);
+    let seed = project_seed(session, wave.name(), &boundary, observations);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
     prepared.config.agent = Some(session.agent.clone());
-    Ok(prepared)
+    Ok(PreparedProjectStep {
+        turn: prepared,
+        basis: boundary.basis,
+    })
 }
 
 fn open_project_flow_body(flow: &mut Playhead, control_repo: &str) -> Result<()> {
@@ -587,30 +633,22 @@ async fn start_project_flow_turn(
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
-    prepared: crate::lf::commands::run::PreparedHarnessTurn,
+    capture: Option<&crate::trace::CaptureHandle>,
+    prepared: PreparedProjectStep,
 ) -> Result<()> {
     let wave = owning_wave(store, session).await?;
     open_project_flow_body(flow, wave.repo())?;
+    if let Some(capture) = capture {
+        capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
+    }
     apply_input(
         store,
         session,
         lease,
         harness,
-        PendingInput {
-            command_id: None,
-            text: prepared.input,
-            effect: ChildCommandEffect::NextTurn,
-            decision: None,
-        },
+        PendingInput::system(prepared.turn.input),
     )
     .await?;
-    store
-        .mark_child_directive_applied_for_lease(
-            &ChildRef::Project(session.id.clone()),
-            lease,
-            session.current_directive_version,
-        )
-        .await?;
     Ok(())
 }
 
@@ -656,96 +694,51 @@ async fn handle_attachment(
             .status();
         return Ok(());
     }
-    let kind = if let Some(message) = line.strip_prefix("/interrupt") {
-        let message = message.trim();
-        ChildCommandKind::Interrupt {
-            replacement: (!message.is_empty()).then(|| message.to_string()),
-        }
-    } else {
-        ChildCommandKind::Steer {
-            text: line.to_string(),
-        }
-    };
-    let command = ChildCommand::new(
-        ChildRef::Project(session.id.clone()),
-        ChildCommandSource::Attachment,
-        kind,
-    );
-    let replacement = match &command.kind {
-        ChildCommandKind::Steer { text } => Some(text.clone()),
-        ChildCommandKind::Interrupt {
-            replacement: Some(text),
-        } => Some(text.clone()),
-        _ => None,
-    };
-    let (superseded, directive_event) = if let Some(text) = replacement {
-        let latest = store
-            .get_project_session(&session.id)
-            .await?
-            .ok_or_else(|| anyhow!("Project Session {} disappeared", session.id))?;
-        let directive = ChildDirective::replacement(
-            ChildRef::Project(session.id.clone()),
-            latest.current_directive_version + 1,
-            text,
-            command.source.clone(),
-            command.id.clone(),
+    store
+        .validate_child_write_lease(&ChildRef::Project(session.id.clone()), lease)
+        .await?;
+    let target = ChildRef::Project(session.id.clone());
+    if line == "/interrupt" {
+        let command = ChildCommand::new(
+            target,
+            ChildCommandSource::Attachment,
+            ChildCommandKind::Interrupt,
         );
-        let superseded = store
-            .create_child_command_with_directive(&command, &directive)
-            .await?;
-        (
-            superseded,
-            Some((directive.id, directive.version, directive.kind)),
-        )
-    } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
-        (
-            store.supersede_and_create_child_command(&command).await?,
-            None,
-        )
-    } else {
-        store.create_child_command(&command).await?;
-        (Vec::new(), None)
-    };
-    for command_id in superseded {
+        let superseded = store.supersede_and_create_child_command(&command).await?;
+        for command_id in superseded {
+            store
+                .append_project_event_for_lease(
+                    &session.id,
+                    lease,
+                    &ProjectEventKind::CommandChanged {
+                        command_id,
+                        state: ChildCommandState::Superseded,
+                        effect: None,
+                        error: None,
+                    },
+                )
+                .await?;
+        }
         store
             .append_project_event_for_lease(
                 &session.id,
                 lease,
                 &ProjectEventKind::CommandChanged {
-                    command_id,
-                    state: ChildCommandState::Superseded,
+                    command_id: command.id.clone(),
+                    state: ChildCommandState::Persisted,
                     effect: None,
                     error: None,
                 },
             )
             .await?;
-    }
-    if let Some((directive_id, version, directive_kind)) = directive_event {
-        store
-            .append_project_event_for_lease(
-                &session.id,
-                lease,
-                &ProjectEventKind::DirectiveChanged {
-                    directive_id,
-                    version,
-                    directive_kind,
-                },
-            )
+        println!("queued {}", command.id);
+    } else {
+        let work = store.work_for_child(&target).await?;
+        let receipt = store
+            .append_steer(&work, crate::durable::Author::User, line, None)
             .await?;
+        println!("queued {}", receipt.steer.id);
     }
-    store
-        .append_project_event_for_lease(
-            &session.id,
-            lease,
-            &ProjectEventKind::CommandChanged {
-                command_id: command.id.clone(),
-                state: ChildCommandState::Persisted,
-                effect: command.effect,
-                error: None,
-            },
-        )
-        .await?;
-    println!("queued {}", command.id);
     Ok(())
 }
 
@@ -1178,7 +1171,7 @@ async fn record_unhandled_failure(
 fn project_seed(
     session: &ProjectSession,
     wave_name: &str,
-    directive: &ChildDirective,
+    boundary: &BoundarySeed,
     observations: &[String],
 ) -> String {
     let observations = if observations.is_empty() {
@@ -1186,15 +1179,13 @@ fn project_seed(
     } else {
         observations.join("\n")
     };
+    let direction = boundary.render();
     format!(
-        "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf project acknowledge {project_id} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
+        "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{direction}\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
         name = session.launch.project.name,
         project_id = session.launch.project.id.as_str(),
         wave = wave_name,
         context = session.launch.project.prompt_context,
-        directive_version = directive.version,
-        directive_kind = directive.kind.as_str(),
-        directive_text = directive.text,
         session_id = session.id,
         iteration = session.iteration + 1,
         synced_at = session.launch.pm_snapshot_synced_at,
@@ -1220,13 +1211,10 @@ mod tests {
     use async_trait::async_trait;
     use time::OffsetDateTime;
 
-    use super::{
-        absorb_commands, apply_input, claim_commands, handle_attachment, take_current_input,
-        CommandStop,
-    };
+    use super::{absorb_commands, CommandStop};
     use crate::child_session::{
-        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildRef, ChildWriteLease,
+        ChildCommand, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildRef,
+        ChildWriteLease,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Harness, SendCurrentOutcome};
@@ -1333,8 +1321,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Created,
             status_reason: "reserved".to_string(),
             status_at: now,
@@ -1368,164 +1354,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_provider_control_reports_honest_steer_effects() {
-        for (provider, accepts_current_send, expected_effect) in [
-            ("codex", true, ChildCommandEffect::LiveSteer),
-            ("claude", false, ChildCommandEffect::NextTurn),
-            ("opencode", false, ChildCommandEffect::NextTurn),
-        ] {
-            let (store, session, lease) = session(provider).await;
-            let command = ChildCommand::new(
-                ChildRef::Project(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::Steer {
-                    text: "change direction".to_string(),
-                },
-            );
-            store.create_child_command(&command).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut harness = ScriptedHarness::new(accepts_current_send);
-            let mut pending = std::collections::VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-            if let Some(input) = pending.pop_front() {
-                apply_input(&store, &session, &lease, &mut harness, input)
-                    .await
-                    .unwrap();
-            }
-
-            let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-            assert_eq!(receipt.state, ChildCommandState::Accepted, "{provider}");
-            assert_eq!(receipt.effect, Some(expected_effect), "{provider}");
-            let expected_sends = if accepts_current_send { 2 } else { 1 };
-            assert_eq!(harness.sent.len(), expected_sends, "{provider}");
-            assert!(
-                harness.sent.iter().all(|text| text == "change direction"),
-                "{provider}"
-            );
-            assert_eq!(harness.interrupts, 0, "{provider}");
-        }
-    }
-
-    #[tokio::test]
-    async fn project_runner_delivers_each_command_once_and_skips_superseded_input() {
-        let (store, session, lease) = session("codex").await;
-        let first = ChildCommand::new(
-            ChildRef::Project(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "old context".to_string(),
-            },
-        );
-        store.create_child_command(&first).await.unwrap();
-        let mut seen = std::collections::HashSet::new();
-        let mut pending = std::collections::VecDeque::new();
-        let mut harness = ScriptedHarness::new(true);
-
-        let commands = claim_commands(&store, &session, &lease, &mut seen)
-            .await
-            .unwrap();
-        absorb_commands(
-            &store,
-            &session,
-            &lease,
-            commands,
-            &mut harness,
-            true,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-        assert!(claim_commands(&store, &session, &lease, &mut seen)
-            .await
-            .unwrap()
-            .is_empty());
-        assert_eq!(pending.len(), 1);
-
-        let replacement = ChildCommand::new(
-            ChildRef::Project(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "new direction".to_string(),
-            },
-        );
-        store
-            .supersede_and_create_child_command(&replacement)
-            .await
-            .unwrap();
-        let commands = claim_commands(&store, &session, &lease, &mut seen)
-            .await
-            .unwrap();
-        absorb_commands(
-            &store,
-            &session,
-            &lease,
-            commands,
-            &mut harness,
-            false,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-
-        let input = take_current_input(&store, &session, &lease, &mut pending)
-            .await
-            .unwrap()
-            .expect("replacement input");
-        assert_eq!(input.command_id.as_ref(), Some(&replacement.id));
-        assert_eq!(input.text, "new direction");
-        assert!(pending.is_empty());
-    }
-
-    #[tokio::test]
-    async fn attached_project_direction_is_versioned_before_provider_input() {
-        let (store, session, lease) = session("codex").await;
-
-        handle_attachment(
-            &store,
-            &session,
-            &lease,
-            "pursue the parser first".to_string(),
-        )
-        .await
-        .unwrap();
-
-        let current = store
-            .get_project_session(&session.id)
-            .await
-            .unwrap()
-            .unwrap();
-        let directives = store
-            .child_directives(&ChildRef::Project(session.id.clone()))
-            .await
-            .unwrap();
-        assert_eq!(current.current_directive_version, 1);
-        assert_eq!(directives.len(), 1);
-        assert_eq!(directives[0].text, "pursue the parser first");
-        assert_eq!(directives[0].source, ChildCommandSource::Attachment);
-        assert!(directives[0].command_id.is_some());
-    }
-
-    #[tokio::test]
     async fn bare_project_interrupt_stops_without_abandoning_history() {
         let (store, session, lease) = session("codex").await;
         let command = ChildCommand::new(
             ChildRef::Project(session.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::Interrupt { replacement: None },
+            ChildCommandKind::Interrupt,
         );
         store.create_child_command(&command).await.unwrap();
         let commands = store
@@ -1556,177 +1390,6 @@ mod tests {
                 .state,
             ChildCommandState::Accepted
         );
-    }
-
-    #[tokio::test]
-    async fn project_decisions_resume_every_provider_without_waiting_for_the_blocked_turn() {
-        for (provider, accepts_current_send) in
-            [("codex", true), ("claude", false), ("opencode", false)]
-        {
-            let (store, session, lease) = session(provider).await;
-            let decision_id = ChildDecisionId::new();
-            let command = ChildCommand::new(
-                ChildRef::Project(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::Decide {
-                    decision_id: decision_id.clone(),
-                    choice: "approve".to_string(),
-                    message: None,
-                },
-            );
-            store.create_child_command(&command).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut harness = ScriptedHarness::new(accepts_current_send);
-            let mut pending = std::collections::VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-            if let Some(input) = pending.pop_front() {
-                apply_input(&store, &session, &lease, &mut harness, input)
-                    .await
-                    .unwrap();
-            }
-
-            assert_eq!(harness.interrupts, 0);
-            assert_eq!(
-                harness.sent,
-                vec![
-                    format!("Decision {decision_id} resolved: approve");
-                    if accepts_current_send { 2 } else { 1 }
-                ]
-            );
-            let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-            assert_eq!(receipt.state, ChildCommandState::Accepted);
-            assert_eq!(receipt.effect, Some(ChildCommandEffect::Decision));
-            assert!(store
-                .project_events_after(&session.id, 0)
-                .await
-                .unwrap()
-                .iter()
-                .any(|event| matches!(
-                    &event.kind,
-                    crate::project_session::ProjectEventKind::DecisionResolved {
-                        decision_id: resolved,
-                        ..
-                    } if resolved == &decision_id
-                )));
-        }
-    }
-
-    #[tokio::test]
-    async fn project_follow_up_is_fifo_and_never_interrupts() {
-        for provider in ["codex", "claude", "opencode"] {
-            let (store, session, lease) = session(provider).await;
-            let first = ChildCommand::new(
-                ChildRef::Project(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::FollowUp {
-                    text: "first".to_string(),
-                },
-            );
-            let second = ChildCommand::new(
-                ChildRef::Project(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::FollowUp {
-                    text: "second".to_string(),
-                },
-            );
-            store.create_child_command(&first).await.unwrap();
-            store.create_child_command(&second).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut harness = ScriptedHarness::new(provider == "codex");
-            let mut pending = std::collections::VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-
-            assert_eq!(harness.interrupts, 0, "{provider}");
-            assert!(harness.sent.is_empty(), "{provider}");
-            for expected in ["first", "second"] {
-                let input = pending.pop_front().expect("queued follow-up");
-                apply_input(&store, &session, &lease, &mut harness, input)
-                    .await
-                    .unwrap();
-                assert_eq!(harness.sent.last().map(String::as_str), Some(expected));
-            }
-            assert_eq!(
-                store
-                    .get_child_command(&first.id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .effect,
-                Some(ChildCommandEffect::NextTurn),
-                "{provider}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn unconfirmed_live_project_send_keeps_direction_for_the_next_turn() {
-        for unknown in [false, true] {
-            let (store, session, lease) = session("codex").await;
-            let command = ChildCommand::new(
-                ChildRef::Project(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::Steer {
-                    text: "change direction".to_string(),
-                },
-            );
-            store.create_child_command(&command).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Project(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut harness = ScriptedHarness::new(true);
-            harness.fail_send = !unknown;
-            harness.unknown_send = unknown;
-            let mut pending = std::collections::VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-            assert_eq!(
-                pending.pop_front().map(|input| input.text),
-                Some("change direction".to_string())
-            );
-            let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-            assert_eq!(receipt.state, ChildCommandState::Delivering);
-            assert_eq!(receipt.effect, Some(ChildCommandEffect::LiveSteer));
-            assert_eq!(harness.interrupts, 0);
-        }
     }
 
     #[test]

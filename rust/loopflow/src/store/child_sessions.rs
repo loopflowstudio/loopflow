@@ -3,8 +3,8 @@
 
 use crate::child_session::{
     AbandonIntent, BoundaryResult, ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand,
-    ChildCommandEffect, ChildCommandId, ChildDirective, ChildProcessGeneration, ChildRef,
-    ChildWriteLease, ObservationRecipient,
+    ChildCommandEffect, ChildCommandId, ChildProcessGeneration, ChildRef, ChildWriteLease,
+    ObservationRecipient,
 };
 use crate::durable::Author;
 use crate::id::WaveId;
@@ -504,12 +504,12 @@ impl Store {
         &self,
         session_id: &TaskSessionId,
         comment_id: String,
-        command: ChildCommand,
+        text: String,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<ChildCommandId>> {
+    ) -> StoreResult<Option<crate::durable::SteerId>> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_comment(&session_id, &comment_id, &command, observed_at)
+            store.apply_linear_comment(&session_id, &comment_id, &text, observed_at)
         })
         .await
     }
@@ -539,17 +539,6 @@ impl Store {
         .await
     }
 
-    pub async fn ensure_child_decision_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<(ChildCommand, bool)> {
-        let command = command.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.ensure_child_decision_command(&command)
-        })
-        .await
-    }
-
     /// Create a `ci-fix` wake unless this incident identity already has one.
     /// Returns the surviving command and whether it was created.
     pub async fn ensure_child_ci_fix_command(
@@ -570,19 +559,6 @@ impl Store {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.supersede_and_insert_child_command(&command)
-        })
-        .await
-    }
-
-    pub async fn create_child_command_with_directive(
-        &self,
-        command: &ChildCommand,
-        directive: &ChildDirective,
-    ) -> StoreResult<Vec<ChildCommandId>> {
-        let command = command.clone();
-        let directive = directive.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_child_command_with_directive(&command, &directive)
         })
         .await
     }
@@ -697,22 +673,6 @@ impl Store {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.mark_child_command_delivering(&command_id, effect)
-        })
-        .await
-    }
-
-    pub(crate) async fn mark_child_command_delivering_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let target = target.clone();
-        let lease = lease.clone();
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_child_command_delivering_for_lease(&target, &lease, &command_id, effect)
         })
         .await
     }
@@ -1307,78 +1267,6 @@ impl Store {
                 &observation,
                 &lease,
             )
-        })
-        .await
-    }
-
-    pub async fn child_directives(&self, target: &ChildRef) -> StoreResult<Vec<ChildDirective>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| store.child_directives(&target)).await
-    }
-
-    pub async fn child_directive_for_command(
-        &self,
-        command_id: &ChildCommandId,
-    ) -> StoreResult<Option<ChildDirective>> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.child_directive_for_command(&command_id)
-        })
-        .await
-    }
-
-    pub async fn mark_child_directive_applied(
-        &self,
-        target: &ChildRef,
-        version: u32,
-    ) -> StoreResult<()> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_child_directive_applied(&target, version)
-        })
-        .await
-    }
-
-    pub(crate) async fn mark_child_directive_applied_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        version: u32,
-    ) -> StoreResult<()> {
-        let target = target.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_child_directive_applied_for_lease(&target, &lease, version)
-        })
-        .await
-    }
-
-    pub async fn incorporate_child_directive(
-        &self,
-        target: &ChildRef,
-        version: u32,
-        summary: &str,
-    ) -> StoreResult<(ChildDirective, bool)> {
-        let target = target.clone();
-        let summary = summary.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.incorporate_child_directive(&target, version, &summary)
-        })
-        .await
-    }
-
-    pub(crate) async fn incorporate_child_directive_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        version: u32,
-        summary: &str,
-    ) -> StoreResult<(ChildDirective, bool)> {
-        let target = target.clone();
-        let lease = lease.clone();
-        let summary = summary.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.incorporate_child_directive_for_lease(&target, &lease, version, &summary)
         })
         .await
     }

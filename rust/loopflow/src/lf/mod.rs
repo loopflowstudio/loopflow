@@ -869,13 +869,6 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Queue an audited instruction for exactly the next provider turn
-    FollowUp {
-        project_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Redirect Project work now, relaunching the Session when needed
     Steer {
         project_id: String,
@@ -883,11 +876,9 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the active Project turn and optionally replace its next instruction
+    /// Interrupt the active Project turn
     Interrupt {
         project_id: String,
-        #[arg(long = "message")]
-        message: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -897,39 +888,6 @@ pub enum ProjectCommand {
         #[arg(long, value_enum)]
         until: Option<crate::ops::ChildReceiptUntil>,
         #[arg(long, default_value = "30s")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Confirm that this Project incorporated its current direction
-    Acknowledge {
-        project_id: String,
-        #[arg(long)]
-        directive: u32,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resolve a durable Project decision request
-    Decide {
-        project_id: String,
-        decision_id: String,
-        choice: String,
-        #[arg(long)]
-        message: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Ask the owning Wave to choose while preserving this Project Session
-    RequestDecision {
-        project_id: String,
-        prompt: String,
-        #[arg(long = "option", required = true)]
-        options: Vec<String>,
-        #[arg(long)]
-        wait: bool,
-        #[arg(long, default_value = "30m")]
         timeout: String,
         #[arg(long)]
         json: bool,
@@ -952,7 +910,6 @@ pub enum ProjectCommand {
     /// Resume the same Project Session, optionally handing its next body to another agent
     Resume {
         project_id: String,
-        message: Option<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long, requires = "model")]
@@ -1096,13 +1053,6 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Queue an audited instruction for exactly the next provider turn
-    FollowUp {
-        issue: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Redirect the active provider turn, interrupting when live steer is unavailable
     Steer {
         issue: String,
@@ -1110,11 +1060,9 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the active provider turn and optionally replace its next instruction
+    /// Interrupt the active provider turn
     Interrupt {
         issue: String,
-        #[arg(long = "message")]
-        message: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1124,52 +1072,6 @@ pub enum TaskCommand {
         #[arg(long, value_enum)]
         until: Option<crate::ops::ChildReceiptUntil>,
         #[arg(long, default_value = "30s")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Confirm that this Task incorporated its current direction
-    Acknowledge {
-        issue: String,
-        #[arg(long)]
-        directive: u32,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Settle a merged, complete Task whose applied final directive was never
-    /// acknowledged, by an out-of-band Wave/Operator attestation. Records the
-    /// summary as the incorporation evidence, completes the Task, and clears its
-    /// orphaned recovery command — no provider turn, no new PR.
-    Reconcile {
-        issue: String,
-        #[arg(long)]
-        directive: u32,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resolve a durable Task decision request
-    Decide {
-        issue: String,
-        decision_id: String,
-        choice: String,
-        #[arg(long)]
-        message: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Ask the Task's Project Session to choose while preserving this Task Session
-    RequestDecision {
-        issue: String,
-        prompt: String,
-        #[arg(long = "option", required = true)]
-        options: Vec<String>,
-        #[arg(long)]
-        wait: bool,
-        #[arg(long, default_value = "30m")]
         timeout: String,
         #[arg(long)]
         json: bool,
@@ -1192,7 +1094,6 @@ pub enum TaskCommand {
     /// Resume the same Task Session, optionally handing its next body to another agent
     Resume {
         issue: String,
-        message: Option<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long, requires = "model")]
@@ -2585,8 +2486,18 @@ mod tests {
     }
 
     #[test]
-    fn task_interrupt_requires_explicit_message_flag() {
-        let cli = Cli::try_parse_from([
+    fn task_interrupt_authors_no_direction() {
+        let cli = Cli::try_parse_from(["lf", "task", "interrupt", "INF-123"])
+            .expect("parse task interrupt");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Interrupt { issue, json },
+        }) = cli.command
+        else {
+            panic!("expected task interrupt command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert!(!json);
+        assert!(Cli::try_parse_from([
             "lf",
             "task",
             "interrupt",
@@ -2594,32 +2505,18 @@ mod tests {
             "--message",
             "take the smaller approach",
         ])
-        .expect("parse task interrupt");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::Interrupt {
-                    issue,
-                    message,
-                    json,
-                },
-        }) = cli.command
-        else {
-            panic!("expected task interrupt command");
-        };
-        assert_eq!(issue, "INF-123");
-        assert_eq!(message.as_deref(), Some("take the smaller approach"));
-        assert!(!json);
+        .is_err());
     }
 
     #[test]
-    fn task_receipt_and_decision_commands_parse_the_durable_ids() {
+    fn task_receipt_parses_the_durable_id() {
         let receipt = Cli::try_parse_from([
             "lf",
             "task",
             "receipt",
             "cc_00000000000000000000000000000000",
             "--until",
-            "incorporated",
+            "applied",
             "--timeout",
             "30s",
             "--json",
@@ -2629,87 +2526,17 @@ mod tests {
             receipt.command,
             Some(Commands::Task {
                 cmd: TaskCommand::Receipt {
-                    until: Some(crate::ops::ChildReceiptUntil::Incorporated),
+                    until: Some(crate::ops::ChildReceiptUntil::Applied),
                     timeout,
                     json: true,
                     ..
                 }
             }) if timeout == "30s"
         ));
-
-        let acknowledge = Cli::try_parse_from([
-            "lf",
-            "task",
-            "acknowledge",
-            "INF-123",
-            "--directive",
-            "2",
-            "--summary",
-            "parser work is now first",
-        ])
-        .expect("parse task acknowledgement");
-        assert!(matches!(
-            acknowledge.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Acknowledge {
-                    issue,
-                    directive: 2,
-                    ..
-                }
-            }) if issue == "INF-123"
-        ));
-
-        let decide = Cli::try_parse_from([
-            "lf",
-            "task",
-            "decide",
-            "INF-123",
-            "cd_00000000000000000000000000000000",
-            "revise",
-            "--message",
-            "cover the race",
-            "--json",
-        ])
-        .expect("parse task decide");
-        assert!(matches!(
-            decide.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Decide {
-                    issue,
-                    choice,
-                    json: true,
-                    ..
-                }
-            }) if issue == "INF-123" && choice == "revise"
-        ));
     }
 
     #[test]
-    fn task_steering_verbs_are_distinct_and_support_json_receipts() {
-        let follow_up = Cli::try_parse_from([
-            "lf",
-            "task",
-            "follow-up",
-            "INF-123",
-            "audit retry callers",
-            "--json",
-        ])
-        .expect("parse task follow-up");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::FollowUp {
-                    issue,
-                    message,
-                    json,
-                },
-        }) = follow_up.command
-        else {
-            panic!("expected task follow-up command");
-        };
-        assert_eq!(issue, "INF-123");
-        assert_eq!(message, "audit retry callers");
-        assert!(json);
-
+    fn task_steer_is_the_only_authored_direction_command() {
         let steer = Cli::try_parse_from([
             "lf",
             "task",
@@ -2732,6 +2559,13 @@ mod tests {
         assert_eq!(issue, "INF-123");
         assert_eq!(message, "take the smaller approach");
         assert!(!json);
+
+        for removed in ["follow-up", "acknowledge", "decide", "request-decision"] {
+            assert!(
+                Cli::try_parse_from(["lf", "task", removed, "INF-123"]).is_err(),
+                "{removed} must not remain as a compatibility command"
+            );
+        }
     }
 
     #[test]

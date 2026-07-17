@@ -369,7 +369,7 @@ fn derive_delivery_id(event: &WebhookEvent, webhook_timestamp: i64, body: &[u8])
 struct OutcomeSummary<'a> {
     outcome: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    directive_applied: Option<bool>,
+    steer_applied: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     delivered: Option<bool>,
 }
@@ -379,27 +379,27 @@ impl<'a> From<&'a WebhookOutcome> for OutcomeSummary<'a> {
         match outcome {
             WebhookOutcome::Ignored => Self {
                 outcome: "ignored",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: None,
             },
             WebhookOutcome::NoTarget => Self {
                 outcome: "no_target",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: None,
             },
             WebhookOutcome::SelfAuthored => Self {
                 outcome: "self_authored",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: None,
             },
-            WebhookOutcome::Edit { directive_applied } => Self {
+            WebhookOutcome::Edit { steer_applied } => Self {
                 outcome: "edit",
-                directive_applied: Some(*directive_applied),
+                steer_applied: Some(*steer_applied),
                 delivered: None,
             },
             WebhookOutcome::Comment { delivered } => Self {
                 outcome: "comment",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: Some(*delivered),
             },
         }
@@ -1018,7 +1018,7 @@ mod tests {
         );
         assert_eq!(
             map_outcome(&WebhookOutcome::Edit {
-                directive_applied: false
+                steer_applied: false
             }),
             (DeliveryStatus::Processed, Some("task_session"))
         );

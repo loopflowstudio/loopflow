@@ -270,8 +270,6 @@ fn register_task_with_process(
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        current_directive_version: 0,
-        incorporated_directive_version: 0,
         status: ProjectSessionStatus::Running,
         status_reason: "test project is running".to_string(),
         status_at: now,
@@ -313,8 +311,6 @@ fn register_task_with_process(
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_session_id: project.id.clone(),
-        current_directive_version: 0,
-        incorporated_directive_version: 0,
         status: if active {
             TaskSessionStatus::Running
         } else {

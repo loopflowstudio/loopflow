@@ -1524,6 +1524,40 @@ mod tests {
             .unwrap()
             .iter()
             .any(|object| object.object_type == "table" && object.name == "task_sessions"));
+        for table in ["project_sessions", "task_sessions"] {
+            let names = columns(&conn, table);
+            assert!(!names.iter().any(|name| name == "current_directive_version"));
+            assert!(!names
+                .iter()
+                .any(|name| name == "incorporated_directive_version"));
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_schema
+                 WHERE type='table' AND name IN (
+                    'child_directives', 'launches', 'turns', 'done_proposals'
+                 )",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0,
+            "the durable spine has no compatibility or shadow lifecycle tables"
+        );
+        let turn_columns = columns(&conn, "agent_turns");
+        assert!(turn_columns.iter().any(|name| name == "epoch_id"));
+        assert!(turn_columns.iter().any(|name| name == "basis_rev"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('sends')
+                 WHERE \"table\"='agent_turns' AND \"from\"='turn_id' AND \"to\"='id'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+            "Send evidence belongs to the sole durable Turn row"
+        );
 
         apply_sqlite(&conn).unwrap();
         assert_eq!(
@@ -2127,13 +2161,12 @@ mod tests {
                  id, project_id, project_slug, project_name,
                  project_prompt_context, wave_id, pm_snapshot_synced_at,
                  status, status_reason, status_at, iteration,
-                 observation_cursor, agent, provider, created_at, updated_at,
-                 current_directive_version, incorporated_directive_version
+                 observation_cursor, agent, provider, created_at, updated_at
              ) VALUES (
                  'ps_new', 'project-1', 'developer-efficiency',
                  'Developer Efficiency', 'Definition', 'w1', 3,
                  'created', 'successor', 3, 0, 0,
-                 'codex', 'codex', 3, 3, 1, 0
+                 'codex', 'codex', 3, 3
              );",
         )
         .unwrap();
@@ -2143,13 +2176,12 @@ mod tests {
                      id, project_id, project_slug, project_name,
                      project_prompt_context, wave_id, pm_snapshot_synced_at,
                      status, status_reason, status_at, iteration,
-                     observation_cursor, agent, provider, created_at, updated_at,
-                     current_directive_version, incorporated_directive_version
+                     observation_cursor, agent, provider, created_at, updated_at
                  ) VALUES (
                      'ps_parallel', 'project-1', 'developer-efficiency',
                      'Developer Efficiency', 'Definition', 'w1', 3,
                      'created', 'parallel', 3, 0, 0,
-                     'codex', 'codex', 3, 3, 1, 0
+                     'codex', 'codex', 3, 3
                  );"
             )
             .is_err());

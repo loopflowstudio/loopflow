@@ -1,16 +1,17 @@
 //! Shared durable control submission for Project and Task Sessions.
 //!
 //! The public nouns stay explicit. This module owns only the protocol that is
-//! already common at both edges: persist one command, supersede or version its
-//! directive atomically, wake the right child, and report the durable receipt.
+//! already common at both edges: persist lifecycle commands, wake the right
+//! child, and report the durable receipt. Authored direction is a Steer.
 
 use std::time::Duration;
 
 use crate::child_session::{
     AbandonIntent, ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand, ChildCommandEffect,
-    ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective,
+    ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
     ChildProcessGeneration, ChildRef,
 };
+use crate::durable::{AuthenticatedRequest, ControlCtx, SteerReceipt};
 use crate::project_session::{ProjectEventKind, ProjectSession, ProjectSessionStatus};
 use crate::store::SharedStore;
 use crate::task::{TaskEventKind, TaskSession, TaskSessionStatus};
@@ -179,7 +180,6 @@ async fn finish_revoked_child_body(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ChildReceiptUntil {
     Applied,
-    Incorporated,
 }
 
 #[derive(Debug)]
@@ -299,20 +299,6 @@ impl ChildSession {
         }
     }
 
-    fn current_directive_version(&self) -> u32 {
-        match self {
-            Self::Project(session) => session.current_directive_version,
-            Self::Task(session) => session.current_directive_version,
-        }
-    }
-
-    fn set_current_directive_version(&mut self, version: u32) {
-        match self {
-            Self::Project(session) => session.current_directive_version = version,
-            Self::Task(session) => session.current_directive_version = version,
-        }
-    }
-
     async fn refresh(&mut self, store: &SharedStore) -> OpsResult<()> {
         *self = match self {
             Self::Project(session) => Self::Project(Box::new(
@@ -407,39 +393,6 @@ impl ChildSession {
                         state,
                         effect,
                         error,
-                    },
-                )
-                .await
-                .map(|_| ())
-                .map_err(child_error),
-        }
-    }
-
-    async fn append_directive_event(
-        &self,
-        store: &SharedStore,
-        directive: &ChildDirective,
-    ) -> OpsResult<()> {
-        match self {
-            Self::Project(session) => store
-                .append_project_event(
-                    &session.id,
-                    &ProjectEventKind::DirectiveChanged {
-                        directive_id: directive.id.clone(),
-                        version: directive.version,
-                        directive_kind: directive.kind,
-                    },
-                )
-                .await
-                .map(|_| ())
-                .map_err(child_error),
-            Self::Task(session) => store
-                .append_task_event(
-                    &session.id,
-                    &TaskEventKind::DirectiveChanged {
-                        directive_id: directive.id.clone(),
-                        version: directive.version,
-                        directive_kind: directive.kind,
                     },
                 )
                 .await
@@ -565,13 +518,10 @@ impl ChildSession {
 pub(crate) struct ChildControlResult {
     pub session_id: String,
     pub command_id: String,
-    pub directive_version: Option<u32>,
     pub state: ChildCommandState,
     pub effect: Option<ChildCommandEffect>,
-    pub incorporated: bool,
     pub generation: Option<u32>,
     pub accepted_at: Option<time::OffsetDateTime>,
-    pub incorporated_at: Option<time::OffsetDateTime>,
     pub error: Option<String>,
 }
 
@@ -614,7 +564,6 @@ pub(crate) async fn resume_session(
     store: &SharedStore,
     mut session: ChildSession,
     source: ChildCommandSource,
-    message: Option<String>,
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<ChildControlResult> {
@@ -629,7 +578,21 @@ pub(crate) async fn resume_session(
             session.handoff(store, &request).await?;
         }
     }
-    queue_command(store, session, source, ChildCommandKind::Resume { message }).await
+    queue_command(store, session, source, ChildCommandKind::Resume).await
+}
+
+pub(crate) async fn append_steer(
+    store: &SharedStore,
+    target: ChildRef,
+    _source: ChildCommandSource,
+    text: &str,
+) -> OpsResult<SteerReceipt> {
+    let work = store.work_for_child(&target).await.map_err(child_error)?;
+    let request = AuthenticatedRequest::cli();
+    store
+        .steer(&ControlCtx::User(&request), &work, text, None)
+        .await
+        .map_err(child_error)
 }
 
 fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHandoffRequest> {
@@ -666,7 +629,6 @@ fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHand
 
 /// Whether a deduplicated command should relaunch an inactive Session.
 ///
-/// A `Decide` re-sent by a human means "run this" — an unsettled one relaunches.
 /// A `CiFix` is re-sent by a *supervision pass*, not a person, so the same rule
 /// would spin a body on every poll for as long as the repair is unsettled. It
 /// keys on `Persisted` instead: nobody ever claimed that wake, so the launch that
@@ -704,9 +666,7 @@ pub(crate) async fn queue_command(
 
     // Only an operator's explicit resume may restart delivered work.
     let launch_intent = match (&kind, &source) {
-        (ChildCommandKind::Resume { .. }, ChildCommandSource::Human) => {
-            LaunchIntent::ExplicitResume
-        }
+        (ChildCommandKind::Resume, ChildCommandSource::Human) => LaunchIntent::ExplicitResume,
         (ChildCommandKind::CiFix { .. }, _) => LaunchIntent::CiFix,
         _ => LaunchIntent::Supervisor,
     };
@@ -727,52 +687,23 @@ pub(crate) async fn queue_command(
     }
 
     let command = ChildCommand::new(session.target(), source, kind);
-    // A ci-fix wake is fire-and-forget like a follow-up: the supervision pass
+    // A ci-fix wake is fire-and-forget: the supervision pass
     // that observed the failure must not block on a body's boot.
-    let wait_for_resolution = !matches!(
-        &command.kind,
-        ChildCommandKind::FollowUp { .. } | ChildCommandKind::CiFix { .. }
-    );
-    let replacement = match &command.kind {
-        ChildCommandKind::Steer { text } => Some(text.clone()),
-        ChildCommandKind::Interrupt {
-            replacement: Some(text),
-        } => Some(text.clone()),
-        _ => None,
-    };
+    let wait_for_resolution = !matches!(&command.kind, ChildCommandKind::CiFix { .. });
 
-    let (command, created, superseded, directive) = if let Some(text) = replacement {
-        let directive = ChildDirective::replacement(
-            session.target(),
-            session.current_directive_version() + 1,
-            text,
-            command.source.clone(),
-            command.id.clone(),
-        );
-        let superseded = store
-            .create_child_command_with_directive(&command, &directive)
-            .await
-            .map_err(child_error)?;
-        session.set_current_directive_version(directive.version);
-        (command, true, superseded, Some(directive))
-    } else if matches!(&command.kind, ChildCommandKind::Decide { .. }) {
-        let (command, created) = store
-            .ensure_child_decision_command(&command)
-            .await
-            .map_err(child_error)?;
-        (command, created, Vec::new(), None)
-    } else if matches!(&command.kind, ChildCommandKind::CiFix { .. }) {
+    let (command, created, superseded) = if matches!(&command.kind, ChildCommandKind::CiFix { .. })
+    {
         let (command, created) = store
             .ensure_child_ci_fix_command(&command)
             .await
             .map_err(child_error)?;
-        (command, created, Vec::new(), None)
-    } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
+        (command, created, Vec::new())
+    } else if matches!(&command.kind, ChildCommandKind::Interrupt) {
         let superseded = store
             .supersede_and_create_child_command(&command)
             .await
             .map_err(child_error)?;
-        (command, true, superseded, None)
+        (command, true, superseded)
     } else if let ChildCommandKind::Abandon { reason } = &command.kind {
         // The intent lands with the command, in one transaction. From here on
         // every launch path reads it and refuses to start a process.
@@ -785,13 +716,13 @@ pub(crate) async fn queue_command(
             .await
             .map_err(child_error)?;
         session.record_abandon_intent(intent);
-        (command, true, Vec::new(), None)
+        (command, true, Vec::new())
     } else {
         store
             .create_child_command(&command)
             .await
             .map_err(child_error)?;
-        (command, true, Vec::new(), None)
+        (command, true, Vec::new())
     };
 
     // Link the wake to its evidence before anything can service it.
@@ -845,9 +776,6 @@ pub(crate) async fn queue_command(
             .append_command_event(store, command_id, ChildCommandState::Superseded, None, None)
             .await?;
     }
-    if let Some(directive) = &directive {
-        session.append_directive_event(store, directive).await?;
-    }
     session
         .append_command_event(
             store,
@@ -884,13 +812,9 @@ pub(crate) async fn queue_command(
         }
     }
 
-    // Interrupt never starts a process. It ends the current turn; it does not
-    // begin one. Interrupting an inactive Session used to relaunch it whenever a
-    // replacement rode along — the exact path that respawned a Session under
-    // whatever binary the interrupting shell happened to be using. The
-    // replacement lands as the pending directive, and `resume` is the one verb
-    // that starts a process.
-    if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) && !session.is_process_active() {
+    // Interrupt never starts a process or authors direction. It only ends the
+    // current boundary; Resume is the lifecycle operation that starts a process.
+    if matches!(&command.kind, ChildCommandKind::Interrupt) && !session.is_process_active() {
         store
             .accept_child_command(&command.id, None)
             .await
@@ -951,26 +875,17 @@ pub(crate) async fn queue_command(
 }
 
 pub(crate) async fn control_result(
-    store: &SharedStore,
+    _store: &SharedStore,
     command: &ChildCommand,
     receipt: ChildCommand,
 ) -> OpsResult<ChildControlResult> {
-    let directive = store
-        .child_directive_for_command(&command.id)
-        .await
-        .map_err(child_error)?;
     Ok(ChildControlResult {
         session_id: command.target.target_id().to_string(),
         command_id: command.id.to_string(),
-        directive_version: directive.as_ref().map(|directive| directive.version),
         state: receipt.state,
         effect: receipt.effect,
-        incorporated: directive
-            .as_ref()
-            .is_some_and(|directive| directive.incorporated_at.is_some()),
         generation: receipt.claimed_by_generation,
         accepted_at: receipt.accepted_at,
-        incorporated_at: directive.and_then(|directive| directive.incorporated_at),
         error: receipt.error,
     })
 }
@@ -1037,17 +952,6 @@ pub(crate) async fn wait_for_receipt_condition(
         }
         let settled = match until {
             ChildReceiptUntil::Applied => command.state.is_terminal(),
-            ChildReceiptUntil::Incorporated => store
-                .child_directive_for_command(command_id)
-                .await
-                .map_err(child_error)?
-                .ok_or_else(|| {
-                    child_error(format!(
-                        "child command {command_id} does not carry a directive to incorporate"
-                    ))
-                })?
-                .incorporated_at
-                .is_some(),
         };
         if settled {
             return Ok((command, false));
@@ -1090,8 +994,9 @@ mod tests {
     use crate::wave::Wave;
 
     use super::{
-        _set_before_launch_hook, child_body_reservation_is_fresh, handoff_request, queue_command,
+        append_steer, child_body_reservation_is_fresh, handoff_request, queue_command,
         relaunch_on_duplicate, resume_session, revoke_and_reap_child_body, ChildSession,
+        LaunchIntent,
     };
 
     #[test]
@@ -1212,8 +1117,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status,
             status_reason: "test project session".to_string(),
             status_at: now,
@@ -1265,8 +1168,6 @@ mod tests {
             pm_writeback: crate::task::PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_session_id: project.id.clone(),
-            current_directive_version: 1,
-            incorporated_directive_version: 0,
             status,
             status_reason: "test task session".to_string(),
             status_at: now,
@@ -1325,34 +1226,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_follow_up_returns_once_durable() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-                .await
-                .unwrap(),
-        );
-        let wave = make_wave(dir.path().to_str().unwrap());
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave, ProjectSessionStatus::Running);
-        store.create_project_session(&project).await.unwrap();
-
-        let result = queue_command(
-            &store,
-            ChildSession::Project(Box::new(project)),
-            ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "Inspect the boundary next".to_string(),
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(result.state, ChildCommandState::Persisted);
-        assert_eq!(result.accepted_at, None);
-    }
-
-    #[tokio::test]
     async fn inactive_project_abandonment_does_not_launch_a_process() {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(
@@ -1405,7 +1278,7 @@ mod tests {
             &store,
             ChildSession::Project(Box::new(project)),
             ChildCommandSource::Human,
-            ChildCommandKind::Interrupt { replacement: None },
+            ChildCommandKind::Interrupt,
         )
         .await
         .unwrap();
@@ -1414,7 +1287,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-
         assert_eq!(result.state, ChildCommandState::Accepted);
         assert_eq!(persisted.status, ProjectSessionStatus::Waiting);
         assert_eq!(persisted.latest_process, None);
@@ -1460,17 +1332,21 @@ mod tests {
         store.update_task_pr(&pr).await.unwrap();
         let task_id = task.id.clone();
 
-        // The supervisor's steer: exactly the path the Project wake took.
-        let error = queue_command(
+        // The Steer is durable, but it does not grant a supervisor permission
+        // to reopen work already delivered for review.
+        append_steer(
             &store,
-            ChildSession::Task(Box::new(task)),
+            ChildRef::Task(task.id.clone()),
             ChildCommandSource::Project(project.id.clone()),
-            ChildCommandKind::Steer {
-                text: "Keep going on the design".to_string(),
-            },
+            "Keep going on the design",
         )
         .await
-        .expect_err("supervision must not restart a submitted Task");
+        .unwrap();
+        let mut child = ChildSession::Task(Box::new(task));
+        let error = child
+            .launch(&store, LaunchIntent::Supervisor)
+            .await
+            .expect_err("supervision must not restart a submitted Task");
 
         assert!(
             error.to_string().contains("#878"),
@@ -1750,20 +1626,17 @@ mod tests {
         assert!(!relaunch_on_duplicate(&wake(ChildCommandState::Superseded)));
         assert!(!relaunch_on_duplicate(&wake(ChildCommandState::Accepted)));
 
-        // Every other kind keeps the human-facing rule: unsettled means relaunch.
-        let mut decide = ChildCommand::new(
+        // Every other lifecycle command keeps the user-facing rule: unsettled
+        // means relaunch.
+        let mut resume = ChildCommand::new(
             ChildRef::Task(crate::task::TaskSessionId::new()),
             ChildCommandSource::Human,
-            ChildCommandKind::Decide {
-                decision_id: crate::child_session::ChildDecisionId::new(),
-                choice: "yes".to_string(),
-                message: None,
-            },
+            ChildCommandKind::Resume,
         );
-        decide.state = ChildCommandState::Claimed;
-        assert!(relaunch_on_duplicate(&decide));
-        decide.state = ChildCommandState::Accepted;
-        assert!(!relaunch_on_duplicate(&decide));
+        resume.state = ChildCommandState::Claimed;
+        assert!(relaunch_on_duplicate(&resume));
+        resume.state = ChildCommandState::Accepted;
+        assert!(!relaunch_on_duplicate(&resume));
     }
 
     /// The durable order is incident -> command ensure -> trigger link -> launch.
@@ -2084,7 +1957,6 @@ mod tests {
             &store,
             ChildSession::Task(Box::new(task)),
             ChildCommandSource::Project(project.id.clone()),
-            None,
             Some("codex".to_string()),
             Some("supervisor tried to answer review".to_string()),
         )
@@ -2188,9 +2060,7 @@ mod tests {
             &store,
             ChildSession::Project(Box::new(persisted)),
             ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "One more thing".to_string(),
-            },
+            ChildCommandKind::Resume,
         )
         .await
         .expect_err("a Session being abandoned accepts nothing else");

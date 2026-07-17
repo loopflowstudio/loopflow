@@ -1,7 +1,7 @@
-use crate::child_session::{ChildRef, ChildWriteLease};
+use crate::child_session::ChildRef;
 use crate::durable::{
-    Author, Basis, BoundarySeed, ControlCtx, RunLease, Send, SendId, SendState, SteerId,
-    SteerReceipt, ToolResponseReceipt, ToolResponseWrite, WorkRef,
+    Author, Basis, BoundarySeed, ControlCtx, Send, SendId, SendState, SteerId, SteerReceipt,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -20,6 +20,17 @@ impl Store {
     pub async fn boundary_seed(&self, work: &WorkRef) -> StoreResult<BoundarySeed> {
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| store.boundary_seed(&work)).await
+    }
+
+    pub(crate) async fn boundary_seed_for_child(
+        &self,
+        target: &ChildRef,
+    ) -> StoreResult<BoundarySeed> {
+        let target = target.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.boundary_seed_for_child(&target)
+        })
+        .await
     }
 
     pub async fn steer(
@@ -122,19 +133,6 @@ impl Store {
         let basis = basis.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.validate_completion_basis(&work, &basis)
-        })
-        .await
-    }
-
-    pub(crate) async fn run_for_child_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<RunLease> {
-        let target = target.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.run_for_child_lease(&target, &lease)
         })
         .await
     }

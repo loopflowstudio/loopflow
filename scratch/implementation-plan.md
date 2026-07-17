@@ -44,45 +44,60 @@ Do not add compatibility shims. Migrate stored data once, cut every caller to th
 
 ## Current implementation review
 
-Review snapshot: PR #1073 rebased through main `547708b3f`, plus the unfinished
-durable-input scaffold
-and the revised canonical architecture in `docs/architecture.md` on 2026-07-17.
+Review snapshot: PR #1073 on commit `5b4978721`, based on main `367bd6046`.
+Main has since advanced through `276830460`; those changes are reviewed below
+and must be rebased after this checkpoint commits. Canonical architecture and
+the next executable cut were refreshed on 2026-07-17.
 
-Disposition: **the adapter and Turn-spend foundations are coherent. The paused
-durable-input work is additive reconnaissance, not a checkpoint. Resume only as
-a large authoritative replacement and deletion pass.**
+Disposition: **the durable input spine is an achieved checkpoint. Execution and
+attention are still bridged through Session/body/Review machinery, so the
+branch is not the completed core cutover.**
 
-The implementation found one sound seam:
+Current evidence:
 
-- provider-wide `supports_steer` is gone;
-- `send_current` reports `Sent | NotSteerable | Failed | Unknown` per active provider Turn;
-- Codex correlates `turn/steer` with the expected vendor Turn and waits for the provider response;
-- ordinary Steer no longer implies interrupt on Claude or OpenCode;
-- trace-only Rust ids moved from `RunId`/`ProcessId` to `TraceId`/`ExecId`, freeing the product names;
-- the separate usage slice is deleting spend writes from `run_events` and moving readers toward `agent_turns`.
+- authored direction is only `Steer`; `ChildDirective`, directive kinds,
+  version/incorporation fields, and authored `ChildCommand` variants are gone;
+- Steer, truth, and ToolResponse allocate one ordered Epoch revision;
+- Project and Task boundaries capture immutable Basis on the existing
+  `agent_turns`, which remains the sole Turn and additive usage store;
+- live and seeded Send are receipts only; a successful later boundary Basis
+  derives application and completion rejects stale/unapplied Basis;
+- interrupt and resume author no prose;
+- stable Project/Task Work and Epoch rows survive Session succession, while
+  exact legacy process generations import into the Run active slot;
+- terminal recovery reads its exact historical Epoch rather than pretending a
+  terminal Work still has a current open Epoch;
+- actionable CI preemption remains typed, bounded, and separate from Steer;
+- `cargo clippy -p loopflow --all-targets -- -D warnings` passes; all 1,600
+  library tests pass, including the process-global environment cases after
+  joining the shared test environment lock.
 
-That is adapter groundwork, not the core cutover. Current state against the phases below:
+Current state against the phases below:
 
 | Phase | Status | Evidence still missing |
 | --- | --- | --- |
 | 0. Executable spec | Complete | `docs/architecture.md` fixes current versus target truth, stored nouns, constraints, transitions, side-effect order, races, migration, research, questions, and next vertical slice |
-| 1. Work/Epoch/Basis/Home | Uncommitted scaffolding | New ids, tables, migration code, and revision APIs exist in the working tree, but current Work does not traverse them exclusively |
-| 2. Run/Launch/containment | Uncommitted bridge | Product Run fencing is being threaded through old child-session stores; Session/body lease stores and duplicated runners remain authoritative |
-| 3. Steer/typed control | Uncommitted bridge | Steer/Send storage exists, but `ChildCommand`, `ChildDirective`, replacement/resume/decision variants, ambient authority, and explicit Ack remain |
-| 4. Provider reconstruction | Partial | Dynamic Send outcome and controller conformance exist; reconstruction, fallback Launches, durable Send rows, and Basis correlation do not |
+| 1. Work/Epoch/Basis/Home | Input spine authoritative | Stable local Work, one-open-Epoch constraint, ordered revision, Home, and terminal succession rules are live; Session ids still mediate current runtime lookup |
+| 2. Run/Launch/containment | Coherent bridge | Exact Session generations reserve/activate/stop matching Runs and migration preserves active authority; Session/body stores, guessed Home/trigger, and duplicate controllers remain |
+| 3. Steer/typed control | Authored direction complete | Steer/Send/Basis/ToolResponse are authoritative and directive storage is deleted; lifecycle `ChildCommand` and source/effect/claim machinery remain |
+| 4. Provider reconstruction | Partial | Dynamic Send outcome, durable Send, fixed Basis, and provider conformance exist; fallback Launch routing and transcript-free reconstruction remain |
 | 5. Review/attention/status | Redesigned, not implemented | Review is now an interactive flow interval derived from Launch + attention; `InteractionReview`, Handoff, dispositions, and parent starvation remain in code |
 | 6. Turn usage | Store/query complete | Every additive reader uses Turn spend; OpenCode still needs one end-to-end usage producer/parser |
-| 7. Purge | Not started | Every named legacy module/schema object remains |
+| 7. Purge | 3,078 code lines removed | Directive and authored-command surface is gone; 8,922 lines remain to reach 119,127 by deleting Review/Handoff and duplicate Session controllers |
 
 ### Findings that change the next implementation step
 
-1. **A confirmed live send is not crash-durable.** `send_current_input` marks the `ChildCommand` accepted, converts the future seed to anonymous `PendingInput::system`, and keeps it only in memory. A crash after `Sent` can lose the later seed. The immutable Steer must remain authoritative; Send is only its receipt.
-2. **Live Steer is not completion-fenced.** Task completion checks unincorporated directives, not Steer commands. The active Turn can still complete Work after a live Steer advanced what it should honor. Basis must land with Steer, not as later hardening.
-3. **Narrow typed tool responses cannot inherit Steer timing.** The current
-   generic `Decide` command records resolution only after provider delivery. On
-   a seed-only harness, a tool can wait on prose that waits for its Turn to end.
-   Delete generic decision/review machinery; where a tool truly requires a
-   typed response, persist and release it before optional notification.
+1. **Fixed: a confirmed live send remains crash-durable.** The immutable Steer
+   stays outstanding after `SendVia::Live`; only a later successful boundary
+   Basis derives application. Crash-after-Sent therefore reconstructs the same
+   seed instead of depending on an anonymous in-memory pending input.
+2. **Fixed: live Steer is completion-fenced.** Every observed root boundary
+   stores immutable starting Basis on `agent_turns`. Live delivery never
+   advances it, and completion validates both current and successfully applied
+   Basis.
+3. **Fixed: narrow typed tool response persists first.** Generic Decide and
+   Approval APIs are gone. `ToolResponse` allocates its Epoch revision and
+   persists before any optional provider notification.
 4. **The provider fixture was descriptive, not conformance.** Its test asserted literals in `control_contract.json` and never invoked an adapter or controller. **Done (2026-07-17):** the fixture is deleted and the four shapes drive `absorb_commands`/`apply_input`, asserting that each still seeds the next boundary and never interrupts.
 5. **Codex outcome cleanup is incomplete. Done (2026-07-17).** A `PendingReply` guard releases the waiter on every terminal path, and rejections are typed from probed live evidence (see `scratch/questions.md`): codex 0.144.5 answers *every* rejection with `-32600`, so only the message separates the expected Turn-boundary race from a Loopflow bug. Timeout, late response, disconnect, mismatched Turn, and explicit rejection are covered; each test was verified to fail against the pre-fix behavior. The `Sent` response shape remains assumed rather than observed.
 6. **The usage store/query cutover is done.** `agent_turns` is the only additive grain; Rust, Swift, CLI, Doctor, and monitoring use the shared Turn-spend wire. Cache-only, explicit zero, and absent usage remain distinct.
@@ -93,11 +108,11 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 11. **Review is conversation, not decision state.** A Review may be critique, questions, brainstorming, or direction. It is the interval where a flow's current step is interactive and its live Launch owes attention to `User | Parent(WorkRef)`. Steers and Turns occur inside it. Close advances the flow; it carries no approval or changes-requested disposition. There is no Review row or `ReviewId`.
 12. **Parent responsiveness is scheduler behavior.** Wave and Project must drain direct User interaction, awaiting child Reviews, and other unblocking child evidence before beginning their own background flow. Child attention may explicitly interrupt a non-steerable background Turn; this does not change plain Steer semantics.
 13. **`User` replaces `Human`.** User means an authenticated external Loopflow client, whether a person in Swift/CLI or another system's agent. Internal Loopflow authority remains `Run(RunId)`.
-14. **Small checkpoints optimize against the desired simplification.** The
-    rebased working tree is 131,127 Rust source lines and still contains all
-    legacy authority. The next pass must cross the structural cut and delete at
-    least 12,000 net lines to reach 119,127, not preserve additive scaffolding
-    or count unrelated upstream deletion as progress.
+14. **The first large deletion paid down 3,078 code lines.** `tokei` reports
+    128,049 Rust code lines against the 131,127 rebased checkpoint. The next
+    pass must delete another 8,922 to reach 119,127 by removing Review/Handoff
+    and duplicate Session control, not by compressing tests or counting
+    unrelated upstream deletion.
 15. **Work is the long-lived logical server; its process is not.** One generic
     Home runtime serves stable Wave, Project, and Task Work. Each kind supplies
     domain policy through an explicit `WorkRef` match, while Run reservation,
@@ -147,13 +162,25 @@ That is adapter groundwork, not the core cutover. Current state against the phas
     columns, not enough to establish authority or provenance. The Home runtime
     must supply its own stable Home identity and the caller must persist the
     actual trigger; row order and a generic Input label cannot survive the cut.
+25. **Main's global-promotion preflight is a new Session-lease consumer.** PR
+    #1074 correctly refuses binary replacement while a writer is live and
+    fails closed on unreadable containment evidence. Its current query names
+    `task_sessions` and `project_sessions`. Preserve the operational fence, but
+    make live Run plus containment the evidence and delete `LiveBody`'s Session
+    id/generation shape during the controller cutover.
+26. **Main's PM reteam fence validates Run authority, not Session status.** PR
+    #1078 moves every Linear issue before narrowing its Project and refuses the
+    whole mutation while any Task process may still write the old identifier.
+    This does not change the domain design. It adds another exact migration
+    caller: classify an external identity change from current Work binding plus
+    active Run authority, then reconcile the stable Work after the move. Do not
+    carry `TaskSessionStatus` or `ChildLeaseState` into the target API.
 
 No more behavior should be adapted around `ChildCommand`, `InteractionReview`,
-or Handoff. The next checkpoint is the large core-control cutover specified in
-`docs/architecture.md`: stable Epoch revision, Run/Launch, Steer/Send, fixed
-Basis, completion fencing, Review/attention, responsive parent scheduling, and
-legacy deletion land together. No intermediate state counts as achieved merely
-because it compiles.
+or Handoff. Stable Epoch revision, Steer/Send, fixed Basis, and completion
+fencing are achieved. The next checkpoint cuts Review/attention, responsive
+parent scheduling, Run/Launch control, and legacy deletion together. No
+intermediate state counts as achieved merely because it compiles.
 
 ## Target contract
 
@@ -915,14 +942,14 @@ Record after each checkpoint:
 
 | Measure | Baseline | Review snapshot | Done |
 | --- | ---: | ---: | ---: |
-| Rust code | 133,974 before upstream integration | 131,127 rebased additive tree | ≤119,127 |
+| Rust code | 133,974 before upstream integration | 128,049 after input spine (-3,078) | ≤119,127 |
 | Named legacy child/control/interaction modules | 12,002 physical lines | 12,002 | 0 old concept lines |
 | Complete old interaction/handoff physical lines | 4,803 | 4,803 | 0 old concept lines |
-| Authored-direction domain types | command + directive + review + handoff | unchanged | 1: Steer; Review is derived |
+| Authored-direction domain types | command + directive + review + handoff | 1: Steer; Review/Handoff still model attention | 1: Steer; Review is derived |
 | Public Run lifecycle verbs | at least reserve/activate/finish/revoke/reap plus runner variants | unchanged | 3 internal: reserve/advance/stop |
 | Stored Work lifecycle states | multiple Session/lease/interaction enums | unchanged | 3 Epoch states |
 | Additive usage authorities | 2 | 1 Turn ledger and query; parser normalization remains | 1 Turn ledger |
 | Executable provider-independent steering shapes | fragmented | 4 shapes through the controller | 4 shapes, one contract |
-| Files containing core deletion symbols | 31 | 31 | 0 |
+| Files containing core deletion symbols | 31 | 28 after input spine | 0 |
 
 Net reduction matters because this architecture deletes duplicate truth. It is not a license to compress readable code or count removed tests without replacing their behavioral proof.

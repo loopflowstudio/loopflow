@@ -18,8 +18,8 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child_session::{
-    body_progress_age, observe, BodyEvidence, BodyObservation, ChildRef, DirectiveKind,
-    ObservationRecipient, DEFAULT_STALL_AFTER,
+    body_progress_age, observe, BodyEvidence, BodyObservation, ChildRef, ObservationRecipient,
+    DEFAULT_STALL_AFTER,
 };
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
@@ -219,13 +219,9 @@ pub struct NextMove {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DirectiveSnapshot {
-    pub version: u32,
-    pub kind: DirectiveKind,
+pub struct BoundarySeedSnapshot {
+    pub basis: String,
     pub text: String,
-    pub applied_at: Option<String>,
-    pub incorporated_at: Option<String>,
-    pub incorporated_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,7 +354,7 @@ pub struct TaskDetailSnapshot {
     pub task: PmTaskSummary,
     pub reference: TaskReferenceSnapshot,
     pub runtime: Option<TaskRuntimeSnapshot>,
-    pub directive: Option<DirectiveSnapshot>,
+    pub direction: Option<BoundarySeedSnapshot>,
     pub next_move: NextMove,
     pub attention: TaskAttentionSnapshot,
     pub prs: Vec<PrSnapshot>,
@@ -426,7 +422,7 @@ impl PrSnapshot {
 pub struct ProjectDetailSnapshot {
     pub project: PmProjectSummary,
     pub runtime: Option<ProjectRuntimeSnapshot>,
-    pub directive: Option<DirectiveSnapshot>,
+    pub direction: Option<BoundarySeedSnapshot>,
     pub next_move: NextMove,
     pub tasks: Vec<TaskDetailSnapshot>,
 }
@@ -1153,7 +1149,7 @@ async fn snapshot_projects(
             next_move: next_move_for_unstarted_project(&project),
             project: project_summary(project),
             runtime: None,
-            directive: None,
+            direction: None,
             tasks: Vec::new(),
         })
         .collect::<Vec<_>>();
@@ -1181,12 +1177,8 @@ async fn snapshot_projects(
             next_move_for_project(project_session.status, &project_session.status_reason);
         details[index].runtime =
             Some(snapshot_project_runtime(store, project_session, liveness, now()).await?);
-        details[index].directive = current_directive(
-            store,
-            ChildRef::Project(project_session.id.clone()),
-            project_session.current_directive_version,
-        )
-        .await?;
+        details[index].direction =
+            current_direction(store, ChildRef::Project(project_session.id.clone())).await?;
     }
 
     for item in planning.items {
@@ -1368,10 +1360,7 @@ async fn snapshot_task_detail(
                     .and_then(|p| p.next_slug.as_deref()),
                 completion_refusal: completion_refusal.as_deref(),
                 resume_refusal: resume_refusal.as_deref(),
-                pending_directive: crate::ops::task::has_pending_directive(session),
-                directive_applied: crate::ops::task::current_directive_applied(store, session)
-                    .await?,
-                reconcilable: crate::ops::task::reconcilable_pr_set(&prs),
+                pending_directive: false,
                 ci: active.and_then(|pr| pr.fresh_ci()),
                 process_alive: process.alive,
                 predecessor_phase,
@@ -1391,22 +1380,15 @@ async fn snapshot_task_detail(
         action_evidence.as_ref(),
         observed_at,
     );
-    let directive = match session {
-        Some(session) => {
-            current_directive(
-                store,
-                ChildRef::Task(session.id.clone()),
-                session.current_directive_version,
-            )
-            .await?
-        }
+    let direction = match session {
+        Some(session) => current_direction(store, ChildRef::Task(session.id.clone())).await?,
         None => None,
     };
     Ok(TaskDetailSnapshot {
         task: task_summary(item),
         reference,
         runtime,
-        directive,
+        direction,
         next_move,
         attention,
         prs: prs
@@ -1688,34 +1670,25 @@ fn task_pr_empty(session: &TaskSession, pr: &TaskPr) -> Option<bool> {
     Some(head == pr.base_commit)
 }
 
-async fn current_directive(
+async fn current_direction(
     store: &SharedStore,
     target: ChildRef,
-    version: u32,
-) -> Result<Option<DirectiveSnapshot>> {
-    if version == 0 {
+) -> Result<Option<BoundarySeedSnapshot>> {
+    let work = store
+        .work_for_child(&target)
+        .await
+        .map_err(|err| anyhow!("failed to resolve child Work: {err}"))?;
+    let seed = store
+        .boundary_seed(&work)
+        .await
+        .map_err(|err| anyhow!("failed to read boundary seed: {err}"))?;
+    let text = seed.render();
+    if text.is_empty() {
         return Ok(None);
     }
-    let directive = store
-        .child_directives(&target)
-        .await
-        .map_err(|err| anyhow!("failed to read child directives: {err}"))?
-        .into_iter()
-        .find(|directive| directive.version == version)
-        .ok_or_else(|| {
-            anyhow!(
-                "{} {} points at missing directive v{version}",
-                target.target_kind(),
-                target.target_id()
-            )
-        })?;
-    Ok(Some(DirectiveSnapshot {
-        version: directive.version,
-        kind: directive.kind,
-        text: directive.text,
-        applied_at: directive.applied_at.and_then(format_time),
-        incorporated_at: directive.incorporated_at.and_then(format_time),
-        incorporated_summary: directive.incorporated_summary,
+    Ok(Some(BoundarySeedSnapshot {
+        basis: format!("{}:{}", seed.basis.epoch_id, seed.basis.revision),
+        text,
     }))
 }
 
@@ -2552,8 +2525,6 @@ mod tests {
                 pm_snapshot_synced_at: 1,
             },
             wave_id: wave_id.clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status,
             status_reason: status.as_str().to_string(),
             status_at: now,
@@ -2598,8 +2569,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave_id.clone(),
             project_session_id: project_session_id.clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status,
             status_reason: status.as_str().to_string(),
             status_at: now,
@@ -2752,6 +2721,11 @@ mod tests {
             "product-performance",
             ProjectSessionStatus::Waiting,
         );
+        store.create_wave(&wave).await.expect("create wave");
+        store
+            .create_project_session(&project)
+            .await
+            .expect("create project session");
         store
             .put_pm_snapshot(PmSnapshotRow {
                 repo: repo.display().to_string(),
@@ -3019,7 +2993,7 @@ mod tests {
                     }],
                 },
                 runtime: None,
-                directive: None,
+                direction: None,
                 next_move: NextMove {
                     owner: NextMoveOwner::Wave,
                     reason: "Project is ready to start".into(),
@@ -3039,7 +3013,7 @@ mod tests {
                         workspace: None,
                     },
                     runtime: None,
-                    directive: None,
+                    direction: None,
                     next_move: NextMove {
                         owner: NextMoveOwner::Project,
                         reason: "Task is ready to start".into(),
@@ -3109,7 +3083,7 @@ mod tests {
                 krs: Vec::new(),
             },
             runtime,
-            directive: None,
+            direction: None,
             next_move,
             tasks,
         }
@@ -3140,7 +3114,7 @@ mod tests {
                 }),
             },
             runtime,
-            directive: None,
+            direction: None,
             next_move,
             attention,
             prs: Vec::new(),

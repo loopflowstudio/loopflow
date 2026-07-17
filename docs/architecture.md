@@ -7,11 +7,11 @@ title: Architecture
 
 > **Moment of transparency — July 17, 2026**
 >
-> Loopflow does not yet implement most of the target model on this page. Today
-> it runs Wave residents, Project Sessions, Task Sessions, body leases,
-> `ChildCommand`, directives, and separate interaction/handoff machinery. The
-> provider-control and Turn-spend foundations have moved, but the structural
-> cutover has not.
+> Loopflow now runs its durable input through Work, Epoch, Basis, Steer, Send,
+> and the existing agent Turn ledger. Project/Task Sessions, body leases,
+> lifecycle `ChildCommand`, duplicate runners, and separate Review/Handoff
+> aggregates still own execution and attention. Run is therefore a normalized
+> authority bridge, not yet the sole controller.
 >
 > This page is deliberately a working architecture ledger during that cutover.
 > It keeps the current reality, target decisions, research evidence, and open
@@ -47,12 +47,13 @@ Three planning nouns remain distinct:
 User -> Wave Chat -> Wave resident
                        |
                        v
-                 Project Session
+                 Project Work / Session bridge
                        |
                        v
-                   Task Session -> worktree -> serial PRs
+                   Task Work / Session bridge -> worktree -> serial PRs
 
-ChildCommand + ChildDirective -> body generation -> provider process
+Steer -> Epoch Basis -> provider boundary -> agent Turn
+ChildCommand lifecycle -> body generation / Run bridge -> provider process
 InteractionReview + InteractiveHandoff -> Swift/terminal attention
 ```
 
@@ -78,10 +79,9 @@ runtime may consolidate local keeping and Work wakeups, but it does not turn
 
 The current runtime contains several overlapping representations:
 
-- Project/Task Session identity mixes durable Work with one attempt;
+- Project/Task Session identity still sits beside stable Work identity;
 - body generation mixes execution ownership with provider-process lifetime;
-- `ChildCommand` mixes direction, lifecycle, decisions, CI, and delivery;
-- directives copy authoritative prompt text and carry incorporation versions;
+- `ChildCommand` still mixes lifecycle controls and CI trigger delivery;
 - Sleeping, Blocked, review, handoff, lease, and health states overlap;
 - provider session ids sit on Work-shaped records;
 - Wave, Project, and Task runners repeat reservation, settlement, and recovery;
@@ -108,12 +108,22 @@ These are the implementation being replaced, not compatibility contracts.
 5. A current actionable CI incident can interrupt a parked Task Review once
    and settle before the background lifecycle resumes. This is the narrow
    implementation precursor to the generic control lane.
+6. Authored Project/Task direction is only Steer. `ChildDirective`, directive
+   versions, follow-up/replacement/resume prose variants, and writable Ack are
+   gone. A confirmed live Send cannot consume the Steer; a successful later
+   boundary Basis derives application.
+7. Project and Task boundaries capture immutable Basis on `agent_turns`, and
+   terminal completion rejects a stale or unapplied Basis.
+8. Stable Project/Task Work rows and Epochs survive Session succession. The
+   bridge imports exact legacy generations into Runs and closes an Epoch only
+   after its executor is quiescent.
 
-The first foundation still stores Project/Task direction through
-`ChildCommand`. A confirmed live send can therefore become only an anonymous
-in-memory future seed, and a crash can lose it. Current completion fencing also
-checks directives rather than the newer Steer. Those are the first structural
-bugs the target model removes.
+The structural gap is now execution and attention. Session/body stores still
+reserve, activate, revoke, and reap through duplicated Project/Task paths, then
+mirror those transitions into Run. Review and Handoff still encode an
+interactive flow as separate state machines and can starve behind parent
+background work. The next cut deletes those aggregates and makes shared Run
+control plus the parent control lane authoritative.
 
 ## Target contract
 
@@ -754,37 +764,42 @@ implementation.
 
 ## Implementation frontier
 
-**Current status.** Provider outcome, controller conformance, trace vocabulary,
-Turn-spend store/query, account-first routing, fail-closed revoked-body release,
-and narrow CI preemption are implemented. The working tree contains an
-unfinished additive attempt at durable ids, Epoch revisions, Runs, Steers,
-Sends, and Turn Basis. It is reconnaissance, not an achieved slice: current
-Session/body/command authority still exists and the new path is not yet the
-only behavior.
+**Current status.** The durable input spine is authoritative. Stable Work and
+Epoch rows survive Project and Task Session succession; exact process
+generations import into the matching Run. `Steer` is the only authored
+direction, allocates one ordered Epoch revision, and remains outstanding until
+a later successful boundary starts from it. `agent_turns` is the sole Turn and
+usage store, with immutable starting Basis. Completion rejects stale or
+unapplied Basis. Typed ToolResponse and actionable CI remain separate input.
+
+Execution and attention are not cut over. Session/body stores, lifecycle
+`ChildCommand`, `InteractionReview`, Handoff, and duplicate Project/Task
+controllers still bridge the new spine to the old runtime. They are the next
+deletion boundary, not supported parallel architecture.
 
 The next implementation pass is one **large core-control cutover**, not a set of
 small additive phases:
 
-1. make each Wave, Project, and Task a stable logical Work server hosted by one
-   generic Home runtime, with Work/Epoch/revision, product Run, Steer/Send, and
-   fixed boundary Basis authoritative across all three;
-2. replace completion/directive checks with the Basis fence;
-3. collapse interactive Task flow into Review derived from flow + Launch +
+1. collapse interactive Task flow into Review derived from flow + Launch +
    `attention: User | Parent(WorkRef)`;
-4. make the same Wave or Project agent concurrently accept control input and
+2. make the same Wave or Project agent concurrently accept control input and
    preempt its durable background playhead to service child Reviews across
    live-send and interrupt/restart providers;
-5. make parent control runnable without a writable clean-main checkout;
-6. cut User and parent direction through the same Steer API;
-7. delete Session/body/ChildCommand/ChildDirective/InteractionReview/Handoff
-   authority and DTOs rather than bridging them;
-8. finish the Run/Launch/Turn controller and migrations needed to leave one
+3. make parent control runnable without a writable clean-main checkout;
+4. cut User and parent direction through the same Steer API;
+5. replace Project/Task reservation, activation, revocation, reaping, and
+   settlement with shared Run reserve/advance/stop operations bound to exact
+   Run ids and leases;
+6. extend existing `agent_launches` for provider and opaque TUI continuity;
+7. delete Session/body/ChildCommand/InteractionReview/Handoff authority and
+   DTOs rather than bridging them;
+8. finish the Run/Launch controller and migrations needed to leave one
    executable architecture.
 
-The deletion is part of correctness. After rebasing on `main`, the unfinished
-additive tree is 131,127 Rust source lines. The core cut still owes the intended
-12,000-line reduction, so the target is at most 119,127 lines rather than
-claiming upstream deletion as architecture progress.
+The deletion is part of correctness. The input-spine checkpoint is 128,049
+Rust code lines, 3,078 below the 131,127 rebased checkpoint. The core cut still
+owes 8,922 lines to reach at most 119,127. Remove duplicate truth; do not earn
+the measure by compressing tests or claiming unrelated upstream deletion.
 
 It is done when:
 
@@ -813,6 +828,8 @@ It is done when:
   the first fresh repaired-head receipt is immutable;
 - Run authority is released only after positive containment absence; an
   unprovable probe remains fenced;
+- global binary promotion and external identity migration fence on active Run
+  authority and containment, never Session status or a body-generation guess;
 - a narrow typed tool response, where one exists, resolves before optional
   provider prose;
 - stale parent lease and stale Epoch/Basis writes are rejected;

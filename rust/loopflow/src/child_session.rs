@@ -88,18 +88,6 @@ prefixed_uuid_id!(
     ChildSessionDataError,
     ChildSessionDataError::InvalidId
 );
-prefixed_uuid_id!(
-    ChildDecisionId,
-    "cd_",
-    ChildSessionDataError,
-    ChildSessionDataError::InvalidId
-);
-prefixed_uuid_id!(
-    ChildDirectiveId,
-    "dir_",
-    ChildSessionDataError,
-    ChildSessionDataError::InvalidId
-);
 
 /// Opaque capability held only by the body allowed to write for a Session.
 ///
@@ -363,23 +351,8 @@ pub struct AbandonIntent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChildCommandKind {
-    FollowUp {
-        text: String,
-    },
-    Steer {
-        text: String,
-    },
-    Interrupt {
-        replacement: Option<String>,
-    },
-    Resume {
-        message: Option<String>,
-    },
-    Decide {
-        decision_id: ChildDecisionId,
-        choice: String,
-        message: Option<String>,
-    },
+    Interrupt,
+    Resume,
     Abandon {
         reason: String,
     },
@@ -529,87 +502,6 @@ impl ChildRef {
     }
 }
 
-pub(crate) fn unincorporated_directive_version(
-    current_version: u32,
-    incorporated_version: u32,
-) -> Option<u32> {
-    (current_version > incorporated_version).then_some(current_version)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum DirectiveKind {
-    Initial,
-    Replacement,
-    WorkRevised,
-}
-
-impl DirectiveKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Replacement => "replacement",
-            Self::WorkRevised => "work_revised",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChildDirective {
-    pub id: ChildDirectiveId,
-    pub target: ChildRef,
-    pub version: u32,
-    pub kind: DirectiveKind,
-    pub text: String,
-    pub source: ChildCommandSource,
-    pub command_id: Option<ChildCommandId>,
-    pub issued_at: OffsetDateTime,
-    pub applied_at: Option<OffsetDateTime>,
-    pub incorporated_at: Option<OffsetDateTime>,
-    pub incorporated_summary: Option<String>,
-}
-
-impl ChildDirective {
-    pub fn initial(target: ChildRef, text: String, source: ChildCommandSource) -> Self {
-        Self {
-            id: ChildDirectiveId::new(),
-            target,
-            version: 1,
-            kind: DirectiveKind::Initial,
-            text,
-            source,
-            command_id: None,
-            issued_at: OffsetDateTime::now_utc(),
-            applied_at: None,
-            incorporated_at: None,
-            incorporated_summary: None,
-        }
-    }
-
-    pub fn replacement(
-        target: ChildRef,
-        version: u32,
-        text: String,
-        source: ChildCommandSource,
-        command_id: ChildCommandId,
-    ) -> Self {
-        Self {
-            id: ChildDirectiveId::new(),
-            target,
-            version,
-            kind: DirectiveKind::Replacement,
-            text,
-            source,
-            command_id: Some(command_id),
-            issued_at: OffsetDateTime::now_utc(),
-            applied_at: None,
-            incorporated_at: None,
-            incorporated_summary: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildCommand {
     pub id: ChildCommandId,
@@ -626,22 +518,7 @@ pub struct ChildCommand {
 
 impl ChildCommand {
     pub fn new(target: ChildRef, source: ChildCommandSource, kind: ChildCommandKind) -> Self {
-        let effect = match &kind {
-            ChildCommandKind::FollowUp { .. } | ChildCommandKind::Resume { message: Some(_) } => {
-                Some(ChildCommandEffect::NextTurn)
-            }
-            ChildCommandKind::Interrupt {
-                replacement: Some(_),
-            } => Some(ChildCommandEffect::Replacement),
-            ChildCommandKind::Decide { .. } => Some(ChildCommandEffect::Decision),
-            // `CiFix` has no effect on a live turn: its effect is a launch, and
-            // its payload seeds the body that launch creates.
-            ChildCommandKind::Steer { .. }
-            | ChildCommandKind::Interrupt { replacement: None }
-            | ChildCommandKind::Resume { message: None }
-            | ChildCommandKind::Abandon { .. }
-            | ChildCommandKind::CiFix { .. } => None,
-        };
+        let effect = None;
         Self {
             id: ChildCommandId::new(),
             target,
@@ -1125,12 +1002,11 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
 mod tests {
     use super::{
         body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
-        plan_stranded_recovery, unincorporated_directive_version, BodyCategory, BodyControl,
-        BodyEvidence, BodyIntent, BodyOwner, BodyRecoveryPlan, ChildBodyOutcome, ChildCommand,
-        ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDecisionId,
-        ChildDirectiveId, ChildLeaseState, ChildLeaseToken, ChildProcessGeneration, ChildRef,
-        ChildWriteLease, Duration, StrandedPlan, TaskEvent, TaskEventKind, TaskSessionId,
-        DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
+        plan_stranded_recovery, BodyCategory, BodyControl, BodyEvidence, BodyIntent, BodyOwner,
+        BodyRecoveryPlan, ChildBodyOutcome, ChildCommand, ChildCommandId, ChildCommandKind,
+        ChildCommandSource, ChildCommandState, ChildLeaseState, ChildLeaseToken,
+        ChildProcessGeneration, ChildRef, ChildWriteLease, Duration, StrandedPlan, TaskEvent,
+        TaskEventKind, TaskSessionId, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
     };
 
     fn evidence(intent: BodyIntent, alive: bool, progress: Duration) -> BodyEvidence {
@@ -1183,9 +1059,8 @@ mod tests {
         assert_eq!(parsed, kind);
     }
 
-    /// A wake is a command, not a direction. Minting a directive would bump
-    /// `current_directive_version`, and `has_pending_directive` would then block
-    /// Task completion until a body acknowledged a direction no human ever gave.
+    /// A wake is a command, not direction. It must not allocate a Steer revision
+    /// or make completion wait on input no User or parent Run authored.
     #[test]
     fn a_ci_fix_wake_has_no_effect_on_a_live_turn() {
         let command = ChildCommand::new(
@@ -1277,19 +1152,12 @@ mod tests {
         let mut delivering = ChildCommand::new(
             target.clone(),
             ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "ship it".to_string(),
-            },
+            ChildCommandKind::Interrupt,
         );
         delivering.state = ChildCommandState::Delivering;
         delivering.claimed_by_generation = Some(7);
-        let mut claimed = ChildCommand::new(
-            target,
-            ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "then verify".to_string(),
-            },
-        );
+        let mut claimed =
+            ChildCommand::new(target, ChildCommandSource::Human, ChildCommandKind::Resume);
         claimed.state = ChildCommandState::Claimed;
         claimed.claimed_by_generation = Some(7);
 
@@ -1314,9 +1182,7 @@ mod tests {
         let mut claimed = ChildCommand::new(
             ChildRef::Task(crate::task::TaskSessionId::new()),
             ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "safe to reclaim".to_string(),
-            },
+            ChildCommandKind::Resume,
         );
         claimed.state = ChildCommandState::Claimed;
         claimed.claimed_by_generation = Some(7);
@@ -1340,9 +1206,7 @@ mod tests {
         let mut old = ChildCommand::new(
             ChildRef::Task(crate::task::TaskSessionId::new()),
             ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "already adjudicated".to_string(),
-            },
+            ChildCommandKind::Interrupt,
         );
         old.state = ChildCommandState::Uncertain;
         old.claimed_by_generation = Some(6);
@@ -1413,15 +1277,8 @@ mod tests {
     #[test]
     fn child_ids_are_prefixed_and_round_trip() {
         let command = ChildCommandId::new();
-        let decision = ChildDecisionId::new();
-        let directive = ChildDirectiveId::new();
 
         assert_eq!(ChildCommandId::parse(command.as_str()).unwrap(), command);
-        assert_eq!(ChildDecisionId::parse(decision.as_str()).unwrap(), decision);
-        assert_eq!(
-            ChildDirectiveId::parse(directive.as_str()).unwrap(),
-            directive
-        );
     }
 
     #[test]
@@ -1450,12 +1307,6 @@ mod tests {
             provenance: None,
         };
         assert!(!serde_json::to_string(&evidence).unwrap().contains(&raw));
-    }
-
-    #[test]
-    fn a_newer_directive_blocks_the_flow_boundary_until_incorporated() {
-        assert_eq!(unincorporated_directive_version(2, 1), Some(2));
-        assert_eq!(unincorporated_directive_version(2, 2), None);
     }
 
     fn body(state: ChildLeaseState, outcome: Option<ChildBodyOutcome>) -> ChildProcessGeneration {

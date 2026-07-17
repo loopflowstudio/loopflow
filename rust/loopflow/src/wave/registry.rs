@@ -190,7 +190,7 @@ impl StoreObserver {
 
     async fn task_control_source(
         &self,
-        session_id: &crate::task::TaskSessionId,
+        _session_id: &crate::task::TaskSessionId,
         event: &crate::task::TaskEventKind,
     ) -> Option<crate::child_session::ChildCommandSource> {
         match event {
@@ -201,22 +201,13 @@ impl StoreObserver {
                 .ok()
                 .flatten()
                 .map(|command| command.source),
-            crate::task::TaskEventKind::DirectiveChanged { directive_id, .. }
-            | crate::task::TaskEventKind::DirectiveIncorporated { directive_id, .. } => self
-                .store
-                .child_directives(&crate::child_session::ChildRef::Task(session_id.clone()))
-                .await
-                .ok()?
-                .into_iter()
-                .find(|directive| &directive.id == directive_id)
-                .map(|directive| directive.source),
             _ => None,
         }
     }
 
     async fn project_control_source(
         &self,
-        session_id: &crate::project_session::ProjectSessionId,
+        _session_id: &crate::project_session::ProjectSessionId,
         event: &crate::project_session::ProjectEventKind,
     ) -> Option<crate::child_session::ChildCommandSource> {
         match event {
@@ -227,18 +218,6 @@ impl StoreObserver {
                 .ok()
                 .flatten()
                 .map(|command| command.source),
-            crate::project_session::ProjectEventKind::DirectiveChanged { directive_id, .. }
-            | crate::project_session::ProjectEventKind::DirectiveIncorporated {
-                directive_id,
-                ..
-            } => self
-                .store
-                .child_directives(&crate::child_session::ChildRef::Project(session_id.clone()))
-                .await
-                .ok()?
-                .into_iter()
-                .find(|directive| &directive.id == directive_id)
-                .map(|directive| directive.source),
             _ => None,
         }
     }

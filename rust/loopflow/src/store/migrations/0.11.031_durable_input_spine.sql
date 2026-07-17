@@ -277,6 +277,76 @@ SELECT
     'historical import'
 FROM epochs;
 
+-- Preserve live execution authority during the one-way Session-to-Run import.
+-- The old lease remains the capability checked by the bridge; the Run row
+-- supplies the normalized active slot and lifecycle state until Sessions are
+-- removed.
+INSERT INTO runs (
+    id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
+    lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
+)
+SELECT
+    'run_' || lower(hex(randomblob(16))),
+    project_sessions.epoch_id,
+    (SELECT id FROM homes LIMIT 1),
+    CASE project_sessions.process_lease_state
+        WHEN 'reserved' THEN 'reserved'
+        WHEN 'revoked' THEN 'stopping'
+        ELSE 'active'
+    END,
+    json_object(
+        'kind', 'input',
+        'basis', json_object(
+            'epoch_id', project_sessions.epoch_id,
+            'revision', epochs.current_rev
+        )
+    ),
+    NULL,
+    lower(hex(randomblob(32))),
+    project_sessions.process_generation,
+    'project',
+    project_sessions.id,
+    COALESCE(project_sessions.process_started_at, project_sessions.created_at),
+    NULL,
+    NULL
+FROM project_sessions
+JOIN epochs ON epochs.id = project_sessions.epoch_id
+WHERE project_sessions.process_generation IS NOT NULL
+  AND project_sessions.process_lease_state IN ('legacy', 'reserved', 'active', 'revoked');
+
+INSERT INTO runs (
+    id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
+    lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
+)
+SELECT
+    'run_' || lower(hex(randomblob(16))),
+    task_sessions.epoch_id,
+    (SELECT id FROM homes LIMIT 1),
+    CASE task_sessions.process_lease_state
+        WHEN 'reserved' THEN 'reserved'
+        WHEN 'revoked' THEN 'stopping'
+        ELSE 'active'
+    END,
+    json_object(
+        'kind', 'input',
+        'basis', json_object(
+            'epoch_id', task_sessions.epoch_id,
+            'revision', epochs.current_rev
+        )
+    ),
+    NULL,
+    lower(hex(randomblob(32))),
+    task_sessions.process_generation,
+    'task',
+    task_sessions.id,
+    COALESCE(task_sessions.process_started_at, task_sessions.created_at),
+    NULL,
+    NULL
+FROM task_sessions
+JOIN epochs ON epochs.id = task_sessions.epoch_id
+WHERE task_sessions.process_generation IS NOT NULL
+  AND task_sessions.process_lease_state IN ('legacy', 'reserved', 'active', 'revoked');
+
 CREATE TABLE waits (
     id TEXT PRIMARY KEY,
     epoch_id TEXT NOT NULL REFERENCES epochs(id) ON DELETE RESTRICT,
@@ -286,58 +356,6 @@ CREATE TABLE waits (
 );
 CREATE UNIQUE INDEX idx_waits_one_unresolved_epoch
     ON waits(epoch_id) WHERE resolved_at IS NULL;
-
-CREATE TABLE launches (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE RESTRICT,
-    home_id TEXT NOT NULL REFERENCES homes(id) ON DELETE RESTRICT,
-    provider TEXT NOT NULL,
-    model TEXT,
-    account_id TEXT,
-    state TEXT NOT NULL CHECK (state IN ('starting', 'live', 'stopping', 'ended')),
-    containment_json TEXT NOT NULL CHECK (json_valid(containment_json)),
-    opaque_epoch_id TEXT,
-    opaque_basis_rev INTEGER,
-    resume_token TEXT,
-    started_at INTEGER NOT NULL,
-    ended_at INTEGER,
-    outcome TEXT,
-    CHECK ((opaque_epoch_id IS NULL) = (opaque_basis_rev IS NULL)),
-    CHECK ((state = 'ended') = (ended_at IS NOT NULL)),
-    FOREIGN KEY (opaque_epoch_id, opaque_basis_rev)
-        REFERENCES epoch_revisions(epoch_id, rev) ON DELETE RESTRICT
-);
-CREATE UNIQUE INDEX idx_launches_one_root
-    ON launches(run_id) WHERE state != 'ended';
-
-CREATE TABLE turns (
-    id TEXT PRIMARY KEY,
-    launch_id TEXT NOT NULL REFERENCES launches(id) ON DELETE RESTRICT,
-    epoch_id TEXT NOT NULL,
-    basis_rev INTEGER NOT NULL,
-    state TEXT NOT NULL CHECK (state IN (
-        'starting', 'active', 'succeeded', 'failed', 'interrupted', 'unknown'
-    )),
-    provider_turn_id TEXT,
-    started_at INTEGER NOT NULL,
-    ended_at INTEGER,
-    CHECK ((state IN ('starting', 'active')) = (ended_at IS NULL)),
-    FOREIGN KEY (epoch_id, basis_rev)
-        REFERENCES epoch_revisions(epoch_id, rev) ON DELETE RESTRICT
-);
-CREATE UNIQUE INDEX idx_turns_one_active_launch
-    ON turns(launch_id) WHERE state IN ('starting', 'active');
-
-CREATE TABLE done_proposals (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE RESTRICT,
-    epoch_id TEXT NOT NULL,
-    basis_rev INTEGER NOT NULL,
-    proposed_at INTEGER NOT NULL,
-    UNIQUE (run_id, epoch_id, basis_rev),
-    FOREIGN KEY (epoch_id, basis_rev)
-        REFERENCES epoch_revisions(epoch_id, rev) ON DELETE RESTRICT
-);
 
 CREATE TABLE steers (
     id TEXT PRIMARY KEY,
@@ -631,3 +649,10 @@ WHERE json_extract(kind_json, '$.kind') IN ('follow_up', 'steer', 'decide')
        AND json_extract(kind_json, '$.message') IS NOT NULL
    );
 DROP TABLE child_directives;
+
+-- Session rows no longer cache authored-input cursors. Work Basis is the only
+-- completion fence and lives on Epoch revisions.
+ALTER TABLE project_sessions DROP COLUMN current_directive_version;
+ALTER TABLE project_sessions DROP COLUMN incorporated_directive_version;
+ALTER TABLE task_sessions DROP COLUMN current_directive_version;
+ALTER TABLE task_sessions DROP COLUMN incorporated_directive_version;

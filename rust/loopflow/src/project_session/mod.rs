@@ -12,8 +12,7 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
-    ChildDecisionId, ChildDirectiveId, ChildLeaseState, ChildProcessGeneration, ChildRef,
-    DirectiveKind, ObservationRecipient,
+    ChildLeaseState, ChildProcessGeneration, ChildRef, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::session_context::ProjectLaunchReceipt;
@@ -113,8 +112,6 @@ pub struct ProjectSession {
     pub launch: ProjectLaunchReceipt,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    pub current_directive_version: u32,
-    pub incorporated_directive_version: u32,
     pub status: ProjectSessionStatus,
     pub status_reason: String,
     pub status_at: OffsetDateTime,
@@ -165,11 +162,6 @@ impl ProjectSession {
                 "{} requires a latest process generation",
                 self.status.as_str()
             )));
-        }
-        if self.incorporated_directive_version > self.current_directive_version {
-            return Err(ProjectDataError::InvalidInvariant(
-                "incorporated directive version exceeds current direction".to_string(),
-            ));
         }
         Ok(())
     }
@@ -230,30 +222,10 @@ pub enum ProjectEventKind {
         effect: Option<ChildCommandEffect>,
         error: Option<String>,
     },
-    DirectiveChanged {
-        directive_id: ChildDirectiveId,
-        version: u32,
-        directive_kind: DirectiveKind,
-    },
-    DirectiveIncorporated {
-        directive_id: ChildDirectiveId,
-        version: u32,
-        summary: String,
-    },
     TaskObserved {
         task_session_id: TaskSessionId,
         task_event_id: i64,
         event: Box<TaskEventKind>,
-    },
-    DecisionRequested {
-        decision_id: ChildDecisionId,
-        prompt: String,
-        options: Vec<String>,
-    },
-    DecisionResolved {
-        decision_id: ChildDecisionId,
-        choice: String,
-        message: Option<String>,
     },
     IterationCompleted {
         iteration: u32,
@@ -356,8 +328,6 @@ mod tests {
                 pm_snapshot_synced_at: 1,
             },
             wave_id: crate::id::WaveId::new(),
-            current_directive_version: 1,
-            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Created,
             status_reason: "created".to_string(),
             status_at: now,
@@ -405,13 +375,9 @@ mod tests {
     }
 
     #[test]
-    fn project_session_rejects_impossible_process_and_directive_state() {
+    fn project_session_rejects_impossible_process_state() {
         let mut session = project_session();
         session.status = ProjectSessionStatus::Running;
-        assert!(session.validate().is_err());
-
-        session.status = ProjectSessionStatus::Waiting;
-        session.incorporated_directive_version = 2;
         assert!(session.validate().is_err());
     }
 }

@@ -1,4 +1,5 @@
-use crate::child_session::{ChildCommand, ChildCommandSource, ChildWriteLease};
+use crate::child_session::{ChildCommandSource, ChildWriteLease};
+use crate::durable::SteerReceipt;
 use crate::id::WaveId;
 use crate::interaction_review::{
     InteractionReview, InteractionReviewDisposition, InteractionReviewId,
@@ -66,7 +67,7 @@ impl Store {
         project_session_id: &ProjectSessionId,
         lease: &ChildWriteLease,
         text: &str,
-    ) -> StoreResult<ChildCommand> {
+    ) -> StoreResult<SteerReceipt> {
         let review_id = review_id.clone();
         let project_session_id = project_session_id.clone();
         let lease = lease.clone();
@@ -102,7 +103,7 @@ impl Store {
         review_id: &InteractionReviewId,
         source: ChildCommandSource,
         text: &str,
-    ) -> StoreResult<ChildCommand> {
+    ) -> StoreResult<SteerReceipt> {
         let review_id = review_id.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {

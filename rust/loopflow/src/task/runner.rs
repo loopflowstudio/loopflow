@@ -11,14 +11,14 @@ use tokio::sync::mpsc;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input, input_is_current,
-    reconcile_stale_deliveries, ChildTarget, CommandStop, DecisionResolution, PendingInput,
+    reconcile_stale_deliveries, send_outstanding_steers, ChildTarget, CommandStop, PendingInput,
 };
 use crate::child_session::{
-    task_write_lease_from_env, unincorporated_directive_version, BoundaryResult,
-    ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
-    ChildRef, ChildWriteLease,
+    task_write_lease_from_env, BoundaryResult, ChildBodyHandoffRequest, ChildBodyOutcome,
+    ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildLeaseState, ChildRef, ChildWriteLease,
 };
+use crate::durable::{Basis, BoundarySeed};
 use crate::engine::wave_config::read_wave_config;
 use crate::engine::InteractionPolicy;
 use crate::harness::{
@@ -45,12 +45,14 @@ use crate::wave::Wave;
 struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     review: Option<InteractionReview>,
+    basis: Basis,
 }
 
 #[derive(Debug)]
 struct StartedTaskStep {
     review: Option<InteractionReviewId>,
     provider_turn_active: bool,
+    basis: Option<Basis>,
 }
 
 pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Result<()> {
@@ -226,7 +228,7 @@ async fn run_task_session_with(
     let mut review_start = None;
     let mut review_recovery = None;
     let mut interaction_review = if let Some(review) = prepared.review.take() {
-        open_interaction_review_body(&store, &session, lease, &mut flow, &review).await?;
+        open_interaction_review_body(&session, &mut flow, &review).await?;
         match (review.status, &review.reviewer) {
             (InteractionReviewStatus::Requested, InteractionReviewer::Human) => {
                 store
@@ -303,7 +305,7 @@ The durable reviewer outcome is:\n{}",
                 gather_ms: prepared.turn.context_gather_ms,
                 render_ms: prepared.turn.context_render_ms,
                 raw_provider: true,
-                basis: None,
+                basis: Some(prepared.basis.clone()),
             },
         ) {
             Ok(capture) => Some(capture),
@@ -317,6 +319,7 @@ The durable reviewer outcome is:\n{}",
     if let Some(capture) = &capture {
         capture.set_provider_session_id(session.provider_session_id.clone());
     }
+    let mut active_basis = prepared.basis.clone();
     let mut flow_turn_active = false;
     let mut provider_turn_active =
         apply_next_pending(&store, &session, lease, harness.as_mut(), &mut pending).await?;
@@ -344,7 +347,7 @@ The durable reviewer outcome is:\n{}",
         }
     });
     println!(
-        "task {}> attached; /status, /interrupt [message], /detach, or type a message/instruction",
+        "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
         session.launch.issue.identifier
     );
     let mut command_poll = tokio::time::interval(Duration::from_millis(200));
@@ -404,14 +407,14 @@ The durable reviewer outcome is:\n{}",
                     )
                 };
                 if let Some(wake) = wake {
-                    start_ci_fix_flow(
+                    active_basis = start_ci_fix_flow(
                         &store,
                         &mut session,
                         lease,
-                        wave.name(),
                         harness.as_mut(),
                         &mut flow,
                         &wake,
+                        capture.as_ref(),
                     ).await?;
                     ci_fix_wake = Some(wake);
                     // The bounded repair owns this body's exit. The durable Gate
@@ -431,6 +434,18 @@ The durable reviewer outcome is:\n{}",
                     &mut pending,
                 ).await? {
                     return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop, capture.as_ref()).await;
+                }
+                if provider_turn_active {
+                    if let Some(capture) = &capture {
+                        send_outstanding_steers(
+                            &store,
+                            ChildTarget::Task(&session.id, lease),
+                            harness.as_mut(),
+                            &capture.current_turn_id(),
+                            &active_basis,
+                        )
+                        .await?;
+                    }
                 }
                 if !provider_turn_active {
                     provider_turn_active = apply_next_pending(
@@ -482,6 +497,15 @@ The durable reviewer outcome is:\n{}",
                         }
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
+                        if let Some(capture) = &capture {
+                            let outcome = match status {
+                                Lifecycle::Completed => "completed",
+                                Lifecycle::Interrupted => "interrupted",
+                                Lifecycle::Failed => "failed",
+                                _ => "failed",
+                            };
+                            capture.finish_turn(outcome)?;
+                        }
                         provider_turn_active = false;
                         review_preempted = false;
                         if status == Lifecycle::Failed {
@@ -509,14 +533,14 @@ The durable reviewer outcome is:\n{}",
                                 &mut seen_commands,
                             ).await?;
                             if let Some(wake) = wake {
-                                start_ci_fix_flow(
+                                active_basis = start_ci_fix_flow(
                                     &store,
                                     &mut session,
                                     lease,
-                                    wave.name(),
                                     harness.as_mut(),
                                     &mut flow,
                                     &wake,
+                                    capture.as_ref(),
                                 ).await?;
                                 ci_fix_wake = Some(wake);
                                 // The repair takes the just-released provider
@@ -759,8 +783,12 @@ The durable reviewer outcome is:\n{}",
                                     harness.as_mut(),
                                     &mut flow,
                                     wave.name(),
+                                    capture.as_ref(),
                                 )
                                 .await?;
+                                if let Some(basis) = &started.basis {
+                                    active_basis = basis.clone();
+                                }
                                 interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
                                 provider_turn_active = started.provider_turn_active;
@@ -775,15 +803,12 @@ The durable reviewer outcome is:\n{}",
                                     open_task_flow_body(&mut flow, &session)?;
                                     flow_turn_active = true;
                                 }
-                                let command = input.command_id.map(|id| (id, input.effect));
                                 apply_input(
                                     &store,
                                     &session,
                                     lease,
                                     harness.as_mut(),
                                     &input.text,
-                                    command,
-                                    input.decision,
                                 ).await?;
                                 provider_turn_active = true;
                                 continue 'runner;
@@ -812,8 +837,12 @@ The durable reviewer outcome is:\n{}",
                                         harness.as_mut(),
                                         &mut flow,
                                         wave.name(),
+                                        capture.as_ref(),
                                     )
                                     .await?;
+                                    if let Some(basis) = &started.basis {
+                                        active_basis = basis.clone();
+                                    }
                                     interaction_review = started.review;
                                     flow_turn_active = interaction_review.is_none();
                                     provider_turn_active = started.provider_turn_active;
@@ -840,9 +869,13 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     harness.as_mut(),
                                     &mut flow,
+                                    capture.as_ref(),
                                     prepared,
                                 )
                                 .await?;
+                                if let Some(basis) = &started.basis {
+                                    active_basis = basis.clone();
+                                }
                                 interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
                                 provider_turn_active = started.provider_turn_active;
@@ -854,13 +887,6 @@ The durable reviewer outcome is:\n{}",
                                 .await?
                                 .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
                             sync_terminal_task_state(&mut session, &latest);
-                            session.current_directive_version = latest.current_directive_version;
-                            session.incorporated_directive_version =
-                                latest.incorporated_directive_version;
-                            let pending_directive = unincorporated_directive_version(
-                                session.current_directive_version,
-                                session.incorporated_directive_version,
-                            );
                             let observed_pr = crate::ops::task::reconcile_task_pr_for_lease(
                                 &store,
                                 &mut session,
@@ -917,13 +943,6 @@ The durable reviewer outcome is:\n{}",
                                     TaskSessionStatus::Completed,
                                     session.status_reason.clone(),
                                 )
-                            } else if let Some(version) = pending_directive {
-                                (
-                                    TaskSessionStatus::Blocked,
-                                    format!(
-                                        "current directive v{version} was applied but not incorporated; resume the Task flow and acknowledge it before settling"
-                                    ),
-                                )
                             } else if status == Lifecycle::Interrupted {
                                 (
                                     TaskSessionStatus::Waiting,
@@ -971,9 +990,13 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     harness.as_mut(),
                                     &mut flow,
+                                    capture.as_ref(),
                                     prepared,
                                 )
                                 .await?;
+                                if let Some(basis) = &started.basis {
+                                    active_basis = basis.clone();
+                                }
                                 interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
                                 provider_turn_active = started.provider_turn_active;
@@ -1019,9 +1042,13 @@ The durable reviewer outcome is:\n{}",
                                         lease,
                                         harness.as_mut(),
                                         &mut flow,
+                                        capture.as_ref(),
                                         prepared,
                                     )
                                     .await?;
+                                    if let Some(basis) = &started.basis {
+                                        active_basis = basis.clone();
+                                    }
                                     interaction_review = started.review;
                                     flow_turn_active = interaction_review.is_none();
                                     provider_turn_active = started.provider_turn_active;
@@ -1089,8 +1116,12 @@ The durable reviewer outcome is:\n{}",
                                     harness.as_mut(),
                                     &mut flow,
                                     wave.name(),
+                                    capture.as_ref(),
                                 )
                                 .await?;
+                                if let Some(basis) = &started.basis {
+                                    active_basis = basis.clone();
+                                }
                                 interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
                                 provider_turn_active = started.provider_turn_active;
@@ -1100,6 +1131,12 @@ The durable reviewer outcome is:\n{}",
                             // Persist non-status fields while the generation is still active.
                             // The following transaction alone chooses commands or inactivity.
                             store.update_task_session_for_lease(&session, lease).await?;
+                            if stopped_status == TaskSessionStatus::Completed {
+                                let work = store
+                                    .work_for_child(&ChildRef::Task(session.id.clone()))
+                                    .await?;
+                                store.validate_completion_basis(&work, &active_basis).await?;
+                            }
                             let boundary = store
                                 .claim_task_commands_or_stop_for_lease(
                                     &session.id,
@@ -1156,7 +1193,7 @@ The durable reviewer outcome is:\n{}",
                                 }
                             };
                             let resume_requested = boundary_commands.iter().any(|command| {
-                                matches!(&command.kind, ChildCommandKind::Resume { .. })
+                                matches!(&command.kind, ChildCommandKind::Resume)
                             });
                             if let Some(stop) = absorb_commands(
                                 &store,
@@ -1193,9 +1230,13 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     harness.as_mut(),
                                     &mut flow,
+                                    capture.as_ref(),
                                     prepared,
                                 )
                                 .await?;
+                                if let Some(basis) = &started.basis {
+                                    active_basis = basis.clone();
+                                }
                                 interaction_review = started.review;
                                 flow_turn_active = interaction_review.is_none();
                                 provider_turn_active = started.provider_turn_active;
@@ -1238,25 +1279,10 @@ async fn prepare_task_flow_step(
     flow: &Playhead,
     ci_fix: Option<&CiFixWake>,
 ) -> Result<PreparedTaskStep> {
-    let latest = store
-        .get_task_session(&session.id)
-        .await?
-        .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
-    session.current_directive_version = latest.current_directive_version;
-    session.incorporated_directive_version = latest.incorporated_directive_version;
-    let directives = store
-        .child_directives(&ChildRef::Task(session.id.clone()))
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
         .await?;
-    let directive = directives
-        .iter()
-        .find(|directive| directive.version == session.current_directive_version)
-        .ok_or_else(|| {
-            anyhow!(
-                "Task Session {} has no current directive v{}",
-                session.id,
-                session.current_directive_version
-            )
-        })?;
+    let boundary = store.boundary_seed(&work).await?;
     let step = flow
         .current()
         .ok_or_else(|| anyhow!("Task flow has no current step"))?;
@@ -1286,14 +1312,18 @@ async fn prepare_task_flow_step(
     // wake are chosen together at birth, so a `ci-fix` step without a wake would
     // mean the runner selected the flow from something other than the ledger.
     let seed = match (step.step.as_str(), ci_fix) {
-        ("ci-fix", Some(wake)) => ci_fix_seed(session, &pr, wake, wave_name),
+        ("ci-fix", Some(wake)) => format!(
+            "{}\n\n{}",
+            ci_fix_seed(session, &pr, wake, wave_name),
+            boundary.render()
+        ),
         ("ci-fix", None) => {
             anyhow::bail!(
                 "Task Session {} is running the ci-fix flow with no claimed ci-fix wake",
                 session.id
             )
         }
-        _ => task_seed(session, &pr, wave_name, directive),
+        _ => task_seed(session, &pr, wave_name, &boundary),
     };
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
@@ -1394,6 +1424,7 @@ async fn prepare_task_flow_step(
     Ok(PreparedTaskStep {
         turn: prepared,
         review,
+        basis: boundary.basis,
     })
 }
 
@@ -1436,7 +1467,7 @@ fn open_task_flow_body(flow: &mut Playhead, session: &TaskSession) -> Result<()>
 }
 
 async fn start_task_flow_turn(
-    store: &SharedStore,
+    _store: &SharedStore,
     session: &mut TaskSession,
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
@@ -1444,21 +1475,12 @@ async fn start_task_flow_turn(
     prepared: crate::lf::commands::run::PreparedHarnessTurn,
 ) -> Result<()> {
     open_task_flow_body(flow, session)?;
-    apply_input(store, session, lease, harness, &prepared.input, None, None).await?;
-    store
-        .mark_child_directive_applied_for_lease(
-            &ChildRef::Task(session.id.clone()),
-            lease,
-            session.current_directive_version,
-        )
-        .await?;
+    apply_input(_store, session, lease, harness, &prepared.input).await?;
     Ok(())
 }
 
 async fn open_interaction_review_body(
-    store: &SharedStore,
     session: &TaskSession,
-    lease: &ChildWriteLease,
     flow: &mut Playhead,
     review: &InteractionReview,
 ) -> Result<()> {
@@ -1473,13 +1495,6 @@ async fn open_interaction_review_body(
         );
     }
     open_task_flow_body(flow, session)?;
-    store
-        .mark_child_directive_applied_for_lease(
-            &ChildRef::Task(session.id.clone()),
-            lease,
-            session.current_directive_version,
-        )
-        .await?;
     Ok(())
 }
 
@@ -1489,24 +1504,23 @@ async fn start_prepared_task_step(
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
+    capture: Option<&crate::trace::CaptureHandle>,
     mut prepared: PreparedTaskStep,
 ) -> Result<StartedTaskStep> {
     if let Some(review) = prepared.review.take() {
-        open_interaction_review_body(store, session, lease, flow, &review).await?;
+        open_interaction_review_body(session, flow, &review).await?;
         let provider_turn_active = if review.reviewer == InteractionReviewer::Human {
             store
                 .activate_human_interaction_review(session, &review.id, lease)
                 .await?;
-            apply_input(
-                store,
-                session,
-                lease,
-                harness,
-                &prepared.turn.input,
-                None,
-                None,
-            )
-            .await?;
+            if let Some(capture) = capture {
+                capture.begin_turn_at(
+                    "queued",
+                    &prepared.turn.input,
+                    Some(prepared.basis.clone()),
+                )?;
+            }
+            apply_input(store, session, lease, harness, &prepared.turn.input).await?;
             true
         } else {
             false
@@ -1514,12 +1528,17 @@ async fn start_prepared_task_step(
         Ok(StartedTaskStep {
             review: Some(review.id),
             provider_turn_active,
+            basis: provider_turn_active.then_some(prepared.basis),
         })
     } else {
+        if let Some(capture) = capture {
+            capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
+        }
         start_task_flow_turn(store, session, lease, harness, flow, prepared.turn).await?;
         Ok(StartedTaskStep {
             review: None,
             provider_turn_active: true,
+            basis: Some(prepared.basis),
         })
     }
 }
@@ -1531,10 +1550,11 @@ async fn start_resumed_task_phase(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     wave_name: &str,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<StartedTaskStep> {
     *flow = resume_task_phase(session)?;
     let prepared = prepare_task_flow_step(store, session, lease, wave_name, flow, None).await?;
-    start_prepared_task_step(store, session, lease, harness, flow, prepared).await
+    start_prepared_task_step(store, session, lease, harness, flow, capture, prepared).await
 }
 
 fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
@@ -1811,17 +1831,7 @@ async fn apply_next_pending(
         if !pending_input_is_current(store, session, lease, &input).await? {
             continue;
         }
-        let command = input.command_id.map(|id| (id, input.effect));
-        apply_input(
-            store,
-            session,
-            lease,
-            harness,
-            &input.text,
-            command,
-            input.decision,
-        )
-        .await?;
+        apply_input(store, session, lease, harness, &input.text).await?;
         return Ok(true);
     }
     Ok(false)
@@ -1852,7 +1862,7 @@ async fn handle_attachment(
             .status();
         return Ok(());
     }
-    if !line.starts_with("/interrupt") {
+    if line != "/interrupt" {
         let review = store
             .interaction_review_at(
                 &session.id,
@@ -1864,107 +1874,62 @@ async fn handle_attachment(
         if let Some(review) = review.filter(|review| {
             review.reviewer == InteractionReviewer::Human && !review.status.is_terminal()
         }) {
-            let command = store
+            let receipt = store
                 .send_human_interaction_review_message(
                     &review.id,
                     ChildCommandSource::Attachment,
                     line,
                 )
                 .await?;
-            println!("queued {} for human review {}", command.id, review.id);
+            println!("queued {} for human review {}", receipt.steer.id, review.id);
             return Ok(());
         }
     }
-    let kind = if let Some(message) = line.strip_prefix("/interrupt") {
-        let message = message.trim();
-        ChildCommandKind::Interrupt {
-            replacement: (!message.is_empty()).then(|| message.to_string()),
-        }
-    } else {
-        ChildCommandKind::Steer {
-            text: line.to_string(),
-        }
-    };
-    let command = ChildCommand::new(
-        ChildRef::Task(session.id.clone()),
-        ChildCommandSource::Attachment,
-        kind,
-    );
-    let replacement = match &command.kind {
-        ChildCommandKind::Steer { text } => Some(text.clone()),
-        ChildCommandKind::Interrupt {
-            replacement: Some(text),
-        } => Some(text.clone()),
-        _ => None,
-    };
-    let (superseded, directive_event) = if let Some(text) = replacement {
-        let latest = store
-            .get_task_session(&session.id)
-            .await?
-            .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
-        let directive = ChildDirective::replacement(
-            ChildRef::Task(session.id.clone()),
-            latest.current_directive_version + 1,
-            text,
-            command.source.clone(),
-            command.id.clone(),
+    store
+        .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+        .await?;
+    let target = ChildRef::Task(session.id.clone());
+    if line == "/interrupt" {
+        let command = ChildCommand::new(
+            target,
+            ChildCommandSource::Attachment,
+            ChildCommandKind::Interrupt,
         );
-        let superseded = store
-            .create_child_command_with_directive(&command, &directive)
-            .await?;
-        (
-            superseded,
-            Some((directive.id, directive.version, directive.kind)),
-        )
-    } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
-        (
-            store.supersede_and_create_child_command(&command).await?,
-            None,
-        )
-    } else {
-        store.create_child_command(&command).await?;
-        (Vec::new(), None)
-    };
-    for command_id in superseded {
+        let superseded = store.supersede_and_create_child_command(&command).await?;
+        for command_id in superseded {
+            store
+                .append_task_event_for_lease(
+                    &session.id,
+                    lease,
+                    &TaskEventKind::CommandChanged {
+                        command_id,
+                        state: ChildCommandState::Superseded,
+                        effect: None,
+                        error: None,
+                    },
+                )
+                .await?;
+        }
         store
             .append_task_event_for_lease(
                 &session.id,
                 lease,
                 &TaskEventKind::CommandChanged {
-                    command_id,
-                    state: ChildCommandState::Superseded,
+                    command_id: command.id.clone(),
+                    state: ChildCommandState::Persisted,
                     effect: None,
                     error: None,
                 },
             )
             .await?;
-    }
-    if let Some((directive_id, version, directive_kind)) = directive_event {
-        store
-            .append_task_event_for_lease(
-                &session.id,
-                lease,
-                &TaskEventKind::DirectiveChanged {
-                    directive_id,
-                    version,
-                    directive_kind,
-                },
-            )
+        println!("queued {}", command.id);
+    } else {
+        let work = store.work_for_child(&target).await?;
+        let receipt = store
+            .append_steer(&work, crate::durable::Author::User, line, None)
             .await?;
+        println!("queued {}", receipt.steer.id);
     }
-    store
-        .append_task_event_for_lease(
-            &session.id,
-            lease,
-            &TaskEventKind::CommandChanged {
-                command_id: command.id.clone(),
-                state: ChildCommandState::Persisted,
-                effect: command.effect,
-                error: None,
-            },
-        )
-        .await?;
-    println!("queued {}", command.id);
     Ok(())
 }
 
@@ -2014,15 +1979,21 @@ async fn start_ci_fix_flow(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: &ChildWriteLease,
-    wave_name: &str,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     wake: &CiFixWake,
-) -> Result<()> {
+    capture: Option<&crate::trace::CaptureHandle>,
+) -> Result<Basis> {
     *flow = Playhead::new(QueuedInvocation::load(&session.worktree, "ci-fix")?).0;
+    let wave = owning_wave(store, session).await?;
     let prepared =
-        prepare_task_flow_step(store, session, lease, wave_name, flow, Some(wake)).await?;
-    start_task_flow_turn(store, session, lease, harness, flow, prepared.turn).await
+        prepare_task_flow_step(store, session, lease, wave.name(), flow, Some(wake)).await?;
+    if let Some(capture) = capture {
+        capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
+    }
+    let basis = prepared.basis;
+    start_task_flow_turn(store, session, lease, harness, flow, prepared.turn).await?;
+    Ok(basis)
 }
 
 fn filter_new_commands(
@@ -2093,31 +2064,18 @@ async fn record_unhandled_failure(
     let _ = store.finish_task_process(&session, lease).await;
 }
 
-/// Send `text` to the harness and record the driving command's fate: accepted on
-/// success, failed (with the error propagated) otherwise. `command` is `None`
-/// for the task seed, which has no command to reconcile.
 async fn apply_input(
     store: &SharedStore,
     session: &TaskSession,
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     text: &str,
-    command: Option<(ChildCommandId, ChildCommandEffect)>,
-    decision: Option<DecisionResolution>,
 ) -> Result<()> {
-    let (command_id, effect) = command
-        .map(|(command_id, effect)| (Some(command_id), effect))
-        .unwrap_or((None, ChildCommandEffect::NextTurn));
     apply_child_input(
         store,
         ChildTarget::Task(&session.id, lease),
         harness,
-        PendingInput {
-            command_id,
-            text: text.to_string(),
-            effect,
-            decision,
-        },
+        PendingInput::system(text.to_string()),
     )
     .await
 }
@@ -2693,12 +2651,12 @@ async fn settle_ci_fix_turn(
     match verdict {
         CiFixVerdict::Accept => {
             target
-                .accept_command(store, wake.command_id.clone(), None)
+                .accept_command(store, wake.command_id.clone())
                 .await?
         }
         CiFixVerdict::Fail => {
             target
-                .fail_command(store, wake.command_id.clone(), None, &reason)
+                .fail_command(store, wake.command_id.clone(), &reason)
                 .await?
         }
         CiFixVerdict::Supersede => {
@@ -2768,7 +2726,7 @@ fn task_seed(
     session: &TaskSession,
     pr: &crate::task::TaskPr,
     wave_name: &str,
-    directive: &ChildDirective,
+    boundary: &BoundarySeed,
 ) -> String {
     let placement = pr
         .parent_pr_id
@@ -2787,16 +2745,14 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` proposes completing the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. Gate approves settlement or returns the same Task to iteration. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` proposes completing the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. Gate approves settlement or returns the same Task to iteration. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,
         project = session.launch.project.name,
         project_id = session.launch.project.id.as_str(),
         project_context = session.launch.project.prompt_context,
-        directive_version = directive.version,
-        directive_kind = directive.kind.as_str(),
-        directive_text = directive.text,
+        direction = boundary.render(),
         snapshot_synced_at = session.launch.pm_snapshot_synced_at,
         wave = wave_name,
         session_id = session.id,
@@ -2823,10 +2779,6 @@ fn progress_summary(text: &str) -> String {
     summary.push('…');
     summary
 }
-
-/// The failed-PR ci-fix lifecycle driven end to end. In-crate because the
-/// functions it proves — `arm_ci_fix_wake` among them — are private to this
-/// module tree; see the module's own header.
 #[cfg(test)]
 mod ci_fix_lifecycle_tests;
 
@@ -2842,15 +2794,14 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        absorb_commands, apply_input, apply_next_pending, ci_fix_seed, handle_attachment,
-        handle_body_failure, human_interaction_review_protocol, infra_blocked_reason,
-        interaction_review_prompt, prepare_task_flow_step, progress_summary, resume_task_phase,
-        run_task_session_inner, start_prepared_task_step, task_seed, CommandStop, PreparedTaskStep,
+        absorb_commands, ci_fix_seed, handle_body_failure, human_interaction_review_protocol,
+        infra_blocked_reason, interaction_review_prompt, prepare_task_flow_step, progress_summary,
+        resume_task_phase, run_task_session_inner, start_prepared_task_step, CommandStop,
+        PreparedTaskStep,
     };
     use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
     use crate::child_session::{
-        ChildBodyHandoffRequest, ChildCommand, ChildCommandEffect, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildRef,
+        ChildCommand, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildRef,
         ChildWriteLease,
     };
     use crate::engine::agent::AgentConfig;
@@ -2952,48 +2903,6 @@ mod tests {
                 fail_interrupt: false,
             }
         }
-
-        /// A live-capable provider whose active Turn answers with `outcome`.
-        fn steering(outcome: SendCurrentOutcome) -> Self {
-            Self {
-                steer_outcome: Some(outcome),
-                ..Self::new(true)
-            }
-        }
-    }
-
-    /// A provider Loopflow cannot see inside: a TUI behind tmux. It takes seed
-    /// input and exposes no Turn, so it never overrides `send_current` and
-    /// inherits the trait default.
-    struct OpaqueTuiHarness {
-        sent: Vec<String>,
-        interrupts: usize,
-    }
-
-    #[async_trait]
-    impl Harness for OpaqueTuiHarness {
-        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
-            Ok(())
-        }
-
-        async fn send_input(&mut self, content: &str) -> Result<()> {
-            self.sent.push(content.to_string());
-            Ok(())
-        }
-
-        async fn interrupt(&mut self) -> Result<()> {
-            self.interrupts += 1;
-            Ok(())
-        }
-
-        async fn stop(&mut self) -> Result<()> {
-            Ok(())
-        }
-
-        /// A TUI exposes no resumable vendor id.
-        fn provider_session_id(&self) -> Option<String> {
-            None
-        }
     }
 
     #[async_trait]
@@ -3076,8 +2985,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Created,
             status_reason: "reserved".to_string(),
             status_at: now,
@@ -3108,8 +3015,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_session_id: project.id,
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status: TaskSessionStatus::Waiting,
             status_reason: "ready for provider".to_string(),
             status_at: now,
@@ -3152,26 +3057,14 @@ mod tests {
         };
         store.create_task_session(&session, &pr).await.unwrap();
         if let Some(text) = directive_text {
-            let command = ChildCommand::new(
-                ChildRef::Task(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::Steer {
-                    text: text.to_string(),
-                },
-            );
-            let directive = ChildDirective::replacement(
-                ChildRef::Task(session.id.clone()),
-                1,
-                text.to_string(),
-                command.source.clone(),
-                command.id.clone(),
-            );
-            store
-                .create_child_command_with_directive(&command, &directive)
+            let work = store
+                .work_for_child(&ChildRef::Task(session.id.clone()))
                 .await
                 .unwrap();
-            session.current_directive_version = 1;
-            store.update_task_session(&session).await.unwrap();
+            store
+                .append_steer(&work, crate::durable::Author::User, text, None)
+                .await
+                .unwrap();
         }
         session.begin_generation(format!("task-{provider}"));
         let lease = store
@@ -3243,9 +3136,13 @@ mod tests {
         let turns = trace_store
             .agent_turns_for_launches(&[launches[0].id.clone()])
             .unwrap();
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].provider_input_tokens, Some(321));
-        assert_eq!(turns[0].provider_output_tokens, Some(45));
+        let spending_turns = turns
+            .iter()
+            .filter(|turn| turn.provider_input_tokens.is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(spending_turns.len(), 1);
+        assert_eq!(spending_turns[0].provider_input_tokens, Some(321));
+        assert_eq!(spending_turns[0].provider_output_tokens, Some(45));
 
         crate::journal::emit(
             repo.path(),
@@ -3293,25 +3190,19 @@ mod tests {
             .success());
 
         let (store, mut session, lease) = conformance_session("codex").await;
-        let command = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "Prepare the Task for review".to_string(),
-            },
-        );
-        let directive = ChildDirective::replacement(
-            ChildRef::Task(session.id.clone()),
-            1,
-            "Prepare the Task for review".to_string(),
-            command.source.clone(),
-            command.id.clone(),
-        );
-        store
-            .create_child_command_with_directive(&command, &directive)
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
             .unwrap();
-        session.current_directive_version = 1;
+        store
+            .append_steer(
+                &work,
+                crate::durable::Author::User,
+                "Prepare the Task for review",
+                None,
+            )
+            .await
+            .unwrap();
         session.worktree = repo.path().to_path_buf();
         session.lifecycle = lifecycle;
         session.lifecycle_phase = TaskLifecyclePhase::Gate;
@@ -3448,6 +3339,7 @@ mod tests {
             &lease,
             &mut harness,
             &mut flow,
+            None,
             replayed,
         )
         .await
@@ -3474,43 +3366,6 @@ mod tests {
             crate::interaction_review::InteractionReviewStatus::Active
         );
         assert!(session.status_reason.contains("Human review"));
-    }
-
-    #[tokio::test]
-    async fn attached_human_review_input_is_fifo_followup_not_steer() {
-        let (_repo, store, session, lease, _flow, prepared) =
-            prepared_gate_review(TaskLifecyclePlan::standard("task")).await;
-        let review = prepared.review.expect("demo requires human review");
-
-        handle_attachment(
-            &store,
-            &session,
-            &lease,
-            "Show the login path from the product.".to_string(),
-        )
-        .await
-        .unwrap();
-
-        let commands = store
-            .list_child_commands(&ChildRef::Task(session.id.clone()))
-            .await
-            .unwrap();
-        let message = commands.last().expect("attached review message is durable");
-        assert_eq!(message.source, ChildCommandSource::Attachment);
-        assert!(matches!(
-            &message.kind,
-            ChildCommandKind::FollowUp { text }
-                if text.contains(review.id.as_str()) && text.contains("Show the login path")
-        ));
-        assert_eq!(
-            store
-                .get_task_session(&session.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .current_directive_version,
-            1
-        );
     }
 
     #[tokio::test]
@@ -3599,451 +3454,12 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn failed_claude_task_hands_off_to_codex_with_directive_and_active_pr() {
-        let (store, mut failed, _lease) = conformance_session("claude").await;
-        let session_id = failed.id.clone();
-        let worktree = failed.worktree.clone();
-        failed.set_status(
-            TaskSessionStatus::Failed,
-            "Claude quota exhausted after preserving durable state",
-        );
-        store.update_task_session(&failed).await.unwrap();
-
-        let command = ChildCommand::new(
-            ChildRef::Task(session_id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "Keep the existing directive and continue PR2".to_string(),
-            },
-        );
-        let directive = ChildDirective::replacement(
-            ChildRef::Task(session_id.clone()),
-            1,
-            "Keep the existing directive and continue PR2".to_string(),
-            command.source.clone(),
-            command.id.clone(),
-        );
-        store
-            .create_child_command_with_directive(&command, &directive)
-            .await
-            .unwrap();
-        let active_pr_before = store.active_task_pr(&session_id).await.unwrap().unwrap();
-
-        let request = ChildBodyHandoffRequest {
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            reason: "Claude quota exhausted".to_string(),
-        };
-        let mut resumed = store
-            .handoff_task_body(&session_id, &request)
-            .await
-            .unwrap();
-        let active_pr_after = store.active_task_pr(&session_id).await.unwrap().unwrap();
-        let current_directive = store
-            .child_directives(&ChildRef::Task(session_id.clone()))
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|candidate| candidate.version == resumed.current_directive_version)
-            .expect("current directive survives provider death");
-        let seed = task_seed(
-            &resumed,
-            &active_pr_after,
-            "wave-claude",
-            &current_directive,
-        );
-
-        assert_eq!(resumed.id, session_id);
-        assert_eq!(resumed.worktree, worktree);
-        assert_eq!(resumed.agent, "codex");
-        assert_eq!(resumed.provider, "codex");
-        assert_eq!(resumed.provider_session_id, None);
-        assert_eq!(active_pr_after.id, active_pr_before.id);
-        assert_eq!(active_pr_after.branch, active_pr_before.branch);
-        assert!(seed.contains("Keep the existing directive and continue PR2"));
-        assert!(seed.contains(&active_pr_before.branch));
-        assert!(seed.contains(session_id.as_str()));
-
-        assert_eq!(resumed.begin_generation("lf-task-codex".to_string()), 2);
-        assert_eq!(resumed.latest_process.unwrap().generation, 2);
-        let events = store.task_events_after(&session_id, 0).await.unwrap();
-        assert!(matches!(
-            events.last().map(|event| &event.kind),
-            Some(TaskEventKind::BodyHandedOff { handoff })
-                if handoff.from_agent == "claude"
-                    && handoff.to_agent == "codex"
-                    && handoff.from_provider == "claude"
-                    && handoff.to_provider == "codex"
-                    && handoff.reason == "Claude quota exhausted"
-        ));
-    }
-
-    #[tokio::test]
-    async fn attached_task_direction_is_versioned_before_provider_input() {
-        let (store, session, lease) = conformance_session("codex").await;
-
-        handle_attachment(&store, &session, &lease, "fix the parser first".to_string())
-            .await
-            .unwrap();
-
-        let current = store.get_task_session(&session.id).await.unwrap().unwrap();
-        let directives = store
-            .child_directives(&ChildRef::Task(session.id.clone()))
-            .await
-            .unwrap();
-        assert_eq!(current.current_directive_version, 1);
-        assert_eq!(directives.len(), 1);
-        assert_eq!(directives[0].text, "fix the parser first");
-        assert_eq!(directives[0].source, ChildCommandSource::Attachment);
-        assert!(directives[0].command_id.is_some());
-    }
-
-    #[tokio::test]
-    async fn provider_control_conformance_reports_honest_steer_effects() {
-        for (provider, accepts_current_send, expected_effect) in [
-            ("codex", true, ChildCommandEffect::LiveSteer),
-            ("claude", false, ChildCommandEffect::NextTurn),
-            ("opencode", false, ChildCommandEffect::NextTurn),
-        ] {
-            let (store, session, lease) = conformance_session(provider).await;
-            let command = ChildCommand::new(
-                ChildRef::Task(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::Steer {
-                    text: "change direction".to_string(),
-                },
-            );
-            store.create_child_command(&command).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut harness = ScriptedHarness::new(accepts_current_send);
-            let mut pending = VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-            if let Some(input) = pending.pop_front() {
-                apply_input(
-                    &store,
-                    &session,
-                    &lease,
-                    &mut harness,
-                    &input.text,
-                    input.command_id.map(|id| (id, input.effect)),
-                    input.decision,
-                )
-                .await
-                .unwrap();
-            }
-
-            let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-            assert_eq!(receipt.state, ChildCommandState::Accepted, "{provider}");
-            assert_eq!(receipt.effect, Some(expected_effect), "{provider}");
-            let expected_sends = if accepts_current_send { 2 } else { 1 };
-            assert_eq!(harness.sent.len(), expected_sends, "{provider}");
-            assert!(
-                harness.sent.iter().all(|text| text == "change direction"),
-                "{provider}"
-            );
-            assert_eq!(harness.interrupts, 0, "{provider}");
-        }
-    }
-
     /// The four provider control shapes must share one durable outcome: the
     /// Steer text reaches the next boundary's seed no matter which route the
     /// provider took, and plain steering never interrupts.
     ///
     /// This drives the real controller against each shape. Asserting these
     /// literals from a fixture file instead would only prove the file parses.
-    #[tokio::test]
-    async fn every_provider_control_shape_still_seeds_the_next_boundary() {
-        for (shape, mut harness) in [
-            (
-                "live steer accepted",
-                ScriptedHarness::steering(SendCurrentOutcome::Sent {
-                    provider_turn_id: "turn_live".to_string(),
-                }),
-            ),
-            (
-                // Codex answering `no active turn to steer`: the Turn ended
-                // between observation and delivery.
-                "live steer rejected",
-                ScriptedHarness::steering(SendCurrentOutcome::NotSteerable),
-            ),
-            (
-                // The send began but its response never came back. The provider
-                // may or may not hold the text.
-                "live steer response lost",
-                ScriptedHarness::steering(SendCurrentOutcome::Unknown {
-                    provider_turn_id: Some("turn_unknown".to_string()),
-                    error: "timed out waiting for Codex steer response".to_string(),
-                }),
-            ),
-        ] {
-            let (store, session, lease) = conformance_session("codex").await;
-            let command = ChildCommand::new(
-                ChildRef::Task(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::Steer {
-                    text: "change direction".to_string(),
-                },
-            );
-            store.create_child_command(&command).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut pending = VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-
-            let seed = pending
-                .pop_front()
-                .unwrap_or_else(|| panic!("{shape}: the Steer must survive to the next seed"));
-            assert_eq!(seed.text, "change direction", "{shape}");
-
-            apply_input(
-                &store,
-                &session,
-                &lease,
-                &mut harness,
-                &seed.text,
-                seed.command_id.map(|id| (id, seed.effect)),
-                seed.decision,
-            )
-            .await
-            .unwrap();
-
-            assert_eq!(
-                harness.sent.last().map(String::as_str),
-                Some("change direction"),
-                "{shape}: the next boundary starts from the Steer"
-            );
-            assert_eq!(
-                harness.interrupts, 0,
-                "{shape}: plain steering never interrupts"
-            );
-        }
-
-        // Fourth shape: a TUI with no observable Turn at all. It inherits the
-        // trait default, so there is no live route to attempt — the Steer can
-        // only reach it as seed input.
-        let (store, session, lease) = conformance_session("codex").await;
-        let command = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "change direction".to_string(),
-            },
-        );
-        store.create_child_command(&command).await.unwrap();
-        let commands = store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-            .await
-            .unwrap();
-        let mut harness = OpaqueTuiHarness {
-            sent: Vec::new(),
-            interrupts: 0,
-        };
-        let mut pending = VecDeque::new();
-
-        absorb_commands(
-            &store,
-            &session,
-            &lease,
-            commands,
-            &mut harness,
-            true,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-
-        let seed = pending
-            .pop_front()
-            .expect("opaque TUI: the Steer must survive to the next seed");
-        apply_input(
-            &store,
-            &session,
-            &lease,
-            &mut harness,
-            &seed.text,
-            seed.command_id.map(|id| (id, seed.effect)),
-            seed.decision,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(harness.sent, vec!["change direction".to_string()]);
-        assert_eq!(harness.interrupts, 0);
-        let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(receipt.effect, Some(ChildCommandEffect::NextTurn));
-    }
-
-    #[tokio::test]
-    async fn task_follow_up_is_fifo_and_never_interrupts() {
-        for provider in ["codex", "claude", "opencode"] {
-            let (store, session, lease) = conformance_session(provider).await;
-            let first = ChildCommand::new(
-                ChildRef::Task(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::FollowUp {
-                    text: "first".to_string(),
-                },
-            );
-            let second = ChildCommand::new(
-                ChildRef::Task(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::FollowUp {
-                    text: "second".to_string(),
-                },
-            );
-            store.create_child_command(&first).await.unwrap();
-            store.create_child_command(&second).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut harness = ScriptedHarness::new(provider == "codex");
-            let mut pending = VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-
-            assert_eq!(harness.interrupts, 0, "{provider}");
-            assert!(harness.sent.is_empty(), "{provider}");
-            for expected in ["first", "second"] {
-                assert!(
-                    apply_next_pending(&store, &session, &lease, &mut harness, &mut pending,)
-                        .await
-                        .unwrap()
-                );
-                assert_eq!(harness.sent.last().map(String::as_str), Some(expected));
-            }
-            assert_eq!(
-                store
-                    .get_child_command(&first.id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .effect,
-                Some(ChildCommandEffect::NextTurn),
-                "{provider}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn task_replacement_supersedes_queued_input() {
-        let (store, session, lease) = conformance_session("claude").await;
-        let first = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "A".to_string(),
-            },
-        );
-        let second = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::FollowUp {
-                text: "B".to_string(),
-            },
-        );
-        store.create_child_command(&first).await.unwrap();
-        store.create_child_command(&second).await.unwrap();
-        let mut harness = ScriptedHarness::new(false);
-        let mut pending = VecDeque::new();
-        let commands = store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-            .await
-            .unwrap();
-        absorb_commands(
-            &store,
-            &session,
-            &lease,
-            commands,
-            &mut harness,
-            true,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-
-        let replacement = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Interrupt {
-                replacement: Some("C".to_string()),
-            },
-        );
-        store
-            .supersede_and_create_child_command(&replacement)
-            .await
-            .unwrap();
-        let commands = store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-            .await
-            .unwrap();
-        absorb_commands(
-            &store,
-            &session,
-            &lease,
-            commands,
-            &mut harness,
-            true,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-
-        let input = pending.pop_front().expect("replacement input");
-        assert_eq!(input.command_id.as_ref(), Some(&replacement.id));
-        assert_eq!(input.text, "C");
-        assert!(pending.is_empty());
-        assert_eq!(harness.interrupts, 1);
-        for superseded in [&first, &second] {
-            assert_eq!(
-                store
-                    .get_child_command(&superseded.id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .state,
-                ChildCommandState::Superseded
-            );
-        }
-    }
 
     #[tokio::test]
     async fn bare_task_interrupt_stops_one_turn_without_abandoning_the_session() {
@@ -4051,7 +3467,7 @@ mod tests {
         let command = ChildCommand::new(
             ChildRef::Task(session.id.clone()),
             ChildCommandSource::Human,
-            ChildCommandKind::Interrupt { replacement: None },
+            ChildCommandKind::Interrupt,
         );
         store.create_child_command(&command).await.unwrap();
         let commands = store
@@ -4086,127 +3502,6 @@ mod tests {
             ChildCommandState::Accepted
         );
         assert!(!session.status.is_terminal());
-    }
-
-    #[tokio::test]
-    async fn task_decisions_resume_every_provider_without_losing_lineage() {
-        for (provider, accepts_current_send) in
-            [("codex", true), ("claude", false), ("opencode", false)]
-        {
-            let (store, session, lease) = conformance_session(provider).await;
-            let decision_id = ChildDecisionId::new();
-            let command = ChildCommand::new(
-                ChildRef::Task(session.id.clone()),
-                ChildCommandSource::Human,
-                ChildCommandKind::Decide {
-                    decision_id: decision_id.clone(),
-                    choice: "revise".to_string(),
-                    message: Some("cover the boundary".to_string()),
-                },
-            );
-            store.create_child_command(&command).await.unwrap();
-            let commands = store
-                .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-                .await
-                .unwrap();
-            let mut harness = ScriptedHarness::new(accepts_current_send);
-            let mut pending = VecDeque::new();
-
-            absorb_commands(
-                &store,
-                &session,
-                &lease,
-                commands,
-                &mut harness,
-                true,
-                &mut pending,
-            )
-            .await
-            .unwrap();
-            if let Some(input) = pending.pop_front() {
-                apply_input(
-                    &store,
-                    &session,
-                    &lease,
-                    &mut harness,
-                    &input.text,
-                    input.command_id.map(|id| (id, input.effect)),
-                    input.decision,
-                )
-                .await
-                .unwrap();
-            }
-
-            assert_eq!(harness.interrupts, 0, "{provider}");
-            assert_eq!(
-                store
-                    .get_child_command(&command.id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .effect,
-                Some(ChildCommandEffect::Decision),
-                "{provider}"
-            );
-            assert!(
-                store
-                    .task_events_after(&session.id, 0)
-                    .await
-                    .unwrap()
-                    .iter()
-                    .any(|event| matches!(
-                        &event.kind,
-                        TaskEventKind::DecisionResolved {
-                            decision_id: resolved,
-                            choice,
-                            message: Some(message),
-                        } if resolved == &decision_id
-                            && choice == "revise"
-                            && message == "cover the boundary"
-                    )),
-                "{provider}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn failed_live_task_send_keeps_direction_for_the_next_turn() {
-        let (store, session, lease) = conformance_session("claude").await;
-        let command = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "change direction".to_string(),
-            },
-        );
-        store.create_child_command(&command).await.unwrap();
-        let commands = store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-            .await
-            .unwrap();
-        let mut harness = ScriptedHarness::new(true);
-        harness.fail_send = true;
-        let mut pending = VecDeque::new();
-
-        absorb_commands(
-            &store,
-            &session,
-            &lease,
-            commands,
-            &mut harness,
-            true,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            pending.pop_front().map(|input| input.text),
-            Some("change direction".to_string())
-        );
-        let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(receipt.state, ChildCommandState::Delivering);
-        assert_eq!(receipt.effect, Some(ChildCommandEffect::LiveSteer));
-        assert_eq!(harness.interrupts, 0);
     }
 
     fn task_handoff_request(
@@ -4433,8 +3728,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Created,
             status_reason: "reserved".to_string(),
             status_at: now,
@@ -4466,8 +3759,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_session_id: project.id,
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
             status: TaskSessionStatus::Waiting,
             status_reason: "ready".to_string(),
             status_at: now,

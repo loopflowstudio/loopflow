@@ -882,6 +882,16 @@ impl CaptureHandle {
         result
     }
 
+    pub fn finish_turn(&self, status: &str) -> StoreResult<()> {
+        if !matches!(status, "completed" | "failed" | "interrupted") {
+            return Err(StoreError::InvalidData(format!(
+                "invalid agent Turn outcome: {status}"
+            )));
+        }
+        let mut capture = self.0.lock().expect("trace capture mutex poisoned");
+        capture.finish_current_turn(status, OffsetDateTime::now_utc().unix_timestamp())
+    }
+
     pub fn current_turn_id(&self) -> String {
         self.0
             .lock()

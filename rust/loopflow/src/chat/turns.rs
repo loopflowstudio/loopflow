@@ -353,52 +353,6 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
                 error.as_deref().unwrap_or_default(),
             )
         },
-        TaskEventKind::DirectiveChanged { version, .. } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Directed,
-                &format!("Direction v{version}"),
-                "Waiting for incorporation",
-            )
-        },
-        TaskEventKind::DirectiveIncorporated {
-            version, summary, ..
-        } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Incorporated,
-                &format!("Incorporated direction v{version}"),
-                summary,
-            )
-        },
-        TaskEventKind::DirectiveReconciled {
-            version, summary, ..
-        } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Incorporated,
-                &format!("Reconciled direction v{version} by out-of-band attestation"),
-                summary,
-            )
-        },
-        TaskEventKind::DecisionRequested {
-            decision_id,
-            prompt,
-            options,
-        } => ActivityFields {
-            decision_id: Some(decision_id.to_string()),
-            options: options.clone(),
-            ..activity(
-                ChildActivityKind::DecisionRequired,
-                "Decision required",
-                prompt,
-            )
-        },
-        TaskEventKind::DecisionResolved { choice, .. } => activity(
-            ChildActivityKind::DecisionResolved,
-            "Decision resolved",
-            choice,
-        ),
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
@@ -480,43 +434,7 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
                 error.as_deref().unwrap_or_default(),
             )
         },
-        ProjectEventKind::DirectiveChanged { version, .. } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Directed,
-                &format!("Direction v{version}"),
-                "Waiting for incorporation",
-            )
-        },
-        ProjectEventKind::DirectiveIncorporated {
-            version, summary, ..
-        } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Incorporated,
-                &format!("Incorporated direction v{version}"),
-                summary,
-            )
-        },
         ProjectEventKind::TaskObserved { event, .. } => task_activity_fields(event),
-        ProjectEventKind::DecisionRequested {
-            decision_id,
-            prompt,
-            options,
-        } => ActivityFields {
-            decision_id: Some(decision_id.to_string()),
-            options: options.clone(),
-            ..activity(
-                ChildActivityKind::DecisionRequired,
-                "Decision required",
-                prompt,
-            )
-        },
-        ProjectEventKind::DecisionResolved { choice, .. } => activity(
-            ChildActivityKind::DecisionResolved,
-            "Decision resolved",
-            choice,
-        ),
         ProjectEventKind::IterationCompleted { summary, .. } => activity(
             ChildActivityKind::StateChanged,
             "Project iteration completed",
@@ -734,27 +652,6 @@ mod tests {
         }
 
         assert_eq!(turn.text, "hello world");
-    }
-
-    #[test]
-    fn decision_activity_keeps_options_and_lineage() {
-        let decision_id = crate::child_session::ChildDecisionId::new();
-        let observation = TaskObservation {
-            session_id: crate::task::TaskSessionId::new(),
-            issue_identifier: "INF-123".to_string(),
-            event_id: 9,
-            control_source: None,
-            event: TaskEventKind::DecisionRequested {
-                decision_id: decision_id.clone(),
-                prompt: "Which parser mode?".to_string(),
-                options: vec!["strict".to_string(), "permissive".to_string()],
-            },
-        };
-
-        let activity = ChildControlActivity::from_task(&observation);
-        assert_eq!(activity.kind, ChildActivityKind::DecisionRequired);
-        assert_eq!(activity.decision_id.as_deref(), Some(decision_id.as_str()));
-        assert_eq!(activity.options, ["strict", "permissive"]);
     }
 
     #[test]

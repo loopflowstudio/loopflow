@@ -2,9 +2,7 @@ mod support;
 
 use std::path::PathBuf;
 
-use loopflow::child_session::{
-    ChildCommand, ChildCommandKind, ChildCommandSource, ChildDirective, ChildRef,
-};
+use loopflow::child_session::ChildRef;
 use loopflow::ops::linear_observe::reconcile_linear_observation;
 use loopflow::pm::IssueObservation;
 use loopflow::task::{
@@ -27,16 +25,6 @@ fn edit(revision: &str, title: &str, description: &str) -> IssueObservation {
     }
 }
 
-fn follow_up_command(target: &ChildRef, body: &str) -> ChildCommand {
-    ChildCommand::new(
-        target.clone(),
-        ChildCommandSource::Linear,
-        ChildCommandKind::FollowUp {
-            text: body.to_string(),
-        },
-    )
-}
-
 /// Build a successor Task Session for the same Linear issue as `predecessor`,
 /// with a fresh id and worktree so it can coexist with the terminal predecessor
 /// under the partial unique indexes. Its sequence-1 Working PR is distinct.
@@ -52,8 +40,6 @@ fn successor_session(
     session.status_at = now;
     session.worktree = PathBuf::from(format!("{}-successor", predecessor.worktree.display()));
     session.workspace_slug = format!("{}-2", predecessor.workspace_slug);
-    session.current_directive_version = 1;
-    session.incorporated_directive_version = 0;
     session.provider_session_id = None;
     session.latest_process = None;
     session.lifecycle = TaskLifecyclePlan::standard("task");
@@ -125,12 +111,12 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
             now,
         ))
         .expect("predecessor edit");
-    assert!(outcome.directive_applied);
+    assert!(outcome.content_steer_applied);
     let created = rt
         .block_on(store.apply_linear_comment(
             &predecessor.id,
             "c-1".to_string(),
-            follow_up_command(&predecessor_target, "please prioritize"),
+            "please prioritize".to_string(),
             now,
         ))
         .expect("predecessor comment");
@@ -151,18 +137,14 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
 
     // 3. Create the successor, carrying the cursor and ledger in one transaction.
     let (successor, successor_pr) = successor_session(&predecessor, &predecessor_pr, now);
-    let initial = ChildDirective::initial(
-        ChildRef::Task(successor.id.clone()),
-        "Carry the predecessor's direction forward.".to_string(),
-        ChildCommandSource::Human,
-    );
+    let initial = "Carry the predecessor's direction forward.";
     let succession = rt
         .block_on(store.reserve_task_session_successor(
             &predecessor,
             &successor,
             &successor_pr,
             loopflow::durable::Author::User,
-            &initial.text,
+            initial,
         ))
         .expect("succession");
     assert!(succession.created, "first succession creates the successor");
@@ -183,14 +165,14 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
         ))
         .expect("racing edit re-delivery");
     assert!(
-        !racing_edit.directive_applied,
+        !racing_edit.content_steer_applied,
         "carried cursor dedups the racing edit"
     );
     let racing_comment = rt
         .block_on(store.apply_linear_comment(
             &successor.id,
             "c-1".to_string(),
-            follow_up_command(&successor_target, "please prioritize"),
+            "please prioritize".to_string(),
             now,
         ))
         .expect("racing comment re-delivery");
@@ -218,31 +200,27 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
         "successor resumes from the predecessor cursor"
     );
 
-    // 5. Historical receipts stay attributable to the predecessor; the successor
-    //    has no commands yet (only its initial directive, which carries no
-    //    command).
-    let predecessor_commands = rt
-        .block_on(store.list_child_commands(&predecessor_target))
-        .expect("predecessor commands");
-    assert!(
-        predecessor_commands
-            .iter()
-            .any(|c| matches!(&c.kind, ChildCommandKind::Steer { .. })),
-        "predecessor keeps its edit receipt"
-    );
-    assert!(
-        predecessor_commands
-            .iter()
-            .any(|c| matches!(&c.kind, ChildCommandKind::FollowUp { .. })),
-        "predecessor keeps its comment receipt"
-    );
-    let successor_commands = rt
-        .block_on(store.list_child_commands(&successor_target))
-        .expect("successor commands");
-    assert!(
-        successor_commands.is_empty(),
-        "successor inherits no receipts; they stay attributable to the predecessor"
-    );
+    // 5. Authored history stays attributable to the predecessor. The successor
+    //    begins with only the explicit carry Steer.
+    let predecessor_work = rt
+        .block_on(store.work_for_child(&predecessor_target))
+        .expect("predecessor work");
+    let predecessor_seed = rt
+        .block_on(store.boundary_seed(&predecessor_work))
+        .expect("predecessor seed");
+    assert_eq!(predecessor_seed.steers.len(), 2);
+    assert!(predecessor_seed.steers[0].text.contains("New title"));
+    assert!(predecessor_seed.steers[1]
+        .text
+        .contains("please prioritize"));
+    let successor_work = rt
+        .block_on(store.work_for_child(&successor_target))
+        .expect("successor work");
+    let successor_seed = rt
+        .block_on(store.boundary_seed(&successor_work))
+        .expect("successor seed");
+    assert_eq!(successor_seed.steers.len(), 1);
+    assert_eq!(successor_seed.steers[0].text, initial);
 
     // 6. Resolution prefers the non-terminal successor, by issue id and by
     //    identifier, over the terminal predecessor.
@@ -267,23 +245,23 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
             now,
         ))
         .expect("new edit");
-    assert!(new_edit.directive_applied, "new edit delivered once");
+    assert!(new_edit.content_steer_applied, "new edit delivered once");
     let new_comment = rt
         .block_on(store.apply_linear_comment(
             &successor.id,
             "c-2".to_string(),
-            follow_up_command(&successor_target, "after succession"),
+            "after succession".to_string(),
             now,
         ))
         .expect("new comment");
     assert!(new_comment.is_some(), "new comment delivered once");
-    let successor_commands = rt
-        .block_on(store.list_child_commands(&successor_target))
-        .expect("successor commands");
+    let successor_seed = rt
+        .block_on(store.boundary_seed(&successor_work))
+        .expect("successor seed");
     assert_eq!(
-        successor_commands.len(),
-        2,
-        "one new edit + one new comment on the successor"
+        successor_seed.steers.len(),
+        3,
+        "carry + one new edit + one new comment on the successor"
     );
 
     // 8. Crash/retry: a second succession is idempotent — it returns the
@@ -294,7 +272,7 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
             &successor,
             &successor_pr,
             loopflow::durable::Author::User,
-            &initial.text,
+            initial,
         ))
         .expect("retry succession");
     assert!(!retry.created, "second succession is a no-op");
@@ -307,13 +285,13 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
         cursor_after_retry.last_title, "Newer title",
         "idempotent retry moves nothing"
     );
-    let successor_commands_after_retry = rt
-        .block_on(store.list_child_commands(&successor_target))
-        .expect("successor commands");
+    let successor_seed_after_retry = rt
+        .block_on(store.boundary_seed(&successor_work))
+        .expect("successor seed");
     assert_eq!(
-        successor_commands_after_retry.len(),
-        2,
-        "idempotent retry adds no receipts"
+        successor_seed_after_retry.steers.len(),
+        3,
+        "idempotent retry adds no Steers"
     );
 }
 
@@ -365,7 +343,7 @@ fn webhooks_resolve_to_the_successor_across_the_boundary() {
         ))
         .expect("predecessor edit"),
         WebhookOutcome::Edit {
-            directive_applied: true
+            steer_applied: true
         }
     );
     assert_eq!(
@@ -384,18 +362,14 @@ fn webhooks_resolve_to_the_successor_across_the_boundary() {
     rt.block_on(store.update_task_session(&predecessor))
         .expect("abandon predecessor");
     let (successor, successor_pr) = successor_session(&predecessor, &predecessor_pr, now);
-    let initial = ChildDirective::initial(
-        ChildRef::Task(successor.id.clone()),
-        "Carry the predecessor's direction forward.".to_string(),
-        ChildCommandSource::Human,
-    );
+    let initial = "Carry the predecessor's direction forward.";
     let succession = rt
         .block_on(store.reserve_task_session_successor(
             &predecessor,
             &successor,
             &successor_pr,
             loopflow::durable::Author::User,
-            &initial.text,
+            initial,
         ))
         .expect("succession");
     assert!(succession.created);
@@ -412,7 +386,7 @@ fn webhooks_resolve_to_the_successor_across_the_boundary() {
         ))
         .expect("racing edit"),
         WebhookOutcome::Edit {
-            directive_applied: false
+            steer_applied: false
         }
     );
     assert_eq!(
@@ -436,7 +410,7 @@ fn webhooks_resolve_to_the_successor_across_the_boundary() {
         ))
         .expect("new edit"),
         WebhookOutcome::Edit {
-            directive_applied: true
+            steer_applied: true
         }
     );
     assert_eq!(
@@ -450,17 +424,24 @@ fn webhooks_resolve_to_the_successor_across_the_boundary() {
         WebhookOutcome::Comment { delivered: true }
     );
 
-    // Exactly one edit + one comment on each side of the boundary.
-    let predecessor_commands = rt
-        .block_on(store.list_child_commands(&ChildRef::Task(predecessor.id.clone())))
-        .expect("predecessor commands");
-    assert_eq!(predecessor_commands.len(), 2);
-    let successor_commands = rt
-        .block_on(store.list_child_commands(&ChildRef::Task(successor.id.clone())))
-        .expect("successor commands");
+    // Exactly one edit + one comment on the predecessor, and the explicit carry
+    // plus one edit + one comment on the successor.
+    let predecessor_work = rt
+        .block_on(store.work_for_child(&ChildRef::Task(predecessor.id.clone())))
+        .expect("predecessor work");
+    let predecessor_seed = rt
+        .block_on(store.boundary_seed(&predecessor_work))
+        .expect("predecessor seed");
+    assert_eq!(predecessor_seed.steers.len(), 2);
+    let successor_work = rt
+        .block_on(store.work_for_child(&ChildRef::Task(successor.id.clone())))
+        .expect("successor work");
+    let successor_seed = rt
+        .block_on(store.boundary_seed(&successor_work))
+        .expect("successor seed");
     assert_eq!(
-        successor_commands.len(),
-        2,
-        "one new edit + one new comment; the racing redelivery added nothing"
+        successor_seed.steers.len(),
+        3,
+        "carry + one new edit + one new comment; the racing redelivery added nothing"
     );
 }

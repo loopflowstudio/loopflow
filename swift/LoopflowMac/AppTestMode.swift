@@ -1,8 +1,48 @@
+import AppKit
 import Foundation
+
+/// The product surface a capture targets, named by `LOOPFLOW_UI_TEST_VIEW` and
+/// listed in `scripts/screenshots.yaml`.
+enum CaptureTarget {
+    /// The always-present primary window: `wave` is it with a Wave selected,
+    /// `roadmap` is it with none. Neither needs opening.
+    case primary
+    /// A routed window — it must be opened with the Wave the capture selects.
+    case contextLab
+    /// Any other Window scene id. Untyped windows are capturable without
+    /// view-specific Swift, so a new site image is a manifest entry.
+    case window(id: String)
+
+    /// Titles of every window that is not the primary surface, so a capture of
+    /// the primary window cannot be won by one that merely opened later.
+    private static let secondaryTitles = ["Context Lab", "Portfolio", "Telemetry", "Task workspace"]
+
+    init(view: String) {
+        switch view {
+        case "wave", "roadmap": self = .primary
+        case "context-lab": self = .contextLab
+        default: self = .window(id: view)
+        }
+    }
+
+    /// A background-launched app has no key window, so the requested surface is
+    /// matched by title rather than assumed.
+    @MainActor
+    func matches(_ window: NSWindow) -> Bool {
+        switch self {
+        case .primary:
+            return !Self.secondaryTitles.contains(window.title)
+        case .contextLab:
+            return window.title == "Context Lab"
+        case .window(let id):
+            let expected = id.split(separator: "-").map { $0.capitalized }.joined(separator: " ")
+            return window.title == expected
+        }
+    }
+}
 
 enum AppTestMode: String {
     case emptyWorkspaces = "empty-workspaces"
-    case sampleWorkspaces = "sample-workspaces"
     case mockWaves = "mock-waves"
     /// Renders through the REAL `lf` registry — the same read path production
     /// uses — while keeping the snapshot/width test knobs armed. Every other
@@ -71,15 +111,14 @@ enum AppTestMode: String {
         return (env?.isEmpty == false ? env : nil)
     }
 
-    /// The product surface a live capture opens. Older Wave-surface proofs do
-    /// not set the knob, so a run with only a snapshot path still targets the
-    /// Wave window.
-    static var captureView: String? {
+    /// The surface a capture run targets. Older Wave-surface proofs do not set
+    /// the knob, so a run with only a snapshot path still means the primary window.
+    static var captureTarget: CaptureTarget? {
         let env = ProcessInfo.processInfo.environment
         if let raw = env["LOOPFLOW_UI_TEST_VIEW"], !raw.isEmpty {
-            return raw
+            return CaptureTarget(view: raw)
         }
-        return env["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] == nil ? nil : "wave"
+        return env["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] == nil ? nil : .primary
     }
 
     /// Website captures are deliberately light even when the laptop is dark.

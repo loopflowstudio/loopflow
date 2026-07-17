@@ -12,6 +12,7 @@ def test_provenance_caption_links_to_the_live_status_snapshot(
 ) -> None:
     image = tmp_path / "context-lab.png"
     image.write_bytes(b"png")
+    image.with_suffix(".status.json").write_text("{}")
     image.with_suffix(".json").write_text(
         json.dumps(
             {
@@ -19,7 +20,6 @@ def test_provenance_caption_links_to_the_live_status_snapshot(
                 "wave": "product",
                 "app_version": "0.11.3",
                 "app_commit": "a" * 40,
-                "status_snapshot": "/static/context-lab.status.json",
             }
         )
     )

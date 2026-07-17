@@ -182,22 +182,19 @@ struct LoopflowApp: App {
 
     @MainActor
     private func openCaptureViewIfNeeded(repoURL: URL?) {
-        guard !didOpenCaptureView,
-              let captureView = AppTestMode.captureView,
-              captureView != "wave",
-              captureView != "roadmap"
-        else { return }
+        guard !didOpenCaptureView, let target = AppTestMode.captureTarget else { return }
         didOpenCaptureView = true
-        if captureView == "context-lab" {
+        switch target {
+        case .primary:
+            break
+        case .contextLab:
             guard let repoURL, let wave = AppTestMode.selectBranch else { return }
             openWindow(
-                id: captureView,
+                id: "context-lab",
                 value: ContextLabRoute.wave(repoPath: repoURL.path, wave: wave)
             )
-        } else {
-            // Untyped app windows are capturable without adding view-specific
-            // Swift: their manifest value is their Window scene id.
-            openWindow(id: captureView)
+        case .window(let id):
+            openWindow(id: id)
         }
     }
 
@@ -256,31 +253,13 @@ private extension View {
     @ViewBuilder
     func uiTestSnapshot() -> some View {
         if AppTestMode.current() != nil,
-           let captureView = AppTestMode.captureView,
+           let target = AppTestMode.captureTarget,
            let path = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] {
             let delay = AppTestMode.snapshotDelay
             task {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                // A background-launched app has no key window. Match the
-                // requested surface by title so opening Context Lab cannot race
-                // the always-present Wave window and capture the wrong pixels.
                 let window = NSApp.windows.first { window in
-                    guard window.isVisible, window.contentView != nil else { return false }
-                    switch captureView {
-                    case "context-lab":
-                        return window.title == "Context Lab"
-                    case "wave", "roadmap":
-                        let secondaryTitles = [
-                            "Context Lab", "Portfolio", "Telemetry", "Task workspace",
-                        ]
-                        return !secondaryTitles.contains(window.title)
-                    default:
-                        let expectedTitle = captureView
-                            .split(separator: "-")
-                            .map { $0.capitalized }
-                            .joined(separator: " ")
-                        return window.title == expectedTitle
-                    }
+                    window.isVisible && window.contentView != nil && target.matches(window)
                 }
                 if let window {
                     do {

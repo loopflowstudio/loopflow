@@ -531,11 +531,15 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 
 
 def _capture_figure(item):
-    """Render only complete image + provenance pairs."""
+    """Render only a complete image + provenance + live-status triple."""
     image = item["image"]
     image_path = STATIC_DIR / image.removeprefix("/static/")
     sidecar_path = image_path.with_suffix(".json")
-    if not image_path.is_file() or not sidecar_path.is_file():
+    status_snapshot = image.removesuffix(".png") + ".status.json"
+    if not all(
+        path.is_file()
+        for path in (image_path, sidecar_path, image_path.with_suffix(".status.json"))
+    ):
         return None
     try:
         provenance = json.loads(sidecar_path.read_text())
@@ -543,7 +547,6 @@ def _capture_figure(item):
         wave = provenance["wave"]
         app_version = provenance["app_version"]
         app_commit = provenance["app_commit"]
-        status_snapshot = provenance["status_snapshot"]
     except (KeyError, TypeError, json.JSONDecodeError):
         return None
     capture_label = f"Captured {captured_at} from the {wave} wave"

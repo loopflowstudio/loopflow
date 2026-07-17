@@ -501,6 +501,11 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
+    } else if let Some(failure) = &result.failure {
+        Err(anyhow!(
+            "agent stopped after {failure}. Check {} for details.",
+            capture.artifact_dir().display()
+        ))
     } else {
         Err(anyhow!(
             "agent exited with code {}. Check {} for details.",

@@ -151,7 +151,7 @@ impl ReaderState {
     }
 }
 
-pub(super) fn rate_limit_signal(line: &str) -> Option<RateLimitSignal> {
+pub(crate) fn rate_limit_signal(line: &str) -> Option<RateLimitSignal> {
     let value = serde_json::from_str::<Value>(line).ok()?;
     let event = value
         .get("stream_event")

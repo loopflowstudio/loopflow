@@ -1875,6 +1875,10 @@ mod tests {
             content: "partial child answer".to_string(),
         });
         capture.begin_turn("message", "follow up").unwrap();
+        capture.finish_turn("failed").unwrap();
+        capture
+            .begin_turn("message", "retry after provider failure")
+            .unwrap();
         capture.finish("completed", false).unwrap();
 
         let store = crate::journal::open_ledger().unwrap();
@@ -1889,14 +1893,15 @@ mod tests {
         let turns = store
             .agent_turns_for_launches(&[launches[0].id.clone()])
             .unwrap();
-        assert_eq!(turns.len(), 2);
+        assert_eq!(turns.len(), 3);
         assert_eq!(turns[0].status, "partial");
         assert_eq!(
             turns[0].root_output.as_deref(),
             Some("partial child answer")
         );
-        assert_eq!(turns[1].context_coverage, "provider_total_only");
-        assert_eq!(turns[1].provider_input_tokens, None);
+        assert_eq!(turns[1].status, "failed");
+        assert_eq!(turns[2].context_coverage, "provider_total_only");
+        assert_eq!(turns[2].provider_input_tokens, None);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

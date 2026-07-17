@@ -173,6 +173,7 @@ pub fn prepare_launch_prompt(
         task_prompt,
         agent: Some(agent),
         max_turns,
+        resume_id: None,
         cwd: Some(cwd.unwrap_or(repo_root)),
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),

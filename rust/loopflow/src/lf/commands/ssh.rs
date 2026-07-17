@@ -594,6 +594,22 @@ mod tests {
         }
     }
 
+    struct CurrentDirRestore(std::path::PathBuf);
+
+    impl CurrentDirRestore {
+        fn enter(path: &std::path::Path) -> Self {
+            let current = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self(current)
+        }
+    }
+
+    impl Drop for CurrentDirRestore {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.0).unwrap();
+        }
+    }
+
     fn full_bundle() -> Credentials {
         let claude = crate::provider_account::parse_account_id("primary").unwrap();
         let codex = crate::provider_account::parse_account_id("reserve").unwrap();
@@ -602,17 +618,19 @@ mod tests {
             claude_token: None,
             codex_token: None,
             account_bundle: Some(ForwardedAccountBundle::new(
-                crate::repository::RepoId::parse("loopflowstudio/loopflow").unwrap(),
-                ForwardedAccountSelection::Routed(vec![
-                    crate::provider_account::ForwardedProviderRoute {
-                        provider: crate::provider_auth::Provider::Claude,
-                        accounts: vec![claude.clone()],
-                    },
-                    crate::provider_account::ForwardedProviderRoute {
-                        provider: crate::provider_auth::Provider::Codex,
-                        accounts: vec![codex.clone()],
-                    },
-                ]),
+                ForwardedAccountSelection::Routed {
+                    repo_id: crate::repository::RepoId::parse("loopflowstudio/loopflow").unwrap(),
+                    routes: vec![
+                        crate::provider_account::ForwardedProviderRoute {
+                            provider: crate::provider_auth::Provider::Claude,
+                            accounts: vec![claude.clone()],
+                        },
+                        crate::provider_account::ForwardedProviderRoute {
+                            provider: crate::provider_auth::Provider::Codex,
+                            accounts: vec![codex.clone()],
+                        },
+                    ],
+                },
                 vec![
                     crate::provider_account::ForwardedProviderAccount {
                         provider: crate::provider_auth::Provider::Claude,
@@ -758,6 +776,100 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[test]
+    fn explicit_account_reaches_foreground_ssh_outside_a_repository() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let transport_input = temp.path().join("ssh-input");
+        let ssh = bin.join("ssh");
+        fs::write(
+            &ssh,
+            format!("#!/bin/sh\ncat > '{}'\n", transport_input.display()),
+        )
+        .unwrap();
+        let codex = bin.join("codex");
+        fs::write(
+            &codex,
+            r#"#!/bin/sh
+IFS= read -r line
+printf '{"id":1,"result":{}}\n'
+IFS= read -r line
+IFS= read -r line
+printf '{"id":2,"result":{"account":null}}\n'
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            for executable in [&ssh, &codex] {
+                let mut permissions = fs::metadata(executable).unwrap().permissions();
+                permissions.set_mode(0o755);
+                fs::set_permissions(executable, permissions).unwrap();
+            }
+        }
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "LF_HOME",
+            "LF_DB_PATH",
+            "PATH",
+            crate::provider_account::ACCOUNT_REPO_ID_ENV,
+            PROVIDER_ACCOUNT_ENV,
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            FORWARDED_ACCOUNT_STORE_ENV,
+        ]);
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("LF_HOME", temp.path());
+        let database = temp.path().join("loopflow.db");
+        std::env::set_var("LF_DB_PATH", &database);
+        std::env::remove_var(crate::provider_account::ACCOUNT_REPO_ID_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
+        std::env::set_var(PROVIDER_ACCOUNT_ENV, "engineering");
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let store = std::sync::Arc::new(
+            runtime
+                .block_on(crate::store::open_store(
+                    &crate::store::StorageConfig::sqlite(database),
+                ))
+                .unwrap(),
+        );
+        let account_home = temp.path().join("accounts/engineering");
+        fs::create_dir_all(&account_home).unwrap();
+        fs::write(
+            account_home.join("auth.json"),
+            r#"{"tokens":{"access_token":"e30.eyJleHAiOjQxMDI0NDQ4MDB9.sig","id_token":"e30.eyJlbWFpbCI6ImVuZ2luZWVyaW5nQGV4YW1wbGUuY29tIn0.sig"}}"#,
+        )
+        .unwrap();
+        let account = crate::provider_account::new_account(
+            crate::provider_auth::Provider::Codex,
+            crate::provider_account::parse_account_id("engineering").unwrap(),
+            account_home,
+            None,
+        );
+        runtime
+            .block_on(store.upsert_provider_account(&account))
+            .unwrap();
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let _cwd = CurrentDirRestore::enter(&outside);
+
+        run("host", Some("."), &[], false, &["lf".to_string()]).unwrap();
+
+        let input = fs::read_to_string(transport_input).unwrap();
+        assert!(input.contains(FORWARDED_ACCOUNT_BUNDLE_ENV));
+        assert!(input.trim_end().ends_with("'lf'"));
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[test]
     fn explicit_account_errors_before_ssh_transport() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
@@ -792,10 +904,7 @@ mod tests {
         std::env::set_var("LF_HOME", temp.path());
         let database = temp.path().join("loopflow.db");
         std::env::set_var("LF_DB_PATH", &database);
-        std::env::set_var(
-            crate::provider_account::ACCOUNT_REPO_ID_ENV,
-            "loopflowstudio/loopflow",
-        );
+        std::env::remove_var(crate::provider_account::ACCOUNT_REPO_ID_ENV);
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(
             "PATH",
@@ -812,6 +921,9 @@ mod tests {
                 .unwrap(),
         );
         let command = ["lf".to_string()];
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let _cwd = CurrentDirRestore::enter(&outside);
 
         std::env::set_var(PROVIDER_ACCOUNT_ENV, "   ");
         let error = run("host", Some("."), &[], false, &command).unwrap_err();

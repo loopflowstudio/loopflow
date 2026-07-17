@@ -122,13 +122,15 @@ pub struct ForwardedProviderPin {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ForwardedAccountSelection {
-    Routed(Vec<ForwardedProviderRoute>),
+    Routed {
+        repo_id: RepoId,
+        routes: Vec<ForwardedProviderRoute>,
+    },
     Pinned(Vec<ForwardedProviderPin>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForwardedAccountBundle {
-    pub repo_id: RepoId,
     pub selection: ForwardedAccountSelection,
     pub accounts: Vec<ForwardedProviderAccount>,
     credentials: Vec<ForwardedProviderCredential>,
@@ -136,13 +138,11 @@ pub struct ForwardedAccountBundle {
 
 impl ForwardedAccountBundle {
     pub fn new(
-        repo_id: RepoId,
         selection: ForwardedAccountSelection,
         accounts: Vec<ForwardedProviderAccount>,
         credentials: Vec<ForwardedProviderCredential>,
     ) -> Self {
         Self {
-            repo_id,
             selection,
             accounts,
             credentials,
@@ -448,17 +448,12 @@ pub async fn local_forwarded_account_bundle(
     store: &SharedStore,
     selector: Option<&str>,
 ) -> Result<Option<ForwardedAccountBundle>, ProviderAccountError> {
-    let Some(repo_id) = current_repo_id()? else {
-        return match selector {
-            Some(_) => Err(ProviderAccountError::Runtime(
-                "cannot resolve --account for SSH outside a repository".to_string(),
-            )),
-            None => Ok(None),
-        };
-    };
     if let Some(selector) = selector {
-        return explicit_forwarded_account_bundle(store, repo_id, selector).await;
+        return explicit_forwarded_account_bundle(store, selector).await;
     }
+    let Some(repo_id) = current_repo_id()? else {
+        return Ok(None);
+    };
     let mut routes = Vec::new();
     for provider in [Provider::Claude, Provider::Codex] {
         let route = match store
@@ -489,8 +484,7 @@ pub async fn local_forwarded_account_bundle(
         credentials.push(prepare_forwarding_credential(provider, &account).await?);
     }
     Ok(Some(ForwardedAccountBundle::new(
-        repo_id,
-        ForwardedAccountSelection::Routed(routes),
+        ForwardedAccountSelection::Routed { repo_id, routes },
         accounts,
         credentials,
     )))
@@ -498,7 +492,6 @@ pub async fn local_forwarded_account_bundle(
 
 async fn explicit_forwarded_account_bundle(
     store: &SharedStore,
-    repo_id: RepoId,
     selector: &str,
 ) -> Result<Option<ForwardedAccountBundle>, ProviderAccountError> {
     let selector = selector.trim();
@@ -543,7 +536,6 @@ async fn explicit_forwarded_account_bundle(
         )));
     }
     Ok(Some(ForwardedAccountBundle::new(
-        repo_id,
         ForwardedAccountSelection::Pinned(pins),
         accounts,
         credentials,
@@ -686,10 +678,10 @@ pub async fn resolve_provider_account(
 
     let mut access_tokens = HashMap::new();
     let (candidates, routed_repo_id) = if let Some(bundle) = &forwarded_bundle {
-        let ForwardedAccountSelection::Routed(routes) = &bundle.selection else {
+        let ForwardedAccountSelection::Routed { repo_id, routes } = &bundle.selection else {
             unreachable!("pinned bundles return before routed selection")
         };
-        let candidates = hydrate_forwarded_route(&store, bundle, routes, provider).await?;
+        let candidates = hydrate_forwarded_route(&store, bundle, repo_id, routes, provider).await?;
         for credential in bundle
             .credentials
             .iter()
@@ -700,7 +692,7 @@ pub async fn resolve_provider_account(
                 credential.access_token().to_string(),
             );
         }
-        (candidates, Some(bundle.repo_id.clone()))
+        (candidates, Some(repo_id.clone()))
     } else {
         let repo_id = current_repo_id()?;
         let route = match &repo_id {
@@ -1005,6 +997,7 @@ async fn retain_authenticated_account(
 async fn hydrate_forwarded_route(
     store: &SharedStore,
     bundle: &ForwardedAccountBundle,
+    repo_id: &RepoId,
     routes: &[ForwardedProviderRoute],
     provider: Provider,
 ) -> Result<Vec<ProviderAccountId>, ProviderAccountError> {
@@ -1015,7 +1008,7 @@ async fn hydrate_forwarded_route(
     // The route is written last and serves as the initialization marker. A
     // restarted provider process reuses health accrued in this SSH lease
     // instead of resetting it from the original local snapshot.
-    let scope = RouteScope::Repo(bundle.repo_id.clone());
+    let scope = RouteScope::Repo(repo_id.clone());
     if store.provider_route(&scope, provider).await?.is_none() {
         let now = now_unix();
         for account in &bundle.accounts {
@@ -1884,11 +1877,13 @@ printf '{"id":2,"result":{"account":null}}\n'
         let first = parse_account_id("first").unwrap();
         let second = parse_account_id("second").unwrap();
         let bundle = ForwardedAccountBundle::new(
-            RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            ForwardedAccountSelection::Routed(vec![ForwardedProviderRoute {
-                provider: Provider::Codex,
-                accounts: vec![first.clone(), second.clone()],
-            }]),
+            ForwardedAccountSelection::Routed {
+                repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
+                routes: vec![ForwardedProviderRoute {
+                    provider: Provider::Codex,
+                    accounts: vec![first.clone(), second.clone()],
+                }],
+            },
             vec![
                 ForwardedProviderAccount {
                     provider: Provider::Codex,
@@ -1945,7 +1940,6 @@ printf '{"id":2,"result":{"account":null}}\n'
     fn forwarded_account_bundle_round_trips_without_exposing_tokens() {
         let account_id = parse_account_id("engineering").unwrap();
         let bundle = ForwardedAccountBundle::new(
-            RepoId::parse("loopflowstudio/loopflow").unwrap(),
             ForwardedAccountSelection::Pinned(vec![ForwardedProviderPin {
                 provider: Provider::Codex,
                 account_id: account_id.clone(),
@@ -1967,5 +1961,28 @@ printf '{"id":2,"result":{"account":null}}\n'
             .unwrap()
             .remove("selection");
         assert!(serde_json::from_value::<ForwardedAccountBundle>(missing_selection).is_err());
+    }
+
+    #[test]
+    fn forwarded_routed_selection_requires_repo_id() {
+        let account_id = parse_account_id("engineering").unwrap();
+        let bundle = ForwardedAccountBundle::new(
+            ForwardedAccountSelection::Routed {
+                repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
+                routes: vec![ForwardedProviderRoute {
+                    provider: Provider::Codex,
+                    accounts: vec![account_id],
+                }],
+            },
+            vec![],
+            vec![],
+        );
+        let mut value = serde_json::to_value(bundle).unwrap();
+        value["selection"]["routed"]
+            .as_object_mut()
+            .unwrap()
+            .remove("repo_id");
+
+        assert!(serde_json::from_value::<ForwardedAccountBundle>(value).is_err());
     }
 }

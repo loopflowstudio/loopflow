@@ -152,7 +152,7 @@ pub struct PmReteamMove {
     pub new_identifier: Option<String>,
 }
 
-/// One open issue left in place while a Task body can still write its old id.
+/// One issue left in place while a Task body can still write its old id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamDeferral {
     pub identifier: String,
@@ -160,8 +160,8 @@ pub struct PmReteamDeferral {
     pub reason: String,
 }
 
-/// One Project pulled onto the wave's team. Projects keep their id and slug on a
-/// team move (Linear only renumbers issues), so there is no new identifier to
+/// One Project narrowed onto the wave's team. Projects keep their id and slug on
+/// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamProjectMove {
@@ -177,7 +177,8 @@ pub struct PmReteamResult {
     pub team_key: String,
     /// True when moves were executed; false for a dry run.
     pub applied: bool,
-    /// Projects re-teamed onto the wave's team (moved ahead of their issues).
+    /// Projects narrowed onto the wave's team (narrowed after their issues moved
+    /// off the legacy team).
     pub project_moves: Vec<PmReteamProjectMove>,
     pub moves: Vec<PmReteamMove>,
     pub deferrals: Vec<PmReteamDeferral>,
@@ -185,8 +186,6 @@ pub struct PmReteamResult {
     pub already: usize,
     /// Durable Task Sessions whose cached display identifier was reconciled.
     pub session_updates: usize,
-    /// Completed issues left in the shared team as historical.
-    pub historical: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -494,6 +493,21 @@ impl PmClient {
     async fn comment(&self, item_id: &str, body: &str) -> PmResult<String> {
         match self {
             Self::Linear(client) => client.comment(item_id, body).await,
+        }
+    }
+
+    /// The bodies of an issue's existing comments, newest page first. `reteam`
+    /// reads these to make its traceability comment idempotent: it re-posts only
+    /// when this migration's marker is absent.
+    async fn issue_comment_bodies(&self, item_id: &str) -> PmResult<Vec<String>> {
+        match self {
+            Self::Linear(client) => Ok(client
+                .observe_issue(item_id)
+                .await?
+                .comments
+                .into_iter()
+                .map(|comment| comment.body)
+                .collect()),
         }
     }
 
@@ -948,13 +962,23 @@ async fn store_pm_snapshot(
     ctx: &PmContext,
     snapshot: &PmSnapshot,
 ) -> OpsResult<()> {
+    let store = pm_store().await?;
+    store_pm_snapshot_with_store(repo, wave, ctx, snapshot, &store).await
+}
+
+async fn store_pm_snapshot_with_store(
+    repo: &Path,
+    wave: &str,
+    ctx: &PmContext,
+    snapshot: &PmSnapshot,
+    store: &Store,
+) -> OpsResult<()> {
     let payload = serde_json::to_string(snapshot).map_err(|err| {
         OpsError::Message(format!(
             "failed to serialize PM snapshot for wave/{wave}: {err}"
         ))
     })?;
-    pm_store()
-        .await?
+    store
         .put_pm_snapshot(PmSnapshotRow {
             repo: pm_repo_key(repo),
             wave: wave.to_string(),
@@ -1656,14 +1680,12 @@ async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<Pm
 /// without a live Linear.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReteamClass {
-    /// Completed → leave in the shared team as historical (shipped references to
-    /// `W2-N` are immutable; renumbering them buys nothing).
-    Historical,
-    /// Already carries the target team key → skip (idempotency key).
+    /// Already carries the target team key → skip the move; only reconcile a
+    /// stale cached Session identifier.
     Already,
     /// A writing Task body owns it → defer until that process generation exits.
     Defer(String),
-    /// Open, not yet in the team, and not being written → move.
+    /// On the legacy team and not being written → move onto the wave's team.
     Move,
 }
 
@@ -1699,18 +1721,18 @@ impl ReteamSessionState<'_> {
     }
 }
 
-/// Open issues move unless a Task body can still write the old identifier back.
-/// Waiting-for-review, blocked, and failed Sessions are durable intent without a
-/// process lease, so renumbering them is safe once their cached identifier is
-/// updated atomically.
+/// Every foreign-team issue moves — completed included — unless a Task body can
+/// still write the old identifier back. Completion is not a shield: a Project
+/// cannot narrow to one team while any of its issues (completed or not) stay on
+/// the legacy team, so completed issues migrate like the rest. Protection keys on
+/// *session state* (a live writing lease), not on Linear completion; waiting,
+/// blocked, and failed Sessions are durable intent without a lease, so renumbering
+/// them is safe once their cached identifier is reconciled.
 fn classify_reteam_item(
     item: &PmItem,
     team_key: &str,
     session: Option<ReteamSessionState<'_>>,
 ) -> ReteamClass {
-    if item.completed {
-        return ReteamClass::Historical;
-    }
     let already = identifier_has_team_prefix(&item.identifier, team_key);
     let session_needs_update = session.is_some_and(|session| session.identifier != item.identifier);
     if let Some(reason) = session
@@ -1768,20 +1790,68 @@ fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
     )))
 }
 
-pub fn pm_reteam(
-    repo: &Path,
-    options: &PmReteamOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmReteamResult> {
-    block_on_pm(pm_reteam_async(repo, options, progress))
+/// Moving an issue to `target_team` keeps it in its Project only when that
+/// Project already carries the target team. Refuse unresolved and missing-team
+/// Projects before the first store or provider mutation.
+fn ensure_move_projects_carry_target_team(
+    projects: &[PmProject],
+    moving_project_ids: &BTreeSet<String>,
+    target_team: &str,
+) -> OpsResult<()> {
+    let unsafe_projects = projects
+        .iter()
+        .filter(|project| moving_project_ids.contains(&project.id))
+        .filter_map(|project| match project.team_ids.as_deref() {
+            Some(team_ids) if team_ids.iter().any(|team| team == target_team) => None,
+            Some(team_ids) => Some(format!(
+                "`{}` (teams [{}])",
+                project.name,
+                team_ids.join(", ")
+            )),
+            None => Some(format!("`{}` (teams unresolved)", project.name)),
+        })
+        .collect::<Vec<_>>();
+    if unsafe_projects.is_empty() {
+        return Ok(());
+    }
+
+    Err(OpsError::Message(format!(
+        "cannot apply reteam because Project(s) containing issues to move do not already carry target team {target_team}: {}. No Projects or Tasks were moved; attach the target team and rerun the dry-run.",
+        unsafe_projects.join("; ")
+    )))
 }
 
-async fn pm_reteam_async(
+#[derive(Debug)]
+struct ReteamIdentifierUpdate {
+    issue_id: String,
+    old_identifier: String,
+    new_identifier: String,
+}
+
+struct ResolvedReteamContext {
+    wave: String,
+    team_id: String,
+    team_key: String,
+    pm: PmContext,
+    store: Store,
+}
+
+fn reteam_comment_marker(old_identifier: &str, team_key: &str) -> String {
+    format!("was {old_identifier}; moving onto team {team_key}")
+}
+
+fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
+    format!(
+        "Reteamed by loopflow: {}. The issue id (UUID) is unchanged; Linear reassigns the number on the move.",
+        reteam_comment_marker(old_identifier, team_key)
+    )
+}
+
+async fn resolve_reteam_context(
     repo: &Path,
-    options: &PmReteamOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmReteamResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
+    wave: Option<&str>,
+) -> OpsResult<ResolvedReteamContext> {
+    let wave = resolve_wave(wave)?;
     let provider = resolve_provider(repo, &wave)?;
     let team_id = read_team(repo, &wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
@@ -1797,39 +1867,98 @@ async fn pm_reteam_async(
             provider.initiative_key()
         ))
     })?;
-
     let client = build_client(repo, provider, Some(team_id.clone())).await?;
     let team_key = client.team_key(&team_id).await.map_err(pm_to_ops)?;
-
-    progress.status(&format!(
-        "listing wave/{wave} issues under {provider} Initiative {initiative}"
-    ));
-    let projects = client.list_projects(&initiative).await.map_err(pm_to_ops)?;
-
     let store = open_store(&storage_config_from_env()?)
         .await
         .map_err(|err| OpsError::Message(format!("failed to open task registry: {err}")))?;
 
+    Ok(ResolvedReteamContext {
+        wave,
+        team_id,
+        team_key,
+        pm: PmContext {
+            client,
+            provider,
+            initiative,
+        },
+        store,
+    })
+}
+
+pub fn pm_reteam(
+    repo: &Path,
+    options: &PmReteamOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmReteamResult> {
+    block_on_pm(pm_reteam_async(repo, options, progress))
+}
+
+async fn pm_reteam_async(
+    repo: &Path,
+    options: &PmReteamOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmReteamResult> {
+    let resolved = resolve_reteam_context(repo, options.wave.as_deref()).await?;
+    apply_or_plan_reteam(
+        &resolved.pm,
+        &resolved.store,
+        repo,
+        &resolved.wave,
+        &resolved.team_id,
+        &resolved.team_key,
+        options.apply,
+        progress,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn apply_or_plan_reteam(
+    ctx: &PmContext,
+    store: &Store,
+    repo: &Path,
+    wave: &str,
+    team_id: &str,
+    team_key: &str,
+    apply: bool,
+    progress: &impl Progress,
+) -> OpsResult<PmReteamResult> {
+    progress.status(&format!(
+        "listing wave/{wave} issues under {} Initiative {}",
+        ctx.provider, ctx.initiative
+    ));
+    let projects = ctx
+        .client
+        .list_projects(&ctx.initiative)
+        .await
+        .map_err(pm_to_ops)?;
+
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
     let mut deferrals = Vec::new();
+    let mut moving_project_ids = BTreeSet::new();
+    let mut identifier_updates = Vec::new();
     let mut already = 0usize;
     let mut session_updates = 0usize;
-    let mut historical = 0usize;
 
     for project in &projects {
         // A Project without exactly the wave's team is moved onto it. A
         // multi-team Project is repaired too: ownership is singular, not merely
         // membership. An unresolved team set (`None`, older snapshot) is skipped,
         // never guessed.
-        if project_needs_reteam(&team_id, project.team_ids.as_deref()) {
+        if project_needs_reteam(team_id, project.team_ids.as_deref()) {
             project_moves.push(PmReteamProjectMove {
                 id: project.id.clone(),
                 name: project.name.clone(),
                 from_teams: project.team_ids.clone().unwrap_or_default(),
             });
         }
-        let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
+        let items = ctx
+            .client
+            .list_items(&project.id)
+            .await
+            .map_err(pm_to_ops)?;
         for item in items {
             // Look up the protecting Session by the issue's stable UUID.
             let session = store
@@ -1838,30 +1967,19 @@ async fn pm_reteam_async(
                 .map_err(|err| OpsError::Message(format!("failed to read task registry: {err}")))?;
             match classify_reteam_item(
                 &item,
-                &team_key,
+                team_key,
                 session.as_ref().map(ReteamSessionState::from),
             ) {
-                ReteamClass::Historical => historical += 1,
                 ReteamClass::Already => {
                     already += 1;
-                    if options.apply {
-                        if let Some(session) = session {
-                            session_updates += usize::from(
-                                store
-                                    .rebind_task_issue_identifier(
-                                        &item.id,
-                                        &session.launch.issue.identifier,
-                                        &item.identifier,
-                                    )
-                                    .await
-                                    .map_err(|err| {
-                                        OpsError::Message(format!(
-                                            "failed to reconcile Task Session for {}: {err}",
-                                            item.identifier
-                                        ))
-                                    })?,
-                            );
-                        }
+                    if let Some(session) =
+                        session.filter(|session| session.launch.issue.identifier != item.identifier)
+                    {
+                        identifier_updates.push(ReteamIdentifierUpdate {
+                            issue_id: item.id,
+                            old_identifier: session.launch.issue.identifier,
+                            new_identifier: item.identifier,
+                        });
                     }
                 }
                 ReteamClass::Defer(reason) => deferrals.push(PmReteamDeferral {
@@ -1869,50 +1987,61 @@ async fn pm_reteam_async(
                     title: item.name,
                     reason,
                 }),
-                ReteamClass::Move => moves.push(PmReteamMove {
-                    id: item.id,
-                    old_identifier: item.identifier,
-                    title: item.name,
-                    new_identifier: None,
-                }),
+                ReteamClass::Move => {
+                    moving_project_ids.insert(project.id.clone());
+                    moves.push(PmReteamMove {
+                        id: item.id,
+                        old_identifier: item.identifier,
+                        title: item.name,
+                        new_identifier: None,
+                    });
+                }
             }
         }
     }
 
-    if options.apply {
+    if apply {
         ensure_reteam_apply_safe(&deferrals)?;
-        // Projects first: a Project must own the team before its issues land there
-        // cleanly. `teamIds` is a set, so this pulls it off the shared team.
-        for pm in &project_moves {
-            progress.status(&format!(
-                "moving Project `{}` onto team {team_key}",
-                pm.name
-            ));
-            client
-                .move_project_to_team(&pm.id, &team_id)
+        ensure_move_projects_carry_target_team(&projects, &moving_project_ids, team_id)?;
+
+        for update in identifier_updates {
+            session_updates += usize::from(
+                store
+                    .rebind_task_issue_identifier(
+                        &update.issue_id,
+                        &update.old_identifier,
+                        &update.new_identifier,
+                    )
+                    .await
+                    .map_err(|err| {
+                        OpsError::Message(format!(
+                            "failed to reconcile Task Session for {}: {err}",
+                            update.new_identifier
+                        ))
+                    })?,
+            );
+        }
+
+        for mv in &mut moves {
+            let marker = reteam_comment_marker(&mv.old_identifier, team_key);
+            let comment_bodies = ctx
+                .client
+                .issue_comment_bodies(&mv.id)
                 .await
                 .map_err(pm_to_ops)?;
-        }
-        for mv in &mut moves {
+            if !comment_bodies.iter().any(|body| body.contains(&marker)) {
+                ctx.client
+                    .comment(&mv.id, &reteam_comment_body(&mv.old_identifier, team_key))
+                    .await
+                    .map_err(pm_to_ops)?;
+            }
             progress.status(&format!(
                 "moving {} into team {team_key}",
                 mv.old_identifier
             ));
-            let new_identifier = client
-                .move_item_to_team(&mv.id, &team_id)
-                .await
-                .map_err(pm_to_ops)?;
-            // Traceability: the number cannot be carried, so record where it came
-            // from. The UUID (and thus every Session/PR/comment link) is intact.
-            client
-                .comment(
-                    &mv.id,
-                    &format!(
-                        "Reteamed by loopflow: was {}, now {new_identifier}. \
-                         Linear reassigns the number on a team move; the issue id is unchanged.",
-                        mv.old_identifier
-                    ),
-                )
+            let new_identifier = ctx
+                .client
+                .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(pm_to_ops)?;
             session_updates += usize::from(
@@ -1932,29 +2061,39 @@ async fn pm_reteam_async(
             );
             mv.new_identifier = Some(new_identifier);
         }
-        if !project_moves.is_empty() || !moves.is_empty() {
-            // Refresh the snapshot so cached identifiers and Project teams reflect
-            // the moves.
-            let ctx = PmContext {
-                client,
-                provider,
-                initiative,
-            };
-            refresh_pm_snapshot(repo, &wave, &ctx).await?;
+
+        // Linear refuses to remove a team from a Project while that team's
+        // issues remain in it, so narrowing is necessarily the final provider
+        // phase. `teamIds` is a set replacement: exactly the wave's team.
+        for pm in &project_moves {
+            progress.status(&format!(
+                "narrowing Project `{}` onto team {team_key}",
+                pm.name
+            ));
+            ctx.client
+                .move_project_to_team(&pm.id, team_id)
+                .await
+                .map_err(pm_to_ops)?;
         }
+
+        // Always refresh after a successful explicit apply. A prior run may have
+        // completed every provider mutation and then failed while refreshing;
+        // its retry classifies everything as Already and must still repair the
+        // local snapshot.
+        let snapshot = fetch_pm_snapshot(wave, ctx).await?;
+        store_pm_snapshot_with_store(repo, wave, ctx, &snapshot, store).await?;
     }
 
     Ok(PmReteamResult {
-        wave,
-        team_id,
-        team_key,
-        applied: options.apply,
+        wave: wave.to_string(),
+        team_id: team_id.to_string(),
+        team_key: team_key.to_string(),
+        applied: apply,
         project_moves,
         moves,
         deferrals,
         already,
         session_updates,
-        historical,
     })
 }
 
@@ -2529,10 +2668,23 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
+    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+        ProjectLaunchReceipt, TaskLaunchReceipt,
+    };
+    use crate::task::{
+        Observation, PmWritebackState, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
+        TaskSessionId,
+    };
+    use crate::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::json;
+    use std::path::PathBuf;
+    use time::OffsetDateTime;
 
     fn linear_test_ctx(base_url: String, initiative: &str) -> PmContext {
         PmContext {
@@ -2585,6 +2737,202 @@ mod tests {
                 "pageInfo": { "hasNextPage": false, "endCursor": null }
             } } } }),
         )
+    }
+
+    fn reteam_project_node(id: &str, name: &str, team_ids: &[&str]) -> serde_json::Value {
+        json!({
+            "id": id,
+            "name": name,
+            "description": "",
+            "content": "## Definition\n\nA measured bet.\n\n## KRs\n",
+            "initiatives": { "nodes": [{ "id": "initiative-123" }] },
+            "teams": {
+                "nodes": team_ids
+                    .iter()
+                    .map(|id| json!({ "id": id }))
+                    .collect::<Vec<_>>()
+            }
+        })
+    }
+
+    fn reteam_issue_node(id: &str, identifier: &str, completed: bool) -> serde_json::Value {
+        json!({
+            "id": id,
+            "identifier": identifier,
+            "url": null,
+            "title": format!("Task {identifier}"),
+            "description": "",
+            "prioritySortOrder": 0.0,
+            "sortOrder": 0.0,
+            "state": { "type": if completed { "completed" } else { "unstarted" } }
+        })
+    }
+
+    fn issue_observation_response(comments: &[&str]) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "issue": {
+                "updatedAt": "2026-07-17T00:00:00.000Z",
+                "title": "Legacy task",
+                "description": "",
+                "comments": {
+                    "nodes": comments
+                        .iter()
+                        .enumerate()
+                        .map(|(index, body)| json!({
+                            "id": format!("comment-{index}"),
+                            "body": body,
+                            "user": null
+                        }))
+                        .collect::<Vec<_>>()
+                }
+            } } }),
+        )
+    }
+
+    fn reteam_comment_create_response(id: &str) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "commentCreate": { "comment": { "id": id } } } }),
+        )
+    }
+
+    fn issue_team_move_response(id: &str, identifier: &str) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "issueUpdate": { "issue": {
+                "id": id,
+                "identifier": identifier
+            } } } }),
+        )
+    }
+
+    fn project_team_move_response(id: &str) -> QueuedResponse {
+        json_response(
+            StatusCode::OK,
+            json!({ "data": { "projectUpdate": { "project": { "id": id } } } }),
+        )
+    }
+
+    async fn reteam_test_store() -> (tempfile::TempDir, Store) {
+        let directory = tempfile::tempdir().expect("temp store directory");
+        let store = open_store(&crate::store::StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .expect("open reteam store");
+        (directory, store)
+    }
+
+    async fn seed_reteam_task_session(
+        store: &Store,
+        issue_id: &str,
+        identifier: &str,
+    ) -> TaskSessionId {
+        let now = OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            WaveId::new(),
+            "infrastructure".to_string(),
+            "/repo".to_string(),
+        );
+        store.create_wave(&wave).await.expect("create wave");
+        let project_snapshot = LinearProjectSnapshot {
+            id: LinearProjectId::new("project-uuid").expect("project id"),
+            slug: "developer-efficiency".to_string(),
+            name: "Developer Efficiency".to_string(),
+            prompt_context: "Keep development fast.".to_string(),
+        };
+        let project = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: project_snapshot.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Waiting,
+            status_reason: "waiting".to_string(),
+            status_at: now,
+            iteration: 1,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store
+            .create_project_session(&project)
+            .await
+            .expect("create project session");
+
+        let session_id = TaskSessionId::new();
+        let session = TaskSession {
+            id: session_id.clone(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(issue_id).expect("issue id"),
+                    identifier: identifier.to_string(),
+                    title: format!("Task {identifier}"),
+                    description: String::new(),
+                },
+                project: project_snapshot,
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_session_id: project.id,
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Waiting,
+            status_reason: "awaiting review".to_string(),
+            status_at: now,
+            worktree: PathBuf::from(format!("/repo.{identifier}")),
+            workspace_slug: identifier.to_ascii_lowercase(),
+            lifecycle: TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: session.id.clone(),
+            sequence: 1,
+            slug: session.workspace_slug.clone(),
+            branch: format!("jack/{}", session.workspace_slug),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store
+            .create_task_session(&session, &pr)
+            .await
+            .expect("create task session");
+        session_id
     }
 
     #[test]
@@ -2856,12 +3204,25 @@ mod tests {
     }
 
     #[test]
-    fn reteam_classifies_move_defer_leave_and_skip() {
-        // Completed → historical, regardless of team.
+    fn reteam_classifies_completed_move_defer_and_skip() {
+        // Completion does not exempt a foreign-team issue from migration.
         assert_eq!(
             classify_reteam_item(&reteam_item("W2-1", true), "PRD", None),
-            ReteamClass::Historical
+            ReteamClass::Move
         );
+        // A completed issue with a writing lease remains protected.
+        assert!(matches!(
+            classify_reteam_item(
+                &reteam_item("W2-5", true),
+                "PRD",
+                Some(reteam_session(
+                    "W2-5",
+                    TaskSessionStatus::Running,
+                    Some(ChildLeaseState::Active)
+                ))
+            ),
+            ReteamClass::Defer(_)
+        ));
         // Already in the target team → skip (idempotency).
         assert_eq!(
             classify_reteam_item(&reteam_item("PRD-7", false), "PRD", None),
@@ -2898,6 +3259,388 @@ mod tests {
             classify_reteam_item(&reteam_item("W2-4", false), "PRD", None),
             ReteamClass::Move
         );
+    }
+
+    #[test]
+    fn reteam_moving_issues_requires_the_target_team_on_every_project() {
+        let project = |id: &str, name: &str, team_ids: Option<Vec<&str>>| PmProject {
+            id: id.to_string(),
+            slug: crate::pm::project_slug(name),
+            name: name.to_string(),
+            summary: String::new(),
+            definition: String::new(),
+            krs: Vec::new(),
+            initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: team_ids.map(|ids| ids.into_iter().map(str::to_string).collect()),
+        };
+        let projects = vec![
+            project("safe", "Safe", Some(vec!["team-prd", "team-shared"])),
+            project("missing", "Missing target", Some(vec!["team-shared"])),
+            project("unknown", "Unknown teams", None),
+        ];
+
+        ensure_move_projects_carry_target_team(
+            &projects,
+            &BTreeSet::from(["safe".to_string()]),
+            "team-prd",
+        )
+        .expect("safe Project carries target team");
+
+        let error = ensure_move_projects_carry_target_team(
+            &projects,
+            &BTreeSet::from(["missing".to_string(), "unknown".to_string()]),
+            "team-prd",
+        )
+        .expect_err("missing and unresolved target teams fail closed");
+        let message = error.to_string();
+        assert!(message.contains("`Missing target` (teams [team-shared])"));
+        assert!(message.contains("`Unknown teams` (teams unresolved)"));
+        assert!(message.contains("No Projects or Tasks were moved"));
+    }
+
+    #[tokio::test]
+    async fn reteam_apply_moves_completed_issues_before_narrowing_projects() {
+        let initial_project = reteam_project_node(
+            "project-1",
+            "Developer Efficiency",
+            &["team-prd", "team-shared"],
+        );
+        let completed_issue = reteam_issue_node("issue-1", "W2-41", true);
+        let (base_url, requests) = test_server::spawn(vec![
+            projects_response(json!([initial_project])),
+            issues_response(json!([completed_issue])),
+            issue_observation_response(&[]),
+            reteam_comment_create_response("comment-1"),
+            issue_team_move_response("issue-1", "PRD-7"),
+            project_team_move_response("project-1"),
+            projects_response(json!([reteam_project_node(
+                "project-1",
+                "Developer Efficiency",
+                &["team-prd"],
+            )])),
+            issues_response(json!([reteam_issue_node("issue-1", "PRD-7", true)])),
+        ])
+        .await;
+        let ctx = linear_test_ctx(base_url, "initiative-123");
+        let (_directory, store) = reteam_test_store().await;
+
+        let result = apply_or_plan_reteam(
+            &ctx,
+            &store,
+            Path::new("/repo"),
+            "product",
+            "team-prd",
+            "PRD",
+            true,
+            &NullProgress,
+        )
+        .await
+        .expect("reteam apply succeeds");
+
+        assert_eq!(result.moves.len(), 1);
+        assert_eq!(result.moves[0].old_identifier, "W2-41");
+        assert_eq!(result.moves[0].new_identifier.as_deref(), Some("PRD-7"));
+
+        let requests = requests.lock().await;
+        let bodies = requests
+            .iter()
+            .map(|request| {
+                serde_json::from_str::<serde_json::Value>(&request.body)
+                    .expect("GraphQL request body")
+            })
+            .collect::<Vec<_>>();
+        let comment = bodies
+            .iter()
+            .position(|body| {
+                body["query"]
+                    .as_str()
+                    .is_some_and(|query| query.contains("mutation CreateComment"))
+            })
+            .expect("traceability comment");
+        let issue_move = bodies
+            .iter()
+            .position(|body| {
+                body["query"]
+                    .as_str()
+                    .is_some_and(|query| query.contains("mutation MoveIssueToTeam"))
+            })
+            .expect("completed issue move");
+        let project_move = bodies
+            .iter()
+            .position(|body| {
+                body["query"]
+                    .as_str()
+                    .is_some_and(|query| query.contains("mutation MoveProjectToTeam"))
+            })
+            .expect("Project narrow");
+        assert!(
+            comment < issue_move,
+            "old identifier is recorded before move"
+        );
+        assert!(
+            issue_move < project_move,
+            "every issue moves before Project narrowing"
+        );
+        assert_eq!(bodies[issue_move]["variables"]["id"], "issue-1");
+        assert!(bodies[comment]["variables"]["body"]
+            .as_str()
+            .expect("comment body")
+            .contains("was W2-41; moving onto team PRD"));
+    }
+
+    #[tokio::test]
+    async fn reteam_apply_refuses_unsafe_project_before_any_mutation() {
+        let (base_url, requests) = test_server::spawn(vec![
+            projects_response(json!([reteam_project_node(
+                "project-1",
+                "Developer Efficiency",
+                &["team-shared"],
+            )])),
+            issues_response(json!([reteam_issue_node("issue-1", "W2-41", false)])),
+        ])
+        .await;
+        let ctx = linear_test_ctx(base_url, "initiative-123");
+        let (_directory, store) = reteam_test_store().await;
+
+        let error = apply_or_plan_reteam(
+            &ctx,
+            &store,
+            Path::new("/repo"),
+            "product",
+            "team-prd",
+            "PRD",
+            true,
+            &NullProgress,
+        )
+        .await
+        .expect_err("missing target team refuses apply");
+
+        assert!(error.to_string().contains("Developer Efficiency"));
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| !request.body.contains("mutation")));
+    }
+
+    #[tokio::test]
+    async fn reteam_apply_refuses_completed_issue_with_a_writing_body() {
+        let (_directory, store) = reteam_test_store().await;
+        let session_id = seed_reteam_task_session(&store, "issue-live", "W2-42").await;
+        let mut session = store
+            .get_task_session(&session_id)
+            .await
+            .expect("read session")
+            .expect("session exists");
+        session.begin_generation("lf-task-test".to_string());
+        store
+            .update_task_session(&session)
+            .await
+            .expect("reserve writing body");
+        let (base_url, requests) = test_server::spawn(vec![
+            projects_response(json!([reteam_project_node(
+                "project-1",
+                "Developer Efficiency",
+                &["team-prd", "team-shared"],
+            )])),
+            issues_response(json!([reteam_issue_node("issue-live", "W2-42", true)])),
+        ])
+        .await;
+        let ctx = linear_test_ctx(base_url, "initiative-123");
+
+        let error = apply_or_plan_reteam(
+            &ctx,
+            &store,
+            Path::new("/repo"),
+            "product",
+            "team-prd",
+            "PRD",
+            true,
+            &NullProgress,
+        )
+        .await
+        .expect_err("writing body refuses the whole apply");
+
+        assert!(error.to_string().contains("W2-42"));
+        assert!(error
+            .to_string()
+            .contains("No Projects or Tasks were moved"));
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| !request.body.contains("mutation")));
+    }
+
+    #[tokio::test]
+    async fn reteam_retry_reuses_pre_move_comment_then_moves_and_rebinds() {
+        let (_directory, store) = reteam_test_store().await;
+        let session_id = seed_reteam_task_session(&store, "issue-legacy", "W2-9").await;
+        let initial_project = || {
+            reteam_project_node(
+                "project-1",
+                "Developer Efficiency",
+                &["team-prd", "team-shared"],
+            )
+        };
+        let legacy_issue = || reteam_issue_node("issue-legacy", "W2-9", false);
+
+        let (base_url, first_requests) = test_server::spawn(vec![
+            projects_response(json!([initial_project()])),
+            issues_response(json!([legacy_issue()])),
+            issue_observation_response(&[]),
+            reteam_comment_create_response("comment-1"),
+            json_response(
+                StatusCode::OK,
+                json!({ "errors": [{ "message": "issue move failed" }] }),
+            ),
+        ])
+        .await;
+        let first_ctx = linear_test_ctx(base_url, "initiative-123");
+        let error = apply_or_plan_reteam(
+            &first_ctx,
+            &store,
+            Path::new("/repo"),
+            "product",
+            "team-prd",
+            "PRD",
+            true,
+            &NullProgress,
+        )
+        .await
+        .expect_err("first move fails after comment");
+        assert!(error.to_string().contains("issue move failed"));
+        assert_eq!(
+            store
+                .get_task_session(&session_id)
+                .await
+                .expect("read session")
+                .expect("session exists")
+                .launch
+                .issue
+                .identifier,
+            "W2-9"
+        );
+
+        let existing_comment = reteam_comment_body("W2-9", "PRD");
+        let (base_url, second_requests) = test_server::spawn(vec![
+            projects_response(json!([initial_project()])),
+            issues_response(json!([legacy_issue()])),
+            issue_observation_response(&[&existing_comment]),
+            issue_team_move_response("issue-legacy", "PRD-9"),
+            project_team_move_response("project-1"),
+            projects_response(json!([reteam_project_node(
+                "project-1",
+                "Developer Efficiency",
+                &["team-prd"],
+            )])),
+            issues_response(json!([reteam_issue_node("issue-legacy", "PRD-9", false,)])),
+        ])
+        .await;
+        let second_ctx = linear_test_ctx(base_url, "initiative-123");
+        let result = apply_or_plan_reteam(
+            &second_ctx,
+            &store,
+            Path::new("/repo"),
+            "product",
+            "team-prd",
+            "PRD",
+            true,
+            &NullProgress,
+        )
+        .await
+        .expect("retry succeeds");
+
+        assert_eq!(result.session_updates, 1);
+        assert_eq!(
+            store
+                .get_task_session(&session_id)
+                .await
+                .expect("read session")
+                .expect("session exists")
+                .launch
+                .issue
+                .identifier,
+            "PRD-9"
+        );
+        let first_requests = first_requests.lock().await;
+        let second_requests = second_requests.lock().await;
+        assert_eq!(
+            first_requests
+                .iter()
+                .filter(|request| request.body.contains("mutation CreateComment"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            second_requests
+                .iter()
+                .filter(|request| request.body.contains("mutation CreateComment"))
+                .count(),
+            0,
+            "retry must reuse this migration's existing comment"
+        );
+    }
+
+    #[tokio::test]
+    async fn reteam_already_moved_issue_only_rebinds_a_stale_session() {
+        let (_directory, store) = reteam_test_store().await;
+        let session_id = seed_reteam_task_session(&store, "issue-moved", "W2-10").await;
+        let (base_url, requests) = test_server::spawn(vec![
+            projects_response(json!([reteam_project_node(
+                "project-1",
+                "Developer Efficiency",
+                &["team-prd"],
+            )])),
+            issues_response(json!([
+                reteam_issue_node("issue-moved", "PRD-10", false),
+                reteam_issue_node("issue-direct", "PRD-11", false)
+            ])),
+            projects_response(json!([reteam_project_node(
+                "project-1",
+                "Developer Efficiency",
+                &["team-prd"],
+            )])),
+            issues_response(json!([
+                reteam_issue_node("issue-moved", "PRD-10", false),
+                reteam_issue_node("issue-direct", "PRD-11", false)
+            ])),
+        ])
+        .await;
+        let ctx = linear_test_ctx(base_url, "initiative-123");
+
+        let result = apply_or_plan_reteam(
+            &ctx,
+            &store,
+            Path::new("/repo"),
+            "product",
+            "team-prd",
+            "PRD",
+            true,
+            &NullProgress,
+        )
+        .await
+        .expect("already-moved reconciliation succeeds");
+
+        assert_eq!(result.already, 2);
+        assert_eq!(result.session_updates, 1);
+        assert!(result.moves.is_empty());
+        assert_eq!(
+            store
+                .get_task_session(&session_id)
+                .await
+                .expect("read session")
+                .expect("session exists")
+                .launch
+                .issue
+                .identifier,
+            "PRD-10"
+        );
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 4);
+        assert!(requests
+            .iter()
+            .all(|request| !request.body.contains("mutation")));
     }
 
     #[test]

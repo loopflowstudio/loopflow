@@ -5540,8 +5540,8 @@ mod tests {
         require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
         resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
         task_recovery_adoption, task_snapshot, unpublished_work,
-        verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions, TaskControlResult,
+        TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,

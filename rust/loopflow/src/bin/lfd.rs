@@ -246,6 +246,20 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Read Linear webhook config from env. `None` when either the secret or the
+/// viewer id is unset/empty — the daemon runs but `/linear/webhook` returns 503.
+fn read_linear_config() -> Option<lfd::LinearConfig> {
+    let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").ok()?;
+    let viewer_id = std::env::var("LF_LINEAR_VIEWER_ID").ok()?;
+    if secret.is_empty() || viewer_id.is_empty() {
+        return None;
+    }
+    Some(lfd::LinearConfig {
+        secret: std::sync::Arc::new(secret.into_bytes()),
+        viewer_id: std::sync::Arc::new(viewer_id),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{MakeWriter, RotatingLog};
@@ -269,18 +283,4 @@ mod tests {
             b"next"
         );
     }
-}
-
-/// Read Linear webhook config from env. `None` when either the secret or the
-/// viewer id is unset/empty — the daemon runs but `/linear/webhook` returns 503.
-fn read_linear_config() -> Option<lfd::LinearConfig> {
-    let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").ok()?;
-    let viewer_id = std::env::var("LF_LINEAR_VIEWER_ID").ok()?;
-    if secret.is_empty() || viewer_id.is_empty() {
-        return None;
-    }
-    Some(lfd::LinearConfig {
-        secret: std::sync::Arc::new(secret.into_bytes()),
-        viewer_id: std::sync::Arc::new(viewer_id),
-    })
 }

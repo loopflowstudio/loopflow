@@ -602,74 +602,52 @@ pub async fn resolve_provider_account(
             },
         ));
     }
-    let mut unauthenticated = Vec::new();
-    loop {
-        let selection = store
-            .select_provider_account(provider, &candidates, provider_session_id)
+    let selection = store
+        .select_provider_account(provider, &candidates, provider_session_id)
+        .await?;
+    let Some(selection) = selection else {
+        let accounts = store
+            .list_provider_accounts(Some(provider.as_str()))
             .await?;
-        let Some(selection) = selection else {
-            if !unauthenticated.is_empty() {
-                return Err(ProviderAccountError::NoAuthenticatedAccount {
-                    provider,
-                    accounts: unauthenticated.join(", "),
-                });
-            }
-            let accounts = store
-                .list_provider_accounts(Some(provider.as_str()))
-                .await?;
-            let reasons = candidates
-                .iter()
-                .map(|account_id| {
-                    accounts
-                        .iter()
-                        .find(|account| account.account_id == *account_id)
-                        .map(account_unavailable_reason)
-                        .unwrap_or_else(|| format!("'{account_id}' missing"))
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(ProviderAccountError::NoEligibleAccount {
-                provider,
-                accounts: reasons,
-            });
-        };
-        let account_id = selection.account.account_id.clone();
-        let credential = match access_tokens.remove(&account_id) {
-            Some(access_token) => AccountCredential::AccessToken(access_token),
-            None => match selection.account.home.as_deref() {
-                Some(home) => {
-                    let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                    ensure_account_home_at(&operator_home, home, provider)?;
-                    let status = provider_account_auth_status(provider, home.to_path_buf())
-                        .await
-                        .map_err(|error| {
-                            ProviderAccountError::Runtime(format!(
-                                "check {provider} account '{account_id}': {error}"
-                            ))
-                        })?;
-                    if !retain_authenticated_account(&store, &selection.account, &status).await? {
-                        unauthenticated.push(format!(
-                            "'{account_id}' with `lf auth connect {provider} {account_id}`"
-                        ));
-                        continue;
-                    }
-                    AccountCredential::NativeHome(home.to_path_buf())
-                }
-                None => {
-                    return Err(ProviderAccountError::ForwardedBundle(format!(
-                        "missing access token for {provider}/{account_id}"
-                    )))
-                }
-            },
-        };
-        return Ok(ProviderAccountResolution::Managed(ProviderAccountRoute {
+        let reasons = candidates
+            .iter()
+            .map(|account_id| {
+                accounts
+                    .iter()
+                    .find(|account| account.account_id == *account_id)
+                    .map(account_unavailable_reason)
+                    .unwrap_or_else(|| format!("'{account_id}' missing"))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(ProviderAccountError::NoEligibleAccount {
             provider,
-            account_id,
-            credential,
-            resume_requested_session: selection.resume_requested_session,
-            store,
-        }));
-    }
+            accounts: reasons,
+        });
+    };
+    let account_id = selection.account.account_id.clone();
+    let credential = match access_tokens.remove(&account_id) {
+        Some(access_token) => AccountCredential::AccessToken(access_token),
+        None => match selection.account.home.as_deref() {
+            Some(home) => {
+                let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+                ensure_account_home_at(&operator_home, home, provider)?;
+                AccountCredential::NativeHome(home.to_path_buf())
+            }
+            None => {
+                return Err(ProviderAccountError::ForwardedBundle(format!(
+                    "missing access token for {provider}/{account_id}"
+                )))
+            }
+        },
+    };
+    Ok(ProviderAccountResolution::Managed(ProviderAccountRoute {
+        provider,
+        account_id,
+        credential,
+        resume_requested_session: selection.resume_requested_session,
+        store,
+    }))
 }
 
 fn account_unavailable_reason(account: &ProviderAccount) -> String {
@@ -1220,7 +1198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expired_native_account_leaves_automatic_rotation() {
+    async fn expired_live_check_marks_the_credential_missing() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             open_store(&crate::store::StorageConfig::sqlite(
@@ -1354,17 +1332,13 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn default_route_selects_an_account_without_a_repo_route() {
+    async fn default_route_selection_does_not_invoke_the_provider_cli() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let bin = temp.path().join("bin");
         fs::create_dir_all(&bin).unwrap();
         let claude = bin.join("claude");
-        fs::write(
-            &claude,
-            "#!/bin/sh\nprintf '%s\\n' '{\"loggedIn\":true,\"email\":\"selected@example.com\"}'\n",
-        )
-        .unwrap();
+        fs::write(&claude, "#!/bin/sh\nexit 99\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

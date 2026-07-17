@@ -141,5 +141,6 @@ Replace succession/review tests with Work/Epoch/Run/attention behavior tests.
   Run authority, not Session status or body leases;
 - current actionable CI preemption still passes without a command-ledger wake;
 - migration, full Rust tests, fmt, and clippy pass together;
-- Rust code falls by at least another 8,922 lines, reaching at most 119,127
-  code lines for the complete core cut.
+- Rust code falls by at least another 8,922 lines, reaching at most 120,220
+  physical code lines on current main (119,127 after normalizing out main's
+  1,093-line orthogonal addition).

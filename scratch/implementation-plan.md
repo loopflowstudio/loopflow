@@ -44,10 +44,9 @@ Do not add compatibility shims. Migrate stored data once, cut every caller to th
 
 ## Current implementation review
 
-Review snapshot: PR #1073 on commit `5b4978721`, based on main `367bd6046`.
-Main has since advanced through `276830460`; those changes are reviewed below
-and must be rebased after this checkpoint commits. Canonical architecture and
-the next executable cut were refreshed on 2026-07-17.
+Review snapshot: PR #1073 rebased onto main `276830460` on 2026-07-17. Main's
+global-promotion preflight and PM reteam changes are integrated and reviewed
+below. Canonical architecture and the next executable cut are current.
 
 Disposition: **the durable input spine is an achieved checkpoint. Execution and
 attention are still bridged through Session/body/Review machinery, so the
@@ -83,7 +82,7 @@ Current state against the phases below:
 | 4. Provider reconstruction | Partial | Dynamic Send outcome, durable Send, fixed Basis, and provider conformance exist; fallback Launch routing and transcript-free reconstruction remain |
 | 5. Review/attention/status | Redesigned, not implemented | Review is now an interactive flow interval derived from Launch + attention; `InteractionReview`, Handoff, dispositions, and parent starvation remain in code |
 | 6. Turn usage | Store/query complete | Every additive reader uses Turn spend; OpenCode still needs one end-to-end usage producer/parser |
-| 7. Purge | 3,078 code lines removed | Directive and authored-command surface is gone; 8,922 lines remain to reach 119,127 by deleting Review/Handoff and duplicate Session controllers |
+| 7. Purge | 3,078 normalized code lines removed | Directive and authored-command surface is gone; 8,922 lines remain to reach 120,220 physical / 119,127 normalized by deleting Review/Handoff and duplicate Session controllers |
 
 ### Findings that change the next implementation step
 
@@ -108,11 +107,13 @@ Current state against the phases below:
 11. **Review is conversation, not decision state.** A Review may be critique, questions, brainstorming, or direction. It is the interval where a flow's current step is interactive and its live Launch owes attention to `User | Parent(WorkRef)`. Steers and Turns occur inside it. Close advances the flow; it carries no approval or changes-requested disposition. There is no Review row or `ReviewId`.
 12. **Parent responsiveness is scheduler behavior.** Wave and Project must drain direct User interaction, awaiting child Reviews, and other unblocking child evidence before beginning their own background flow. Child attention may explicitly interrupt a non-steerable background Turn; this does not change plain Steer semantics.
 13. **`User` replaces `Human`.** User means an authenticated external Loopflow client, whether a person in Swift/CLI or another system's agent. Internal Loopflow authority remains `Run(RunId)`.
-14. **The first large deletion paid down 3,078 code lines.** `tokei` reports
-    128,049 Rust code lines against the 131,127 rebased checkpoint. The next
-    pass must delete another 8,922 to reach 119,127 by removing Review/Handoff
-    and duplicate Session control, not by compressing tests or counting
-    unrelated upstream deletion.
+14. **The first large deletion paid down 3,078 code lines.** Before the latest
+    main rebase, `tokei` reported 128,049 Rust code lines against the 131,127
+    architecture checkpoint. Main then added 1,093 orthogonal lines, making the
+    physical count 129,142 without changing the architecture delta. The next
+    pass must delete another 8,922 to reach 120,220 physical / 119,127
+    normalized by removing Review/Handoff and duplicate Session control, not by
+    compressing tests or charging unrelated upstream code to this design.
 15. **Work is the long-lived logical server; its process is not.** One generic
     Home runtime serves stable Wave, Project, and Task Work. Each kind supplies
     domain policy through an explicit `WorkRef` match, while Run reservation,
@@ -440,8 +441,8 @@ The pass is accepted only when:
 - Review and parent priority execute through the same Steer/Launch path;
 - the old writers, readers, DTOs, commands, and schemas in the deletion ledger
   are removed;
-- Rust is at most 119,127 lines, a 12,000-line reduction from the rebased
-  additive tree;
+- Rust is at most 120,220 physical lines on current main / 119,127 normalized,
+  a 12,000-line architecture reduction from the additive checkpoint;
 - any retained legacy-looking code names a distinct truth and is recorded here
   before acceptance.
 
@@ -735,7 +736,8 @@ Done when:
 - provider smoke tests pass where credentials are available without exposing secrets;
 - a copied dogfood database survives migration and recovery drills;
 - no dual read/write, fallback parser, old enum case, or compatibility DTO remains;
-- Rust code is at most 119,127 lines: 12,000 below the rebased additive tree;
+- Rust code is at most 120,220 physical lines on current main / 119,127
+  normalized: 12,000 below the additive architecture checkpoint;
 - no shortfall is accepted as a completed core cutover.
 
 ## Deletion ledger
@@ -942,7 +944,7 @@ Record after each checkpoint:
 
 | Measure | Baseline | Review snapshot | Done |
 | --- | ---: | ---: | ---: |
-| Rust code | 133,974 before upstream integration | 128,049 after input spine (-3,078) | ≤119,127 |
+| Rust code | 133,974 before upstream integration | 129,142 physical / 128,049 normalized after input spine (-3,078) | ≤120,220 physical / ≤119,127 normalized |
 | Named legacy child/control/interaction modules | 12,002 physical lines | 12,002 | 0 old concept lines |
 | Complete old interaction/handoff physical lines | 4,803 | 4,803 | 0 old concept lines |
 | Authored-direction domain types | command + directive + review + handoff | 1: Steer; Review/Handoff still model attention | 1: Steer; Review is derived |

@@ -797,9 +797,11 @@ small additive phases:
    executable architecture.
 
 The deletion is part of correctness. The input-spine checkpoint is 128,049
-Rust code lines, 3,078 below the 131,127 rebased checkpoint. The core cut still
-owes 8,922 lines to reach at most 119,127. Remove duplicate truth; do not earn
-the measure by compressing tests or claiming unrelated upstream deletion.
+normalized Rust code lines, 3,078 below the 131,127 architecture checkpoint.
+Current main then added 1,093 orthogonal lines, so the physical branch is
+129,142. The core cut still owes 8,922 lines to reach at most 120,220 physical /
+119,127 normalized. Remove duplicate truth; do not earn the measure by
+compressing tests or charging unrelated upstream code to this design.
 
 It is done when:
 

@@ -413,6 +413,12 @@ fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, Pat
     Ok((repo_root, main_repo))
 }
 
+/// Clear `scratch/` down to `.gitkeep` and commit it.
+///
+/// This step is what greens the `scratch-clear` required check, which is why
+/// that check is a *land-time precondition* and no Task repair turn can act on
+/// it — see [`crate::task::CiCheck::land_time_precondition`], which classifies it
+/// so a ci-fix wake never arms against work only this function can do.
 fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let scratch = repo.join("scratch");
     let gitkeep = scratch.join(".gitkeep");

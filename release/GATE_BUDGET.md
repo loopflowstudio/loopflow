@@ -31,11 +31,39 @@ one always does. The `ui-host` gate is separate and never counts toward `--all`.
 ```bash
 uv run python scripts/test.py --all        # bounded full gate; prints elapsed / budget per phase
 uv run python scripts/test.py --list --all # the plan and every phase budget, run nothing
+uv run python scripts/test.py --history 30 # judge the durable 30-day budget window
 uv run python scripts/test.py --ui-host    # the required hosted UI gate (permissioned host)
 ```
 
-The summary prints each suite's `elapsed / budget` and a total line. On failure
-the phase log (and any `.xcresult`) is kept under `.lf/tmp/gate/run-<pid>/`.
+The summary prints each phase and suite's `elapsed / budget` and a total line.
+On failure the phase log (and any `.xcresult`) is kept under
+`.lf/tmp/gate/run-<pid>/`.
+
+## Durable evidence
+
+Every selected phase is checkpointed under:
+
+```text
+<git-common-dir>/loopflow/pre-land/runs/<kind>/<run-id>.json
+```
+
+The Git common directory is shared by linked worktrees and survives Task
+worktree pruning, `.lf/tmp` reaping, and machine restart. Records contain only
+the run identity, branch, commit, timestamps, phase status, elapsed time, and
+the budget that governed that run. Logs, commands, paths, output, diffs, and
+environment values stay out of the durable record.
+
+`--all` records are the 30-day authority. Losing one would bias the evidence,
+so a write failure stops the full gate with `MEASUREMENT FAILED`. Changed-aware
+and required-host records are diagnostics; their write failures print one
+`MEASUREMENT WARNING` without changing the test result. `--history 30` reads
+only `full` records and reports:
+
+- `IN PROGRESS` while clean full-run history is younger than 30 days;
+- `NOT HOLDING` for any over-budget, incomplete, or unreadable full record in
+  the trailing window;
+- `HOLDING` once the full window has at least one complete run and every full
+  run in it stayed inside its captured budgets.
 
 ## Measured (this repo)
 

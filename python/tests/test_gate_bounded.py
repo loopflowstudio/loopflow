@@ -6,8 +6,12 @@ simulated runner-bootstrap failure names the missing capability.
 """
 
 import importlib.util
+import json
+import re
+import shutil
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,15 +28,68 @@ def _cmd(argv: list[str], label: str) -> "gate.Command":
     return gate.Command(argv=argv, cwd=ROOT, label=label)
 
 
+def _plan(*commands: "gate.Command") -> "gate.Plan":
+    suite = gate.Suite(
+        name="probe",
+        slow=False,
+        trigger_desc="test fixture",
+        match=lambda _changed: True,
+        build=lambda _changed: list(commands),
+    )
+    return gate.Plan(suite=suite, run=True, reason="test fixture", commands=list(commands))
+
+
+def _history_run(
+    root: Path,
+    started: datetime,
+    *,
+    branch: str = "test/branch",
+    status: str = "passed",
+    phase_status: str = "passed",
+    over_budget: bool = False,
+) -> Path:
+    run_id = f"{started.strftime('%Y%m%dT%H%M%SZ')}-1-abcdef12"
+    phase = gate.PhaseOutcome(
+        suite="python",
+        phase="python",
+        budget_s=600,
+        elapsed_s=601.0 if over_budget else 12.5,
+        status=phase_status,
+        over_budget=over_budget,
+    )
+    run = gate.GateRun(
+        run_id=run_id,
+        kind="full",
+        branch=branch,
+        head="0123456789abcdef",
+        task_session_id=None,
+        started_at=gate._format_timestamp(started),
+        finished_at=None
+        if status == "running"
+        else gate._format_timestamp(started + timedelta(minutes=1)),
+        status=status,
+        phases=[phase],
+    )
+    path = root / "full" / f"{run_id}.json"
+    gate._write_run_record(path, run.as_record())
+    return path
+
+
+def _fail_write(_path: Path, _record: dict[str, object]) -> None:
+    raise OSError("read-only fixture")
+
+
 def test_hanging_phase_is_killed_at_its_budget(tmp_path, monkeypatch):
     # A phase that would sleep far past its budget must be killed promptly.
     monkeypatch.setitem(gate.PHASE_BUDGETS, "hang-probe", 1)
     started = time.monotonic()
-    failure = gate._run_command(_cmd(["sleep", "60"], "hang-probe"), tmp_path)
+    outcome = gate._run_command(_cmd(["sleep", "60"], "hang-probe"), tmp_path, "probe")
     elapsed = time.monotonic() - started
 
-    assert failure is not None
-    assert "TIMEOUT" in failure and "hang-probe" in failure
+    assert outcome.status == "timed_out"
+    assert outcome.over_budget is True
+    assert outcome.failure is not None
+    assert "TIMEOUT" in outcome.failure and "hang-probe" in outcome.failure
     # Killed near its 1s budget plus the SIGTERM->SIGKILL grace, nowhere near 60s.
     assert elapsed < 20, f"phase took {elapsed:.1f}s; the budget did not bound it"
 
@@ -44,26 +101,282 @@ def test_child_process_dies_with_the_group(tmp_path, monkeypatch):
     monkeypatch.setitem(gate.PHASE_BUDGETS, "group-probe", 1)
     marker = tmp_path / "child-survived"
     script = f"sleep 30 && touch {marker} & wait"
-    gate._run_command(_cmd(["bash", "-c", script], "group-probe"), tmp_path)
+    gate._run_command(_cmd(["bash", "-c", script], "group-probe"), tmp_path, "probe")
     time.sleep(3)
     assert not marker.exists(), "backgrounded child outlived the group-kill"
 
 
 def test_failing_phase_reports_actionable_failure(tmp_path):
-    failure = gate._run_command(_cmd(["bash", "-c", "exit 3"], "red-probe"), tmp_path)
-    assert failure is not None
-    assert "FAILED" in failure and "red-probe" in failure
-    assert "exit 3" in failure
+    outcome = gate._run_command(_cmd(["bash", "-c", "exit 3"], "red-probe"), tmp_path, "probe")
+    assert outcome.status == "failed"
+    assert outcome.failure is not None
+    assert "FAILED" in outcome.failure and "red-probe" in outcome.failure
+    assert "exit 3" in outcome.failure
 
 
-def test_passing_phase_returns_none(tmp_path):
-    assert gate._run_command(_cmd(["bash", "-c", "exit 0"], "ok-probe"), tmp_path) is None
+def test_passing_phase_returns_measured_outcome(tmp_path):
+    outcome = gate._run_command(_cmd(["bash", "-c", "exit 0"], "ok-probe"), tmp_path, "probe")
+    assert outcome.status == "passed"
+    assert outcome.elapsed_s >= 0
+    assert outcome.budget_s == gate.DEFAULT_BUDGET_S
+    assert outcome.failure is None
 
 
 def test_missing_tool_is_named_not_a_traceback(tmp_path):
-    failure = gate._run_command(_cmd(["definitely-not-a-real-binary-xyz"], "tool-probe"), tmp_path)
-    assert failure is not None
-    assert "MISSING TOOL" in failure
+    outcome = gate._run_command(
+        _cmd(["definitely-not-a-real-binary-xyz"], "tool-probe"), tmp_path, "probe"
+    )
+    assert outcome.status == "missing_tool"
+    assert outcome.failure is not None
+    assert "MISSING TOOL" in outcome.failure
+
+
+def test_gate_history_uses_the_git_common_directory():
+    common_dir = Path(
+        gate.subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    assert gate._gate_history_root() == common_dir / "loopflow" / "pre-land" / "runs"
+    assert ROOT / ".lf" / "tmp" not in gate._gate_history_root().parents
+
+
+def test_run_persists_every_selected_phase_and_skips_after_failure(tmp_path, monkeypatch, capsys):
+    history_root = tmp_path / "common-history"
+    marker = tmp_path / "later-phase-ran"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: history_root)
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    plan = _plan(
+        _cmd(["bash", "-c", "exit 3"], "first"),
+        _cmd(["bash", "-c", f"touch {marker}"], "second"),
+    )
+
+    assert gate.run_plans([plan], kind="changed") == 1
+
+    records = list((history_root / "changed").glob("*.json"))
+    assert len(records) == 1
+    record = json.loads(records[0].read_text())
+    assert record["status"] == "failed"
+    assert [phase["status"] for phase in record["phases"]] == ["failed", "not_run"]
+    assert all("budget_s" in phase and "elapsed_s" in phase for phase in record["phases"])
+    assert not marker.exists()
+    summary = capsys.readouterr().out
+    assert "probe/first" in summary
+    assert "probe/second" in summary
+    assert "not run / 900s budget" in summary
+
+
+def test_initial_checkpoint_is_running_with_every_phase_not_run(tmp_path, monkeypatch):
+    history_root = tmp_path / "history"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: history_root)
+    plan = _plan(_cmd(["true"], "first"), _cmd(["true"], "second"))
+
+    recorder = gate._start_recorder("full", [plan])
+
+    assert recorder is not None
+    record = json.loads(recorder.path.read_text())
+    assert record["status"] == "running"
+    assert record["finished_at"] is None
+    assert [phase["status"] for phase in record["phases"]] == ["not_run", "not_run"]
+    assert not list(recorder.path.parent.glob("*.tmp"))
+
+
+def test_full_measurement_failure_stops_before_verification(tmp_path, monkeypatch, capsys):
+    marker = tmp_path / "phase-ran"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: tmp_path / "history")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_write_run_record", _fail_write)
+
+    result = gate.run_plans(
+        [_plan(_cmd(["bash", "-c", f"touch {marker}"], "probe"))],
+        kind="full",
+    )
+
+    assert result == 1
+    assert not marker.exists()
+    assert "MEASUREMENT FAILED" in capsys.readouterr().err
+
+
+def test_full_checkpoint_failure_stops_after_the_measured_phase(tmp_path, monkeypatch, capsys):
+    marker = tmp_path / "phase-ran"
+    history_root = tmp_path / "history"
+    real_write = gate._write_run_record
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: history_root)
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+
+    def _fail_after_initial(path: Path, record: dict[str, object]) -> None:
+        if path.exists():
+            raise OSError("checkpoint fixture")
+        real_write(path, record)
+
+    monkeypatch.setattr(gate, "_write_run_record", _fail_after_initial)
+    result = gate.run_plans(
+        [_plan(_cmd(["bash", "-c", f"touch {marker}"], "probe"))],
+        kind="full",
+    )
+
+    assert result == 1
+    assert marker.exists()
+    record = json.loads(next((history_root / "full").glob("*.json")).read_text())
+    assert record["status"] == "running"
+    assert record["phases"][0]["status"] == "not_run"
+    assert "MEASUREMENT FAILED" in capsys.readouterr().err
+
+
+def test_changed_measurement_failure_warns_once_and_keeps_result(tmp_path, monkeypatch, capsys):
+    marker = tmp_path / "phase-ran"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: tmp_path / "history")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_write_run_record", _fail_write)
+
+    result = gate.run_plans(
+        [_plan(_cmd(["bash", "-c", f"touch {marker}"], "probe"))],
+        kind="changed",
+    )
+
+    assert result == 0
+    assert marker.exists()
+    assert capsys.readouterr().err.count("MEASUREMENT WARNING") == 1
+
+
+def test_changed_measurement_warning_preserves_a_failing_result(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: tmp_path / "history")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_write_run_record", _fail_write)
+
+    result = gate.run_plans(
+        [_plan(_cmd(["bash", "-c", "exit 7"], "probe"))],
+        kind="changed",
+    )
+
+    assert result == 1
+    assert capsys.readouterr().err.count("MEASUREMENT WARNING") == 1
+
+
+def test_history_verdict_moves_from_progress_to_holding_to_overrun(tmp_path, monkeypatch, capsys):
+    history_root = tmp_path / "history"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: history_root)
+    now = datetime(2026, 7, 17, 12, tzinfo=timezone.utc)
+
+    _history_run(history_root, now - timedelta(days=29))
+    assert gate._history_report(30, now=now).verdict == "IN PROGRESS"
+
+    _history_run(history_root, now - timedelta(days=30), branch="test/clock-start")
+    assert gate._history_report(30, now=now).verdict == "HOLDING"
+
+    _history_run(
+        history_root,
+        now - timedelta(days=1),
+        branch="test/overrun",
+        status="failed",
+        phase_status="timed_out",
+        over_budget=True,
+    )
+    report = gate._history_report(30, now=now)
+    assert report.verdict == "NOT HOLDING"
+    assert any(
+        "OVER BUDGET python/python" in issue for entry in report.entries for issue in entry.issues
+    )
+    gate._print_history(report)
+    output = capsys.readouterr().out
+    assert "Verdict: NOT HOLDING" in output
+    assert "OVER BUDGET python/python" in output
+
+
+def test_corrupt_full_is_a_gap_but_corrupt_changed_is_not(tmp_path, monkeypatch):
+    history_root = tmp_path / "history"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: history_root)
+    now = datetime(2026, 7, 17, 12, tzinfo=timezone.utc)
+    _history_run(history_root, now - timedelta(days=30))
+    changed = history_root / "changed" / "20260716T120000Z-1-bad.json"
+    changed.parent.mkdir(parents=True)
+    changed.write_text("{broken")
+
+    assert gate._history_report(30, now=now).verdict == "HOLDING"
+
+    full = history_root / "full" / "20260716T120000Z-1-bad.json"
+    full.write_text("{broken")
+    assert gate._history_report(30, now=now).verdict == "NOT HOLDING"
+
+
+def test_history_cli_is_read_only_and_prints_the_verdict(tmp_path, monkeypatch, capsys):
+    history_root = tmp_path / "history"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: history_root)
+
+    assert gate.main(["--history", "30"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Verdict: IN PROGRESS" in output
+    assert not history_root.exists()
+
+
+def test_history_survives_worktree_tmp_and_worktree_removal(tmp_path, monkeypatch):
+    history_root = tmp_path / "common-git" / "loopflow" / "pre-land" / "runs"
+    monkeypatch.setattr(gate, "_gate_history_root", lambda: history_root)
+    now = datetime(2026, 7, 17, 12, tzinfo=timezone.utc)
+    worktree_a = tmp_path / "repo.task-a"
+    worktree_b = tmp_path / "repo.task-b"
+    (worktree_a / ".lf" / "tmp").mkdir(parents=True)
+    (worktree_b / ".lf" / "tmp").mkdir(parents=True)
+    _history_run(history_root, now - timedelta(days=30), branch="task-a")
+    _history_run(history_root, now - timedelta(days=29), branch="task-b")
+    before = gate._history_report(30, now=now)
+
+    shutil.rmtree(worktree_a)
+    shutil.rmtree(worktree_b / ".lf" / "tmp")
+    after = gate._history_report(30, now=now)
+
+    assert len(before.entries) == len(after.entries) == 2
+    assert before.verdict == after.verdict == "HOLDING"
+
+
+def test_persisted_schema_contains_only_operational_facts():
+    run = gate.GateRun(
+        run_id="20260717T120000Z-1-abcdef12",
+        kind="full",
+        branch="test/branch",
+        head="0123456789abcdef",
+        task_session_id="ts_test",
+        started_at="2026-07-17T12:00:00Z",
+        finished_at="2026-07-17T12:01:00Z",
+        status="passed",
+        phases=[gate.PhaseOutcome("python", "python", 600, 12.5, "passed", False)],
+    )
+    record = run.as_record()
+
+    assert set(record) == {
+        "schema",
+        "run_id",
+        "kind",
+        "branch",
+        "head",
+        "task_session_id",
+        "started_at",
+        "finished_at",
+        "status",
+        "phases",
+    }
+    assert set(record["phases"][0]) == {
+        "suite",
+        "phase",
+        "budget_s",
+        "elapsed_s",
+        "status",
+        "over_budget",
+    }
+    forbidden = {"argv", "cwd", "output", "environment", "prompt", "diff"}
+    assert forbidden.isdisjoint(json.dumps(record).lower().split('"'))
+
+
+def test_budget_document_names_every_executable_phase_budget():
+    document = (ROOT / "release/GATE_BUDGET.md").read_text()
+    for label, budget in gate.PHASE_BUDGETS.items():
+        row = rf"\|\s*[^|]+\|\s*{re.escape(label)}\s*\|\s*{budget}s\s*\|"
+        assert re.search(row, document), f"{label}={budget}s is absent from GATE_BUDGET.md"
 
 
 def test_all_never_runs_the_required_host_gate():

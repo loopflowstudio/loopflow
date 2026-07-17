@@ -24,6 +24,7 @@ Run at minimum the checks that apply to files you changed. A PR that passes loca
 uv run python scripts/test.py          # run only the suites your branch touched
 uv run python scripts/test.py --list   # print the plan, run nothing
 uv run python scripts/test.py --all    # run every suite (the full matrix)
+uv run python scripts/test.py --history 30 # read the durable budget window
 ```
 
 `scripts/test.py` diffs your branch against `origin/main`, maps changed paths
@@ -43,9 +44,24 @@ uv run python scripts/test.py --base HEAD~5  # diff against a different ref
 Every phase runs under a printed wall-clock budget (see
 `release/GATE_BUDGET.md`). A phase that overruns is killed—process group and
 all—and reported as `TIMEOUT <phase> (budget Ns)`, so **no phase can hang the
-gate**. The plan and summary print each phase's budget and elapsed time; on
-failure the phase log (and any `.xcresult`) is preserved under
+gate**. The plan and summary print each phase's `elapsed / budget`; later
+phases remain visible as `not_run` after an earlier failure. On failure the
+phase log (and any `.xcresult`) is preserved under
 `.lf/tmp/gate/run-<pid>/<suite>/` for one-command repair without opening Xcode.
+
+Each invocation also checkpoints a compact JSON record under the repository's
+Git common directory:
+
+```text
+<git-common-dir>/loopflow/pre-land/runs/<kind>/<run-id>.json
+```
+
+This evidence is shared by linked worktrees and survives Task-worktree and
+`.lf/tmp` cleanup. A full `--all` run fails with `MEASUREMENT FAILED` if its
+record cannot be written; changed-aware and `--ui-host` runs print one
+`MEASUREMENT WARNING` and preserve their underlying test result. Read the
+full-run budget evidence with `--history 30`; `IN PROGRESS`, `NOT HOLDING`, and
+`HOLDING` make the Developer Efficiency observation window explicit.
 
 The summary states **what each suite proves**. The `loopflow` suite compiles
 the app and UI-test runners; it does **not** run hosted UI behavior. That real

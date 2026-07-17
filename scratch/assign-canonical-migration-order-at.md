@@ -1,295 +1,313 @@
 # Assign canonical migration order at the release cut
 
+## Decision
+
+A migration has two different coordinates:
+
+- a **source id**, minted once when the schema change is authored and preserved
+  forever; and
+- a **canonical ordinal**, assigned once by the release PR.
+
+Dependencies use the source id. Databases record the canonical file stem. A
+human-readable name explains the change but identifies nothing.
+
+This iteration replaces the shared, name-keyed draft registry with a file-only
+source model and makes release preparation an error-atomic transaction. The two
+changes belong together: independent branches do not share a registry edit, and
+the release cut is the first operation that writes a shared order.
+
 ## Problem
 
-The migration ordinal is allocated while a branch is active. `scripts/new_migration.py`
-fetches `origin/main`, counts the migrations in the active `<major>.<minor>` namespace,
-and writes the next `<ordinal>`. Two consequences follow, both live on main right now:
+Today `scripts/new_migration.py` allocates an ordinal on a feature branch. Two
+parallel branches can therefore choose the same ordinal and must coordinate on a
+rebase even when their schemas are independent. `check_migrations.py` compounds
+that cost by requiring every canonical file on `origin/main` to exist locally;
+a branch can fail only because main advanced after its branch point.
 
-1. **Ordinals race.** Two branches authored concurrently both pick the same next
-   ordinal; whichever merges second must rebase and renumber. Independent schema
-   changes coordinate on a serial number instead of on their real data dependency.
-   `check_migrations.py` with `LOOPFLOW_REQUIRE_ORIGIN_MAIN=1` then turns
-   `migration-check` red on *every* branch that is merely behind main, whether or
-   not it touches a migration — a recurring source of manual git surgery
-   (wave `MEMORY.md`: "Migration ordinals race until merge").
+The first draft design moved the race instead of removing it:
 
-2. **`origin/main` is treated as the publication boundary because dogfooding runs
-   ahead of tags.** So a migration is "canonical" the instant it merges, not when it
-   is released. Main currently holds `0.11.027_accounts_first` then
-   `0.11.029_ci_incident_repaired_head`; `0.11.028_task_gate_settlement` is still
-   isolated on open PR #1052. If #1052 lands after a main build has already applied
-   029, the canonical source order and a live ledger disagree even though each branch
-   was locally reasonable. The `lf code-review` breakage on 2026-07-17 was the same
-   class from the promotion side (W2-319 owns that half).
+- `<human_name>.sql` still made every branch coordinate on a global name;
+- every author still edited the same `DRAFTS` slice;
+- `depends_on` accepted only live drafts, so a dependency broke when its upstream
+  draft became canonical;
+- canonicalization wrote files and the registry incrementally;
+- one `previous_release.db` was both the release gate's input and the next
+  release's output; and
+- the unchanged `origin/main` missing-file check made the claimed zero false reds
+  impossible.
 
-Who benefits: every developer and agent authoring schema in parallel. The win is
-that parallel schema work never contends for, reserves, or renames an ordinal, and
-"which migration comes first" is decided once, deterministically, at the one moment
-that is actually a publication — the release cut.
+The current implementation also makes Rust CI red:
+`every_migration_file_is_registered_under_its_own_name` treats the new `drafts/`
+directory as an unregistered migration. Generated registration replaces that
+test's hand-maintained premise rather than merely teaching it to ignore one
+directory.
 
-## The demo
+## Authoring contract
 
-```
-# two branches, authored the same afternoon, no coordination:
-uv run python scripts/new_migration.py add_wave_colour      # branch A
-uv run python scripts/new_migration.py add_task_priority    # branch B
-# each writes a draft with a stable name and NO ordinal; no fetch, no rebase race.
-# both merge to main in either order — migration-check stays green on both.
-
-lf release run patch
-# the release worktree orders the accumulated drafts, assigns the next canonical
-# ordinals in one contiguous tail, proves the previous release upgrades cleanly
-# through them, opens the release PR, merges it, then tags that exact commit.
-# Re-running `lf release run patch` after a failed attempt regenerates byte-identical
-# canonical files.
+```bash
+uv run python scripts/new_migration.py add_wave_colour
+# rust/loopflow/src/store/migrations/drafts/
+#   task-a3d1cb8f8cf24f2bb0d47c15fcf75fd2--content-7f3a91c2a6d14b98__add_wave_colour.sql
 ```
 
-The moment that proves the win: `git log --stat` on the two merged feature branches
-shows `drafts/add_wave_colour.sql` and `drafts/add_task_priority.sql` — no ordinal,
-no collision — and `git show <release-tag>` shows them canonicalized as a contiguous
-`0.11.030_… / 0.11.031_…` tail assigned in one deterministic step.
-
-## Approach
-
-Split migration identity into two lifecycle stages that share one model:
-
-- **Draft** — authored on a branch. Lives at
-  `rust/loopflow/src/store/migrations/drafts/<name>.sql`, registered in a `DRAFTS`
-  slice beside `MIGRATIONS`. Carries a **stable name** and an optional
-  **`depends_on`** list of other draft names. It has **no ordinal**. Drafts are
-  mutable and applied only to disposable development/test databases.
-
-- **Canonical** — a released migration, exactly today's `Migration` /
-  `<major>.<minor>.<ordinal>_<name>.sql`. Immutable once merged. The *only* way a
-  draft becomes canonical is the release cut.
-
-Canonicalization becomes a step inside the existing `lf release run` worktree, before
-the migration gate and the PR: it freezes the draft set, validates the dependency
-graph, topologically orders it, assigns the next ordinals in the version-being-cut's
-namespace, rewrites each draft into a canonical `.sql` + `MIGRATIONS` entry, deletes
-the draft, and proves the previous release upgrades through the new tail. This reuses
-`lf release run`'s existing worktree/PR/merge/tag machinery rather than adding a second
-release mechanism.
-
-The development-store fence already exists and is reused unchanged:
-`MigrationAuthority::{Published, ValidationOnly}`, `guard_development_database`, and
-`may_apply_migrations` (`store/mod.rs`) already refuse a dev build against
-`~/.lf/loopflow.db` and give each source worktree its own
-`~/.lf-dev/worktrees/<source-identity>/loopflow.db`. Drafts only ever exist in a
-development build (a released binary ships an empty `DRAFTS`), so they can never reach
-the shared release store. This Task adds no new fence; it relies on W2-319's.
-
-### Draft file format
+The file is the entire branch-owned change:
 
 ```sql
--- name: add_wave_colour
--- depends_on: add_wave_table, seed_wave_defaults
+-- depends_on: task-4d94...--content-29af...
 ALTER TABLE waves ADD COLUMN colour TEXT;
 ```
 
-- `name`: snake_case, unique across all drafts and all released migration names.
-  This is the draft's whole identity. It survives canonicalization unchanged — the
-  canonical file is `<id>_<name>.sql` — so any test or helper keyed on the name keeps
-  working across the rename.
-- `depends_on`: comma-separated draft names, or omitted / `none`. Names **other
-  drafts only**; released migrations already precede every draft by construction, so a
-  draft never depends on a canonical id. A data migration that must run after another
-  draft declares it here — this is the dependency graph, never the ordinal.
+The stem is `<source-id>__<readable-name>`.
 
-### `DRAFTS` registry
+- `source-id` is opaque and immutable. `new_migration.py` uses the stable Task
+  UUID when Loopflow supplies one and always adds a generated content UUID, so a
+  Task may own more than one migration. Outside a Task it emits a content UUID
+  alone. The chosen id is persisted in the filename; release retries never
+  regenerate it.
+- `readable-name` is snake_case prose. It is not globally unique, is never a
+  dependency target, and is never used as a topological tie-break.
+- `depends_on` contains source ids, not names or ordinals. It may name a draft or
+  an already-canonical migration.
+- The SQL file may be edited while its PR is active, but its source id does not
+  change. Once canonical, the full file name and bytes are immutable.
 
-Beside `MIGRATIONS` in `migrations.rs` (or a sibling `drafts.rs`):
+`new_migration.py` creates only this file. It does not fetch, count files, edit
+Rust, or inspect `origin/main`. Two branches therefore have disjoint diffs even
+when their readable names match.
+
+## Generated registration
+
+`rust/loopflow/build.rs` scans both migration directories and writes
+`$OUT_DIR/migration_registry.rs`. `migrations.rs` includes that generated file;
+there is no `DRAFTS` or `MIGRATIONS` slice for an author or the release script to
+edit.
+
+The generator emits:
 
 ```rust
 pub struct DraftMigration {
+    pub source_id: &'static str,
     pub name: &'static str,
     pub depends_on: &'static [&'static str],
     pub sql: &'static str,
 }
 
-const DRAFTS: &[DraftMigration] = &[
-    DraftMigration {
-        name: "add_wave_colour",
-        depends_on: &[],
-        sql: include_str!("migrations/drafts/add_wave_colour.sql"),
-    },
-];
+const MIGRATIONS: &[Migration] = &[/* canonical files, numeric id order */];
+const DRAFTS: &[DraftMigration] = &[/* draft files, source-id order */];
 ```
 
-`new_migration.py` writes the draft file and prints this entry to paste — the same
-"write SQL, paste the printed entry" ergonomics as today, minus the ordinal.
+Build generation validates file grammar, duplicate source ids, duplicate
+canonical ordinals, and exact file/registry coverage. It emits
+`cargo:rerun-if-changed` for both directories. `check_migrations.py` performs the
+same user-facing validation without requiring a Rust compile; Rust tests prove
+that the generated sets equal the files on disk.
 
-### Development / test application
+New canonical files retain the source id:
 
-The store applies the immutable canonical chain, then overlays drafts:
+```
+0.11.030__task-a3d1...--content-7f3a...__add_wave_colour.sql
+```
 
-1. Apply `MIGRATIONS` exactly as today (incremental, immutable prefix).
-2. Topologically sort `DRAFTS` (dependency edges; ties broken by name — deterministic,
-   never by file order, PR number, or time). Apply each pending draft, recording it in
-   `schema_migrations` under version `draft.<name>` with its SQL checksum.
-3. On open, reconcile the draft overlay against the current `DRAFTS`: any recorded
-   `draft.*` row whose draft was removed, renamed, or whose checksum changed means the
-   overlay is stale. Because drafts are mutable and the dev store is disposable, the
-   response is to **recreate the development store** (back up, delete, re-init canonical
-   + current drafts fresh) and log it loudly. Appending a new draft with the canonical
-   prefix unchanged just applies the new draft; a *changed* draft recreates.
+Canonicalization copies the draft bytes, including dependency comments, and
+adds only the release ordinal to the path. Existing released files are not
+renamed. The generator assigns each legacy file a stable synthetic source id
+equal to `legacy:<existing-file-stem>`, so a new draft can explicitly depend on
+one without changing history.
 
-A released build ships `DRAFTS == &[]`, so it never applies or records a `draft.*` row.
-Combined with `may_apply_migrations`, `draft.*` rows exist only in development stores,
-and a released binary that encounters one treats it as an unknown id (incompatible),
-exactly as it should.
+`Migration` gains explicit `version`, `source_id`, and `name` fields generated
+from the file. `version` remains exactly the canonical file stem recorded in
+`schema_migrations`; formatting it is no longer reconstructed from a supposedly
+unique human name.
 
-### Release canonicalization (`scripts/canonicalize_migrations.py`, stdlib-only)
+## Stable dependency resolution
 
-Run by `lf release run` in the release worktree, before `verify_migrations`:
+Validation builds one `source_id -> canonical | draft` map.
 
-1. Read `DRAFTS` and the draft files. Validate: names unique and snake_case; no
-   collision with any released id or name; every `depends_on` resolves to a draft; the
-   graph is acyclic.
-2. Topologically sort (Kahn), tie-breaking ready nodes by name → a total, deterministic
-   order independent of merge timing.
-3. Choose the namespace from the **version being cut** (`resolve_version`): patch keeps
-   the current `(major, minor)` and continues after the last released ordinal in it; a
-   minor/major bump starts a fresh `(major, minor)` sequence at ordinal 1.
-4. Assign a contiguous ordinal tail. For each draft in order, write
-   `migrations/<major>.<minor>.<NNN>_<name>.sql` (draft SQL body, header stripped),
-   delete `drafts/<name>.sql`, append the `Migration { .. }` entry to `MIGRATIONS`, and
-   remove the `DRAFTS` entry.
-5. Idempotent + deterministic: re-running on an empty `DRAFTS` is a no-op; the same
-   draft set always yields the same ids, files, and diff. A failed/abandoned release
-   never merged its ids, so a later release regenerates them identically.
+1. Duplicate ids anywhere are ambiguous and fail.
+2. A dependency resolved to canonical is already satisfied.
+3. A dependency resolved to a draft contributes a graph edge.
+4. A dependency missing from both sets fails.
+5. Kahn ordering chooses the lowest **source id** among ready nodes. Readable
+   name, PR number, merge time, file mtime, and canonical ordinal do not decide
+   draft order.
 
-### The previous-release upgrade gate
+This survives a release boundary. If draft B depends on source id A and A is
+canonicalized by release N, B still names A after rebasing and release N+1
+resolves it from the canonical set. No header or dependency rewrite is needed.
 
-A committed fixture proves data transforms before publication:
-`rust/loopflow/tests/fixtures/migrations/previous_release.db` holds the **last
-released** schema frontier with representative product rows.
+Development stores apply canonical migrations, then the resolved draft order,
+recording `draft.<source-id>` plus a checksum. A missing, renamed, or changed
+draft receipt recreates only that source-owned development database. Released
+builds are produced from a canonicalized tree with no drafts, so no published
+binary can write a `draft.*` receipt. The existing W2-319 authority and shared
+store fence remain unchanged.
 
-A `#[test]` (so it runs on every `cargo test` *and* in the release PR's CI, which is
-before the tag and before any shared-store write) copies the fixture, applies the full
-current `MIGRATIONS` chain, and asserts: no error, `PRAGMA foreign_key_check` clean,
-product schema byte-identical to a fresh init, checksums valid, and a second open is a
-no-op. A fresh-init proof and the no-op-reopen already exist in `migrations.rs` tests.
+Data-transform tests use `apply_through_source_id`, which resolves the same id
+from either registry. The test therefore survives draft-to-canonical promotion.
 
-The release worktree also **regenerates** `previous_release.db` to the new frontier
-(open fresh, apply the now-canonical chain, apply the committed seed rows, snapshot) and
-commits it in the release PR, so the next release's fixture sits at this release's
-frontier. At gate time the fixture is still the prior frontier — exactly "a fixture at
-the previous released frontier."
+## Branch migration check
 
-Per-migration data-transform correctness is a normal `#[test]` using a name-keyed
-helper `apply_through(conn, "add_wave_colour")` that applies canonical chain + drafts up
-to and including the named migration. The helper resolves a name whether it is currently
-a draft or already canonical, so the test is written once and survives the release
-rename — the data logic is never untested until release.
+`origin/main` is no longer required to be a subset of the branch. That rule is
+the behind-main false red.
 
-## De-risking
+`check_migrations.py` instead separates two questions:
 
-| Question | Finding | Impact on design |
-|----------|---------|-----------------|
-| Does a dev/prod store fence already exist, or must this Task build one? | Yes: `MigrationAuthority`, `guard_development_database`, `may_apply_migrations`, and per-source `~/.lf-dev/worktrees/<source-identity>/loopflow.db` all exist (`store/mod.rs`, `build_info.rs`). W2-319 owns promotion safety. | Reuse it verbatim. Drafts live only in dev builds (empty `DRAFTS` in release), so no new fence — satisfies "fail closed against the shared release store" and the exclusion "do not weaken W2-319's fence." |
-| Can canonicalization reuse `lf release run`, or is a second mechanism needed? | `release_run` already creates a dedicated worktree, bumps manifests, writes notes, commits, opens the PR, waits for merge, then tags the merged commit (`ops/release.rs`). `verify_migrations` runs `check_migrations.py` in that worktree. | Add canonicalization as one more `prepare_release_in_worktree` step before `verify_migrations`. No new release path. |
-| Will `apply_set` accept a synthetic release history for the upgrade fixture? | `apply_set(conn, set: &[Migration])` already takes the set as an argument precisely so "fixtures can drive synthetic release histories without a test-only seam." Existing divergent/permuted tests do this. | The upgrade gate and per-migration tests use `apply_set` on slices; no production reshaping for tests. |
-| Does the file stem have to equal the ledger version string? | Yes — `Migration::version()` is `format!("{id}_{name}")` and is exactly the file stem; renaming a shipped file is a schema break the immutability check enforces. | Canonicalization writes `<id>_<name>.sql` with the draft's `name` unchanged, so the recorded version is stable; the name is chosen at authoring time and never revised at release. |
-| How do drafts avoid becoming a second canonical namespace (the design-pressure ban)? | Drafts carry no ordinal and record `draft.<name>` (which `MigrationId::parse_version` rejects as a release id). They are mutable, dev-only, and deleted at canonicalization. | There is exactly one canonical namespace (`MIGRATIONS`); `DRAFTS` is a staging area that empties at every release, not a parallel quasi-canonical order. |
-| Does `check_migrations.py`'s `origin/main` staleness failure survive? | It fails a branch only when a *canonical* migration disagrees with `origin/main`. Feature branches now add drafts, not canonical ids. | The "X exists on origin/main but missing from this branch" red on merely-behind branches disappears for schema-adding branches — a direct developer-efficiency win. The check gains draft validation (names, graph) but drops branch-ordinal collisions. |
-| What decides order between two independent drafts (no dependency)? | Topological sort with a name tie-break is total and deterministic; merge time / PR number / file mtime are not reproducible on release retry. | Ordinal assignment is reproducible: same drafts → same ids. Satisfies "re-running release yields no migration diff" and "do not infer order from filename sort/PR/time when a dependency exists." |
-| Is recreating the dev store on draft drift acceptable? | The dev store is explicitly disposable (`~/.lf-dev/...`), and this repo dogfoods on the *release* binary against `~/.lf/loopflow.db`; dev builds are walled off. | Recreate-on-draft-change is sanctioned by the Task ("a schema frontier change recreates that development database"). Back up before delete; never touch the release store. |
+- **Published immutability:** every canonical file in the last release tag still
+  has the same path and bytes.
+- **Branch-authored change:** compare the branch with `merge-base(HEAD,
+  origin/main)`. A modification or deletion of a canonical file fails. A new
+  canonical file is legal only when the same branch deletes a draft with the
+  same source id and bytes and the target namespace matches the bumped package
+  version. That is the release transformation.
 
-## Alternatives considered
+Canonical files added to `origin/main` after the branch point are not in the
+branch-authored diff, so their absence is ignored. A real collision, mutation,
+missing dependency, or malformed graph remains red. CI still fetches
+`origin/main` to find the merge base, but never asks a behind branch to contain
+main's whole tree.
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Central ordinal reservation service (a store that hands out the next number) | Removes the race but adds a networked coordination point and a new failure mode; ordinals still allocated pre-release. | Explicitly banned by the Task's design pressure; heavier than the problem. |
-| Keep branch ordinals but renumber deterministically at rebase | No new file format. | Still allocates on branches, still renames on rebase, still coordinates on a serial number — exactly the behavior the Task removes. Two quasi-canonical namespaces. |
-| Content-hash draft identity (`draft_<sha8>.sql`) instead of a human name | No name collisions to police. | Opaque; the Task asks for "a content/task identity **plus an explicit human-readable name**." A name is also what lets `apply_through` and tests survive the rename. |
-| Order drafts by filename/PR at release | Trivial to implement. | Not a dependency graph; a real data dependency between two drafts would be silently mis-ordered. The Task forbids inferring order from filename/PR/time when a dependency exists. |
-| Regenerate `previous_release.db` after the tag instead of in the PR | Simpler sequencing. | The gate needs the fixture at the *prior* frontier at PR time; regenerating post-tag leaves the next release with no committed fixture. Regenerate in the PR (fixture still prior-frontier at gate time). |
+## Release transaction
 
-## Key decisions
+`lf release run` keeps its existing worktree, PR, merge, and exact-commit tag.
+Preparation changes order:
 
-- **Draft name is the identity and it never changes at release.** The canonical file is
-  `<id>_<name>.sql`; only the `<id>` prefix is minted at the cut. This is what keeps
-  name-keyed tests and `apply_through` valid across the rename and keeps the recorded
-  `schema_migrations.version` stable.
-- **Canonicalization is Python (`scripts/canonicalize_migrations.py`), stdlib-only**,
-  matching `new_migration.py` / `check_migrations.py`, so `lf release` needs no toolchain
-  to canonicalize. The upgrade *gate* is Rust (`#[test]`) because it needs the migration
-  engine (checksums, schema compare); it runs in the release PR's CI before the tag.
-- **Drafts are dev-only by construction.** A released binary ships `DRAFTS == &[]`;
-  combined with `may_apply_migrations`, `draft.*` ledger rows exist only in development
-  stores. No new fence, no production risk.
-- **Recreate the dev store on draft drift**, never advance it across a mutated draft —
-  drafts are not immutable, so incremental application across an edit is unsound.
-- **Topological order with a name tie-break**, computed from `depends_on`, is the single
-  source of migration order for the release tail. Deterministic and retry-stable.
-- **`check_migrations.py` gains draft validation and loses branch-ordinal collision as a
-  routine failure.** It validates draft names/graph and keeps every canonical
-  immutability check (vs `origin/main`, vs last tag) unchanged.
+1. Resolve the previous tag and target version, create a fresh release worktree,
+   then **bump manifests first**. The bumped version selects the namespace.
+2. Freeze a manifest of every draft source id, path, dependency, and byte digest,
+   plus the exact previous fixture digest.
+3. Build a pure `CanonicalizationPlan` in memory. Validate all ids,
+   dependencies, cycles, target paths, ordinals, and fixture generations before
+   touching the worktree.
+4. Stage the canonical file tree in a temporary sibling directory. Record a
+   byte-for-byte before image for every migration and fixture path the operation
+   can add, replace, or remove; keep that transaction open through verification.
+5. Install the canonical paths with temp-file writes and `os.replace`. Any
+   returned write error restores the before image and removes every staged
+   addition.
+6. With canonical files now present, build and run the migration verifier **from
+   that modified worktree before the release commit**. The already-running
+   release binary does not contain files it just canonicalized, so it must not
+   perform this proof itself. The worktree-built verifier copies the prior
+   fixture to a temporary target, migrates it, and proves checksums, schema,
+   `PRAGMA foreign_key_check`, fresh initialization, and a no-op second open.
+   Install the verified target fixture, prune only a generation older than the
+   prior one, then run `check_migrations.py` and the generated-registry test. Any
+   build, fixture write, or verification error restores the same before image.
+   From the caller's perspective the operation is atomic: success installs the
+   whole plan; failure leaves the migration and fixture trees byte-identical. A
+   process crash can strand only the disposable release worktree, which is
+   discarded before a retry.
+7. Commit and publish the release PR. Wait for the exact PR head's required
+   `rust-test`, `rust-lint`, `migration-check`, and `python-test` checks to pass
+   before arming merge. Only after the PR merges is that merged SHA tagged.
 
-## Scope
+Canonicalization no longer rewrites Rust source. Its installed diff consists of
+draft deletions, canonical file additions, the target fixture generation, and
+normal release metadata.
 
-**In scope**
+## Two-generation fixtures
 
-- `drafts/` directory, draft file format, `DRAFTS` registry, `DraftMigration` type.
-- `new_migration.py` rewritten to emit a draft (no ordinal, no fetch/rebase).
-- Dev/test store application of the draft overlay + recreate-on-drift.
-- `scripts/canonicalize_migrations.py` and its wiring into `release_run` before
-  `verify_migrations`.
-- `check_migrations.py` draft validation; retain all canonical immutability checks.
-- The previous-release upgrade fixture, its gate `#[test]`, fixture regeneration in the
-  release worktree, and the `apply_through` name-keyed test helper.
-- `MIGRATIONS.md`, doctor output, and CI `migration-check` updated to describe the
-  release cut as the publication boundary.
+Fixtures are versioned, never overwritten in place:
 
-**Out of scope**
+```
+rust/loopflow/tests/fixtures/migrations/v0.11.3.db  # prior input
+rust/loopflow/tests/fixtures/migrations/v0.11.4.db  # target output
+```
 
-- Weakening or duplicating W2-319's shared-store promotion fence.
-- Making production databases disposable.
-- Retroactively renaming released migrations.
-- Repairing the live 028/029 history (separate operational cleanup — see below).
+Release `v0.11.4` copies `v0.11.3.db` to a temporary database, migrates that
+copy through the canonical tail, validates it, and installs the result as
+`v0.11.4.db`. The prior file remains present and byte-identical in the release
+PR. Once the target is valid, a fixture older than the prior generation may be
+removed in the same transaction, leaving exactly prior + target.
 
-### Forward-compatible transition for 028/029
+Rust tests open both committed generations against the current chain. In a
+release PR this proves the prior input upgrades and the target is a no-op; after
+release it continues to exercise one real historical upgrade. A separately
+initialized temporary database proves fresh schema equivalence. No test decides
+that the newly generated target fixture was the previous release.
 
-This Task prevents recurrence; it does not rewrite history. `0.11.027` and `0.11.029`
-stay canonical as-is. `0.11.028_task_gate_settlement` on PR #1052 is reconciled by the
-operator by either landing it with its current ordinal (a one-time gap in the sequence,
-which the numeric-tuple ordering tolerates) or re-authoring it as a draft to be
-canonicalized at the next release. The design leaves both ordinals immutable and adds no
-code that renumbers them.
+Fixture materialization is deterministic. After the real migration engine and
+data checks pass, the worktree-built verifier normalizes non-semantic ledger
+fields (`applied_at` and build/source provenance) to documented fixture values,
+checkpoints/removes WAL state, and uses `VACUUM INTO` for the committed file. A
+retry test proves the resulting target fixture digest is stable; production
+databases still retain their real timestamps and provenance.
+
+## Proof matrix
+
+| Proof | Executable evidence |
+| --- | --- |
+| Two independent branches share no registry edit | A temporary git repo forks branches A/B; each `new_migration.py` run changes exactly one distinct draft file and neither changes `migrations.rs` or `build.rs`. Both merge orders compile to the same generated registry. |
+| A dependency crosses a release boundary | Canonicalize source A into release N, leave B depending on A's source id, then prepare release N+1. B resolves A from canonical files and orders after it. |
+| Invalid graph leaves the tree unchanged | Hash every relative path and byte under migrations/fixtures, run missing-dependency and cycle plans, and assert the complete digest is unchanged. |
+| Write failure leaves the tree unchanged | Patch the file side effect in the canonicalizer to fail after the first successful replacement; rollback must restore the same complete-tree digest and leave no temp path. |
+| Release PR retains its prior input | Prepare a release from `vN.db`; assert `vN.db` still exists with its original digest and the diff adds `vN+1.db` rather than modifying `vN.db`. |
+| Retry is deterministic | Run preparation twice from the same frozen tree and target version; canonical paths, bytes, fixture bytes, and the resulting diff are identical. |
+| Current Rust red is closed | The generated registry/file equality test passes and no directory entry can be interpreted as a migration. Full required Rust CI passes on the release PR head. |
+
+## Files to change
+
+- `scripts/new_migration.py`: mint one immutable source id and write one file.
+- `scripts/check_migrations.py`: parse source ids/dependencies; replace the
+  origin/main superset rule with merge-base branch-authorship checks.
+- `scripts/canonicalize_migrations.py`: pure plan, cross-boundary resolver,
+  staged transactional install, fixture rotation.
+- `rust/loopflow/build.rs`: generate canonical and draft registration.
+- `rust/loopflow/src/store/migrations.rs`: include generated sets, apply drafts
+  by source id, recreate stale dev stores, expose source-id test helpers.
+- `rust/loopflow/src/ops/release.rs`: bump -> canonicalize -> verify -> commit ->
+  wait for required CI -> merge -> tag.
+- A worktree-built internal migration verifier: exercise the just-generated
+  registry and materialize the normalized target fixture; the parent release
+  process only orchestrates it.
+- `rust/loopflow/tests/fixtures/migrations/`: retain versioned prior and target
+  databases.
+- `python/tests/test_{new,check,canonicalize}_migrations.py` and Rust migration/
+  release tests: the proof matrix above.
+- `rust/loopflow/src/store/MIGRATIONS.md`, CI comments, and doctor output: one
+  publication boundary and no hand-edited registry instructions.
+
+The current partial Python implementation is revised in place. Do not merge the
+new draft format before generated registration, cross-boundary resolution,
+transactional release preparation, and the fixture/CI gates exist end to end.
 
 ## Done when
 
-- `scripts/new_migration.py add_x` writes `drafts/x.sql` with no ordinal and performs
-  no `git fetch`/rebase; `test_new_migration.py` asserts this.
-- Two branches each add a draft; both merge in either order; `check_migrations.py`
-  (with `LOOPFLOW_REQUIRE_ORIGIN_MAIN=1`) passes on both — no rename, no collision.
-- `scripts/canonicalize_migrations.py` on a two-draft set with a declared dependency
-  emits a contiguous ordinal tail in dependency order; on a cycle it fails before any
-  file is written; re-running yields a byte-identical result.
-- A Rust gate `#[test]` upgrades `previous_release.db` through the full chain
-  (FK-clean, schema == fresh, checksums valid, no-op reopen) and proves fresh init.
-- `apply_through("<name>")` applies canonical chain + drafts up to a named migration,
-  used by a data-transform test that passes both before (draft) and after (canonical)
-  the rename.
-- A dev store with a changed draft recreates rather than advancing; a released build
-  (empty `DRAFTS`) never writes a `draft.*` row and refuses `~/.lf/loopflow.db`.
-- `cargo test -p loopflow`, `cargo fmt`, `cargo clippy -- -D warnings`,
-  `uv run pytest python/tests/test_new_migration.py python/tests/test_check_migrations.py`,
-  and a new `test_canonicalize_migrations.py` all pass.
-- `MIGRATIONS.md` and the CI `migration-check` comment describe the release cut, not
-  `origin/main`, as the publication boundary.
+- `new_migration.py` changes exactly one uniquely keyed draft file and performs
+  no git/network or shared registry write.
+- Two same-name drafts from independent branches coexist; generated registration
+  includes both.
+- Dependencies resolve by source id from drafts or canonicals; a release-boundary
+  dependency test passes.
+- Missing/ambiguous/cyclic graphs and injected write failure leave the complete
+  migration + fixture tree byte-identical.
+- Canonicalization runs after the version bump, assigns one deterministic
+  contiguous tail, consumes included drafts, and is retry-identical.
+- The release PR contains byte-identical prior input and a separately named
+  target fixture; Rust proves prior upgrade, target no-op, and fresh init.
+- A branch behind main passes when its only difference is canonical files added
+  upstream after its merge base. Real branch-authored canonical changes still
+  fail.
+- Worktree migration verification passes before commit; required Rust CI passes
+  on the exact PR head before merge; the merged SHA is the tagged SHA.
+- Development draft drift recreates only the per-source dev store. W2-319's
+  shared-store promotion fence is unchanged.
 
 ## Measure
 
-- **Avoidable `migration-check` reds** — the count of branches failing `migration-check`
-  solely because they are behind main while adding a migration. Baseline from
-  wave `MEMORY.md`: this fires on effectively every schema-adding branch and on
-  behind-main branches that touch no migration. Target after: **zero** for
-  schema-adding branches (they add drafts, no ordinal, no `origin/main` collision).
-- **Ordinal renames per merged schema PR** — `git log` count of migrations renamed
-  during rebase. Baseline: nonzero and rising with parallelism (027/028/029 is the live
-  instance). Target: **zero** — ordinals are assigned once, at the cut.
-- **Release-retry determinism** — re-running `lf release run <bump>` after an aborted
-  attempt produces an empty migration diff. Target: **byte-identical** canonical files.
+The previous document claimed all behind-main reds would become zero without
+removing the check that caused them. The measurable claim is narrower:
+
+- **Shared registration edits per schema PR:** target 0. A schema PR adds its
+  uniquely keyed file; generated code owns registration.
+- **Behind-main absence-only failures:** target 0. Count failures whose only
+  difference is canonical files added to `origin/main` after the branch's merge
+  base. Invalid graphs and branch-authored canonical mutations are expected reds.
+- **Pre-release ordinal renames:** target 0. Feature PRs contain no ordinal.
+- **Release retry drift:** target 0 changed bytes for identical frozen input and
+  target version.
+
+Historical CI does not record a structured cause for every migration red, so no
+numeric baseline is invented. The live 027/028/029 sequence and this PR's Rust
+registration failure are concrete pre-change evidence; post-change tests and
+categorized check failures make the four targets directly computable.

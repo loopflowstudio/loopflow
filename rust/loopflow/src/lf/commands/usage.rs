@@ -4,10 +4,9 @@ use anyhow::Result;
 use time::OffsetDateTime;
 
 use crate::journal::open_ledger;
-use crate::lf::commands::runs::{boundary_spans, SpanDto};
 use crate::lf::output::{format_int, truncate, Colors};
 use crate::provider_account::open_account_store;
-use crate::store::{AccountLimitRow, AccountLimitWindow, ProviderAccount};
+use crate::store::{AccountLimitRow, AccountLimitWindow, ProviderAccount, TurnSpendRow};
 use crate::subscription::{poll_account, SubscriptionError};
 
 const REPO_WIDTH: usize = 32;
@@ -24,18 +23,17 @@ const FRESH_SECS: i64 = 15 * 60;
 /// spend by repo and provider. Both read local stores; accounts whose stored
 /// window observations have gone stale are polled live first.
 ///
-/// `--json` emits one row per *boundary* instead: what each skill, and each
-/// terminal run, actually spent. Rows are stored as per-boundary deltas, so
-/// this is exactly the grain the dashboard groups by — skill,
-/// `provider:model`, repo — and consumers sum, never diff.
+/// `--json` emits one row per *Turn* instead: what the provider measured for
+/// one exchange, attributed by the launch that ran it. That is the grain the
+/// dashboard groups by — skill, `provider:model`, repo — and consumers sum,
+/// never diff.
 pub fn run(json: bool, days: u32, refresh: bool, cached: bool) -> Result<()> {
     let since = if days == 0 {
         0
     } else {
         OffsetDateTime::now_utc().unix_timestamp() - i64::from(days) * 86_400
     };
-    let events = open_ledger()?.list_run_events_since(since)?;
-    let spend = boundary_spans(&events);
+    let spend = open_ledger()?.turn_spend_since(since)?;
     if json {
         println!("{}", serde_json::to_string(&spend)?);
         return Ok(());
@@ -261,12 +259,6 @@ fn format_age(seconds: i64) -> String {
 
 // -- Spend ---------------------------------------------------------------------
 
-/// Rows recorded before the provider dimension existed, and runs whose repo
-/// was never resolved, group under a NULL key.
-fn or_unattributed(value: Option<&str>) -> &str {
-    value.unwrap_or("(unattributed)")
-}
-
 /// A running sum over `(repo, provider)` rows — the only grain the ledger
 /// reports. Every coarser row in this table is one of these.
 #[derive(Default)]
@@ -310,28 +302,31 @@ fn format_share(total: u64, grand_total: u64) -> String {
 }
 
 /// Spend attributed to one `(repo, provider)` pair, folded from the same
-/// per-boundary rows emitted by `--json`: terminal-only SQL cannot assign a
-/// flow that uses Claude for one skill and Codex for another.
+/// per-Turn rows emitted by `--json`: terminal-only SQL cannot assign a flow
+/// that uses Claude for one skill and Codex for another.
+///
+/// Every Turn is reached through the launch that ran it, and a launch always
+/// names its repo and provider — so spend here is never unattributed.
 #[derive(Debug, PartialEq)]
 struct UsageRow {
-    repo: Option<String>,
-    provider: Option<String>,
+    repo: String,
+    provider: String,
     input_tokens: u64,
     output_tokens: u64,
     cache_read_tokens: u64,
 }
 
-fn aggregate_spend(spend: &[SpanDto]) -> Vec<UsageRow> {
-    let mut rows: BTreeMap<(Option<String>, Option<String>), Totals> = BTreeMap::new();
-    for span in spend {
-        let input = span.input_tokens.unwrap_or(0).max(0) as u64;
-        let output = span.output_tokens.unwrap_or(0).max(0) as u64;
-        let cache = span.cache_read_tokens.unwrap_or(0).max(0) as u64;
+fn aggregate_spend(spend: &[TurnSpendRow]) -> Vec<UsageRow> {
+    let mut rows: BTreeMap<(String, String), Totals> = BTreeMap::new();
+    for turn in spend {
+        let input = turn.input_tokens.unwrap_or(0).max(0) as u64;
+        let output = turn.output_tokens.unwrap_or(0).max(0) as u64;
+        let cache = turn.cache_read_tokens.unwrap_or(0).max(0) as u64;
         if input == 0 && output == 0 && cache == 0 {
             continue;
         }
         let totals = rows
-            .entry((span.repo.clone(), span.provider.clone()))
+            .entry((turn.repo.clone(), turn.provider.clone()))
             .or_default();
         totals.input += input;
         totals.output += output;
@@ -359,11 +354,11 @@ fn print_report(rows: &[UsageRow], days: u32) {
         return;
     }
 
-    let mut by_provider: BTreeMap<Option<&str>, Totals> = BTreeMap::new();
+    let mut by_provider: BTreeMap<&str, Totals> = BTreeMap::new();
     let mut grand = Totals::default();
     for row in rows {
         by_provider
-            .entry(row.provider.as_deref())
+            .entry(row.provider.as_str())
             .or_default()
             .add(row);
         grand.add(row);
@@ -381,13 +376,7 @@ fn print_report(rows: &[UsageRow], days: u32) {
         let mut totals = Totals::default();
         totals.add(row);
         print_row(
-            &repo_lead(
-                &truncate(
-                    &short_repo(or_unattributed(row.repo.as_deref())),
-                    REPO_WIDTH,
-                ),
-                or_unattributed(row.provider.as_deref()),
-            ),
+            &repo_lead(&truncate(&short_repo(&row.repo), REPO_WIDTH), &row.provider),
             totals.cells(grand_total),
             false,
         );
@@ -396,11 +385,7 @@ fn print_report(rows: &[UsageRow], days: u32) {
 
     print_row(&provider_lead("PROVIDER"), HEADINGS.map(String::from), true);
     for (provider, totals) in &by_provider {
-        print_row(
-            &provider_lead(or_unattributed(*provider)),
-            totals.cells(grand_total),
-            false,
-        );
+        print_row(&provider_lead(provider), totals.cells(grand_total), false);
     }
     println!();
 
@@ -450,16 +435,15 @@ fn short_repo(repo: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        account_statuses, aggregate_spend, format_share, format_window, or_unattributed,
-        short_repo, Totals, UsageRow,
+        account_statuses, aggregate_spend, format_share, format_window, short_repo, Totals,
+        UsageRow,
     };
-    use crate::lf::commands::runs::SpanDto;
-    use crate::store::AccountLimitWindow;
+    use crate::store::{AccountLimitWindow, TurnSpendRow};
 
-    fn row(repo: Option<&str>, provider: Option<&str>, input: u64) -> UsageRow {
+    fn row(repo: &str, provider: &str, input: u64) -> UsageRow {
         UsageRow {
-            repo: repo.map(str::to_string),
-            provider: provider.map(str::to_string),
+            repo: repo.to_string(),
+            provider: provider.to_string(),
             input_tokens: input,
             output_tokens: 1,
             cache_read_tokens: 2,
@@ -500,26 +484,20 @@ mod tests {
         assert_eq!(short_repo("/Users/jack/src/cadenza/"), "cadenza");
     }
 
+    /// The per-provider table is a fold of the repo rows: one provider's spend
+    /// across every repo reaches its total, and the grand total is every row.
     #[test]
-    fn null_repo_and_provider_read_as_unattributed() {
-        assert_eq!(or_unattributed(None), "(unattributed)");
-        assert_eq!(or_unattributed(Some("claude")), "claude");
-    }
-
-    /// The per-provider table is a fold of the repo rows, so a run with no repo
-    /// still reaches the provider's total — and the grand total is every row.
-    #[test]
-    fn a_repoless_run_still_lands_in_the_provider_rollup() {
+    fn provider_rollup_folds_every_repo_row() {
         let rows = [
-            row(Some("/src/loopflow"), Some("claude"), 100),
-            row(None, Some("claude"), 50),
-            row(Some("/src/cadenza"), None, 7),
+            row("/src/loopflow", "claude", 100),
+            row("/src/cadenza", "claude", 50),
+            row("/src/cadenza", "codex", 7),
         ];
 
         let mut claude = Totals::default();
         let mut grand = Totals::default();
         for row in &rows {
-            if row.provider.as_deref() == Some("claude") {
+            if row.provider == "claude" {
                 claude.add(row);
             }
             grand.add(row);
@@ -558,49 +536,42 @@ mod tests {
         assert_eq!(format_window(&[], "session", 0), "-");
     }
 
-    fn boundary(process: &str, seq: i64, provider: &str, input: i64) -> SpanDto {
-        SpanDto {
+    fn turn(process: &str, at: i64, provider: &str, input: i64) -> TurnSpendRow {
+        TurnSpendRow {
             run_id: "trace".to_string(),
             process_id: process.to_string(),
-            parent_process_id: None,
-            seq,
-            node: "skill".to_string(),
-            name: Some("implement".to_string()),
-            repo: Some("/src/loopflow".to_string()),
+            repo: "/src/loopflow".to_string(),
             wave: None,
             flow: Some("ship".to_string()),
             skill: Some("implement".to_string()),
-            started_at: seq,
-            ended_at: Some(seq),
-            status: "completed".to_string(),
+            provider: provider.to_string(),
+            model: None,
+            at,
             input_tokens: Some(input),
             output_tokens: Some(0),
             cache_read_tokens: Some(0),
             cost_usd: Some(input as f64 / 100.0),
-            duration_secs: None,
-            provider: Some(provider.to_string()),
-            model: None,
         }
     }
 
     #[test]
     fn mixed_provider_flow_spend_stays_with_each_provider() {
         let rows = aggregate_spend(&[
-            boundary("process", 1, "claude", 100),
-            boundary("process", 2, "codex", 25),
+            turn("process", 1, "claude", 100),
+            turn("process", 2, "codex", 25),
         ]);
 
         assert_eq!(rows.len(), 2);
         assert_eq!(
             rows.iter()
-                .find(|row| row.provider.as_deref() == Some("claude"))
+                .find(|row| row.provider == "claude")
                 .expect("claude row")
                 .input_tokens,
             100
         );
         assert_eq!(
             rows.iter()
-                .find(|row| row.provider.as_deref() == Some("codex"))
+                .find(|row| row.provider == "codex")
                 .expect("codex row")
                 .input_tokens,
             25
@@ -610,8 +581,8 @@ mod tests {
     #[test]
     fn processes_sharing_a_trace_remain_additive() {
         let rows = aggregate_spend(&[
-            boundary("parent", 1, "claude", 100),
-            boundary("child", 1, "claude", 5),
+            turn("parent", 1, "claude", 100),
+            turn("child", 1, "claude", 5),
         ]);
 
         assert_eq!(rows.len(), 1);

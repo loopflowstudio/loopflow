@@ -42,6 +42,48 @@ It does not redesign:
 
 Do not add compatibility shims. Migrate stored data once, cut every caller to the new model, and delete the old readers and writers in the same branch. The implementation checkpoints below are review boundaries, not independently supported dual architectures.
 
+## Current implementation review
+
+Review snapshot: `9ffba7edd` plus the uncommitted Turn-spend cutover in progress on 2026-07-16.
+
+Disposition: **extend; do not land the steering commit as a standalone architecture**.
+
+The implementation found one sound seam:
+
+- provider-wide `supports_steer` is gone;
+- `send_current` reports `Sent | NotSteerable | Failed | Unknown` per active provider Turn;
+- Codex correlates `turn/steer` with the expected vendor Turn and waits for the provider response;
+- ordinary Steer no longer implies interrupt on Claude or OpenCode;
+- trace-only Rust ids moved from `RunId`/`ProcessId` to `TraceId`/`ExecId`, freeing the product names;
+- the separate usage slice is deleting spend writes from `run_events` and moving readers toward `agent_turns`.
+
+That is adapter groundwork, not the core cutover. Current state against the phases below:
+
+| Phase | Status | Evidence still missing |
+| --- | --- | --- |
+| 0. Executable spec | Partial | Static JSON names four provider shapes, but no transition tables and no executable opaque-TUI contract |
+| 1. Work/Epoch/Basis/Home | Not started | No target types, tables, migration, ids, or revision allocator exist |
+| 2. Run/Launch/containment | Vocabulary only | Trace ids were renamed; Session/body lease stores and duplicated runners remain authoritative |
+| 3. Steer/typed control | Adapter only | `ChildCommand`, `ChildDirective`, replacement/resume/decision variants, ambient authority, and explicit Ack remain |
+| 4. Provider reconstruction | Partial | Dynamic Send outcome exists; reconstruction, fallback Launches, exact durable Send correlation, and real conformance do not |
+| 5. Wait/interaction/status | Not started | InteractionReview, InteractiveHandoff, stored status cross-products, and Swift Handoff surfaces remain |
+| 6. Turn usage | In progress | Writer deletion and reader cutover are uncommitted and not yet accepted by the full gate |
+| 7. Purge | Not started | Every named legacy module/schema object remains |
+
+### Findings that change the next implementation step
+
+1. **A confirmed live send is not crash-durable.** `send_current_input` marks the `ChildCommand` accepted, converts the future seed to anonymous `PendingInput::system`, and keeps it only in memory. A crash after `Sent` can lose the later seed. The immutable Steer must remain authoritative; Send is only its receipt.
+2. **Live Steer is not completion-fenced.** Task completion checks unincorporated directives, not Steer commands. The active Turn can still complete Work after a live Steer advanced what it should honor. Basis must land with Steer, not as later hardening.
+3. **Typed decisions cannot inherit ordinary Steer timing.** On a seed-only provider, the current code queues `Decide` until the active Turn ends but records `DecisionResolved` only after sending that queued text. A Turn blocked in `decision request --wait` can therefore wait on the write that is waiting on the Turn. Persist the typed resolution and revision first; live/seed prose is optional notification.
+4. **The provider fixture is descriptive, not conformance.** Its test asserts literals in `control_contract.json`; it never invokes an adapter or controller. Keep the four shapes, but drive executable fake protocols through the same controller and assert durable state.
+5. **Codex outcome cleanup is incomplete.** A timeout leaves the pending request sender in the map until a late response, disconnect, or stop. Provider rejection of an ended/non-steerable Turn currently maps to generic `Failed`, not `NotSteerable`. Test timeout, late response, disconnect, mismatched Turn, and explicit rejection.
+6. **The usage cutover is the right independent reduction but is not done until every reader moves.** At review time the working tree had removed `RunEventRow` spend fields before all consumers and JSON serialization compiled. The final query must also retain a Turn whose only reported measurement is cache usage and preserve absent versus zero.
+7. **One table still has two parser/producer paths.** Legacy agent launches update Turn usage through `StreamEvent::Usage`; harness launches use `ConversationEvent::TurnUsage`. Both reach `agent_turns`, but W2-289 remains possible until one normalization function/event owns replacement-versus-accumulation semantics.
+8. **`lf top` still has a parallel Codex usage reader.** It reads raw Codex session logs and conditionally suppresses Codex Turn rows. That may be useful live evidence, but it cannot remain a second additive spend authority. Either persist it through the Turn producer or expose it as explicitly provisional, non-additive activity that budgets and totals never consume.
+9. **Deleting the old spend ledger must not delete coverage diagnosis.** The working usage slice removes `lf doctor`'s “agent ran but no usage was captured” check because it depended on `run_events`. Re-express that check over Launch/Turn rows; do not make missing usage invisible merely because it is now correctly `None`.
+
+No more behavior should be adapted around `ChildCommand`. Finish the independent usage cutover, harden the provider outcome seam, then take Phases 1–3 as one core branch: no intermediate state may accept a Steer without durable Basis fencing.
+
 ## Target contract
 
 ### Durable nouns
@@ -238,6 +280,34 @@ Some failures cannot be made impossible by data shape: a provider can lie, a mac
 
 ## Implementation sequence
 
+### A. Close the current foundation slices
+
+This checkpoint contains no new domain model. It makes the already-started adapter and usage work honest enough to support the cutover.
+
+- Replace the literal-only provider fixture test with controller tests backed by four fake protocols: live accepted, live rejected, response lost, and opaque TUI.
+- Test Codex `Sent`, provider rejection, mismatched Turn, timeout, late response, and disconnect. Remove every pending waiter on terminal outcome.
+- Keep the Loopflow `TurnId` beside the provider Turn id so the future Send row can name both without inferring correlation later.
+- Do not mark a confirmed live Steer incorporated or consume its durable source.
+- Persist typed decision/approval resolution before any provider delivery attempt; provider text cannot be the transaction that unblocks the decision.
+- Finish the Turn-spend migration and move `usage`, `top`, `runs`, `doctor`, budgets, and JSON to it.
+- Normalize legacy stream usage and harness usage through one TurnUsage producer; delete the other accumulation semantics.
+- Remove raw Codex log totals from additive `top` accounting, or label them as a separate provisional signal that is never combined with Turn spend.
+- Move `lf doctor` usage/capture coverage to Launch/Turn evidence before deleting the old run-event check.
+
+Done when:
+
+- crash-after-`Sent` still leaves direction available to a later seed;
+- a live Steer racing current completion prevents stale completion;
+- a seed-only fake blocked in `decision request --wait` observes the decision without ending its Turn first;
+- the conformance tests execute behavior rather than validate fixture literals;
+- Codex has no retained pending waiter after success, rejection, timeout, disconnect, or a late response;
+- cache-only, zero, absent, failed, and interrupted Turn usage remain distinct;
+- one parser path owns whether usage replaces or accumulates, and every additive total reads only persisted Turn rows;
+- `lf doctor` identifies terminal agent Launches whose provider usage is absent without treating absence as zero;
+- `cargo fmt --all -- --check`, `cargo clippy -p loopflow --all-targets -- -D warnings`, and the full Rust suite pass together.
+
+The first two criteria require Phases 1 and 3. Until then, keep the steering work on this cutover branch rather than adding temporary ChildCommand incorporation rules.
+
 ### 0. Ratify the executable spec
 
 Rewrite `scratch/architecture.md` around the target contract above. Remove the earlier required-Turn Ack, Handle graph, Block/Sleep split, Interaction entity, `settle`, and Session/body terminology. Add transition tables for Epoch, Run, Launch, boundary outcome, Wait resolution, and completion.
@@ -325,6 +395,8 @@ Replace `ChildCommand`, `ChildDirective`, and their Task/Project variants with:
 
 Persist Steer before attempting the provider. Permit at most one live Send attempt for a Steer/Turn. Render all still-outstanding Steers as one ordered seed projection while preserving their individual receipts.
 
+Persist a typed decision or approval before trying to notify the provider. It allocates its Epoch revision and directly releases any Loopflow waiter. A same-Turn Send may reduce latency; a later seed may explain the decision; neither delivery owns the resolution.
+
 Done when:
 
 - Human→Wave, Wave Run→Project, and Project Run→Task call the same Steer function;
@@ -332,6 +404,7 @@ Done when:
 - absence of an env var never changes caller identity;
 - the wire request cannot submit `Author` or otherwise claim Human provenance;
 - callers cannot request live, seed, replace, or retry behavior;
+- a seed-only provider can observe a typed decision without ending the blocked Turn or receiving prose first;
 - CI failures enter only through `CiIncident` and reserve one bounded repair Run;
 - `ChildCommandKind`, `ChildDirective`, `Replacement`, `FollowUp`, command `Resume`, and command `Decide` have no production references.
 - changing any authored Work field changes the next rendered seed without a second copy/update path.
@@ -354,7 +427,9 @@ The reconstruction renderer reads current Work truth, outstanding Steers, typed 
 Done when:
 
 - one conformance suite proves equivalent durable outcomes for live, seed-only, persistent-session, and opaque-TUI fakes;
+- the suite invokes the controller and adapter boundary; a fixture that only describes expected rows is insufficient;
 - Codex, Claude, and OpenCode adapters pass the suite;
+- every Send records the Loopflow Turn and any provider Turn correlation, and terminal outcomes retain no adapter waiter;
 - losing every resume token still produces a valid next Launch;
 - provider/account/model fallback stays inside the current Run;
 - interrupted/failed partial Turn usage is retained when reported;
@@ -388,11 +463,26 @@ Route provider usage through `ConversationEvent::TurnUsage` into the observed Tu
 
 Keep `provider_account_limits` as a separate latest quota snapshot. Keep raw provider events only as audit artifacts. Remove spend from process/run-event rows and rename trace ids that collide with product Run ids.
 
+**Store landed (2026-07-17).** `run_events` lost its seven spend columns, `agent_turns` is the only additive grain, and `usage`/`top`/`trace` read one `turn_spend_since` join. `PendingUsage`, `record_usage`, `record_result`, `record_agent`, `record_stream_usage`, and `boundary_spans` are gone. Migration `0.11.029_one_spend_grain` drops the columns and `trace_capture_meta`.
+
+The dogfood ledger settled the coverage question empirically rather than by argument — see `scratch/questions.md`. `run_events` held 103 usage rows to `agent_turns`' 779, over the same span, with every one of its 75 usage-bearing processes also holding a captured turn. It was a strict subset carrying ~40% of the spend, and it mis-attributed: the thread-local stamped whichever agent launched last in the process, so one process's claude tokens were reported under `provider = opencode`.
+
+Two consequences worth keeping:
+
+- `lf usage` totals rise (output 1,428,413 → 3,599,965 on the dogfood ledger). That is the reduction paying out, not a regression.
+- Absent usage is now honestly `None` everywhere, which makes it invisible. `lf doctor`'s coverage check therefore moved to Launch/Turn grain instead of being deleted with the ledger it read; it names the provider (`opencode 8/8`), which is how W2-289 announces itself.
+
+Still open here:
+
+- one parser must own usage end to end (W2-289) — `StreamEvent::Usage` accumulates and `ConversationEvent::TurnUsage` replaces, and they reach captures through different launch surfaces;
+- `lf top` still reads raw Codex session logs as a parallel reader and suppresses Codex Turn rows when it finds activity. It must either persist through the Turn producer or be labelled provisional and never combined with Turn spend.
+
 Done when:
 
 - `lf usage`, `lf top`, budgets, and monitoring read the same Turn query;
 - OpenCode usage cannot be replaced by a synthetic zero event;
 - absent, zero, partial, failed, and interrupted usage fixtures remain distinct;
+- a cache-only provider report remains a Turn-spend row;
 - retry/new Run costs add rather than overwrite;
 - summing all Turn rows exactly reproduces every displayed aggregate;
 - `boundary_spans` is not a spend authority.
@@ -533,6 +623,9 @@ Provider adapter internals may still say provider session/thread id. Production 
 - new input × `advance` to Wait;
 - new input × `done` commit;
 - live Steer × Turn success;
+- confirmed live Send × controller crash before the next seed;
+- live Steer × stale current-Turn completion;
+- typed decision × seed-only provider blocked in a waiting tool call;
 - interrupt × already-dead executor;
 - stop × new reserve;
 - reap observation × keeper recovery;
@@ -551,6 +644,7 @@ Each adapter must prove:
 - exact active-boundary correlation where live steer exists;
 - typed `NotSteerable` fallback;
 - Unknown delivery behavior;
+- explicit provider rejection, timeout, late reply, mismatched Turn, and disconnect cleanup;
 - fixed starting Basis;
 - interrupt terminal/fence observation;
 - continuation loss reconstruction;
@@ -589,15 +683,16 @@ Every field is required or explicitly optional. No language supplies a wire defa
 
 Record after each checkpoint:
 
-| Measure | Baseline | Done |
-| --- | ---: | ---: |
-| Rust code | 133,974 | ≤125,974; target ≈121,974 |
-| Complete old interaction/handoff physical lines | 4,803 | 0 old concept lines |
-| Authored-direction domain types | command + directive + review + handoff | 1: Steer |
-| Public Run lifecycle verbs | at least reserve/activate/finish/revoke/reap plus runner variants | 3 internal: reserve/advance/stop |
-| Stored Work lifecycle states | multiple Session/lease/interaction enums | 3 Epoch states |
-| Additive usage authorities | 2 | 1 Turn ledger |
-| Provider-independent steering fixtures | fragmented | 4 shapes, one contract |
-| Production references to deletion symbols | current | 0 |
+| Measure | Baseline | Review snapshot | Done |
+| --- | ---: | ---: | ---: |
+| Rust code | 133,974 | 134,011 | ≤125,974; target ≈121,974 |
+| Named legacy child/control/interaction modules | 12,002 physical lines | 12,002 | 0 old concept lines |
+| Complete old interaction/handoff physical lines | 4,803 | 4,803 | 0 old concept lines |
+| Authored-direction domain types | command + directive + review + handoff | unchanged | 1: Steer |
+| Public Run lifecycle verbs | at least reserve/activate/finish/revoke/reap plus runner variants | unchanged | 3 internal: reserve/advance/stop |
+| Stored Work lifecycle states | multiple Session/lease/interaction enums | unchanged | 3 Epoch states |
+| Additive usage authorities | 2 | 1 Turn ledger (store landed; `lf top`'s raw Codex log reader still parallel) | 1 Turn ledger |
+| Executable provider-independent steering shapes | fragmented | 0; one literal fixture | 4 shapes, one contract |
+| Files containing core deletion symbols | 31 | 31 | 0 |
 
 Net reduction matters because this architecture deletes duplicate truth. It is not a license to compress readable code or count removed tests without replacing their behavioral proof.

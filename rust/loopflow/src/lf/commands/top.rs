@@ -12,9 +12,8 @@ use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::lf::commands::runs::{boundary_spans, SpanDto};
 use crate::lf::output::{format_int, truncate};
-use crate::store::{sqlite::SqliteStore, RunEventRow};
+use crate::store::{sqlite::SqliteStore, TurnSpendRow};
 
 const WINDOW_MINUTES: usize = 60;
 const BUCKET_SECONDS: i64 = 60;
@@ -55,8 +54,7 @@ pub fn run() -> Result<()> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let home = dirs::home_dir().ok_or_else(|| anyhow!("home directory unavailable"))?;
     let ledger_path = home.join(".lf/loopflow.db");
-    let events = read_run_events(&ledger_path)?;
-    let spend = boundary_spans(&events);
+    let spend = read_turn_spend(&ledger_path, now - (WINDOW_MINUTES as i64 * BUCKET_SECONDS))?;
     let (mut buckets, has_codex_activity) = codex_token_buckets(&codex_session_roots(&home), now);
     add_ledger_tokens(&mut buckets, &spend, now, !has_codex_activity);
     let processes = running_loopflow_processes()?;
@@ -86,32 +84,28 @@ pub fn running_workspace_paths() -> HashSet<PathBuf> {
         .collect()
 }
 
-fn read_run_events(path: &Path) -> Result<Vec<RunEventRow>> {
+fn read_turn_spend(path: &Path, since: i64) -> Result<Vec<TurnSpendRow>> {
     SqliteStore::open_run_ledger_read_only(path)
-        .and_then(|store| store.list_run_events_since(0))
+        .and_then(|store| store.turn_spend_since(since))
         .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))
 }
 
 fn add_ledger_tokens(
     buckets: &mut [u64; WINDOW_MINUTES],
-    spend: &[SpanDto],
+    spend: &[TurnSpendRow],
     now: i64,
     include_codex: bool,
 ) {
-    for span in spend {
+    for turn in spend {
         // Codex's session log reports incremental usage throughout a turn. Its
-        // terminal ledger receipt contains the same tokens and would count them
-        // twice here.
-        if !include_codex && span.provider.as_deref() == Some("codex") {
+        // turn receipt contains the same tokens and would count them twice here.
+        if !include_codex && turn.provider == "codex" {
             continue;
         }
-        let Some(recorded_at) = span.ended_at else {
+        let Some(index) = bucket_index(turn.at, now) else {
             continue;
         };
-        let Some(index) = bucket_index(recorded_at, now) else {
-            continue;
-        };
-        let output = span.output_tokens.unwrap_or(0).max(0) as u64;
+        let output = turn.output_tokens.unwrap_or(0).max(0) as u64;
         buckets[index] = buckets[index].saturating_add(output);
     }
 }
@@ -447,34 +441,26 @@ fn render_processes(processes: &[RunningProcess]) -> String {
 mod tests {
     use super::{
         add_codex_session_tokens, add_ledger_tokens, codex_session_roots, parse_lsof_workspaces,
-        parse_processes, read_run_events, render_dashboard, ProcessKind, RunningProcess,
+        parse_processes, read_turn_spend, render_dashboard, ProcessKind, RunningProcess,
         WINDOW_MINUTES,
     };
-    use crate::lf::commands::runs::SpanDto;
-    use crate::store::{sqlite::SqliteStore, RunEventRow};
+    use crate::store::{sqlite::SqliteStore, TurnSpendRow};
 
-    fn spend(recorded_at: i64, output: i64, provider: &str) -> SpanDto {
-        SpanDto {
+    fn spend(recorded_at: i64, output: i64, provider: &str) -> TurnSpendRow {
+        TurnSpendRow {
             run_id: "run".to_string(),
             process_id: "process".to_string(),
-            parent_process_id: None,
-            seq: recorded_at,
-            node: "run".to_string(),
-            name: Some("lf implement".to_string()),
-            repo: Some("/src/loopflow".to_string()),
+            repo: "/src/loopflow".to_string(),
             wave: None,
             flow: None,
             skill: None,
-            started_at: recorded_at,
-            ended_at: Some(recorded_at),
-            status: "completed".to_string(),
+            provider: provider.to_string(),
+            model: None,
+            at: recorded_at,
             input_tokens: Some(0),
             output_tokens: Some(output),
             cache_read_tokens: Some(0),
             cost_usd: None,
-            duration_secs: None,
-            provider: Some(provider.to_string()),
-            model: None,
         }
     }
 
@@ -482,34 +468,7 @@ mod tests {
     fn telemetry_reader_ignores_newer_migration_history_without_writing() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
-        let store = SqliteStore::new(&path).unwrap();
-        store
-            .insert_run_event(&RunEventRow {
-                run_id: "run".to_string(),
-                process_id: "process".to_string(),
-                parent_process_id: None,
-                seq: 0,
-                ts: 1,
-                repo: Some("/repo".to_string()),
-                worktree: Some("/repo".to_string()),
-                wave: None,
-                node: "run".to_string(),
-                event: "completed".to_string(),
-                command: Some("lf top".to_string()),
-                flow: None,
-                skill: None,
-                step_index: None,
-                error: None,
-                input_tokens: Some(10),
-                output_tokens: Some(5),
-                cache_read_tokens: None,
-                cost_usd: None,
-                duration_secs: None,
-                provider: Some("codex".to_string()),
-                model: None,
-            })
-            .unwrap();
-        drop(store);
+        drop(SqliteStore::new(&path).unwrap());
         let connection = rusqlite::Connection::open(&path).unwrap();
         connection
             .execute(
@@ -520,9 +479,10 @@ mod tests {
             .unwrap();
         drop(connection);
 
-        let events = read_run_events(&path).unwrap();
+        // `lf top` reads a ledger a newer `lf` may have migrated past. It must
+        // answer from what it can read, and must not migrate anything away.
+        read_turn_spend(&path, 0).unwrap();
 
-        assert_eq!(events.len(), 1);
         let connection = rusqlite::Connection::open(&path).unwrap();
         assert_eq!(
             connection

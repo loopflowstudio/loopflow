@@ -21,9 +21,11 @@ pub mod sqlite;
 mod token_crypto;
 
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
-/// for a run, flow, or skill, written directly by `lf` into the
-/// local store. Token/cost fields are cumulative snapshots populated on skill
-/// boundaries and terminal run events when the stream reported them.
+/// for a run, flow, or skill, written directly by `lf` into the local store.
+///
+/// Lineage only. Spend lives on `agent_turns`, the grain the provider actually
+/// measures; readers join `run_events -> agent_launches -> agent_turns` rather
+/// than reading tokens from here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEventRow {
     pub run_id: String,
@@ -41,16 +43,32 @@ pub struct RunEventRow {
     pub skill: Option<String>,
     pub step_index: Option<i64>,
     pub error: Option<String>,
+}
+
+/// One provider-measured Turn's spend, joined to the launch that names where it
+/// was spent. This is the only additive usage grain: `lf usage`, `lf top`, and
+/// the trace tree all sum these rows, and every total is a grouping of them.
+///
+/// Token fields stay `Option`: a provider that reported nothing is unknown, not
+/// zero. `lf usage --json` emits this shape, so every field is required or
+/// explicitly optional — no wire defaults.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TurnSpendRow {
+    pub run_id: String,
+    pub process_id: String,
+    pub repo: String,
+    pub wave: Option<String>,
+    pub flow: Option<String>,
+    pub skill: Option<String>,
+    pub provider: String,
+    pub model: Option<String>,
+    /// When the provider finished measuring. Falls back to the start for a turn
+    /// still running, so a live turn still lands in a time bucket.
+    pub at: i64,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
-    pub duration_secs: Option<f64>,
-    /// The harness the tokens were spent through. NULL when the process never
-    /// launched an agent.
-    pub provider: Option<String>,
-    /// The configured model, when the agent launch names one.
-    pub model: Option<String>,
 }
 
 /// One frame on the agent bus (`bus_messages`). `byline` is testimony — what
@@ -4799,13 +4817,6 @@ mod tests {
             skill: None,
             step_index: None,
             error: None,
-            input_tokens: None,
-            output_tokens: None,
-            cache_read_tokens: None,
-            cost_usd: None,
-            duration_secs: None,
-            provider: None,
-            model: None,
         }
     }
 

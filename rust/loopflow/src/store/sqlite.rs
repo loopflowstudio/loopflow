@@ -13,7 +13,7 @@ use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, BusMessage, CredentialState, PmSnapshotRow, ProviderAccount,
     ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
-    StoreResult,
+    StoreResult, TurnSpendRow,
 };
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
@@ -514,9 +514,7 @@ impl SqliteStore {
 fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
         "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree,
-                wave, node, event, command, flow, skill, step_index, error,
-                input_tokens, output_tokens, cache_read_tokens, cost_usd,
-                duration_secs, provider, model
+                wave, node, event, command, flow, skill, step_index, error
          FROM run_events LIMIT 0",
     )?;
     Ok(())
@@ -1382,9 +1380,8 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO run_events (
                 run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                flow, skill, step_index, error, input_tokens, output_tokens,
-                cache_read_tokens, cost_usd, duration_secs, provider, model
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                flow, skill, step_index, error
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 row.run_id,
                 row.process_id,
@@ -1401,23 +1398,58 @@ impl SqliteStore {
                 row.skill,
                 row.step_index,
                 row.error,
-                row.input_tokens,
-                row.output_tokens,
-                row.cache_read_tokens,
-                row.cost_usd,
-                row.duration_secs,
-                row.provider,
-                row.model,
             ],
         )?;
         Ok(())
     }
 
+    /// Every provider-measured Turn's spend since `since_unix`, attributed by
+    /// the launch that ran it.
+    ///
+    /// Turns with no provider report at all are dropped: they carry no spend to
+    /// sum, and keeping them would let a reader mistake silence for zero. Any
+    /// one measurement is enough to keep the turn — a report of cache reads
+    /// alone is still something the provider measured.
+    pub fn turn_spend_since(&self, since_unix: i64) -> StoreResult<Vec<TurnSpendRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT l.run_id, l.process_id, l.repo, l.wave, l.flow, l.skill, l.provider, l.model,
+                    COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
+                    t.provider_output_tokens, t.cache_read_tokens, t.cost_usd
+             FROM agent_turns t
+             JOIN agent_launches l ON l.id = t.launch_id
+             WHERE COALESCE(t.ended_at, t.started_at) >= ?1
+               AND (t.provider_input_tokens IS NOT NULL
+                    OR t.provider_output_tokens IS NOT NULL
+                    OR t.cache_read_tokens IS NOT NULL
+                    OR t.cost_usd IS NOT NULL)
+             ORDER BY COALESCE(t.ended_at, t.started_at), l.process_id, t.ordinal",
+        )?;
+        let rows = stmt.query_map(params![since_unix], |row| {
+            Ok(TurnSpendRow {
+                run_id: row.get(0)?,
+                process_id: row.get(1)?,
+                repo: row.get(2)?,
+                wave: row.get(3)?,
+                flow: row.get(4)?,
+                skill: row.get(5)?,
+                provider: row.get(6)?,
+                model: row.get(7)?,
+                at: row.get(8)?,
+                input_tokens: row.get(9)?,
+                output_tokens: row.get(10)?,
+                cache_read_tokens: row.get(11)?,
+                cost_usd: row.get(12)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::from)
+    }
+
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
         )
@@ -1437,8 +1469,7 @@ impl SqliteStore {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1450,8 +1481,7 @@ impl SqliteStore {
         let prefix = format!("{}%", exec_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE process_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1481,13 +1511,6 @@ impl SqliteStore {
                 skill: row.get(12)?,
                 step_index: row.get(13)?,
                 error: row.get(14)?,
-                input_tokens: row.get(15)?,
-                output_tokens: row.get(16)?,
-                cache_read_tokens: row.get(17)?,
-                cost_usd: row.get(18)?,
-                duration_secs: row.get(19)?,
-                provider: row.get(20)?,
-                model: row.get(21)?,
             })
         })?;
         let mut events = Vec::new();
@@ -1640,15 +1663,6 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
-    }
-
-    pub fn trace_capture_required_after(&self) -> StoreResult<i64> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT required_after FROM trace_capture_meta WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?)
     }
 
     pub fn agent_launches_matching(&self, run_id: &str) -> StoreResult<Vec<AgentLaunchRow>> {

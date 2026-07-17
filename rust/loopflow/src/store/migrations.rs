@@ -341,6 +341,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "ci_incident_repaired_head",
         sql: include_str!("migrations/0.11.029_ci_incident_repaired_head.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 30,
+        },
+        name: "one_spend_grain",
+        sql: include_str!("migrations/0.11.030_one_spend_grain.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1487,39 +1496,49 @@ mod tests {
                 "0.11.025_usage_deltas".to_string(),
                 "0.11.026_lineage_boundary".to_string(),
                 "0.11.027_accounts_first".to_string(),
-                "0.11.029_ci_incident_repaired_head".to_string()
+                "0.11.029_ci_incident_repaired_head".to_string(),
+                "0.11.030_one_spend_grain".to_string()
             ]
         );
+    }
+
+    /// Everything up to but excluding `name`. A test whose subject is one
+    /// migration names it, so appending the next migration cannot silently
+    /// re-point the test at different SQL.
+    fn prefix_before(name: &str) -> &'static [Migration] {
+        let index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == name)
+            .expect("named migration is registered");
+        &MIGRATIONS[..index]
+    }
+
+    fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+        conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 0"))
+            .is_ok()
     }
 
     #[test]
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
-        // Bait for the withheld tail (`0.11.026_lineage_boundary`): a parent no
-        // row records. Its survival is what proves the tail stayed withheld.
-        conn.execute_batch(
-            "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
-             VALUES ('trace_a', 'proc_orphan', 'proc_ghost', 0, 100, 'run', 'started')",
-        )
-        .unwrap();
+        let published = &MIGRATIONS[..MIGRATIONS.len() - 1];
+        apply_set(&conn, published).unwrap();
+        let tail = MIGRATIONS.last().expect("a tail to withhold");
 
         validate_sqlite(&conn).unwrap();
 
         assert_eq!(
-            latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.025_usage_deltas")
+            latest_applied_version_sqlite(&conn).unwrap(),
+            published.last().map(Migration::version),
+            "a validation-only open advances nothing"
         );
         assert!(capture_status_accepts(&conn, "pruned"));
-        assert_eq!(
-            conn.query_row(
-                "SELECT parent_process_id FROM run_events WHERE process_id = 'proc_orphan'",
-                [],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .unwrap(),
-            Some("proc_ghost".to_string()),
-            "a validation-only open must not run the tail's backfill"
+        // Bait for the withheld tail (`one_spend_grain` drops the exec ledger's
+        // spend columns): the column's survival proves the tail stayed withheld.
+        assert_eq!(tail.name, "one_spend_grain", "bait tracks the current tail");
+        assert!(
+            has_column(&conn, "run_events", "input_tokens"),
+            "a validation-only open must not run the tail's schema change"
         );
     }
 
@@ -1579,7 +1598,7 @@ mod tests {
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
+        apply_set(&conn, prefix_before("lineage_boundary")).unwrap();
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
@@ -1626,7 +1645,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 6]).unwrap();
+        apply_set(&conn, prefix_before("capture_pruned_state")).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"

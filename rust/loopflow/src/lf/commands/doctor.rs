@@ -10,7 +10,7 @@
 //!
 //! Checks are pure functions of the rows, so they are tested without a store.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -96,6 +96,7 @@ pub fn run(json: bool) -> Result<()> {
             let events = store.list_run_events_since(0)?;
             let mut checks = audit(&events);
             checks.push(check_capture(&store, &events)?);
+            checks.push(check_usage_coverage(&store)?);
             let (facts, known) = gather_receipt_audit(&store, &events);
             checks.push(check_receipts(&facts, &known));
             (events, checks)
@@ -252,7 +253,6 @@ fn check_capture(
     store: &crate::store::sqlite::SqliteStore,
     events: &[RunEventRow],
 ) -> Result<Check> {
-    let required_after = store.trace_capture_required_after()?;
     let launches = store.agent_launches_since(0)?;
     let launch_ids = launches
         .iter()
@@ -261,36 +261,6 @@ fn check_capture(
     let turns = store.agent_turns_for_launches(&launch_ids)?;
     let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
     let assets = store.context_assets_for_turns(&turn_ids)?;
-
-    let launch_processes: HashSet<&str> = launches
-        .iter()
-        .map(|launch| launch.process_id.as_str())
-        .collect();
-    let process_started_at = events
-        .iter()
-        .filter(|event| event.node == "run" && event.event == "started")
-        .fold(HashMap::new(), |mut starts, event| {
-            starts
-                .entry(event.process_id.as_str())
-                .and_modify(|started_at: &mut i64| *started_at = (*started_at).min(event.ts))
-                .or_insert(event.ts);
-            starts
-        });
-    let uncaptured_spend: BTreeSet<&str> = events
-        .iter()
-        .filter(|event| {
-            process_started_at
-                .get(event.process_id.as_str())
-                .copied()
-                .unwrap_or(event.ts)
-                >= required_after
-                && event.node == "run"
-                && event.event != "started"
-                && reports_provider_spend(event)
-        })
-        .map(|event| event.process_id.as_str())
-        .filter(|process| !launch_processes.contains(process))
-        .collect();
 
     let mut failures = Vec::new();
     let mut prompt_only = 0;
@@ -419,11 +389,6 @@ fn check_capture(
         }
     }
 
-    for process_id in uncaptured_spend {
-        failures.push(format!(
-            "process {process_id} reports provider spend but has no launch"
-        ));
-    }
     let pruned_clause = if pruned > 0 {
         format!(", {pruned} pruned")
     } else {
@@ -470,13 +435,6 @@ fn check_capture(
     ))
 }
 
-fn reports_provider_spend(event: &RunEventRow) -> bool {
-    event.input_tokens.is_some()
-        || event.output_tokens.is_some()
-        || event.cache_read_tokens.is_some()
-        || event.cost_usd.is_some()
-}
-
 pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
     if events.is_empty() {
         return vec![Check::warn("continuity", "ledger is empty")];
@@ -488,8 +446,74 @@ pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
         check_attribution(events),
         check_identity(events),
         check_lineage(events),
-        check_coverage(events),
     ]
+}
+
+/// A launch that finished capturing and recorded no provider measurement is a
+/// launch whose cost is lost. Spend lives only on turns now, so absent usage is
+/// correctly `None` rather than a fictitious zero — which makes it invisible
+/// unless something counts it. This is that count.
+///
+/// Scoped to `complete` launches: `capturing` has not finished, `prompt_only`
+/// never streamed, and `partial`/`pruned` already report themselves through
+/// `check_capture`. The breakdown names providers because that is the actionable
+/// unit — a provider reporting nothing is a mapping gap, not a quiet week.
+fn check_usage_coverage(store: &crate::store::sqlite::SqliteStore) -> Result<Check> {
+    let launches: Vec<_> = store
+        .agent_launches_since(0)?
+        .into_iter()
+        .filter(|launch| launch.capture_status == "complete")
+        .collect();
+    if launches.is_empty() {
+        return Ok(Check::ok("usage", "no completed launches recorded"));
+    }
+    let launch_ids = launches
+        .iter()
+        .map(|launch| launch.id.clone())
+        .collect::<Vec<_>>();
+    let measured: HashSet<String> = store
+        .agent_turns_for_launches(&launch_ids)?
+        .into_iter()
+        .filter(|turn| {
+            turn.provider_input_tokens.is_some()
+                || turn.provider_output_tokens.is_some()
+                || turn.cache_read_tokens.is_some()
+                || turn.cost_usd.is_some()
+        })
+        .map(|turn| turn.launch_id)
+        .collect();
+
+    let mut missing_by_provider: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+    for launch in &launches {
+        let entry = missing_by_provider
+            .entry(launch.provider.as_str())
+            .or_default();
+        entry.1 += 1;
+        if !measured.contains(&launch.id) {
+            entry.0 += 1;
+        }
+    }
+    let covered = launches
+        .iter()
+        .filter(|launch| measured.contains(&launch.id))
+        .count();
+    let total = launches.len();
+    if covered == total {
+        return Ok(Check::ok(
+            "usage",
+            format!("{total} completed launches all report provider usage"),
+        ));
+    }
+    let breakdown = missing_by_provider
+        .iter()
+        .filter(|(_, (missing, _))| *missing > 0)
+        .map(|(provider, (missing, seen))| format!("{provider} {missing}/{seen}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(Check::warn(
+        "usage",
+        format!("{covered}/{total} completed launches report provider usage; missing: {breakdown}"),
+    ))
 }
 
 /// Silence longer than this is reported. The 29.2-hour outage is the reason
@@ -658,35 +682,6 @@ fn check_lineage(events: &[RunEventRow]) -> Check {
             dangling.len()
         ),
     )
-}
-
-/// A run that launched an agent and recorded no tokens is a run whose cost is
-/// lost. Skill rows prove an agent ran; the terminal row should carry the spend.
-fn check_coverage(events: &[RunEventRow]) -> Check {
-    let agent_processes: HashSet<&str> = events
-        .iter()
-        .filter(|event| event.node == "skill" || event.provider.is_some())
-        .map(|event| event.process_id.as_str())
-        .collect();
-    if agent_processes.is_empty() {
-        return Check::ok("coverage", "no agent-bearing runs recorded");
-    }
-
-    let with_tokens: HashSet<&str> = events
-        .iter()
-        .filter(|e| e.node == "run" && e.event != "started" && e.input_tokens.is_some())
-        .map(|event| event.process_id.as_str())
-        .collect();
-    let covered = agent_processes.intersection(&with_tokens).count();
-    let total = agent_processes.len();
-    let pct = (covered as f64 / total as f64) * 100.0;
-
-    let detail = format!("{covered}/{total} agent-bearing runs carry tokens ({pct:.0}%)");
-    if covered == total {
-        Check::ok("coverage", detail)
-    } else {
-        Check::warn("coverage", detail)
-    }
 }
 
 // ── Receipt sweep ───────────────────────────────────────────────────
@@ -955,7 +950,9 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, check_capture, check_continuity, inspect_store, Status};
+    use super::{
+        audit, check_capture, check_continuity, check_usage_coverage, inspect_store, Status,
+    };
     use crate::store::RunEventRow;
 
     const DAY: i64 = 86_400;
@@ -1033,6 +1030,75 @@ mod tests {
         (launch.id, conversation)
     }
 
+    /// The same production path, but with the provider reporting what it
+    /// measured — the shape a covered launch has.
+    fn captured_launch_with_usage(guard: &crate::journal::TestLedgerGuard, skill: &str) {
+        let capture = crate::trace::CaptureHandle::begin(
+            crate::trace::TraceCaptureContext {
+                run_id: crate::id::TraceId::new(),
+                process_id: crate::id::ExecId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: Some("infrastructure".to_string()),
+                project: None,
+                task: None,
+                flow: None,
+                skill: Some(skill.to_string()),
+            },
+            crate::trace::PreparedTurnContext::from_prompts("system", "task"),
+            crate::trace::CaptureStart {
+                provider: "claude".to_string(),
+                model: Some("opus".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+            },
+        )
+        .unwrap();
+        capture.record_conversation(crate::chat::types::ConversationEvent::TurnUsage {
+            turn_id: "turn-1".to_string(),
+            usage: crate::chat::types::TurnUsage {
+                input_tokens: 40,
+                output_tokens: 5_197,
+                ..Default::default()
+            },
+        });
+        capture.finish("completed", false).unwrap();
+    }
+
+    /// Spend lives only on turns now, so a launch that reported nothing is
+    /// correctly `None` everywhere — invisible unless this check counts it. The
+    /// provider breakdown is the actionable part: it is how a harness that stops
+    /// reporting usage announces itself instead of silently costing nothing.
+    #[test]
+    fn a_completed_launch_that_reported_no_usage_is_a_coverage_warning() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        captured_launch(&guard, "kickoff");
+        let store = crate::journal::open_ledger().unwrap();
+
+        let check = check_usage_coverage(&store).unwrap();
+
+        assert_eq!(check.status, Status::Warn, "{}", check.detail);
+        assert!(
+            check.detail.contains("0/1") && check.detail.contains("codex 1/1"),
+            "the warning must name the provider that reported nothing: {}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn a_launch_whose_provider_measured_the_turn_is_covered() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        captured_launch_with_usage(&guard, "implement");
+        let store = crate::journal::open_ledger().unwrap();
+
+        let check = check_usage_coverage(&store).unwrap();
+
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+    }
+
     #[test]
     fn a_tombstoned_capture_is_counted_while_fresh_loss_still_fails() {
         // The whole point of W2-235: acknowledged historical loss goes green
@@ -1090,64 +1156,7 @@ mod tests {
             skill: None,
             step_index: None,
             error: None,
-            input_tokens: None,
-            output_tokens: None,
-            cache_read_tokens: None,
-            cost_usd: None,
-            duration_secs: None,
-            provider: None,
-            model: None,
         }
-    }
-
-    #[test]
-    fn capture_check_rejects_post_epoch_provider_spend_without_a_launch() {
-        let _guard = crate::journal::TestLedgerGuard::new();
-        let store = crate::journal::open_ledger().unwrap();
-        let mut event = row(
-            "missing-capture",
-            store.trace_capture_required_after().unwrap(),
-            "run",
-            "completed",
-        );
-        event.provider = Some("codex".to_string());
-        event.input_tokens = Some(10);
-
-        let check = check_capture(&store, &[event]).unwrap();
-        assert_eq!(check.status, Status::Fail);
-        assert!(
-            check
-                .detail
-                .contains("process missing-capture reports provider spend but has no launch"),
-            "{}",
-            check.detail
-        );
-    }
-
-    #[test]
-    fn capture_check_ignores_ungated_orchestrators_and_external_hosts() {
-        let _guard = crate::journal::TestLedgerGuard::new();
-        let store = crate::journal::open_ledger().unwrap();
-        let required_after = store.trace_capture_required_after().unwrap();
-        let orchestrator = row("orchestrator", required_after, "skill", "completed");
-        let mut external_host = row("external", required_after, "run", "completed");
-        external_host.provider = Some("codex".to_string());
-
-        let check = check_capture(&store, &[orchestrator, external_host]).unwrap();
-        assert_eq!(check.status, Status::Ok, "{}", check.detail);
-    }
-
-    #[test]
-    fn capture_check_ignores_a_pre_epoch_process_that_finishes_after_activation() {
-        let _guard = crate::journal::TestLedgerGuard::new();
-        let store = crate::journal::open_ledger().unwrap();
-        let required_after = store.trace_capture_required_after().unwrap();
-        let started = row("old-process", required_after - 1, "run", "started");
-        let mut completed = row("old-process", required_after + 1, "run", "completed");
-        completed.input_tokens = Some(10);
-
-        let check = check_capture(&store, &[started, completed]).unwrap();
-        assert_eq!(check.status, Status::Ok, "{}", check.detail);
     }
 
     fn named(mut row: RunEventRow, command: &str) -> RunEventRow {
@@ -1284,23 +1293,6 @@ mod tests {
         child.process_id = "child".to_string();
         child.parent_process_id = Some("parent".to_string());
         assert_eq!(status_of(&[parent, child], "lineage"), Status::Fail);
-    }
-
-    #[test]
-    fn an_agent_run_without_tokens_is_a_coverage_warning() {
-        let rows = [
-            row("a", DAY, "skill", "completed"),
-            row("a", DAY, "run", "completed"),
-        ];
-        assert_eq!(status_of(&rows, "coverage"), Status::Warn);
-    }
-
-    #[test]
-    fn an_inline_agent_with_provider_and_tokens_is_covered() {
-        let mut terminal = row("a", DAY, "run", "completed");
-        terminal.provider = Some("claude".to_string());
-        terminal.input_tokens = Some(100);
-        assert_eq!(status_of(&[terminal], "coverage"), Status::Ok);
     }
 
     // ── receipt sweep tests (pure over facts + known-id sets) ─────────

@@ -41,13 +41,6 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         skill: None,
         step_index: None,
         error: None,
-        input_tokens: None,
-        output_tokens: None,
-        cache_read_tokens: None,
-        cost_usd: None,
-        duration_secs: None,
-        provider: None,
-        model: None,
     };
     store
         .insert_run_event(&event(0, now - 120, "started"))

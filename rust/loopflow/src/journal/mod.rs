@@ -109,7 +109,6 @@ impl Drop for TestLedgerGuard {
 
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
-    static PENDING_USAGE: RefCell<PendingUsage> = const { RefCell::new(PendingUsage::new()) };
 }
 
 #[derive(Debug, Clone)]
@@ -128,104 +127,6 @@ struct RunContext {
     /// True when this process minted the run id (vs inheriting LF_RUN_ID);
     /// the export is removed again when the run ends.
     minted_run_id: bool,
-}
-
-/// Token/cost totals accumulated from the agent stream on this thread, plus the
-/// agent that spent them. Drained at each ledger boundary, so every row carries
-/// the spend attributable to that boundary alone — readers sum rows, never diff.
-#[derive(Debug, Clone)]
-struct PendingUsage {
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_tokens: u64,
-    cost_usd: Option<f64>,
-    duration_secs: Option<f64>,
-    provider: Option<&'static str>,
-    model: Option<String>,
-    seen: bool,
-}
-
-impl PendingUsage {
-    const fn new() -> Self {
-        Self {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cost_usd: None,
-            duration_secs: None,
-            provider: None,
-            model: None,
-            seen: false,
-        }
-    }
-
-    /// Take the spend accumulated since the previous boundary, keeping agent
-    /// attribution (and `seen`) for the boundaries that follow.
-    fn drain(&mut self) -> Self {
-        let drained = self.clone();
-        self.input_tokens = 0;
-        self.output_tokens = 0;
-        self.cache_read_tokens = 0;
-        self.cost_usd = None;
-        self.duration_secs = None;
-        drained
-    }
-}
-
-/// Accumulate token usage reported by the agent stream for the current run.
-pub fn record_usage(input: Option<u64>, output: Option<u64>, cache_read: Option<u64>) {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        usage.input_tokens += input.unwrap_or(0);
-        usage.output_tokens += output.unwrap_or(0);
-        usage.cache_read_tokens += cache_read.unwrap_or(0);
-        usage.seen = true;
-    });
-}
-
-/// Record the stream's final cost/duration report for the current run.
-///
-/// Cost accumulates until the next boundary drains it; a skill that launches
-/// several agents reports the sum, not just the last invocation.
-pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        if let Some(cost) = cost_usd {
-            usage.cost_usd = Some(usage.cost_usd.unwrap_or(0.0) + cost);
-        }
-        if let Some(duration) = duration_secs {
-            usage.duration_secs = Some(usage.duration_secs.unwrap_or(0.0) + duration);
-        }
-        usage.seen = true;
-    });
-}
-
-/// Name the harness the current agent launch is spending tokens through, and
-/// the model it drove. Recorded without marking usage seen — a launch that
-/// reports no tokens names an agent but should not materialize a row.
-///
-/// Set both fields together. A process may launch several agents, and an
-/// unconfigured model on the second launch must clear the first launch's model
-/// rather than producing a fictitious `codex:opus` boundary.
-pub fn record_agent(provider: Option<&'static str>, model: Option<&str>) {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        usage.provider = provider;
-        usage.model = model.map(str::to_string);
-    });
-}
-
-fn drain_usage() -> Option<PendingUsage> {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        usage.seen.then(|| usage.drain())
-    })
-}
-
-fn clear_usage() {
-    PENDING_USAGE.with(|cell| {
-        *cell.borrow_mut() = PendingUsage::new();
-    });
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -371,7 +272,6 @@ fn try_emit(
         }
         std::env::remove_var(LF_PROCESS_ID_ENV);
         clear_context();
-        clear_usage();
     }
 
     Ok(())
@@ -381,22 +281,6 @@ fn try_emit(
 /// run: a locked or missing store degrades to a debug log line. Local-only —
 /// the ledger never leaves the machine.
 fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Path) {
-    let is_terminal_run = matches!(event.node, LfNode::Run)
-        && matches!(
-            event.event,
-            LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
-        );
-    let is_skill_boundary = matches!(event.node, LfNode::Skill)
-        && matches!(event.event, LfEventType::Completed | LfEventType::Errored);
-    // Each boundary drains the spend accumulated since the previous one: a
-    // skill row carries that skill's spend, the terminal run row carries
-    // whatever ran outside any skill. Summing rows gives any rollup.
-    let usage = if is_terminal_run || is_skill_boundary {
-        drain_usage()
-    } else {
-        None
-    };
-
     let row = RunEventRow {
         run_id: event.run_id.as_str().to_string(),
         process_id: context.process_id.as_str().to_string(),
@@ -420,13 +304,6 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         skill: event.skill.clone(),
         step_index: event.index.map(i64::from),
         error: event.error.clone(),
-        input_tokens: usage.as_ref().map(|u| u.input_tokens as i64),
-        output_tokens: usage.as_ref().map(|u| u.output_tokens as i64),
-        cache_read_tokens: usage.as_ref().map(|u| u.cache_read_tokens as i64),
-        cost_usd: usage.as_ref().and_then(|u| u.cost_usd),
-        duration_secs: usage.as_ref().and_then(|u| u.duration_secs),
-        provider: usage.as_ref().and_then(|u| u.provider).map(str::to_string),
-        model: usage.as_ref().and_then(|u| u.model.clone()),
     };
 
     match open_ledger() {
@@ -833,64 +710,6 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn each_boundary_drains_only_its_own_spend() {
-        // A ledger row carries the spend since the previous boundary, so a
-        // reader sums rows: skill rows own their spend, the terminal run row
-        // owns whatever ran outside any skill.
-        super::clear_usage();
-        super::record_usage(Some(100), Some(10), Some(5));
-        super::record_result(Some(1.00), Some(2.0));
-
-        let first = super::drain_usage().expect("usage seen");
-        assert_eq!(first.input_tokens, 100);
-        assert_eq!(first.output_tokens, 10);
-        assert_eq!(first.cache_read_tokens, 5);
-        assert_eq!(first.cost_usd, Some(1.00));
-        assert_eq!(first.duration_secs, Some(2.0));
-
-        super::record_usage(Some(50), Some(5), Some(0));
-        super::record_result(Some(0.25), Some(3.0));
-
-        let second = super::drain_usage().expect("usage still seen");
-        assert_eq!(second.input_tokens, 50, "spend must not repeat");
-        assert_eq!(second.output_tokens, 5);
-        assert_eq!(second.cache_read_tokens, 0);
-        assert_eq!(second.cost_usd, Some(0.25));
-        assert_eq!(second.duration_secs, Some(3.0));
-        super::clear_usage();
-    }
-
-    #[test]
-    fn a_quiet_boundary_after_spend_reports_zero_not_a_repeat() {
-        super::clear_usage();
-        super::record_usage(Some(100), Some(10), Some(5));
-        super::drain_usage().expect("usage seen");
-
-        let quiet = super::drain_usage().expect("seen persists across boundaries");
-        assert_eq!(quiet.input_tokens, 0);
-        assert_eq!(quiet.output_tokens, 0);
-        assert_eq!(quiet.cost_usd, None);
-        super::clear_usage();
-    }
-
-    #[test]
-    fn each_agent_launch_replaces_provider_and_model_attribution() {
-        super::clear_usage();
-        super::record_agent(Some("claude"), Some("opus"));
-        super::record_usage(Some(100), Some(10), None);
-        let first = super::drain_usage().expect("first usage");
-        assert_eq!(first.provider, Some("claude"));
-        assert_eq!(first.model.as_deref(), Some("opus"));
-
-        super::record_agent(Some("codex"), None);
-        super::record_usage(Some(50), Some(5), None);
-        let second = super::drain_usage().expect("second usage");
-        assert_eq!(second.provider, Some("codex"));
-        assert_eq!(second.model, None, "the prior launch's model must not leak");
-        super::clear_usage();
-    }
-
     use super::{
         emit, events_path, read_events, runs_root, LfEvent, LfEventFields, LfEventType, LfNode,
         TestLedgerGuard,
@@ -944,7 +763,6 @@ mod tests {
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
         let _guard = journal_test_guard();
         super::clear_context();
-        super::clear_usage();
         let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
         let previous_process = std::env::var(super::LF_PROCESS_ID_ENV).ok();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
@@ -968,7 +786,6 @@ mod tests {
     fn journal_test_guard() -> TestLedgerGuard {
         let guard = TestLedgerGuard::new();
         super::clear_context();
-        super::clear_usage();
         std::env::remove_var(super::LF_RUN_ID_ENV);
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         guard
@@ -1119,7 +936,6 @@ mod tests {
             LfEventType::Started,
             started_fields(&command, repo.path(), "main"),
         );
-        super::record_usage(Some(100), Some(20), Some(5));
         emit(
             repo.path(),
             LfNode::Run,
@@ -1134,9 +950,9 @@ mod tests {
         assert_eq!(file_events.len(), 2);
         assert!(is_clean(repo.path()).expect("journal stays git-excluded"));
 
-        // And the machine-grain ledger has the run, with usage on the
-        // terminal event and a null wave. LF_HOME points this test at its own
-        // store, so every row here belongs to this invocation.
+        // And the machine-grain ledger has the run's lineage and a null wave.
+        // LF_HOME points this test at its own store, so every row here belongs
+        // to this invocation.
         let store = super::open_ledger().expect("ledger");
         let events = store.list_run_events_since(0).expect("ledger rows");
         assert_eq!(events.len(), 2);
@@ -1151,9 +967,6 @@ mod tests {
             .unwrap_or("")
             .contains("implement"));
         assert_eq!(events[1].event, "completed");
-        assert_eq!(events[1].input_tokens, Some(100));
-        assert_eq!(events[1].output_tokens, Some(20));
-        assert_eq!(events[1].cache_read_tokens, Some(5));
         assert_eq!(events[0].process_id, events[1].process_id);
         assert_eq!(events[1].command, events[0].command);
     }

@@ -2,13 +2,19 @@
 
 ## Outcome
 
-**PR #1030 owns this incident. This branch carries the proof, not a second fix.**
+**PR #1030 owns the contention incident. This branch carries the proof it did
+not have — and repairs the regression it introduced.**
 
 The root cause was found here, reported, and fixed independently by #1030
 ("store: skip no-op migration transactions", merged 2026-07-17). Re-measured
-against main with **zero source changes**, the production-shaped fleet probe is
-**zero-loss**. So this Task reduces to the regression guard that pins #1030's
-behaviour, and nothing else.
+against main, the production-shaped fleet probe is **zero-loss**, so no retry,
+cache, or durability change is warranted and none ships.
+
+Verifying #1030 turned up a regression it introduced on the same open path: its
+gate treats an *uninitialized* database as "nothing to migrate", wedging a
+database killed mid-migration permanently on `no such table: run_events`. Review
+directed fixing that here. So this branch is one fleet-scale measurement and one
+two-line predicate correction.
 
 ## Problem
 
@@ -89,34 +95,51 @@ added.
 
 ## What this branch ships
 
-Two tests, and nothing else:
+Reshaped by review (2026-07-17, `ir_5100a8fce1e6`):
 
-1. `every_receipt_at_fleet_fanout_is_recorded_exactly_once` — the fleet-scale
-   proof at fanout 51 with a fresh connection per event. Asserts no write
-   errored, `COUNT(*)` equals the requested total, and no `(run_id, seq)` is
-   recorded twice.
-2. `opening_a_current_database_takes_no_exclusive_lock` — the precise,
-   timing-free guard for the named cause. Holds the write lock across a store
-   open; asserts on the open's outcome, never on elapsed time, so it cannot
-   flake under parallel load.
+**1. The fleet-scale proof** — `every_receipt_at_fleet_fanout_is_recorded_exactly_once`,
+fanout 51 with a fresh connection per event. Asserts no write errored, `COUNT(*)`
+equals the requested total, and no `(run_id, seq)` recorded twice. This is the
+evidence #1030 did not have.
 
 Writers open their own connections. SQLite locks per connection through file
 locks and the WAL's shared memory, not per process, so separate connections in
 one process contend exactly as separate processes do — which is what makes a
 fleet-scale proof deterministic in one test binary.
 
+**2. The uninitialized-database fix** — the regression #1030 introduced, fixed
+here rather than filed. `requires_migration_sqlite` now reports migration needed
+for a database with no user tables and for an empty `schema_migrations` as the
+only table, so an existing non-empty SQLite file reaches
+`apply_sqlite_transaction` and gets its schema.
+
+Fixing the predicate exposed that `backup_before_migration` shared it to ask a
+*different* question — "is there a previous generation worth preserving?" The
+old `false` answer was load-bearing there: it returned early, which is the only
+reason `migration_history_fingerprint` never queried the absent
+`schema_migrations`. That guard now skips when nothing has been applied, which
+is the question it actually meant, and retires the `"uninitialized"` label that
+was unreachable dead code.
+
+Guarded by `an_existing_schema_less_database_still_gets_its_schema`, which reads
+`run_events` back through the store's own API rather than trusting a bare `Ok` —
+the regression's face was a *successful* open over a database with no tables.
+
+**Dropped by review:** `opening_a_current_database_takes_no_exclusive_lock`
+duplicated #1030's own `current_schema_does_not_take_the_database_write_lock`
+(verified in `1e064a47b`, same shape: hold `BEGIN IMMEDIATE`, `busy_timeout`
+zero, assert the open succeeds).
+
 ### Sabotage proof
 
 Per wave memory ("a test whose subject is 'the store says no' passes for free
-against a store that does not exist"), both tests were sabotaged against main's
-real code — forcing `requires_migration_sqlite` to always report a pending
-migration, restoring pre-#1030 behaviour:
+against a store that does not exist"), every guard was sabotaged against real
+code:
 
-- `opening_a_current_database_takes_no_exclusive_lock` → **red** (deterministic).
-- `every_receipt_at_fleet_fanout_is_recorded_exactly_once` → **red** (3 receipts
-  lost).
-
-Restored, both green. The tests pin #1030's behaviour, not a fixture.
+- Reverting `requires_migration_sqlite` to its `false` answers reproduces the
+  exact production face — **`no such table: run_events`**. Restored, green.
+- Forcing a pending migration (pre-#1030 behaviour) turns the fleet probe
+  **red** (3 receipts lost). Restored, green.
 
 ## Discarded (deliberately)
 
@@ -133,10 +156,11 @@ was worse than nothing:
 - Each rung costs a full `busy_timeout` (5s) before `SQLITE_BUSY` is even
   returned, so a ladder trades a lost receipt for a multi-second hang.
 
-## Open finding — not fixed here
+## The #1030 regression — fixed here, not filed
 
-**#1030 introduced a regression in the open path.** Its gate treats an
-*uninitialized* database as "nothing to migrate": `requires_migration_sqlite`
+Review directed fixing this in place rather than spending a second
+implementation cycle on it. Its gate treated an *uninitialized* database as
+"nothing to migrate": `requires_migration_sqlite`
 returns `Ok(false)` both when the schema is current and when there are no user
 tables at all. Combined with `existing_database` meaning only "the file has
 bytes", a database file with a header but no tables — a process killed
@@ -144,25 +168,9 @@ mid-migration, which is reachable in a 51-process fleet — now permanently fail
 to initialize with `no such table: run_events`, where the old code's `apply_set`
 created the schema.
 
-Verified by bisection, not inferred: the repro below **passes on `1e064a47b^`
-and fails on `1e064a47b`**.
-
-```rust
-#[test]
-fn an_existing_but_empty_database_still_gets_its_schema() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("loopflow.db");
-    let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("PRAGMA user_version = 1;").unwrap();  // header, no tables
-    drop(conn);
-    assert!(std::fs::metadata(&path).unwrap().len() > 0);
-
-    loopflow::store::sqlite::SqliteStore::new(&path)
-        .expect("an existing but unmigrated database must still get its schema");
-}
-```
+Verified by bisection, not inferred: it passes on `1e064a47b^` and fails on
+`1e064a47b`.
 
 A permanent wedge needing a manual `rm loopflow.db` is an avoidable
-human-in-the-loop repair step — the same KR this Task serves. It is a separate
-defect from the contention incident, on a different code path, so it is filed
-rather than absorbed here.
+human-in-the-loop repair step — the same KR this Task serves, which is why the
+review pulled it in here rather than letting it wait for its own cycle.

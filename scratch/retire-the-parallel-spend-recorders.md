@@ -152,6 +152,42 @@ call it a merger.
    threshold. That is the same defect the old check guarded, asked of the
    surviving store.
 
+## Absent and error states (reader boundary)
+
+Once readers answer from turns, "which turns are spend?" needs one rule. It is
+the exact translation of today's gate, and the measurement says it is free:
+
+**A turn contributes to `lf usage`/`lf top`/`lf trace` iff
+`provider_input_tokens IS NOT NULL`.** This mirrors `boundary_spans`' existing
+`input_tokens.is_some()` gate (`runs.rs:1163`). Measured: 634 of 1,057 turns
+pass, and their totals are *identical* to summing all 1,057 (input 227,196,444 /
+output 2,661,626 / $60.68) — the 423 excluded turns contribute exactly zero. The
+gate changes row count, never totals.
+
+**Do not filter on `status`.** The tempting `status = 'completed'` silently
+deletes money: 12 `failed` turns carry real usage — 22,917 output tokens and
+**$3.68, 6% of the store's total cost**. A turn that failed still spent what it
+spent. Usage presence is the gate; status is not.
+
+`running` (75), `partial` (20) and `interrupted` (9) turns all currently have
+NULL usage, so the usage-presence gate excludes them with no special case. That
+is a property of today's data, not a rule — if a `running` turn ever reports
+usage, it counts, and that is correct.
+
+**NULL is not 0.** NULL = the provider reported nothing (unknown). 0 = the
+provider reported zero. Today the opencode clobber conflates them by writing
+zeros for "unknown"; PR1's source fix is what makes the distinction honest, and
+`aggregate_spend` (`usage.rs:344-347`) already skips all-zero rows.
+
+**A launch with no turns** contributes nothing to usage and *is* the defect the
+inverted doctor check reports. Zero exist today.
+
+**Doctor threshold: a turn left `running` with `started_at` older than 1h is an
+orphaned capture.** Measured: 74 of 75 `running` turns are already older than 1h
+(oldest 54.3h); exactly one is live — the session writing this. So 1h separates
+orphans from live turns cleanly, and the inverted check finds 74 real defects on
+day one. That is the check earning its keep, not a false alarm to tune away.
+
 ## De-risking
 
 | Question | Finding | Impact on design |
@@ -261,6 +297,12 @@ Baseline captured 2026-07-16 on `~/.lf/loopflow.db` (copy at `/tmp/ledger-probe.
 - opencode turns with usage: 0 of 8 → target 8 of 8
 - Launches with no turn rows: 0
 - Task Session spend visible in `lf usage`: **$0 / 0 tokens** → target: nonzero
+- Turns passing the usage-presence gate: 634 of 1,057 — totals identical to all
+  1,057, so the gate costs nothing
+- Spend a `status='completed'` filter would delete: 12 failed turns, 22,917
+  output tokens, **$3.68 (6% of cost)** → must stay at $0 lost
+- Orphaned `running` turns (>1h old): 74 of 75 → what the inverted doctor check
+  should report on day one
 
 "Better" = a Task run's spend is queryable; opencode turns are non-zero; the
 seven columns are gone; totals reconcile with every delta attributed.

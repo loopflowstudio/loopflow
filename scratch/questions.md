@@ -1,5 +1,31 @@
 # Open questions — W2-280
 
+## 0. PR boundary after the failed recovery (decided: do not mint a duplicate)
+
+State as of epoch 2, verified rather than inferred:
+
+- **PR #1031** — branch `…-recorders`, head `931dee16a`, **OPEN** on GitHub,
+  carries both design files. The ledger marked it abandoned at 00:46:01 during a
+  recovery that then failed on a dirty worktree — the abandonment is an artifact
+  of that error, not a decision.
+- **Sequence 2** — branch `…-recorders-2`, head `194c1d462`, base `6b659d92b`,
+  tree clean, ledger-active, unpublished. `git diff 931dee16a HEAD -- scratch/`
+  is **empty**: it carries the identical revised design.
+
+So sequence 2 is a **duplicate**, not the empty successor the ENG-20 rule warns
+about — the rotation carried the design forward and nothing was lost.
+
+**Decided: do not publish sequence 2 as a second design PR.** Two open PRs with
+byte-identical content is the noise that rule exists to prevent. #1031 stays the
+design of record and keeps the review thread; sequence 2 is the serial branch
+that PR1's *implementation* goes into, and it gets published when it has
+implementation to show. #1031 is then superseded naturally, by content rather
+than by ceremony.
+
+Not attempted here: repairing the ledger's abandoned/open split-brain. W2-286
+(`reconcile-a-reopened-task-pr`, PR #1032) owns exactly that and is in review.
+Racing it from inside the Task it broke would be the same mistake twice.
+
 ## 1. Directive Done-When #4 is unachievable as written (decided: reframed)
 
 > "lf usage output before and after the cut is identical on a migrated copy of a

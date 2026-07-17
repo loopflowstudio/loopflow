@@ -611,6 +611,7 @@ downgraded account should remain a normal fallback.
 
 ```bash
 lf ssh mini -- lf pr open
+lf --account engineering ssh mini -- lf -m codex : "work here"
 ```
 
 `lf ssh` forwards the current repository's ordered account routes and each
@@ -618,6 +619,11 @@ referenced Claude or Codex credential once. It forwards no Chrome venue data
 and writes no credential files on the remote host. Before connecting,
 Loopflow validates each automatically eligible routed login and refreshes Codex
 when due; `lf ssh` fails instead of sending an incomplete route.
+
+`--account` resolves and verifies the named account locally, then pins the
+remote foreground command to that exact account by access token. The account
+may be outside the repository route, explicit-only, or cooling; the remote
+needs neither its account configuration nor its native credential home.
 
 Forwarded account auth lasts only for the foreground SSH command. Loopflow
 rejects its own detached Wave, Project, and Task sessions, plus direct remote

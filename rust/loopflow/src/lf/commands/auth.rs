@@ -38,6 +38,9 @@ const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
 #[cfg(test)]
 static TEST_OPENED_CHROME_PROFILES: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
+#[cfg(test)]
+static TEST_ACCESS_PROFILE_FAILURES: LazyLock<Mutex<Vec<String>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaudeAuthStatusOutput {
@@ -210,7 +213,15 @@ async fn connect_account(
                 selected = Some(profile);
                 break;
             }
-            Err(error) => failures.push(format!("{}: {error}", profile.id)),
+            Err(error) => {
+                let failure = format!("{}: {error}", profile.id);
+                #[cfg(test)]
+                TEST_ACCESS_PROFILE_FAILURES
+                    .lock()
+                    .expect("test access profile failure log should not be poisoned")
+                    .push(failure.clone());
+                failures.push(failure);
+            }
         }
     }
     let selected =
@@ -1432,7 +1443,7 @@ mod account_first_tests {
 
     use super::{
         connect_account, exhausted_access_profiles_error, verify_provider_login,
-        TEST_OPENED_CHROME_PROFILES,
+        TEST_ACCESS_PROFILE_FAILURES, TEST_OPENED_CHROME_PROFILES,
     };
     use crate::profile::{AccessProfile, EmailAddress, ProfileId};
     use crate::provider_account::{
@@ -1524,6 +1535,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             "LF_TEST_CODEX_FAIL_FIRST",
             if fail_first { "1" } else { "0" },
         );
+        TEST_ACCESS_PROFILE_FAILURES.lock().unwrap().clear();
         TEST_OPENED_CHROME_PROFILES.lock().unwrap().clear();
     }
 
@@ -1633,6 +1645,68 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         assert_eq!(
             fs::read_to_string(temp.path().join("codex-count")).unwrap(),
             "2"
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn connect_skips_drifted_venue_and_names_both_logins() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "LF_HOME",
+            "LF_DB_PATH",
+            "PATH",
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            FORWARDED_ACCOUNT_STORE_ENV,
+            "LF_TEST_CODEX_AUTH_JSON",
+            "LF_TEST_CODEX_COUNT",
+            "LF_TEST_CODEX_HOMES",
+            "LF_TEST_CODEX_FAIL_FIRST",
+        ]);
+        configure_connect_test(temp.path(), "operator@example.com", false);
+        write_chrome_profiles(
+            temp.path(),
+            &[
+                ("Profile 3", "Drifted", "someone.else@example.com"),
+                ("Profile 8", "Operator", "operator@example.com"),
+            ],
+        );
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let account = account(None, "operator@example.com");
+        store.upsert_provider_account(&account).await.unwrap();
+        let first = access_profile("Profile 3", "operator@example.com", 1);
+        let second = access_profile("Profile 8", "operator@example.com", 2);
+        store.upsert_access_profile(&first).await.unwrap();
+        store.upsert_access_profile(&second).await.unwrap();
+        store
+            .set_account_access_profiles(
+                Provider::Codex,
+                &account.account_id,
+                &[first.id.clone(), second.id.clone()],
+            )
+            .await
+            .unwrap();
+
+        connect_account("codex", "primary", None).await.unwrap();
+
+        assert_eq!(
+            *TEST_OPENED_CHROME_PROFILES.lock().unwrap(),
+            ["Profile 8".to_string()]
+        );
+        assert_eq!(
+            *TEST_ACCESS_PROFILE_FAILURES.lock().unwrap(),
+            ["Profile 3: signed in as 'someone.else@example.com', expected 'operator@example.com'"
+                .to_string()]
+        );
+        assert_eq!(
+            fs::read_to_string(temp.path().join("codex-count")).unwrap(),
+            "1"
         );
     }
 

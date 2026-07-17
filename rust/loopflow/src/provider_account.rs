@@ -113,9 +113,23 @@ pub struct ForwardedProviderRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardedProviderPin {
+    pub provider: Provider,
+    pub account_id: ProviderAccountId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ForwardedAccountSelection {
+    Routed(Vec<ForwardedProviderRoute>),
+    Pinned(Vec<ForwardedProviderPin>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForwardedAccountBundle {
     pub repo_id: RepoId,
-    pub routes: Vec<ForwardedProviderRoute>,
+    pub selection: ForwardedAccountSelection,
     pub accounts: Vec<ForwardedProviderAccount>,
     credentials: Vec<ForwardedProviderCredential>,
 }
@@ -123,13 +137,13 @@ pub struct ForwardedAccountBundle {
 impl ForwardedAccountBundle {
     pub fn new(
         repo_id: RepoId,
-        routes: Vec<ForwardedProviderRoute>,
+        selection: ForwardedAccountSelection,
         accounts: Vec<ForwardedProviderAccount>,
         credentials: Vec<ForwardedProviderCredential>,
     ) -> Self {
         Self {
             repo_id,
-            routes,
+            selection,
             accounts,
             credentials,
         }
@@ -432,10 +446,19 @@ pub fn decode_forwarded_account_bundle(
 
 pub async fn local_forwarded_account_bundle(
     store: &SharedStore,
+    selector: Option<&str>,
 ) -> Result<Option<ForwardedAccountBundle>, ProviderAccountError> {
     let Some(repo_id) = current_repo_id()? else {
-        return Ok(None);
+        return match selector {
+            Some(_) => Err(ProviderAccountError::Runtime(
+                "cannot resolve --account for SSH outside a repository".to_string(),
+            )),
+            None => Ok(None),
+        };
     };
+    if let Some(selector) = selector {
+        return explicit_forwarded_account_bundle(store, repo_id, selector).await;
+    }
     let mut routes = Vec::new();
     for provider in [Provider::Claude, Provider::Codex] {
         let route = match store
@@ -459,55 +482,152 @@ pub async fn local_forwarded_account_bundle(
     let mut accounts = Vec::new();
     let mut credentials = Vec::new();
     for (provider, account) in routed_accounts {
-        accounts.push(ForwardedProviderAccount {
-            provider,
-            account_id: account.account_id.clone(),
-            login_email: account.login_email.clone(),
-            credential_state: account.credential_state,
-            routing_state: account.routing_state,
-            plan: account.plan.clone(),
-            paid_through: account.paid_through,
-            utilization_percent: account.utilization_percent,
-            cooldown_until: account.cooldown_until,
-            cooldown_reason: account.cooldown_reason.clone(),
-        });
+        accounts.push(forwarded_account(provider, &account));
         if !account.eligible_for_automatic_routing(time::OffsetDateTime::now_utc().date()) {
             continue;
         }
-        let home =
-            account
-                .home
-                .as_deref()
-                .ok_or_else(|| ProviderAccountError::ForwardingCredential {
-                    provider,
-                    account_id: account.account_id.clone(),
-                    reason: "managed account has no native credential home".to_string(),
-                })?;
-        let access_token =
-            crate::provider_auth::prepare_provider_account_access_token(provider, home)
-                .await
-                .map_err(|error| ProviderAccountError::ForwardingCredential {
-                    provider,
-                    account_id: account.account_id.clone(),
-                    reason: error.to_string(),
-                })?
-                .ok_or_else(|| ProviderAccountError::ForwardingCredential {
-                    provider,
-                    account_id: account.account_id.clone(),
-                    reason: "provider CLI reports no active OAuth login".to_string(),
-                })?;
-        credentials.push(ForwardedProviderCredential::new(
-            provider,
-            account.account_id,
-            access_token,
-        ));
+        credentials.push(prepare_forwarding_credential(provider, &account).await?);
     }
     Ok(Some(ForwardedAccountBundle::new(
         repo_id,
-        routes,
+        ForwardedAccountSelection::Routed(routes),
         accounts,
         credentials,
     )))
+}
+
+async fn explicit_forwarded_account_bundle(
+    store: &SharedStore,
+    repo_id: RepoId,
+    selector: &str,
+) -> Result<Option<ForwardedAccountBundle>, ProviderAccountError> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return Err(ProviderAccountError::Runtime(
+            "--account requires a non-empty account id or login email".to_string(),
+        ));
+    }
+
+    let mut accounts = Vec::new();
+    let mut pins = Vec::new();
+    let mut credentials = Vec::new();
+    for provider in [Provider::Claude, Provider::Codex] {
+        let provider_accounts = store
+            .list_provider_accounts(Some(provider.as_str()))
+            .await?;
+        let account = match match_account(&provider_accounts, selector) {
+            AccountMatch::None => continue,
+            AccountMatch::One(account) => account,
+            AccountMatch::Ambiguous(candidates) => {
+                return Err(ProviderAccountError::Runtime(format!(
+                    "'{selector}' matches several {provider} accounts: {}",
+                    candidates
+                        .iter()
+                        .map(|account| account.account_id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+        };
+        let credential = prepare_explicit_forwarding_credential(store, provider, account).await?;
+        accounts.push(forwarded_account(provider, account));
+        pins.push(ForwardedProviderPin {
+            provider,
+            account_id: account.account_id.clone(),
+        });
+        credentials.push(credential);
+    }
+    if pins.is_empty() {
+        return Err(ProviderAccountError::Runtime(format!(
+            "no managed Claude or Codex account matches '{selector}'; see `lf auth accounts`"
+        )));
+    }
+    Ok(Some(ForwardedAccountBundle::new(
+        repo_id,
+        ForwardedAccountSelection::Pinned(pins),
+        accounts,
+        credentials,
+    )))
+}
+
+async fn prepare_explicit_forwarding_credential(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+) -> Result<ForwardedProviderCredential, ProviderAccountError> {
+    let home = account.home.as_deref().ok_or_else(|| {
+        ProviderAccountError::Runtime(format!(
+            "{provider} account '{}' has no managed credential home",
+            account.account_id
+        ))
+    })?;
+    let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    ensure_account_home_at(&operator_home, home, provider)?;
+    let status = provider_account_auth_status(provider, home.to_path_buf())
+        .await
+        .map_err(|error| {
+            ProviderAccountError::Runtime(format!(
+                "check {provider} account '{}': {error}",
+                account.account_id
+            ))
+        })?;
+    if !retain_authenticated_account(store, account, &status).await? {
+        return Err(ProviderAccountError::NoAuthenticatedAccount {
+            provider,
+            accounts: format!(
+                "'{}' with `lf auth connect {provider} {}`",
+                account.account_id, account.account_id
+            ),
+        });
+    }
+    prepare_forwarding_credential(provider, account).await
+}
+
+async fn prepare_forwarding_credential(
+    provider: Provider,
+    account: &ProviderAccount,
+) -> Result<ForwardedProviderCredential, ProviderAccountError> {
+    let home =
+        account
+            .home
+            .as_deref()
+            .ok_or_else(|| ProviderAccountError::ForwardingCredential {
+                provider,
+                account_id: account.account_id.clone(),
+                reason: "managed account has no native credential home".to_string(),
+            })?;
+    let access_token = crate::provider_auth::prepare_provider_account_access_token(provider, home)
+        .await
+        .map_err(|error| ProviderAccountError::ForwardingCredential {
+            provider,
+            account_id: account.account_id.clone(),
+            reason: error.to_string(),
+        })?
+        .ok_or_else(|| ProviderAccountError::ForwardingCredential {
+            provider,
+            account_id: account.account_id.clone(),
+            reason: "provider CLI reports no active OAuth login".to_string(),
+        })?;
+    Ok(ForwardedProviderCredential::new(
+        provider,
+        account.account_id.clone(),
+        access_token,
+    ))
+}
+
+fn forwarded_account(provider: Provider, account: &ProviderAccount) -> ForwardedProviderAccount {
+    ForwardedProviderAccount {
+        provider,
+        account_id: account.account_id.clone(),
+        login_email: account.login_email.clone(),
+        credential_state: account.credential_state,
+        routing_state: account.routing_state,
+        plan: account.plan.clone(),
+        paid_through: account.paid_through,
+        utilization_percent: account.utilization_percent,
+        cooldown_until: account.cooldown_until,
+        cooldown_reason: account.cooldown_reason.clone(),
+    }
 }
 
 async fn referenced_provider_accounts(
@@ -541,6 +661,15 @@ pub async fn resolve_provider_account(
     provider_session_id: Option<&str>,
 ) -> Result<ProviderAccountResolution, ProviderAccountError> {
     ensure_supported(provider)?;
+    let forwarded_bundle = match std::env::var(FORWARDED_ACCOUNT_BUNDLE_ENV) {
+        Ok(value) if !value.trim().is_empty() => Some(decode_forwarded_account_bundle(&value)?),
+        _ => None,
+    };
+    if let Some(bundle) = &forwarded_bundle {
+        if matches!(bundle.selection, ForwardedAccountSelection::Pinned(_)) {
+            return resolve_forwarded_pin(bundle, provider).await;
+        }
+    }
     if let Ok(selector) = std::env::var(PROVIDER_ACCOUNT_ENV) {
         if !selector.trim().is_empty() {
             return resolve_explicit_account(provider, selector.trim())
@@ -548,10 +677,6 @@ pub async fn resolve_provider_account(
                 .map(ProviderAccountResolution::Managed);
         }
     }
-    let forwarded_bundle = match std::env::var(FORWARDED_ACCOUNT_BUNDLE_ENV) {
-        Ok(value) if !value.trim().is_empty() => Some(decode_forwarded_account_bundle(&value)?),
-        _ => None,
-    };
     let store = route_store(forwarded_bundle.is_some()).await?;
     let Some(store) = store else {
         return Ok(ProviderAccountResolution::Ambient(
@@ -561,7 +686,10 @@ pub async fn resolve_provider_account(
 
     let mut access_tokens = HashMap::new();
     let (candidates, routed_repo_id) = if let Some(bundle) = &forwarded_bundle {
-        let candidates = hydrate_forwarded_account_bundle(&store, bundle, provider).await?;
+        let ForwardedAccountSelection::Routed(routes) = &bundle.selection else {
+            unreachable!("pinned bundles return before routed selection")
+        };
+        let candidates = hydrate_forwarded_route(&store, bundle, routes, provider).await?;
         for credential in bundle
             .credentials
             .iter()
@@ -646,6 +774,87 @@ pub async fn resolve_provider_account(
         account_id,
         credential,
         resume_requested_session: selection.resume_requested_session,
+        store,
+    }))
+}
+
+async fn resolve_forwarded_pin(
+    bundle: &ForwardedAccountBundle,
+    provider: Provider,
+) -> Result<ProviderAccountResolution, ProviderAccountError> {
+    let ForwardedAccountSelection::Pinned(pins) = &bundle.selection else {
+        return Err(ProviderAccountError::ForwardedBundle(
+            "routed bundle cannot resolve an explicit pin".to_string(),
+        ));
+    };
+    let pins = pins
+        .iter()
+        .filter(|pin| pin.provider == provider)
+        .collect::<Vec<_>>();
+    let pin = match pins.as_slice() {
+        [pin] => *pin,
+        [] => {
+            return Err(ProviderAccountError::ForwardedBundle(format!(
+                "explicit forwarded bundle has no {provider} account pin"
+            )));
+        }
+        _ => {
+            return Err(ProviderAccountError::ForwardedBundle(format!(
+                "explicit forwarded bundle has several {provider} account pins"
+            )));
+        }
+    };
+    let store = route_store(true).await?.ok_or_else(|| {
+        ProviderAccountError::ForwardedBundle(
+            "temporary forwarded account store is unavailable".to_string(),
+        )
+    })?;
+    let account = bundle
+        .accounts
+        .iter()
+        .find(|account| account.provider == provider && account.account_id == pin.account_id)
+        .ok_or_else(|| {
+            ProviderAccountError::ForwardedBundle(format!(
+                "pin references missing {provider}/{}",
+                pin.account_id
+            ))
+        })?;
+    if store
+        .get_provider_account(provider.as_str(), &pin.account_id)
+        .await?
+        .is_none()
+    {
+        store
+            .upsert_provider_account(&provider_account_from_forwarded(account))
+            .await?;
+    }
+    let credentials = bundle
+        .credentials
+        .iter()
+        .filter(|credential| {
+            credential.provider == provider && credential.account_id == pin.account_id
+        })
+        .collect::<Vec<_>>();
+    let credential = match credentials.as_slice() {
+        [credential] => *credential,
+        [] => {
+            return Err(ProviderAccountError::ForwardedBundle(format!(
+                "missing access token for {provider}/{}",
+                pin.account_id
+            )));
+        }
+        _ => {
+            return Err(ProviderAccountError::ForwardedBundle(format!(
+                "several access tokens for {provider}/{}",
+                pin.account_id
+            )));
+        }
+    };
+    Ok(ProviderAccountResolution::Managed(ProviderAccountRoute {
+        provider,
+        account_id: account.account_id.clone(),
+        credential: AccountCredential::AccessToken(credential.access_token().to_string()),
+        resume_requested_session: false,
         store,
     }))
 }
@@ -793,16 +1002,13 @@ async fn retain_authenticated_account(
     Ok(false)
 }
 
-async fn hydrate_forwarded_account_bundle(
+async fn hydrate_forwarded_route(
     store: &SharedStore,
     bundle: &ForwardedAccountBundle,
+    routes: &[ForwardedProviderRoute],
     provider: Provider,
 ) -> Result<Vec<ProviderAccountId>, ProviderAccountError> {
-    let Some(route) = bundle
-        .routes
-        .iter()
-        .find(|route| route.provider == provider)
-    else {
+    let Some(route) = routes.iter().find(|route| route.provider == provider) else {
         return Ok(Vec::new());
     };
 
@@ -814,22 +1020,7 @@ async fn hydrate_forwarded_account_bundle(
         let now = now_unix();
         for account in &bundle.accounts {
             store
-                .upsert_provider_account(&ProviderAccount {
-                    provider: account.provider.as_str().to_string(),
-                    account_id: account.account_id.clone(),
-                    home: None,
-                    login_email: account.login_email.clone(),
-                    credential_state: account.credential_state,
-                    routing_state: account.routing_state,
-                    plan: account.plan.clone(),
-                    paid_through: account.paid_through,
-                    utilization_percent: account.utilization_percent,
-                    cooldown_until: account.cooldown_until,
-                    cooldown_reason: account.cooldown_reason.clone(),
-                    last_selected_at: None,
-                    created_at: now,
-                    updated_at: now,
-                })
+                .upsert_provider_account(&provider_account_from_forwarded(account))
                 .await?;
         }
         store
@@ -844,6 +1035,26 @@ async fn hydrate_forwarded_account_bundle(
     }
 
     Ok(route.accounts.clone())
+}
+
+fn provider_account_from_forwarded(account: &ForwardedProviderAccount) -> ProviderAccount {
+    let now = now_unix();
+    ProviderAccount {
+        provider: account.provider.as_str().to_string(),
+        account_id: account.account_id.clone(),
+        home: None,
+        login_email: account.login_email.clone(),
+        credential_state: account.credential_state,
+        routing_state: account.routing_state,
+        plan: account.plan.clone(),
+        paid_through: account.paid_through,
+        utilization_percent: account.utilization_percent,
+        cooldown_until: account.cooldown_until,
+        cooldown_reason: account.cooldown_reason.clone(),
+        last_selected_at: None,
+        created_at: now,
+        updated_at: now,
+    }
 }
 
 fn current_repo_id() -> Result<Option<RepoId>, ProviderAccountError> {
@@ -1548,15 +1759,197 @@ mod account_first_tests {
         );
     }
 
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn explicit_forwarded_pin_uses_local_account_identity_and_remote_access_token() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let codex = bin.join("codex");
+        fs::write(
+            &codex,
+            r#"#!/bin/sh
+IFS= read -r line
+printf '{"id":1,"result":{}}\n'
+IFS= read -r line
+IFS= read -r line
+printf '{"id":2,"result":{"account":null}}\n'
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = fs::metadata(&codex).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&codex, permissions).unwrap();
+        }
+        let _restore = EnvRestore::capture(&[
+            "PATH",
+            ACCOUNT_REPO_ID_ENV,
+            PROVIDER_ACCOUNT_ENV,
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            FORWARDED_ACCOUNT_STORE_ENV,
+        ]);
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        std::env::set_var(ACCOUNT_REPO_ID_ENV, "loopflowstudio/loopflow");
+        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
+        let source_store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("source.db")))
+                .await
+                .unwrap(),
+        );
+        let mut engineering = account(Provider::Codex, "engineering", temp.path());
+        engineering.routing_state = RoutingState::ExplicitOnly;
+        engineering.cooldown_until = Some(now_unix() + 3600);
+        let home = engineering.home.as_ref().unwrap();
+        fs::create_dir_all(home).unwrap();
+        fs::write(
+            home.join("auth.json"),
+            r#"{"tokens":{"access_token":"e30.eyJleHAiOjQxMDI0NDQ4MDB9.sig","id_token":"e30.eyJlbWFpbCI6ImVuZ2luZWVyaW5nQGV4YW1wbGUuY29tIn0.sig"}}"#,
+        )
+        .unwrap();
+        source_store
+            .upsert_provider_account(&engineering)
+            .await
+            .unwrap();
+
+        let bundle = local_forwarded_account_bundle(&source_store, Some("engineering"))
+            .await
+            .unwrap()
+            .expect("explicit account should produce a bundle without a repo route");
+
+        assert_eq!(
+            bundle.selection,
+            ForwardedAccountSelection::Pinned(vec![ForwardedProviderPin {
+                provider: Provider::Codex,
+                account_id: engineering.account_id.clone(),
+            }])
+        );
+        assert_eq!(bundle.accounts.len(), 1);
+        assert_eq!(bundle.credentials.len(), 1);
+        let remote_db = temp.path().join("remote.db");
+        std::env::set_var(
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            encode_forwarded_account_bundle(&bundle).unwrap(),
+        );
+        std::env::set_var(FORWARDED_ACCOUNT_STORE_ENV, &remote_db);
+        std::env::set_var(PROVIDER_ACCOUNT_ENV, "some-other-remote-account");
+
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .into_route()
+            .expect("forwarded explicit pin should resolve");
+
+        assert_eq!(route.account_id(), &engineering.account_id);
+        assert!(!route.uses_native_home());
+        let mut command = Command::new("codex");
+        route.apply(&mut command);
+        assert_eq!(
+            command
+                .get_envs()
+                .find(|(name, _)| *name == std::ffi::OsStr::new("CODEX_ACCESS_TOKEN"))
+                .and_then(|(_, value)| value)
+                .map(|value| value.to_string_lossy()),
+            Some("e30.eyJleHAiOjQxMDI0NDQ4MDB9.sig".into())
+        );
+        let remote_store = open_store(&StorageConfig::sqlite(remote_db)).await.unwrap();
+        assert!(remote_store
+            .get_provider_account(Provider::Codex.as_str(), &engineering.account_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .home
+            .is_none());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn ordinary_forwarded_route_preserves_health_aware_failover() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            PROVIDER_ACCOUNT_ENV,
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            FORWARDED_ACCOUNT_STORE_ENV,
+        ]);
+        let first = parse_account_id("first").unwrap();
+        let second = parse_account_id("second").unwrap();
+        let bundle = ForwardedAccountBundle::new(
+            RepoId::parse("loopflowstudio/loopflow").unwrap(),
+            ForwardedAccountSelection::Routed(vec![ForwardedProviderRoute {
+                provider: Provider::Codex,
+                accounts: vec![first.clone(), second.clone()],
+            }]),
+            vec![
+                ForwardedProviderAccount {
+                    provider: Provider::Codex,
+                    account_id: first,
+                    login_email: None,
+                    credential_state: CredentialState::Connected,
+                    routing_state: RoutingState::Automatic,
+                    plan: None,
+                    paid_through: None,
+                    utilization_percent: None,
+                    cooldown_until: Some(now_unix() + 3600),
+                    cooldown_reason: Some("rate limit".to_string()),
+                },
+                ForwardedProviderAccount {
+                    provider: Provider::Codex,
+                    account_id: second.clone(),
+                    login_email: None,
+                    credential_state: CredentialState::Connected,
+                    routing_state: RoutingState::Automatic,
+                    plan: None,
+                    paid_through: None,
+                    utilization_percent: None,
+                    cooldown_until: None,
+                    cooldown_reason: None,
+                },
+            ],
+            vec![ForwardedProviderCredential::new(
+                Provider::Codex,
+                second.clone(),
+                "second-token".to_string(),
+            )],
+        );
+        std::env::remove_var(PROVIDER_ACCOUNT_ENV);
+        std::env::set_var(
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            encode_forwarded_account_bundle(&bundle).unwrap(),
+        );
+        std::env::set_var(
+            FORWARDED_ACCOUNT_STORE_ENV,
+            temp.path().join("forwarded.db"),
+        );
+
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .into_route()
+            .expect("ordinary forwarded route should select its healthy fallback");
+
+        assert_eq!(route.account_id(), &second);
+        assert!(!route.uses_native_home());
+    }
+
     #[test]
     fn forwarded_account_bundle_round_trips_without_exposing_tokens() {
         let account_id = parse_account_id("engineering").unwrap();
         let bundle = ForwardedAccountBundle::new(
             RepoId::parse("loopflowstudio/loopflow").unwrap(),
-            vec![ForwardedProviderRoute {
+            ForwardedAccountSelection::Pinned(vec![ForwardedProviderPin {
                 provider: Provider::Codex,
-                accounts: vec![account_id.clone()],
-            }],
+                account_id: account_id.clone(),
+            }]),
             vec![],
             vec![ForwardedProviderCredential::new(
                 Provider::Codex,
@@ -1568,5 +1961,11 @@ mod account_first_tests {
         let encoded = encode_forwarded_account_bundle(&bundle).unwrap();
         assert_eq!(decode_forwarded_account_bundle(&encoded).unwrap(), bundle);
         assert!(!format!("{bundle:?}").contains("secret-token"));
+        let mut missing_selection = serde_json::to_value(&bundle).unwrap();
+        missing_selection
+            .as_object_mut()
+            .unwrap()
+            .remove("selection");
+        assert!(serde_json::from_value::<ForwardedAccountBundle>(missing_selection).is_err());
     }
 }

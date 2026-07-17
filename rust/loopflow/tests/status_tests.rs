@@ -107,6 +107,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         provider_session_path: None,
         conversation_event_count: 2,
         conversation_bytes: 10,
+        control: None,
     };
     let turn = AgentTurnRow {
         id: "turn-wave-mutate".to_string(),

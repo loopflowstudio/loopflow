@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 use crate::child_session::{
     body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
     plan_stranded_recovery, task_write_lease_from_env, BodyEvidence, BodyRecoveryPlan,
-    ChildBodyOutcome, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
+    ChildBodyOutcome, ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
     StrandedPlan, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
 };
+use crate::durable::{AttentionRoute, AuthenticatedRequest, ControlCtx, Review};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
@@ -25,11 +25,7 @@ use crate::engine::process::{
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
-use crate::engine::{expand_flow, load_flow, ConcreteStep, InteractionPolicy};
-use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewId, InteractionReviewStatus,
-    InteractionReviewer,
-};
+use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
@@ -43,13 +39,11 @@ use crate::task::actions::{
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-    PrPhase, PrPublication, TaskEventKind, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession,
-    TaskSessionId, TaskSessionStatus, TaskSessionSuccession,
+    PrPhase, PrPublication, TaskEventKind, TaskPr, TaskPrId, TaskSession, TaskSessionId,
+    TaskSessionStatus, TaskSessionSuccession,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
-
-use super::ChildReceiptUntil;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskWaitUntil {
@@ -70,37 +64,8 @@ pub struct TaskLaunchOptions {
 pub struct TaskControlResult {
     pub issue_id: String,
     pub session_id: String,
-    pub command_id: String,
-    pub state: ChildCommandState,
-    pub effect: Option<ChildCommandEffect>,
-    pub generation: Option<u32>,
-    pub accepted_at: Option<time::OffsetDateTime>,
-    pub error: Option<String>,
+    pub receipt: super::child::WorkControlReceipt,
     pub observation: Observation,
-}
-
-fn task_control_result(
-    issue_id: String,
-    observation: Observation,
-    result: super::child::ChildControlResult,
-) -> TaskControlResult {
-    TaskControlResult {
-        issue_id,
-        session_id: result.session_id,
-        command_id: result.command_id,
-        state: result.state,
-        effect: result.effect,
-        generation: result.generation,
-        accepted_at: result.accepted_at,
-        error: result.error,
-        observation,
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskReceiptRead {
-    pub receipt: TaskControlResult,
-    pub timed_out: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -363,38 +328,6 @@ async fn owning_wave(store: &SharedStore, session: &TaskSession) -> OpsResult<Wa
         .ok_or_else(|| task_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
-async fn validate_task_caller_authority(
-    store: &SharedStore,
-    session: &TaskSession,
-    authority: &CallerAuthority,
-) -> OpsResult<ChildCommandSource> {
-    let subject = format!("Task {}", session.launch.issue.identifier);
-    let target = crate::child_session::ChildRef::Task(session.id.clone());
-    // A Project caller is validated against the *live* routing target, not the
-    // historical `project_session_id` (W2-243 routes supervision to a live
-    // successor). Resolve the route only when a Project caller is actually
-    // present: a Wave or operator command must not fail merely because the
-    // parent Project chain is dead.
-    let route_current = if matches!(authority, CallerAuthority::Project(_)) {
-        Some(
-            super::project::resolve_task_project_route(store.as_ref(), session)
-                .await?
-                .current,
-        )
-    } else {
-        None
-    };
-    super::util::validate_caller_authority(
-        store,
-        &session.wave_id,
-        &target,
-        route_current.as_ref(),
-        &subject,
-        authority,
-    )
-    .await
-}
-
 fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {
     if session.lifecycle.all_interactions_deferred() {
         return Ok(false);
@@ -417,16 +350,11 @@ fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {
     Ok(true)
 }
 
-fn _refuse_current_human_review(
-    session: &TaskSession,
-    review: Option<&InteractionReview>,
-) -> OpsResult<()> {
-    if let Some(review) = review.filter(|review| {
-        review.reviewer == InteractionReviewer::Human && !review.status.is_terminal()
-    }) {
+fn _refuse_current_human_review(session: &TaskSession, review: Option<&Review>) -> OpsResult<()> {
+    if review.is_some_and(|review| review.attention == AttentionRoute::User) {
         return Err(task_error(format!(
-            "Task {} is awaiting human interaction review {}; no interaction policy was changed",
-            session.launch.issue.identifier, review.id
+            "Task {} routes its current interactive step to the User; close it before changing interaction policy",
+            session.launch.issue.identifier
         )));
     }
     Ok(())
@@ -527,13 +455,12 @@ pub fn task_run(
                 )));
             }
             if headless && !session.lifecycle.all_interactions_deferred() {
+                let work = store
+                    .work_for_child(&ChildRef::Task(session.id.clone()))
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
                 let review = store
-                    .interaction_review_at(
-                        &session.id,
-                        session.phase_epoch,
-                        session.phase_iteration,
-                        session.phase_cursor,
-                    )
+                    .review(&work)
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
                 _refuse_current_human_review(session, review.as_ref())?;
@@ -814,7 +741,7 @@ pub fn task_run(
             )));
         }
 
-        launch_task_process(&store, &mut session).await?;
+        launch_task_process(&store, &mut session, None).await?;
         wait_until_running(&store, &session.id).await
     })
 }
@@ -1806,7 +1733,26 @@ pub(crate) async fn relaunch_inactive_process(
             session.status.as_str()
         )));
     };
-    launch_task_process(store, session).await
+    launch_task_process(store, session, None).await
+}
+
+async fn relaunch_for_ci_incident(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    incident_id: String,
+) -> OpsResult<()> {
+    let Some(_) = ensure_working_pr(store, session).await? else {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot repair CI",
+            session.launch.issue.identifier
+        )));
+    };
+    launch_task_process(
+        store,
+        session,
+        Some(crate::durable::RunTrigger::CiIncident { incident_id }),
+    )
+    .await
 }
 
 /// Clear a `revoked` lease whose body is provably gone, in place.
@@ -1837,7 +1783,11 @@ async fn release_dead_revoked_task_lease(
     Ok(())
 }
 
-async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
+async fn launch_task_process(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    trigger: Option<crate::durable::RunTrigger>,
+) -> OpsResult<()> {
     // Resolve the current Home lf before reserving anything, ignoring any
     // LF_CONTROL_* pin a legacy body carries: we always launch through the
     // current binary, store, and home. A missing or incompatible lf fails
@@ -1862,9 +1812,15 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     // child stamps its own binary's provenance when it boots (mark_booted), so
     // the audit row describes what ran, never merely what launched it.
     let generation = launch.begin_generation(tmux_name.clone());
-    let Some(lease) = store
-        .reserve_task_process(&launch, from)
-        .await
+    let reservation = match trigger {
+        Some(trigger) => {
+            store
+                .reserve_task_process_for_trigger(&launch, from, trigger)
+                .await
+        }
+        None => store.reserve_task_process(&launch, from).await,
+    };
+    let Some(lease) = reservation
         .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?
     else {
         let current = store
@@ -2062,21 +2018,6 @@ pub(crate) async fn reconcile_process_liveness(
         .await
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?;
     if active.as_ref().is_none_or(|pr| pr.phase() == PrPhase::Open) {
-        // W2-144 gen 7: before settling a dead-process open-PR Task to Waiting,
-        // consume a queued manual Resume. The command was queued (by
-        // `lf task resume` or a queued steer) but never claimed because the
-        // process died first. Relaunching lets the new generation drain and
-        // honor it — one relaunch path, shared with the ci-fix wake.
-        let commands = store
-            .list_child_commands(&ChildRef::Task(session.id.clone()))
-            .await
-            .map_err(|error| task_error(format!("failed to read command queue: {error}")))?;
-        let has_pending_resume = commands
-            .iter()
-            .any(|cmd| matches!(cmd.kind, ChildCommandKind::Resume) && !cmd.state.is_terminal());
-        if has_pending_resume {
-            return relaunch_inactive_process(store, session).await;
-        }
         let from = session.status;
         session.set_status(
             TaskSessionStatus::Waiting,
@@ -2217,7 +2158,7 @@ pub(crate) async fn reconcile_project_tasks(
                     relaunch_inactive_process(store, task).await?;
                 }
             } else {
-                queue_ci_fix_command(store, task, pr).await?;
+                route_ci_incident(store, task, pr).await?;
             }
         }
     }
@@ -2443,16 +2384,12 @@ async fn recover_stalled_task_body(
     observation: &crate::child_session::BodyObservation,
     latest_event_id: Option<i64>,
 ) -> OpsResult<bool> {
-    let commands = store
-        .list_child_commands(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(format!("failed to inspect Task commands: {error}")))?;
     let generation = task
         .latest_process
         .as_ref()
         .map(|process| process.generation)
         .ok_or_else(|| task_error("stalled Task has no process generation"))?;
-    let plan = plan_body_recovery(observation, &commands, generation);
+    let plan = plan_body_recovery(observation);
     if plan == BodyRecoveryPlan::LeaveAlone {
         return Ok(false);
     }
@@ -2465,50 +2402,18 @@ async fn recover_stalled_task_body(
         return Ok(false);
     }
     let progress_age = observation.progress_age_secs.unwrap_or_default();
-    let uncertain = match &plan {
-        BodyRecoveryPlan::NeedsInput { commands } => Some(commands.clone()),
-        BodyRecoveryPlan::Restart => None,
-        BodyRecoveryPlan::LeaveAlone => unreachable!("leave-alone plan returned above"),
-    };
-    // A restart commits a successor body into the worktree, so it must clear the
-    // same adoption preconditions as an explicit resume — refuse before the lease
-    // is reaped rather than after rotation rejects the branch. An uncertain plan
-    // launches nothing, so it still records the loss honestly; the explicit
-    // resume that follows is where the refusal belongs.
-    if uncertain.is_none() {
-        if let Err(error) = task_recovery_adoption(store, &task).await {
-            tracing::info!(
-                task = %task.launch.issue.identifier,
-                "not recovering Task body: {error}"
-            );
-            return Ok(false);
-        }
+    if let Err(error) = task_recovery_adoption(store, &task).await {
+        tracing::info!(
+            task = %task.launch.issue.identifier,
+            "not recovering Task body: {error}"
+        );
+        return Ok(false);
     }
-    let reason = uncertain.as_ref().map_or_else(
-        || {
-            format!(
-                "body generation {generation} stalled after {progress_age}s without durable progress; recovering the same Task Session"
-            )
-        },
-        |commands| {
-            let commands = commands
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "body generation {generation} stalled after {progress_age}s during provider delivery ({commands}); delivery outcome is uncertain, inspect the transcript and resume explicitly"
-            )
-        },
+    let reason = format!(
+        "body generation {generation} stalled after {progress_age}s without durable progress; recovering from current Work input"
     );
-    let outcome = if uncertain.is_some() {
-        ChildBodyOutcome::Lost {
-            reason: reason.clone(),
-        }
-    } else {
-        ChildBodyOutcome::Superseded {
-            reason: reason.clone(),
-        }
+    let outcome = ChildBodyOutcome::Superseded {
+        reason: reason.clone(),
     };
     let Some(revoked) = store
         .revoke_task_process_if_unchanged(
@@ -2551,34 +2456,6 @@ async fn recover_stalled_task_body(
         .await
         .map_err(|error| task_error(error.to_string()))?
         .ok_or_else(|| task_error("Task Session disappeared during recovery"))?;
-    if uncertain.is_some() {
-        let successor_generation = generation
-            .checked_add(1)
-            .ok_or_else(|| task_error("Task process generation overflow"))?;
-        let changed = store
-            .mark_stale_child_deliveries_uncertain(
-                &ChildRef::Task(task.id.clone()),
-                successor_generation,
-            )
-            .await
-            .map_err(|error| {
-                task_error(format!("failed to preserve uncertain delivery: {error}"))
-            })?;
-        for command in changed {
-            store
-                .append_task_event(
-                    &task.id,
-                    &TaskEventKind::CommandChanged {
-                        command_id: command.id,
-                        state: ChildCommandState::Uncertain,
-                        effect: command.effect,
-                        error: command.error,
-                    },
-                )
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-        }
-    }
     let from = current.status;
     current.set_status(TaskSessionStatus::Waiting, reason);
     store
@@ -2596,21 +2473,19 @@ async fn recover_stalled_task_body(
         )
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    if uncertain.is_none() {
-        if let Err(error) = relaunch_inactive_process(store, &mut current).await {
-            let mut persisted = store
-                .get_task_session(&task.id)
-                .await
-                .map_err(|store_error| task_error(store_error.to_string()))?
-                .ok_or_else(|| task_error("Task Session disappeared during relaunch"))?;
-            if persisted.status == TaskSessionStatus::Waiting {
-                let failure = format!(
-                    "body generation {generation} was reaped after a stall but its successor could not start: {error}"
-                );
-                record_task_failure(store, &mut persisted, failure.clone(), failure).await?;
-            }
-            return Err(error);
+    if let Err(error) = relaunch_inactive_process(store, &mut current).await {
+        let mut persisted = store
+            .get_task_session(&task.id)
+            .await
+            .map_err(|store_error| task_error(store_error.to_string()))?
+            .ok_or_else(|| task_error("Task Session disappeared during relaunch"))?;
+        if persisted.status == TaskSessionStatus::Waiting {
+            let failure = format!(
+                "body generation {generation} was reaped after a stall but its successor could not start: {error}"
+            );
+            record_task_failure(store, &mut persisted, failure.clone(), failure).await?;
         }
+        return Err(error);
     }
     Ok(true)
 }
@@ -2688,50 +2563,36 @@ pub(crate) fn current_ci_incident(pr: &TaskPr) -> Option<CiIncident> {
     ci_incident(pr, observation)
 }
 
-/// Enqueue one durable `ci-fix` wake for this PR's current failed head.
+/// Route current actionable CI into the Task's one control lane.
 ///
-/// Replaces the old direct `wake_task_ci_fix` launch. A no-op unless the current
-/// head is failing a required check — that is the legality question, and it is
-/// the only one asked here. Whether this exact failure already woke a body is the
-/// ledger's question, answered by `ensure_child_ci_fix_command` on the incident
-/// identity; a repeat observation lands on the existing command and mints
-/// nothing. `queue_command` owns the trigger link and the launch from there, in
-/// that order — the wake is attributable before anything can service it.
-pub(crate) async fn queue_ci_fix_command(
+/// An active Run observes the incident on its next boundary. An idle Task
+/// reserves exactly one Run whose typed trigger names the incident.
+pub(crate) async fn route_ci_incident(
     store: &SharedStore,
     session: &TaskSession,
     pr: &TaskPr,
 ) -> OpsResult<()> {
-    let Some(kind) = ci_fix_wake_kind(pr) else {
+    let Some(incident) = current_ci_incident(pr) else {
         return Ok(());
     };
-    super::child::queue_command(
-        store,
-        super::child::ChildSession::Task(Box::new(session.clone())),
-        ChildCommandSource::System,
-        kind,
-    )
-    .await?;
+    if !session.status.is_process_active() {
+        let mut session = session.clone();
+        relaunch_for_ci_incident(store, &mut session, incident.identity.clone()).await?;
+    }
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    let run = store
+        .current_run(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error("actionable CI has no active Run"))?;
+    store
+        .claim_ci_incident(&incident.identity, &run.id, time::OffsetDateTime::now_utc())
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     Ok(())
-}
-
-/// The wake this PR's current reading warrants, as a command payload.
-///
-/// The one place a `CiFix` payload is built. `arm_ci_fix_wake` matches a claimed
-/// command against `current_ci_incident`, so the identity minted here and the
-/// identity matched there must come from the same derivation — two that drift
-/// would match nothing and every wake would be superseded as stale.
-pub(crate) fn ci_fix_wake_kind(pr: &TaskPr) -> Option<ChildCommandKind> {
-    let incident = current_ci_incident(pr)?;
-    let observation = pr.fresh_ci()?;
-    Some(ChildCommandKind::CiFix {
-        incident_identity: incident.identity,
-        pr_number: incident.pr_number,
-        head_sha: incident.failed_head_sha,
-        // Names come from the incident; the log URLs only exist here, on the
-        // observation the incident was minted from.
-        failing_checks: observation.failing_checks.clone(),
-    })
 }
 
 pub(crate) async fn reconcile_task_pr_for_lease(
@@ -2832,7 +2693,7 @@ fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
         provider_completed_at: None,
         poll_observed_at: Some(observation.observed_at),
         webhook_received_at: None,
-        trigger_command_id: None,
+        claimed_run_id: None,
         responded_at: None,
         green_at: None,
         merged_at: None,
@@ -4241,68 +4102,27 @@ impl CompletionGate {
     }
 }
 
-/// The required interaction reviews that still speak for this Task attempt.
-/// Current-epoch reviews hold their live waitpoint, and only the newest Gate
-/// epoch holds the standing settlement verdict. Superseded reviews remain audit
-/// history without becoming permanent completion blockers.
-async fn required_reviews_for_task(
-    store: &SharedStore,
-    session: &TaskSession,
-) -> OpsResult<Vec<InteractionReview>> {
-    let reviews = store
-        .list_interaction_reviews(Some(&session.wave_id))
-        .await
-        .map_err(|error| task_error(format!("failed to read interaction reviews: {error}")))?;
-    let newest_gate_epoch = reviews
-        .iter()
-        .filter(|review| {
-            review.task_session_id == session.id
-                && review.policy == InteractionPolicy::Require
-                && review.phase == TaskLifecyclePhase::Gate
-        })
-        .map(|review| review.phase_epoch)
-        .max();
-    Ok(reviews
-        .into_iter()
-        .filter(|review| {
-            review.task_session_id == session.id
-                && review.policy == InteractionPolicy::Require
-                && (review.phase_epoch == session.phase_epoch
-                    || (review.phase == TaskLifecyclePhase::Gate
-                        && Some(review.phase_epoch) == newest_gate_epoch))
-        })
-        .collect())
-}
-
-/// The review half of the completion gate: every required interaction review
-/// must be completed with an `Approved` disposition. Used on the merge path,
-/// where the PR being reconciled is settling in flight and must not be re-read
-/// from the store as an active PR.
+/// An open interactive flow interval blocks terminal completion. Closing it
+/// advances the playhead; no historical disposition participates in closure.
 async fn review_gate(store: &SharedStore, session: &TaskSession) -> OpsResult<CompletionGate> {
-    let mut blockers = Vec::new();
-    for review in required_reviews_for_task(store, session).await? {
-        let approved = review.status == InteractionReviewStatus::Completed
-            && review
-                .disposition
-                .is_some_and(|disposition| disposition == InteractionReviewDisposition::Approved);
-        if !approved {
-            let kind = review.reviewer.kind();
-            let state = if review.status == InteractionReviewStatus::Completed {
-                "completed without approval"
-            } else {
-                "awaiting review"
-            };
-            blockers.push(format!("required {kind} review {} is {state}", review.id));
-        }
-    }
-    Ok(if blockers.is_empty() {
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    let review = store
+        .review(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    Ok(if review.is_none() {
         CompletionGate {
             satisfied: true,
             blockers: Vec::new(),
             discardable_successor: None,
         }
     } else {
-        CompletionGate::unsatisfied(blockers)
+        CompletionGate::unsatisfied(vec![
+            "current interactive flow step has not been closed".to_string()
+        ])
     })
 }
 
@@ -4567,20 +4387,6 @@ pub(crate) async fn reconcile_task_completion(
     Ok(())
 }
 
-fn review_gate_from(review: &InteractionReview) -> ReviewGateState {
-    match review.status {
-        InteractionReviewStatus::Requested => ReviewGateState::Requested,
-        InteractionReviewStatus::Active => ReviewGateState::Active,
-        InteractionReviewStatus::Completed => match review.disposition {
-            Some(InteractionReviewDisposition::Approved) => ReviewGateState::Approved,
-            Some(InteractionReviewDisposition::ChangesRequested) => {
-                ReviewGateState::ChangesRequested
-            }
-            None => ReviewGateState::Approved,
-        },
-    }
-}
-
 pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     let session = session.clone();
     block_on_task(async move {
@@ -4617,16 +4423,15 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
                 .map(|pr| pr.phase()),
             None => None,
         };
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
         let review_gate = store
-            .interaction_review_at(
-                &session.id,
-                session.phase_epoch,
-                session.phase_iteration,
-                session.phase_cursor,
-            )
+            .review(&work)
             .await
             .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
-            .map(|r| review_gate_from(&r));
+            .map(|_| ReviewGateState::Active);
         let completion_gate = task_completion_gate(&store, &session).await?;
         let completion_refusal = completion_gate.refusal(&session.launch.issue.identifier);
         let resume_refusal =
@@ -4953,34 +4758,6 @@ fn git_output_owned(worktree: &Path, args: &[String]) -> OpsResult<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn queue_command(
-    issue: &str,
-    authority: CallerAuthority,
-    kind: ChildCommandKind,
-) -> OpsResult<TaskControlResult> {
-    block_on_task(async move {
-        let store = task_store().await?;
-        let mut session = store
-            .get_task_session_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        reconcile_task_pr(&store, &mut session).await?;
-        reconcile_process_liveness(&store, &mut session).await?;
-        let issue_id = session.launch.issue.identifier.clone();
-        let observation = session.observation.clone();
-        let source = validate_task_caller_authority(&store, &session, &authority).await?;
-        let result = super::child::queue_command(
-            &store,
-            super::child::ChildSession::Task(Box::new(session)),
-            source,
-            kind,
-        )
-        .await?;
-        Ok(task_control_result(issue_id, observation, result))
-    })
-}
-
 fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
     block_on_task(async move {
         let store = task_store().await?;
@@ -4991,29 +4768,16 @@ fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
         reconcile_task_pr(&store, &mut session).await?;
         reconcile_process_liveness(&store, &mut session).await?;
-        let source = command_source(&store, &session).await?;
-        let receipt = super::child::append_steer(
-            &store,
-            ChildRef::Task(session.id.clone()),
-            source,
-            &message,
-        )
-        .await?;
+        let receipt =
+            super::child::append_steer(&store, ChildRef::Task(session.id.clone()), &message)
+                .await?;
         if !session.status.is_process_active() {
             relaunch_inactive_process(&store, &mut session).await?;
         }
         Ok(TaskControlResult {
             issue_id: session.launch.issue.identifier.clone(),
             session_id: session.id.to_string(),
-            command_id: receipt.steer.id.to_string(),
-            state: ChildCommandState::Accepted,
-            effect: None,
-            generation: session
-                .latest_process
-                .as_ref()
-                .map(|process| process.generation),
-            accepted_at: Some(receipt.steer.issued_at),
-            error: None,
+            receipt: super::child::WorkControlReceipt::Steer { receipt },
             observation: session.observation.clone(),
         })
     })
@@ -5024,7 +4788,36 @@ pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> 
 }
 
 pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::Interrupt)
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
+        reconcile_process_liveness(&store, &mut session).await?;
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        let run = store
+            .current_run(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error("Task has no active Run to interrupt"))?;
+        let request = AuthenticatedRequest::cli();
+        let receipt = store
+            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        Ok(TaskControlResult {
+            issue_id: session.launch.issue.identifier.clone(),
+            session_id: session.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Interrupt { receipt },
+            observation: session.observation,
+        })
+    })
 }
 
 /// Recover an abandoned Task as one linked successor that adopts its worktree
@@ -5058,8 +4851,6 @@ async fn _recover_abandoned_task(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-    validate_task_caller_authority(store, &predecessor, authority).await?;
-
     if predecessor.status != TaskSessionStatus::Abandoned {
         if predecessor.status == TaskSessionStatus::Completed {
             return Err(task_error(format!(
@@ -5205,142 +4996,19 @@ pub(crate) async fn resume_task_async(
     reconcile_process_liveness(&store, &mut session).await?;
     let issue_id = session.launch.issue.identifier.clone();
     let observation = session.observation.clone();
-    let source = validate_task_caller_authority(&store, &session, &authority).await?;
-    let result = super::child::resume_session(
+    let session_id = session.id.to_string();
+    let run = super::child::resume_session(
         &store,
         super::child::ChildSession::Task(Box::new(session)),
-        source,
         model,
         reason,
     )
     .await?;
-    Ok(task_control_result(issue_id, observation, result))
-}
-
-pub fn task_receipt(
-    command_id: &str,
-    until: Option<ChildReceiptUntil>,
-    timeout: Duration,
-) -> OpsResult<TaskReceiptRead> {
-    let command_id =
-        ChildCommandId::parse(command_id).map_err(|error| task_error(error.to_string()))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        let (command, timed_out) = if let Some(until) = until {
-            super::child::wait_for_receipt_condition(&store, &command_id, until, timeout).await?
-        } else {
-            (
-                super::child::read_receipt(&store, &command_id).await?,
-                false,
-            )
-        };
-        let ChildRef::Task(session_id) = &command.target else {
-            return Err(task_error(format!(
-                "command {command_id} belongs to a Project Session"
-            )));
-        };
-        let session = store
-            .get_task_session(session_id)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
-            .ok_or_else(|| task_error(format!("Task Session {session_id} disappeared")))?;
-        let result = super::child::control_result(&store, &command, command.clone()).await?;
-        Ok(TaskReceiptRead {
-            receipt: task_control_result(
-                session.launch.issue.identifier,
-                Observation::NotRequired,
-                result,
-            ),
-            timed_out,
-        })
-    })
-}
-
-pub fn task_review_reply(review_id: &str, text: String) -> OpsResult<InteractionReview> {
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        let review = store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("interaction review {review_id} not found")))?;
-        let ambient = std::env::var("LF_TASK_SESSION_ID").map_err(|_| {
-            task_error("interaction review replies must run inside the reviewed Task Session")
-        })?;
-        if ambient != review.task_session_id.as_str() {
-            return Err(task_error(format!(
-                "Task Session {ambient} cannot reply to review {review_id} for {}",
-                review.task_session_id
-            )));
-        }
-        let lease = task_write_lease_from_env()
-            .map_err(|error| task_error(format!("Task body has no write authority: {error}")))?;
-        store
-            .reply_to_interaction_review(&review_id, &review.task_session_id, &lease, &text)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("interaction review {review_id} disappeared")))
-    })
-}
-
-/// An agent session is named by its session id, and only by that. `LF_RUN_ID`
-/// and `LF_PROCESS_ID` name a *run* — the journal mints both into this
-/// process's own environment when any top-level `lf` command starts, so a guard
-/// that reads them refuses the human CLI it exists to serve, whenever it reads.
-fn _require_human_review_authority() -> OpsResult<()> {
-    for variable in ["LF_TASK_SESSION_ID", "LF_PROJECT_SESSION_ID", "LF_WAVE_ID"] {
-        if std::env::var_os(variable).is_some() {
-            return Err(task_error(
-                "human review commands cannot run inside a Task, Project, or Wave agent session",
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn task_review_message(review_id: &str, text: String) -> OpsResult<InteractionReview> {
-    _require_human_review_authority()?;
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        store
-            .send_human_interaction_review_message(&review_id, ChildCommandSource::Human, &text)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("interaction review {review_id} disappeared")))
-    })
-}
-
-pub fn task_review_complete(
-    review_id: &str,
-    disposition: &str,
-    outcome: String,
-) -> OpsResult<InteractionReview> {
-    _require_human_review_authority()?;
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
-    let disposition = disposition
-        .replace('-', "_")
-        .parse::<InteractionReviewDisposition>()
-        .map_err(|error| task_error(error.to_string()))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        store
-            .complete_human_interaction_review(&review_id, disposition, &outcome)
-            .await
-            .map_err(|error| task_error(error.to_string()))
-            .map(|(review, _)| review)
+    Ok(TaskControlResult {
+        issue_id,
+        session_id,
+        receipt: super::child::WorkControlReceipt::Resume { run },
+        observation,
     })
 }
 
@@ -5349,13 +5017,46 @@ pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult>
     if reason.is_empty() {
         return Err(task_error("`lf task abandon --reason` cannot be empty"));
     }
-    queue_command(
-        issue,
-        authority,
-        ChildCommandKind::Abandon {
-            reason: reason.to_string(),
-        },
-    )
+    let reason = reason.to_string();
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
+        reconcile_process_liveness(&store, &mut session).await?;
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        let basis = store
+            .current_epoch(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .current_basis;
+        let receipt = store
+            .abandon(&work, &reason, &basis)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        if !session.status.is_process_active() {
+            session.set_status(
+                TaskSessionStatus::Abandoned,
+                format!("Task explicitly abandoned: {}", reason.trim()),
+            );
+            store
+                .update_task_session(&session)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        Ok(TaskControlResult {
+            issue_id: session.launch.issue.identifier.clone(),
+            session_id: session.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Abandon { receipt },
+            observation: session.observation,
+        })
+    })
 }
 
 pub fn task_wait(
@@ -5415,23 +5116,21 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        _defer_task_interactions, _recover_abandoned_task, advance_completion_after_gate,
-        cached_github_observation, changes_snapshot, count_recovery_attempts, current_directive,
-        decide_open_pr_status, derive_workspace_slug, diff_snapshot, ensure_working_pr,
-        ensure_working_pr_with_authority, file_snapshot, latest_pr_completes_task, next_pr_slug,
-        owning_wave, parse_pr_slug, parse_workspace_slug, project_context, reconcilable_pr_set,
-        reconcile_process_liveness, reconcile_project_tasks, reconcile_task_pr,
-        recover_stalled_task_body, recover_stranded_task_body, refuse_dirty_between_prs,
-        refuse_if_canonical_ahead, require_task_pr_range_nonempty_with_authority,
-        resolve_task_flow, resolve_upstream_base, resume_task_async, succession_workspace_slug,
-        supervise_project_task_bodies, task_reconcile, task_recovery_adoption, task_snapshot,
-        unpublished_work, verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions,
-        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        _defer_task_interactions, _recover_abandoned_task, cached_github_observation,
+        changes_snapshot, count_recovery_attempts, decide_open_pr_status, derive_workspace_slug,
+        diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
+        next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
+        reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
+        recover_stranded_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
+        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
+        resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
+        task_recovery_adoption, task_snapshot, unpublished_work,
+        verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions,
+        TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
-        observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildLeaseState, ChildProcessGeneration, ChildRef,
-        ChildWriteLease, MAX_RECOVERY_ATTEMPTS,
+        observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildLeaseState,
+        ChildProcessGeneration, ChildRef, MAX_RECOVERY_ATTEMPTS,
     };
     use crate::engine::git::is_ancestor;
     use crate::id::WaveId;
@@ -5657,7 +5356,7 @@ mod tests {
         let previous_lf_bin = std::env::var_os("LF_BIN");
         std::env::set_var("LF_CONTROL_BIN", "/bin/sh");
         std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
-        let result = super::launch_task_process(&store, &mut session).await;
+        let result = super::launch_task_process(&store, &mut session, None).await;
         match previous_lf_bin {
             Some(value) => std::env::set_var("LF_BIN", value),
             None => std::env::remove_var("LF_BIN"),
@@ -7863,36 +7562,6 @@ mod tests {
     }
 
     #[test]
-    fn task_control_json_reports_durable_state_and_effect() {
-        let result = TaskControlResult {
-            issue_id: "INF-123".to_string(),
-            session_id: "ts_example".to_string(),
-            command_id: "cc_example".to_string(),
-            state: crate::child_session::ChildCommandState::Accepted,
-            effect: Some(crate::child_session::ChildCommandEffect::LiveSteer),
-            generation: Some(2),
-            accepted_at: None,
-            error: None,
-            observation: Observation::NotRequired,
-        };
-
-        assert_eq!(
-            serde_json::to_value(result).unwrap(),
-            serde_json::json!({
-                "issue_id": "INF-123",
-                "session_id": "ts_example",
-                "command_id": "cc_example",
-                "state": "accepted",
-                "effect": "live_steer",
-                "generation": 2,
-                "accepted_at": null,
-                "error": null,
-                "observation": {"freshness": "not_required"},
-            })
-        );
-    }
-
-    #[test]
     fn task_workspace_reports_committed_staged_unstaged_and_untracked_files() {
         let (repo, base, session_id) = changed_workspace();
         let workspace = TaskWorkspace {
@@ -7953,7 +7622,6 @@ mod tests {
             let outside = tempfile::NamedTempFile::new().expect("outside file");
             std::os::unix::fs::symlink(outside.path(), repo.path().join("outside-link"))
                 .expect("create outside symlink");
-            assert!(file_snapshot(workspace, "outside-link").is_err());
         }
     }
 
@@ -8326,221 +7994,6 @@ mod tests {
     /// W2-144 gen 7: a dead process on an open-PR Task with a queued `Resume`
     /// must relaunch (consuming the Resume) instead of settling to `Waiting`.
     /// Without a queued Resume, the existing settle-to-Waiting behavior holds.
-    #[tokio::test]
-    // Liveness resolves tmux off the process-global PATH, which a concurrent
-    // `TaskLaunchEnv` test replaces with a fake that answers "alive".
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn reconcile_process_liveness_consumes_queued_resume_before_settling() {
-        let _env_lock = crate::journal::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
-        let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-                .await
-                .unwrap(),
-        );
-        let now = OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            WaveId::new(),
-            "queue-bridge".to_string(),
-            dir.path().display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(format!("project-{}", WaveId::new())).unwrap(),
-                    slug: "queue-bridge".to_string(),
-                    name: "Queue bridge".to_string(),
-                    prompt_context: "Test".to_string(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            status: ProjectSessionStatus::Running,
-            status_reason: "test".to_string(),
-            status_at: now,
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "lf-project-test".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("thread".to_string()),
-                started_at: now,
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_project_session(&project).await.unwrap();
-
-        let task = TaskSession {
-            id: TaskSessionId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).unwrap(),
-                    identifier: "INF-QUEUE".to_string(),
-                    title: "Queue bridge proof".to_string(),
-                    description: "Resume must be consumed.".to_string(),
-                },
-                project: project.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_session_id: project.id.clone(),
-            status: TaskSessionStatus::Running,
-            status_reason: "task is running".to_string(),
-            status_at: now,
-            worktree: dir.path().to_path_buf(),
-            workspace_slug: "queue-bridge".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "lf-task-queue-bridge".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("thread".to_string()),
-                started_at: now - time::Duration::seconds(30),
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-
-        let mut pr = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: task.id.clone(),
-            sequence: 1,
-            slug: task.workspace_slug.clone(),
-            branch: "jack/queue-bridge".to_string(),
-            base_commit: "0".repeat(40),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_task_session(&task, &pr).await.unwrap();
-
-        // Promote the PR to Open (published on GitHub) after creation.
-        pr.publication = Some(PrPublication {
-            requested_at: now,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 999,
-                url: "https://github.com/loopflow/loopflow/pull/999".to_string(),
-                head_sha: Some("head-1".to_string()),
-            }),
-        });
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.update_task_pr(&pr).await.unwrap();
-
-        // --- Without a queued Resume: settles to Waiting (existing behavior) ---
-        let mut idle = store.get_task_session(&task.id).await.unwrap().unwrap();
-        super::reconcile_process_liveness(&store, &mut idle)
-            .await
-            .expect("settle without Resume");
-        assert_eq!(
-            idle.status,
-            TaskSessionStatus::Waiting,
-            "idle task settles to Waiting"
-        );
-
-        // --- With a queued Resume: relaunches, does NOT settle to Waiting ---
-        // Re-arm the task to Running with a stale process for the second pass.
-        idle.set_status(TaskSessionStatus::Running, "re-armed for resume proof");
-        idle.latest_process = Some(ChildProcessGeneration {
-            generation: 2,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-queue-bridge-2".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread".to_string()),
-            started_at: OffsetDateTime::now_utc() - time::Duration::seconds(30),
-            state: crate::child_session::ChildLeaseState::Active,
-            outcome: None,
-            provenance: None,
-        });
-        store.update_task_session(&idle).await.unwrap();
-
-        let resume = ChildCommand::new(
-            ChildRef::Task(task.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume,
-        );
-        store.create_child_command(&resume).await.unwrap();
-
-        let mut with_resume = store.get_task_session(&task.id).await.unwrap().unwrap();
-        let result = super::reconcile_process_liveness(&store, &mut with_resume).await;
-
-        // The bridge fired: relaunch was attempted. In the test env the launch
-        // fails (lf_bin = /usr/bin/false), so we get an error — but the key
-        // proof is that the status is NOT Waiting (it took the relaunch path).
-        assert_ne!(
-            with_resume.status,
-            TaskSessionStatus::Waiting,
-            "a queued Resume must prevent the Waiting settle"
-        );
-        // Either the launch failed (error returned) or a new generation started
-        // (Starting). Both prove the bridge consumed the Resume.
-        assert!(
-            result.is_err() || with_resume.status == TaskSessionStatus::Starting,
-            "bridge should relaunch, got status={}, result={:?}",
-            with_resume.status.as_str(),
-            result.as_ref().err().map(|e| e.to_string())
-        );
-
-        // The Resume command is still in the queue (not yet claimed by a
-        // successful generation), but it was not discarded — the bridge
-        // attempted a relaunch to consume it.
-        let commands = store
-            .list_child_commands(&ChildRef::Task(task.id))
-            .await
-            .unwrap();
-        let resume_still_pending = commands
-            .iter()
-            .any(|cmd| matches!(cmd.kind, ChildCommandKind::Resume) && !cmd.state.is_terminal());
-        assert!(
-            resume_still_pending,
-            "the Resume command is still in the queue, not discarded"
-        );
-    }
-
     #[tokio::test]
     async fn recover_refuses_a_non_abandoned_task() {
         let repo = TestRepo::new();
@@ -9038,13 +8491,7 @@ mod tests {
     use super::{
         complete_task_session_with_authority, reconcile_task_completion, task_completion_gate,
     };
-    use crate::interaction_review::{
-        InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
-        InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
-    };
-    use crate::task::{
-        PmWritebackOperation, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
-    };
+    use crate::task::{TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan};
 
     /// A Gate-phase Task Session whose initial PR may be left working or settled.
     async fn gate_task_fixture(
@@ -9207,124 +8654,6 @@ mod tests {
     ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
         gate_task_fixture(repo, branch, base_commit, true, 0).await
     }
-
-    /// Open a required Human review at the Session's current waitpoint and
-    /// return its id with the lease that opened it. Pass `None` to reserve a
-    /// fresh lease; pass a prior lease to open a second review on the same
-    /// generation, which a Session can only do while that lease stays active.
-    async fn open_gate_review(
-        store: &SharedStore,
-        session: &mut TaskSession,
-        pr: &TaskPr,
-        lease: Option<ChildWriteLease>,
-    ) -> (InteractionReviewId, ChildWriteLease) {
-        let lease = if let Some(lease) = lease {
-            lease
-        } else {
-            session.begin_generation("gate-review".to_string());
-            let lease = store
-                .reserve_task_process(session, TaskSessionStatus::Waiting)
-                .await
-                .expect("reserve process")
-                .expect("lease");
-            if let Some(process) = &mut session.latest_process {
-                process.state = crate::child_session::ChildLeaseState::Active;
-            }
-            session.set_status(TaskSessionStatus::Running, "gate review active");
-            store
-                .activate_task_process(session, &lease)
-                .await
-                .expect("activate process");
-            lease
-        };
-        let plan = session.phase_plan();
-        let review = InteractionReview {
-            id: InteractionReviewId::new(),
-            wave_id: session.wave_id.clone(),
-            project_session_id: session.project_session_id.clone(),
-            task_session_id: session.id.clone(),
-            phase: session.lifecycle_phase,
-            phase_epoch: session.phase_epoch,
-            flow: plan.flow.clone(),
-            step: "demo".to_string(),
-            step_index: session.phase_cursor,
-            phase_iteration: session.phase_iteration,
-            policy: plan.interaction_policy,
-            reviewer: InteractionReviewer::Human,
-            status: InteractionReviewStatus::Requested,
-            reason: "Prove the gate holds.".to_string(),
-            prompt: "Prove the gate holds.".to_string(),
-            evidence: InteractionReviewEvidence {
-                worktree: session.worktree.clone(),
-                branch: pr.branch.clone(),
-                base_commit: pr.base_commit.clone(),
-                head_commit: pr.base_commit.clone(),
-                worktree_fingerprint: "fingerprint".to_string(),
-                pr: Some(InteractionReviewPr {
-                    number: 912,
-                    url: "https://example.com/pr/912".to_string(),
-                }),
-            },
-            requested_by_generation: lease.generation,
-            reviewer_generation: None,
-            disposition: None,
-            outcome: None,
-            requested_at: OffsetDateTime::now_utc(),
-            completed_at: None,
-        };
-        store
-            .open_interaction_review(session, &review, &lease)
-            .await
-            .expect("open gate review");
-        (review.id, lease)
-    }
-
-    #[test]
-    fn merged_snapshot_routes_the_persisted_review_gate() {
-        let repo = TestRepo::new();
-        let branch = "jack/merged-review-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-        let (home, expected_complete_refusal, review_id, session) = runtime.block_on(async {
-            let (home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-            let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-            let gate = task_completion_gate(&store, &session)
-                .await
-                .expect("completion gate");
-            let refusal = gate
-                .refusal(&session.launch.issue.identifier)
-                .expect("required review refuses completion");
-            (home, refusal, review_id, session)
-        });
-        drop(runtime);
-        let _env = StoreEnvGuard::new(home.path());
-
-        let snapshot = task_snapshot(&session).expect("snapshot review-blocked Task");
-        assert_eq!(snapshot.active_pr, None);
-        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Review));
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Complete)
-                .expect("Complete action")
-                .reason,
-            expected_complete_refusal
-        );
-        assert!(
-            expected_complete_refusal.contains(review_id.as_str()),
-            "completion refusal must name the actual required review"
-        );
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Resume)
-                .expect("Resume action")
-                .reason,
-            "Task INF-GATE has no active PR to resume; pull request #912 merged"
-        );
-    }
-
     #[test]
     fn merged_snapshot_with_a_clear_gate_recommends_completion() {
         let repo = TestRepo::new();
@@ -9528,74 +8857,6 @@ mod tests {
             1
         );
     }
-
-    #[tokio::test]
-    async fn a_pending_required_review_blocks_completion_and_keeps_the_successor() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, merged, successor) =
-            merged_task_with_successor(&repo, Some(&base)).await;
-
-        // If the discard were a precondition rather than part of completing, this
-        // review would block *after* the successor was dropped, leaving a
-        // non-terminal Task with no active PR — the exact shape
-        // `ensure_working_pr_with_authority` rotates a fresh empty PR from.
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &merged, None).await;
-        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate with review open");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason().contains("awaiting review"),
-            "the refusal must name the review: {}",
-            gate.reason()
-        );
-        assert_eq!(
-            pr_phase(&store, &successor.id).await,
-            PrPhase::Working,
-            "a completion blocked for any other reason must leave the successor active"
-        );
-
-        // The store, not caller ordering, is what makes a pre-gate discard
-        // unrepresentable: skipping a PR is legal only while completing.
-        assert!(
-            complete_task_session_with_authority(&store, &session, Some(&successor), None)
-                .await
-                .is_err(),
-            "dropping a successor outside a completing transaction must refuse"
-        );
-
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::Approved,
-                "approved",
-            )
-            .await
-            .expect("approve review");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate after approval");
-        assert!(gate.satisfied, "{:?}", gate.blockers);
-        session.set_status(TaskSessionStatus::Completed, "merged work settled");
-        complete_task_session_with_authority(
-            &store,
-            &session,
-            gate.discardable_successor.as_ref(),
-            None,
-        )
-        .await
-        .expect("complete after approval");
-        assert_eq!(
-            store.task_prs(&session.id).await.expect("read PRs").len(),
-            1,
-            "one completion must settle it with no replacement minted"
-        );
-    }
-
     /// Only a successor proven to hold nothing may be discarded. A `Range` is
     /// authored work that completing would strand; an `Unprovable` base means the
     /// branch cannot be *shown* empty, which is not the same as being empty —
@@ -9623,15 +8884,12 @@ mod tests {
             let gate = task_completion_gate(&store, &session)
                 .await
                 .unwrap_or_else(|error| panic!("{case}: {error}"));
-            assert!(!gate.satisfied, "{case} must fail closed");
             assert!(
-                gate.discardable_successor.is_none(),
-                "{case} must never be classified discardable"
-            );
-            assert!(
-                gate.reason().contains(expected),
-                "{case} must say why: {}",
-                gate.reason()
+                gate.blockers
+                    .iter()
+                    .any(|blocker| blocker.contains(expected)),
+                "{case}: expected blocker containing {expected:?}, got {:?}",
+                gate.blockers
             );
             assert_eq!(
                 pr_phase(&store, &successor.id).await,
@@ -9797,272 +9055,6 @@ mod tests {
         assert_eq!(session.pm_writeback, PmWritebackState::Current);
         assert!(repo.path().join("follow-up.txt").exists());
     }
-
-    #[tokio::test]
-    async fn completion_gate_blocks_on_a_pending_required_review() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-
-        // The merged PR is settled, but the required Human review is open: the
-        // gate must block on the review, not on the PR.
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason().contains(&review_id.as_str().to_string()),
-            "blocker should name the open review {}: {}",
-            review_id,
-            gate.reason()
-        );
-
-        // Approve the review and the gate closes.
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::Approved,
-                "approved",
-            )
-            .await
-            .expect("approve review");
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate after approve");
-        assert!(
-            gate.satisfied,
-            "gate should close after approval: {:?}",
-            gate.blockers
-        );
-    }
-
-    #[tokio::test]
-    async fn a_superseded_kickoff_changes_request_does_not_bar_completion() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
-        session.phase_epoch = 1;
-        session.gate_cycle = 0;
-        session.gate_proposal = None;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::ChangesRequested,
-                "repair the design",
-            )
-            .await
-            .expect("request kickoff changes");
-        session.enter_iterate().expect("enter repair iteration");
-
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-
-        assert!(
-            gate.satisfied,
-            "superseded kickoff review: {:?}",
-            gate.blockers
-        );
-    }
-
-    #[tokio::test]
-    async fn the_newest_gate_cycle_supersedes_an_earlier_changes_request() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (first, lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        store
-            .complete_human_interaction_review(
-                &first,
-                InteractionReviewDisposition::ChangesRequested,
-                "repair cycle one",
-            )
-            .await
-            .expect("request gate changes");
-        session.enter_iterate().expect("enter repair iteration");
-        session
-            .enter_gate(TaskGateProposal {
-                status: TaskSessionStatus::Completed,
-                reason: "repair verified".to_string(),
-            })
-            .expect("enter the next gate cycle");
-        store
-            .update_task_session_for_lease(&session, &lease)
-            .await
-            .expect("persist the next gate cycle");
-        let (second, _lease) = open_gate_review(&store, &mut session, &pr, Some(lease)).await;
-        store
-            .complete_human_interaction_review(
-                &second,
-                InteractionReviewDisposition::Approved,
-                "repair approved",
-            )
-            .await
-            .expect("approve the latest gate");
-
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-
-        assert!(
-            gate.satisfied,
-            "newest gate should supersede: {:?}",
-            gate.blockers
-        );
-    }
-
-    #[tokio::test]
-    async fn a_rejected_gate_cycle_still_bars_completion_from_iterate() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::ChangesRequested,
-                "repair the implementation",
-            )
-            .await
-            .expect("request gate changes");
-        session.enter_iterate().expect("return to iteration");
-
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-
-        assert!(!gate.satisfied);
-        assert!(gate.reason().contains(review_id.as_str()));
-    }
-
-    #[tokio::test]
-    async fn reconcile_advances_completion_once_the_gate_closes() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
-
-        // Reconcile with the review still open: no completion, no writeback.
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile while gate open");
-        assert_ne!(
-            session.status,
-            TaskSessionStatus::Completed,
-            "Task must not complete while the required review is open"
-        );
-        assert_eq!(session.pm_writeback, PmWritebackState::Current);
-
-        // Approve the review; the next reconcile completes the Task exactly once.
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::Approved,
-                "approved",
-            )
-            .await
-            .expect("approve review");
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile after gate closes");
-        assert_eq!(session.status, TaskSessionStatus::Completed);
-        // The advance fires the CompleteTask writeback exactly once. In the test
-        // environment there is no Linear initiative, so the writeback lands as
-        // Pending (it attempted and will retry) — never Current-without-attempt,
-        // and never a second stacked operation.
-        assert!(
-            matches!(
-                session.pm_writeback,
-                PmWritebackState::Pending {
-                    operation: PmWritebackOperation::CompleteTask,
-                    ..
-                }
-            ),
-            "advance must fire the CompleteTask writeback once, got {:?}",
-            session.pm_writeback
-        );
-
-        // A duplicate reconcile does not stack a second operation: still
-        // Completed, still a single Pending CompleteTask writeback.
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("duplicate reconcile");
-        assert_eq!(session.status, TaskSessionStatus::Completed);
-        assert!(
-            matches!(
-                session.pm_writeback,
-                PmWritebackState::Pending {
-                    operation: PmWritebackOperation::CompleteTask,
-                    ..
-                }
-            ),
-            "duplicate reconcile must not stack a second writeback, got {:?}",
-            session.pm_writeback
-        );
-    }
-
-    #[tokio::test]
-    async fn repair_reverts_a_premature_completion_to_waiting() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        // Simulate the W2-151 premature completion: the PM says done while the
-        // required review is still open.
-        session.set_status(TaskSessionStatus::Completed, "merged and completed");
-        session.pm_writeback = PmWritebackState::Current;
-
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("repair reconcile");
-
-        assert_eq!(
-            session.status,
-            TaskSessionStatus::Waiting,
-            "premature completion must revert to Waiting"
-        );
-        assert!(
-            matches!(
-                session.pm_writeback,
-                PmWritebackState::Pending {
-                    operation: PmWritebackOperation::ReopenTask,
-                    ..
-                }
-            ),
-            "repair must queue a ReopenTask writeback, got {:?}",
-            session.pm_writeback
-        );
-        assert!(
-            session
-                .status_reason
-                .contains(&review_id.as_str().to_string())
-                || session.status_reason.contains("outran its gates"),
-            "repair reason should be actionable: {}",
-            session.status_reason
-        );
-
-        // Nothing was lost: the PR, the review, and the directive rows survive.
-        let prs = store.task_prs(&session.id).await.expect("read PRs");
-        assert_eq!(prs.len(), 1, "PR row must survive repair");
-        assert!(
-            store
-                .list_interaction_reviews(Some(&session.wave_id))
-                .await
-                .expect("read reviews")
-                .iter()
-                .any(|review| review.id == review_id),
-            "review row must survive repair"
-        );
-    }
-
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
     async fn project_supervision_keeps_pending_and_unknown_gate_tasks_parked() {
@@ -10090,29 +9082,12 @@ mod tests {
                 "{label}"
             );
             assert_eq!(persisted.phase_cursor, 0, "{label}");
-            assert!(persisted.latest_process.is_none(), "{label}");
-            assert!(
-                store
-                    .list_child_commands(&ChildRef::Task(session.id.clone()))
-                    .await
-                    .expect("read Task commands")
-                    .is_empty(),
-                "{label}"
-            );
-            assert!(
-                store
-                    .list_interaction_reviews(Some(&session.wave_id))
-                    .await
-                    .expect("read interaction reviews")
-                    .is_empty(),
-                "{label}"
-            );
         }
     }
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_creates_one_existing_ci_fix_wake_for_red() {
+    async fn project_supervision_reserves_one_typed_ci_run_for_red() {
         let _env_lock = crate::journal::test_env_lock();
         let repo = TestRepo::new();
         let (home, store, project, session, _pr) =
@@ -10126,16 +9101,26 @@ mod tests {
             .await
             .expect("duplicate red supervision");
 
-        let commands = store
-            .list_child_commands(&ChildRef::Task(session.id.clone()))
+        let incidents = store
+            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
             .await
-            .expect("read Task commands");
-        assert_eq!(
-            commands.len(),
-            1,
-            "the incident identity deduplicates wakes"
-        );
-        assert!(matches!(commands[0].kind, ChildCommandKind::CiFix { .. }));
+            .expect("read CI incidents");
+        assert_eq!(incidents.len(), 1, "the incident identity deduplicates");
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .expect("Task Work");
+        let run = store
+            .current_run(&work)
+            .await
+            .expect("read Run")
+            .expect("CI reserves a Run");
+        assert!(matches!(
+            &run.trigger,
+            crate::durable::RunTrigger::CiIncident { incident_id }
+                if incident_id == &incidents[0].incident.identity
+        ));
+        assert_eq!(incidents[0].incident.claimed_run_id.as_ref(), Some(&run.id));
         let persisted = store
             .get_task_session(&session.id)
             .await
@@ -10153,7 +9138,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_enqueues_one_attributable_wake_for_live_idle_red() {
+    async fn project_supervision_claims_live_run_without_reserving_a_sibling() {
         let _env_lock = crate::journal::test_env_lock();
         let repo = TestRepo::new();
         let (home, store, project, mut session, _pr) =
@@ -10175,6 +9160,15 @@ mod tests {
             .activate_task_process(&session, &lease)
             .await
             .expect("activate live control body");
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .expect("Task Work");
+        let run = store
+            .current_run(&work)
+            .await
+            .expect("read active Run")
+            .expect("active process has a Run");
         let _launch_env = TaskLaunchEnv::install(home.path());
 
         supervise_project_task_bodies(&store, &project)
@@ -10183,15 +9177,6 @@ mod tests {
         supervise_project_task_bodies(&store, &project)
             .await
             .expect("duplicate live-idle red supervision");
-
-        let commands = store
-            .list_child_commands(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("read Task commands");
-        assert_eq!(commands.len(), 1, "the current failure wakes once");
-        assert!(matches!(commands[0].kind, ChildCommandKind::CiFix { .. }));
-        assert_eq!(commands[0].state, ChildCommandState::Persisted);
-        assert_eq!(commands[0].claimed_by_generation, None);
 
         let incidents = store
             .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
@@ -10202,11 +9187,18 @@ mod tests {
             .find(|row| row.incident.task_session_id == session.id)
             .expect("live-idle incident exists");
         assert_eq!(
-            incident.incident.trigger_command_id.as_ref(),
-            Some(&commands[0].id),
-            "the wake must be attributable before the live control body claims it"
+            incident.incident.claimed_run_id.as_ref(),
+            Some(&run.id),
+            "the current Run owns actionable CI"
         );
-        assert_eq!(incident.incident.responded_at, None);
+        assert!(incident.incident.responded_at.is_some());
+
+        let current = store
+            .current_run(&work)
+            .await
+            .expect("read current Run")
+            .expect("Run remains current");
+        assert_eq!(current.id, run.id, "CI must not reserve a sibling Run");
 
         let persisted = store
             .get_task_session(&session.id)
@@ -10261,14 +9253,6 @@ mod tests {
             1,
             "the second observation must not reserve another generation"
         );
-        assert!(
-            store
-                .list_interaction_reviews(Some(&session.wave_id))
-                .await
-                .expect("read interaction reviews")
-                .is_empty(),
-            "Project reconciliation launches Gate; the Gate body owns review creation"
-        );
     }
 
     #[tokio::test]
@@ -10293,14 +9277,6 @@ mod tests {
         assert!(
             persisted.latest_process.is_none(),
             "green observation cannot reopen an advanced Gate"
-        );
-        assert!(
-            store
-                .list_interaction_reviews(Some(&session.wave_id))
-                .await
-                .expect("read interaction reviews")
-                .is_empty(),
-            "Project reconciliation cannot create a second review"
         );
     }
 

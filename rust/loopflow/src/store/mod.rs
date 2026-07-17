@@ -13,8 +13,6 @@ use crate::wave::Wave;
 mod child_sessions;
 pub(crate) mod ci_incidents;
 mod durable;
-mod interaction_reviews;
-mod interactive_handoffs;
 pub mod migrations;
 pub mod provider_deliveries;
 pub mod rows;
@@ -1028,19 +1026,14 @@ mod tests {
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child_session::{
-        BinaryProvenance, BoundaryResult, ChildBodyOutcome, ChildCommand, ChildCommandEffect,
-        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildLeaseState,
-        ChildProcessGeneration, ChildRef, ObservationRecipient,
+        BinaryProvenance, ChildBodyOutcome, ChildLeaseState, ChildProcessGeneration, ChildRef,
+        ObservationRecipient,
     };
     use crate::durable::{Author, SendState};
     use crate::id::WaveId;
-    use crate::interaction_review::{
-        InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
-        InteractionReviewId, InteractionReviewStatus, InteractionReviewer,
-    };
     use crate::profile::EmailAddress;
     use crate::project_session::{
-        ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
+        ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
@@ -1048,8 +1041,7 @@ mod tests {
     };
     use crate::task::{
         AfterMerge, CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, TaskEventKind,
-        TaskGateProposal, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession, TaskSessionId,
-        TaskSessionStatus,
+        TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::trace::{AgentLaunchRow, AgentTurnRow};
     use crate::wave::Wave;
@@ -1340,6 +1332,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 0,
             conversation_bytes: 0,
+            control: None,
         }
     }
 
@@ -1436,7 +1429,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["inspect the failing test", "preserve the public behavior"]
         );
-        assert!(store.list_child_commands(&target).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1544,7 +1536,7 @@ mod tests {
         let pr = make_task_pr(&task);
         store.create_task_session(&task, &pr).await.unwrap();
 
-        let observed_at = task.created_at + Duration::seconds(5);
+        let observed_at = task.created_at - Duration::seconds(5);
         let incident = CiIncident {
             identity: "github:ci:owner/repo:42:bad-head:digest".to_string(),
             task_session_id: task.id.clone(),
@@ -1557,7 +1549,7 @@ mod tests {
             provider_completed_at: None,
             poll_observed_at: Some(observed_at),
             webhook_received_at: None,
-            trigger_command_id: None,
+            claimed_run_id: None,
             responded_at: None,
             green_at: None,
             merged_at: None,
@@ -1569,25 +1561,38 @@ mod tests {
         store.observe_ci_incident(&incident).await.unwrap();
         store.observe_ci_incident(&incident).await.unwrap();
 
-        let mut command = ChildCommand::new(
-            ChildRef::Task(task.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume,
-        );
-        command.created_at = observed_at + Duration::seconds(15);
-        store.create_child_command(&command).await.unwrap();
-        // The trigger link and the response are both keyed on the identity the
-        // wake carries, so evidence names the command that woke the body.
-        assert!(store
-            .mark_ci_incident_triggered(
-                &incident.identity,
-                &command.id,
-                observed_at + Duration::seconds(8),
-            )
+        let work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
-            .unwrap());
+            .unwrap();
+        store
+            .append_steer(&work, Author::User, "inspect the failed checks", None)
+            .await
+            .unwrap();
+
+        let mut running = task.clone();
+        running.set_status(TaskSessionStatus::Waiting, "CI incident is runnable");
+        store.update_task_session(&running).await.unwrap();
+        running.begin_generation("ci-incident-run".to_string());
+        let lease = store
+            .reserve_task_process(&running, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        running
+            .latest_process
+            .as_mut()
+            .expect("reserved process")
+            .state = ChildLeaseState::Active;
+        running.set_status(TaskSessionStatus::Running, "repairing CI");
+        store.activate_task_process(&running, &lease).await.unwrap();
+        let run = store.current_run(&work).await.unwrap().unwrap();
         assert!(store
-            .mark_ci_incident_responded(&incident.identity, observed_at + Duration::seconds(10))
+            .claim_ci_incident(
+                &incident.identity,
+                &run.id,
+                observed_at + Duration::seconds(10),
+            )
             .await
             .unwrap());
         store
@@ -1614,6 +1619,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
         assert_eq!(row.incident.poll_observed_at, Some(observed_at));
+        assert_eq!(row.incident.claimed_run_id.as_ref(), Some(&run.id));
         assert_eq!(
             row.incident.responded_at,
             Some(observed_at + Duration::seconds(10))
@@ -2072,398 +2078,6 @@ mod tests {
             "implementation complete"
         );
     }
-
-    #[tokio::test]
-    async fn interaction_review_is_idempotent_and_supports_fifo_parent_dialogue() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-
-        let mut project = make_project_session(&wave);
-        project.status = ProjectSessionStatus::Created;
-        project.status_reason = "reserved".to_string();
-        project.latest_process = None;
-        store.create_project_session(&project).await.unwrap();
-        project.begin_generation("project-reviewer".to_string());
-        let project_lease = store
-            .reserve_project_process(&project, ProjectSessionStatus::Created)
-            .await
-            .unwrap()
-            .unwrap();
-        if let Some(process) = &mut project.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        project.set_status(ProjectSessionStatus::Running, "reviewer active");
-        store
-            .activate_project_process(&project, &project_lease)
-            .await
-            .unwrap();
-
-        let mut task = make_task_session(&wave, &project);
-        task.lifecycle = crate::task::TaskLifecyclePlan::headless("task");
-        task.lifecycle_phase = TaskLifecyclePhase::Gate;
-        task.phase_epoch = 3;
-        task.gate_cycle = 1;
-        task.gate_proposal = Some(TaskGateProposal {
-            status: TaskSessionStatus::Waiting,
-            reason: "PR ready".to_string(),
-        });
-        task.set_status(TaskSessionStatus::Waiting, "ready for gate review");
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        task.begin_generation("task-review".to_string());
-        let task_lease = store
-            .reserve_task_process(&task, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .unwrap();
-        if let Some(process) = &mut task.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        task.set_status(TaskSessionStatus::Running, "review requested");
-        store
-            .activate_task_process(&task, &task_lease)
-            .await
-            .unwrap();
-
-        let review = InteractionReview {
-            id: InteractionReviewId::new(),
-            wave_id: wave.id().clone(),
-            project_session_id: project.id.clone(),
-            task_session_id: task.id.clone(),
-            phase: task.lifecycle_phase,
-            phase_epoch: task.phase_epoch,
-            flow: task.phase_plan().flow.clone(),
-            step: "demo".to_string(),
-            step_index: 0,
-            phase_iteration: task.phase_iteration,
-            policy: task.phase_plan().interaction_policy,
-            reviewer: InteractionReviewer::Project(project.id.clone()),
-            status: InteractionReviewStatus::Requested,
-            reason: "prove the task outcome".to_string(),
-            prompt: "Demonstrate each Done When criterion.".to_string(),
-            evidence: InteractionReviewEvidence {
-                worktree: task.worktree.clone(),
-                branch: "jack/reviewed-task".to_string(),
-                base_commit: "base".to_string(),
-                head_commit: "head".to_string(),
-                worktree_fingerprint: "fingerprint".to_string(),
-                pr: None,
-            },
-            requested_by_generation: task_lease.generation,
-            reviewer_generation: None,
-            disposition: None,
-            outcome: None,
-            requested_at: OffsetDateTime::now_utc(),
-            completed_at: None,
-        };
-        let (opened, created) = store
-            .open_interaction_review(&task, &review, &task_lease)
-            .await
-            .unwrap();
-        assert!(created);
-        let mut replay = review.clone();
-        replay.id = InteractionReviewId::new();
-        let (same, created) = store
-            .open_interaction_review(&task, &replay, &task_lease)
-            .await
-            .unwrap();
-        assert!(!created);
-        assert_eq!(same.id, opened.id);
-        let mut future_step = review.clone();
-        future_step.id = InteractionReviewId::new();
-        future_step.step = "code-review".to_string();
-        future_step.step_index = 1;
-        assert!(store
-            .open_interaction_review(&task, &future_step, &task_lease)
-            .await
-            .is_err());
-
-        let command = store
-            .send_project_interaction_review_message(
-                &opened.id,
-                &project.id,
-                &project_lease,
-                "Show the stored state after the product action.",
-            )
-            .await
-            .unwrap();
-        assert!(command.steer.text.contains("Show the stored state"));
-        let second_command = store
-            .send_project_interaction_review_message(
-                &opened.id,
-                &project.id,
-                &project_lease,
-                "Then connect that row to the implementation.",
-            )
-            .await
-            .unwrap();
-        assert!(second_command.steer.text.contains("Then connect that row"));
-        store
-            .reply_to_interaction_review(
-                &opened.id,
-                &task.id,
-                &task_lease,
-                "The action writes row 42; the admin view reads that row.",
-            )
-            .await
-            .unwrap();
-
-        let (completed, changed) = store
-            .complete_project_interaction_review(
-                &opened.id,
-                &project.id,
-                &project_lease,
-                InteractionReviewDisposition::Approved,
-                "Product action and stored row agree.",
-            )
-            .await
-            .unwrap();
-        assert!(changed);
-        assert_eq!(completed.status, InteractionReviewStatus::Completed);
-        assert_eq!(
-            completed.reviewer_generation,
-            Some(project_lease.generation)
-        );
-        let (_, changed) = store
-            .complete_project_interaction_review(
-                &opened.id,
-                &project.id,
-                &project_lease,
-                InteractionReviewDisposition::Approved,
-                "Product action and stored row agree.",
-            )
-            .await
-            .unwrap();
-        assert!(!changed);
-        let work = store
-            .work_for_child(&ChildRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        let seed = store.boundary_seed(&work).await.unwrap();
-        assert_eq!(seed.steers.len(), 3);
-        assert_eq!(seed.steers[0].id, command.steer.id);
-        assert_eq!(seed.steers[1].id, second_command.steer.id);
-        assert!(seed.steers[2].text.contains("interaction_review_completed"));
-        assert!(seed.steers[2].text.contains("disposition=\"approved\""));
-
-        let events = store.task_events_after(&task.id, 0).await.unwrap();
-        let messages = events
-            .iter()
-            .filter(|event| matches!(event.kind, TaskEventKind::InteractionReviewMessage { .. }))
-            .count();
-        assert_eq!(messages, 3);
-        let project_observations = store
-            .pending_observations(&ObservationRecipient::Project {
-                session_id: project.id.clone(),
-            })
-            .await
-            .unwrap();
-        let review_observations = project_observations
-            .iter()
-            .filter(|observation| {
-                matches!(
-                    &observation.payload,
-                    ChildEventPayload::Task {
-                        event: TaskEventKind::InteractionReviewRequested { .. }
-                            | TaskEventKind::InteractionReviewMessage { .. }
-                            | TaskEventKind::InteractionReviewCompleted { .. }
-                    }
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(review_observations.len(), 2);
-        assert!(matches!(
-            &review_observations[0].payload,
-            ChildEventPayload::Task {
-                event: TaskEventKind::InteractionReviewRequested { .. }
-            }
-        ));
-        assert!(matches!(
-            &review_observations[1].payload,
-            ChildEventPayload::Task {
-                event: TaskEventKind::InteractionReviewMessage {
-                    author: crate::interaction_review::InteractionReviewMessageAuthor::Task,
-                    ..
-                }
-            }
-        ));
-        let wave_observations = store
-            .pending_observations(&ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|observation| {
-                matches!(
-                    observation.payload,
-                    ChildEventPayload::Task {
-                        event: TaskEventKind::InteractionReviewRequested { .. }
-                            | TaskEventKind::InteractionReviewMessage { .. }
-                            | TaskEventKind::InteractionReviewCompleted { .. }
-                    }
-                )
-            })
-            .count();
-        assert_eq!(wave_observations, 0);
-
-        task.enter_iterate().unwrap();
-        task.enter_gate(TaskGateProposal {
-            status: TaskSessionStatus::Waiting,
-            reason: "PR ready after review changes".to_string(),
-        })
-        .unwrap();
-        store
-            .update_task_session_for_lease(&task, &task_lease)
-            .await
-            .unwrap();
-        let mut next_gate_review = review.clone();
-        next_gate_review.id = InteractionReviewId::new();
-        next_gate_review.phase_epoch = task.phase_epoch;
-        next_gate_review.evidence.head_commit = "head-after-review".to_string();
-        next_gate_review.evidence.worktree_fingerprint = "fingerprint-after-review".to_string();
-        next_gate_review.requested_at = OffsetDateTime::now_utc();
-        let (next_gate_review, created) = store
-            .open_interaction_review(&task, &next_gate_review, &task_lease)
-            .await
-            .unwrap();
-        assert!(created);
-        assert_ne!(next_gate_review.id, completed.id);
-
-        let reviews = store
-            .list_interaction_reviews(Some(wave.id()))
-            .await
-            .unwrap();
-        assert_eq!(reviews.len(), 2);
-        assert!(reviews.contains(&completed));
-        assert!(reviews.iter().any(|review| {
-            review.id == next_gate_review.id && review.phase_epoch == next_gate_review.phase_epoch
-        }));
-
-        task.enter_iterate().unwrap();
-        task.lifecycle = crate::task::TaskLifecyclePlan::standard("task");
-        task.enter_gate(TaskGateProposal {
-            status: TaskSessionStatus::Waiting,
-            reason: "PR ready for attended review".to_string(),
-        })
-        .unwrap();
-        store
-            .update_task_session_for_lease(&task, &task_lease)
-            .await
-            .unwrap();
-        let mut human_review = review.clone();
-        human_review.id = InteractionReviewId::new();
-        human_review.phase_epoch = task.phase_epoch;
-        human_review.policy = crate::engine::InteractionPolicy::Require;
-        human_review.reviewer = InteractionReviewer::Human;
-        human_review.evidence.head_commit = "head-for-human".to_string();
-        human_review.evidence.worktree_fingerprint = "fingerprint-for-human".to_string();
-        human_review.requested_at = OffsetDateTime::now_utc();
-        let (human_review, created) = store
-            .open_interaction_review(&task, &human_review, &task_lease)
-            .await
-            .unwrap();
-        assert!(created);
-        let active = store
-            .activate_human_interaction_review(&task, &human_review.id, &task_lease)
-            .await
-            .unwrap();
-        assert_eq!(active.status, InteractionReviewStatus::Active);
-        let first_human_message = store
-            .send_human_interaction_review_message(
-                &human_review.id,
-                ChildCommandSource::Human,
-                "Show me the user-visible result.",
-            )
-            .await
-            .unwrap();
-        let attached_message = store
-            .send_human_interaction_review_message(
-                &human_review.id,
-                ChildCommandSource::Attachment,
-                "Now connect it to the stored row.",
-            )
-            .await
-            .unwrap();
-        let work = store
-            .work_for_child(&ChildRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        let seed = store.boundary_seed(&work).await.unwrap();
-        let steer_ids = seed
-            .steers
-            .iter()
-            .map(|steer| steer.id.clone())
-            .collect::<Vec<_>>();
-        assert_eq!(steer_ids.len(), 5);
-        assert!(steer_ids.ends_with(&[first_human_message.steer.id, attached_message.steer.id,]));
-        store
-            .reply_to_interaction_review(
-                &human_review.id,
-                &task.id,
-                &task_lease,
-                "The product result and stored row agree.",
-            )
-            .await
-            .unwrap();
-        assert!(store
-            .send_project_interaction_review_message(
-                &human_review.id,
-                &project.id,
-                &project_lease,
-                "Project agents cannot impersonate the human.",
-            )
-            .await
-            .is_err());
-        let (completed_human_review, changed) = store
-            .complete_human_interaction_review(
-                &human_review.id,
-                InteractionReviewDisposition::ChangesRequested,
-                "The login proof is still missing.",
-            )
-            .await
-            .unwrap();
-        assert!(changed);
-        assert_eq!(completed_human_review.reviewer_generation, None);
-        assert_eq!(
-            completed_human_review.disposition,
-            Some(InteractionReviewDisposition::ChangesRequested)
-        );
-        let (_, changed) = store
-            .complete_human_interaction_review(
-                &human_review.id,
-                InteractionReviewDisposition::ChangesRequested,
-                "The login proof is still missing.",
-            )
-            .await
-            .unwrap();
-        assert!(!changed);
-        assert!(store
-            .complete_project_interaction_review(
-                &human_review.id,
-                &project.id,
-                &project_lease,
-                InteractionReviewDisposition::Approved,
-                "The Project cannot approve the human checkpoint.",
-            )
-            .await
-            .is_err());
-        assert_eq!(
-            store
-                .list_interaction_reviews(Some(wave.id()))
-                .await
-                .unwrap()
-                .len(),
-            3
-        );
-    }
-
     #[tokio::test]
     async fn terminal_project_history_keeps_one_current_successor() {
         let dir = tempfile::tempdir().unwrap();
@@ -2708,277 +2322,6 @@ mod tests {
             if task_session_id == &task.id
         )));
     }
-
-    #[tokio::test]
-    async fn successor_completes_review_assigned_to_predecessor() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-
-        // Predecessor Project + a gate Task with a Defer review assigned to it.
-        let mut predecessor = make_project_session(&wave);
-        predecessor.status = ProjectSessionStatus::Created;
-        predecessor.status_reason = "reserved".to_string();
-        predecessor.latest_process = None;
-        store.create_project_session(&predecessor).await.unwrap();
-        predecessor.begin_generation("project-reviewer".to_string());
-        let predecessor_lease = store
-            .reserve_project_process(&predecessor, ProjectSessionStatus::Created)
-            .await
-            .unwrap()
-            .unwrap();
-        if let Some(process) = &mut predecessor.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        predecessor.set_status(ProjectSessionStatus::Running, "reviewer active");
-        store
-            .activate_project_process(&predecessor, &predecessor_lease)
-            .await
-            .unwrap();
-
-        let mut task = make_task_session(&wave, &predecessor);
-        task.lifecycle = crate::task::TaskLifecyclePlan::headless("task");
-        task.lifecycle_phase = TaskLifecyclePhase::Gate;
-        task.phase_epoch = 3;
-        task.gate_cycle = 1;
-        task.gate_proposal = Some(TaskGateProposal {
-            status: TaskSessionStatus::Waiting,
-            reason: "PR ready".to_string(),
-        });
-        task.set_status(TaskSessionStatus::Waiting, "ready for gate review");
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        task.begin_generation("task-review".to_string());
-        let task_lease = store
-            .reserve_task_process(&task, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .unwrap();
-        if let Some(process) = &mut task.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        task.set_status(TaskSessionStatus::Running, "review requested");
-        store
-            .activate_task_process(&task, &task_lease)
-            .await
-            .unwrap();
-
-        let review = InteractionReview {
-            id: InteractionReviewId::new(),
-            wave_id: wave.id().clone(),
-            project_session_id: predecessor.id.clone(),
-            task_session_id: task.id.clone(),
-            phase: task.lifecycle_phase,
-            phase_epoch: task.phase_epoch,
-            flow: task.phase_plan().flow.clone(),
-            step: "demo".to_string(),
-            step_index: 0,
-            phase_iteration: task.phase_iteration,
-            policy: task.phase_plan().interaction_policy,
-            reviewer: InteractionReviewer::Project(predecessor.id.clone()),
-            status: InteractionReviewStatus::Requested,
-            reason: "prove the successor routing".to_string(),
-            prompt: "Demonstrate each Done When criterion.".to_string(),
-            evidence: InteractionReviewEvidence {
-                worktree: task.worktree.clone(),
-                branch: "jack/reviewed-task".to_string(),
-                base_commit: "base".to_string(),
-                head_commit: "head".to_string(),
-                worktree_fingerprint: "fingerprint".to_string(),
-                pr: None,
-            },
-            requested_by_generation: task_lease.generation,
-            reviewer_generation: None,
-            disposition: None,
-            outcome: None,
-            requested_at: OffsetDateTime::now_utc(),
-            completed_at: None,
-        };
-        let (opened, created) = store
-            .open_interaction_review(&task, &review, &task_lease)
-            .await
-            .unwrap();
-        assert!(created);
-
-        // Abandon the predecessor and stand up a successor for the same project.
-        let mut abandoned = predecessor.clone();
-        abandoned.set_status(ProjectSessionStatus::Abandoned, "replaced append-only");
-        if let Some(process) = &mut abandoned.latest_process {
-            process.state = ChildLeaseState::Finished;
-            process.outcome = Some(crate::child_session::ChildBodyOutcome::Superseded {
-                reason: "replaced append-only".to_string(),
-            });
-        }
-        store
-            .finish_project_process(&abandoned, &predecessor_lease)
-            .await
-            .unwrap();
-        let mut successor = make_project_session(&wave);
-        successor.status = ProjectSessionStatus::Created;
-        successor.status_reason = "successor".to_string();
-        successor.latest_process = None;
-        successor.created_at += time::Duration::SECOND;
-        successor.updated_at = successor.created_at;
-        store.create_project_session(&successor).await.unwrap();
-        successor.begin_generation("successor-reviewer".to_string());
-        let successor_lease = store
-            .reserve_project_process(&successor, ProjectSessionStatus::Created)
-            .await
-            .unwrap()
-            .unwrap();
-        if let Some(process) = &mut successor.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        successor.set_status(ProjectSessionStatus::Running, "successor reviewer active");
-        store
-            .activate_project_process(&successor, &successor_lease)
-            .await
-            .unwrap();
-
-        // A Project outside the chain may not conduct the predecessor's review.
-        let mut other = make_project_session(&wave);
-        other.launch.project.id = LinearProjectId::new("project-other").unwrap();
-        other.status = ProjectSessionStatus::Created;
-        other.latest_process = None;
-        other.created_at += time::Duration::SECOND * 2;
-        other.updated_at = other.created_at;
-        store.create_project_session(&other).await.unwrap();
-        other.begin_generation("other-reviewer".to_string());
-        let other_lease = store
-            .reserve_project_process(&other, ProjectSessionStatus::Created)
-            .await
-            .unwrap()
-            .unwrap();
-        if let Some(process) = &mut other.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        other.set_status(ProjectSessionStatus::Running, "outside the chain");
-        store
-            .activate_project_process(&other, &other_lease)
-            .await
-            .unwrap();
-        assert!(store
-            .complete_project_interaction_review(
-                &opened.id,
-                &other.id,
-                &other_lease,
-                InteractionReviewDisposition::Approved,
-                "outside the chain",
-            )
-            .await
-            .is_err());
-
-        // The successor conducts the review assigned to the predecessor.
-        let (completed, changed) = store
-            .complete_project_interaction_review(
-                &opened.id,
-                &successor.id,
-                &successor_lease,
-                InteractionReviewDisposition::Approved,
-                "successor approves the routed review",
-            )
-            .await
-            .expect("successor must complete the predecessor's review");
-        assert!(changed);
-        assert_eq!(completed.status, InteractionReviewStatus::Completed);
-    }
-
-    #[tokio::test]
-    async fn project_sessions_persist_commands_and_receive_task_observations() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let command = ChildCommand::new(
-            ChildRef::Project(project.id.clone()),
-            ChildCommandSource::Wave(wave.id().clone()),
-            ChildCommandKind::Resume,
-        );
-        store.create_child_command(&command).await.unwrap();
-        let claimed = store
-            .claim_child_commands(&ChildRef::Project(project.id.clone()), 1)
-            .await
-            .unwrap();
-        assert_eq!(claimed.len(), 1);
-        store
-            .accept_child_command(&command.id, Some(ChildCommandEffect::NextTurn))
-            .await
-            .unwrap();
-        let stored = store.get_child_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(stored.state, ChildCommandState::Accepted);
-        assert_eq!(stored.target, ChildRef::Project(project.id.clone()));
-        let task = make_task_session(&wave, &project);
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        store
-            .sqlite
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::Failed {
-                    error: "provider stopped".to_string(),
-                    resumable: true,
-                },
-            )
-            .unwrap();
-        let observations = store
-            .pending_observations(&ObservationRecipient::Project {
-                session_id: project.id.clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(observations.len(), 1);
-        assert!(matches!(
-            (&observations[0].source, &observations[0].payload),
-            (
-                ChildRef::Task(session_id),
-                ChildEventPayload::Task { event: TaskEventKind::Failed { .. } }
-            ) if session_id == &task.id
-        ));
-        let wave_observations = store
-            .pending_observations(&ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert!(wave_observations.iter().any(|observation| matches!(
-            (&observation.source, &observation.payload),
-            (
-                ChildRef::Task(session_id),
-                ChildEventPayload::Task { event: TaskEventKind::Failed { .. } }
-            ) if session_id == &task.id
-        )));
-        assert!(store
-            .consume_task_observation_for_project(&project.id, &observations[0])
-            .await
-            .unwrap());
-        assert!(!store
-            .consume_task_observation_for_project(&project.id, &observations[0])
-            .await
-            .unwrap());
-        let project_events = store.project_events_after(&project.id, 0).await.unwrap();
-        assert_eq!(
-            project_events
-                .iter()
-                .filter(|event| matches!(
-                    event.kind,
-                    crate::project_session::ProjectEventKind::TaskObserved { .. }
-                ))
-                .count(),
-            1
-        );
-    }
-
     #[tokio::test]
     async fn task_session_requires_its_matching_project_session() {
         let dir = tempfile::tempdir().unwrap();
@@ -3013,154 +2356,6 @@ mod tests {
             .await
             .unwrap_err();
         assert!(mismatched.to_string().contains("does not own Task"));
-    }
-
-    #[tokio::test]
-    async fn task_session_commands_reclaim_by_generation_and_events_are_durable() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let session = make_task_session(&wave, &project);
-        store
-            .create_task_session(&session, &make_task_pr(&session))
-            .await
-            .unwrap();
-
-        let loaded = store
-            .get_task_session_by_issue("INF-123")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(loaded, session);
-
-        let command = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume,
-        );
-        store.create_child_command(&command).await.unwrap();
-        let first_claim = store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 1)
-            .await
-            .unwrap();
-        assert_eq!(first_claim.len(), 1);
-        assert_eq!(first_claim[0].id, command.id);
-        assert_eq!(first_claim[0].kind, command.kind);
-        assert_eq!(first_claim[0].state, ChildCommandState::Claimed);
-        assert_eq!(first_claim[0].claimed_by_generation, Some(1));
-        assert_eq!(
-            store
-                .claim_child_commands(&ChildRef::Task(session.id.clone()), 2)
-                .await
-                .unwrap()[0]
-                .claimed_by_generation,
-            Some(2)
-        );
-        store.accept_child_command(&command.id, None).await.unwrap();
-        let accepted = store.get_child_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(accepted.state, ChildCommandState::Accepted);
-        assert_eq!(accepted.effect, None);
-        assert!(store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 3)
-            .await
-            .unwrap()
-            .is_empty());
-
-        let resume_a = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume,
-        );
-        let resume_b = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume,
-        );
-        store.create_child_command(&resume_a).await.unwrap();
-        store.create_child_command(&resume_b).await.unwrap();
-        let interrupt = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Interrupt,
-        );
-        let superseded = store
-            .supersede_and_create_child_command(&interrupt)
-            .await
-            .unwrap();
-        assert_eq!(superseded, vec![resume_a.id.clone(), resume_b.id.clone()]);
-        assert_eq!(
-            store
-                .get_child_command(&resume_a.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .state,
-            ChildCommandState::Superseded
-        );
-        assert_eq!(
-            store
-                .claim_child_commands(&ChildRef::Task(session.id.clone()), 3)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|command| command.id)
-                .collect::<Vec<_>>(),
-            vec![interrupt.id.clone()]
-        );
-        store
-            .fail_child_command(
-                &interrupt.id,
-                Some(ChildCommandEffect::Replacement),
-                "provider control failed".to_string(),
-            )
-            .await
-            .unwrap();
-        let failed = store
-            .get_child_command(&interrupt.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(failed.state, ChildCommandState::Failed);
-        assert_eq!(failed.effect, Some(ChildCommandEffect::Replacement));
-        assert_eq!(failed.error.as_deref(), Some("provider control failed"));
-        assert!(store
-            .claim_child_commands(&ChildRef::Task(session.id.clone()), 4)
-            .await
-            .unwrap()
-            .is_empty());
-
-        let event = store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::Progress {
-                    summary: "tests pass".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.task_events_after(&session.id, 0).await.unwrap(),
-            vec![event]
-        );
-
-        let mut second = make_task_session(&wave, &project);
-        second.launch.issue.id = LinearIssueId::new("issue-two").unwrap();
-        second.launch.issue.identifier = "INF-124".to_string();
-        second.worktree = PathBuf::from("/repo.inf-124");
-        store
-            .create_task_session(&second, &make_task_pr(&second))
-            .await
-            .unwrap();
-        assert!(store
-            .get_task_session_by_issue("INF-124")
-            .await
-            .unwrap()
-            .is_some());
     }
 
     #[tokio::test]
@@ -3894,81 +3089,6 @@ mod tests {
         );
         let stored = store.task_prs(&session.id).await.unwrap();
         assert!(stored.is_empty());
-    }
-
-    #[tokio::test]
-    async fn task_boundary_atomically_claims_work_or_stops_the_generation() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-
-        let mut with_command = make_task_session(&wave, &project);
-        with_command.begin_generation("task-a".to_string());
-        with_command.set_status(TaskSessionStatus::Running, "provider active");
-        store
-            .create_task_session(&with_command, &make_task_pr(&with_command))
-            .await
-            .unwrap();
-        let command = ChildCommand::new(
-            ChildRef::Task(with_command.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume,
-        );
-        store.create_child_command(&command).await.unwrap();
-
-        let claimed = store
-            .claim_task_commands_or_stop(
-                &with_command.id,
-                1,
-                TaskSessionStatus::Waiting,
-                "turn complete",
-            )
-            .await
-            .unwrap();
-        let BoundaryResult::Commands(commands) = claimed else {
-            panic!("boundary stopped despite a persisted command");
-        };
-        assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].id, command.id);
-        assert_eq!(
-            store
-                .get_task_session(&with_command.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .status,
-            TaskSessionStatus::Running
-        );
-
-        let mut without_command = make_task_session(&wave, &project);
-        without_command.launch.issue.id = LinearIssueId::new("other-issue").unwrap();
-        without_command.launch.issue.identifier = "INF-124".to_string();
-        without_command.worktree = PathBuf::from("/repo.inf-124");
-        without_command.begin_generation("task-b".to_string());
-        without_command.set_status(TaskSessionStatus::Running, "provider active");
-        store
-            .create_task_session(&without_command, &make_task_pr(&without_command))
-            .await
-            .unwrap();
-        let stopped = store
-            .claim_task_commands_or_stop(
-                &without_command.id,
-                1,
-                TaskSessionStatus::Waiting,
-                "turn complete",
-            )
-            .await
-            .unwrap();
-        let BoundaryResult::Stopped(stopped) = stopped else {
-            panic!("empty boundary did not stop");
-        };
-        assert_eq!(stopped.status, TaskSessionStatus::Waiting);
-        assert_eq!(stopped.status_reason, "turn complete");
     }
 
     #[tokio::test]

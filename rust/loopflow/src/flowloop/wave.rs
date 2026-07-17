@@ -682,6 +682,7 @@ impl WaveLoop {
                     render_ms: prepared.context_render_ms,
                     raw_provider: true,
                     basis: None,
+                    control: None,
                 },
             ) {
                 Ok(capture) => Some(capture),

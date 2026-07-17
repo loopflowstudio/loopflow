@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
-    ChildLeaseState, ChildProcessGeneration, ChildRef, ObservationRecipient,
+    prefixed_uuid_id, AbandonIntent, ChildLeaseState, ChildProcessGeneration, ChildRef,
+    ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::session_context::ProjectLaunchReceipt;
@@ -216,12 +216,6 @@ pub enum ProjectEventKind {
         to: ProjectSessionStatus,
         reason: String,
     },
-    CommandChanged {
-        command_id: ChildCommandId,
-        state: ChildCommandState,
-        effect: Option<ChildCommandEffect>,
-        error: Option<String>,
-    },
     TaskObserved {
         task_session_id: TaskSessionId,
         task_event_id: i64,
@@ -248,7 +242,6 @@ impl ProjectEventKind {
                 process.state,
                 ChildLeaseState::Revoked | ChildLeaseState::Finished
             ),
-            Self::CommandChanged { state, .. } => state.is_terminal(),
             _ => true,
         }
     }
@@ -267,7 +260,6 @@ pub struct ProjectObservation {
     pub session_id: ProjectSessionId,
     pub project: String,
     pub event_id: i64,
-    pub control_source: Option<crate::child_session::ChildCommandSource>,
     pub event: ProjectEventKind,
 }
 
@@ -277,11 +269,8 @@ impl ProjectObservation {
     }
 
     pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&serde_json::json!({
-            "control_source": self.control_source,
-            "event": self.event,
-        }))
-        .expect("Project observation always serializes to structured JSON");
+        let payload = serde_json::to_string(&self.event)
+            .expect("Project observation always serializes to structured JSON");
         format!(
             "<project_observation session_id=\"{}\" project=\"{}\" event_id=\"{}\">\n{}\n</project_observation>",
             self.session_id, self.project, self.event_id, payload
@@ -308,10 +297,7 @@ pub struct ObservationOutboxRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ChildCommandId, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
-    };
-    use crate::child_session::ChildCommandState;
+    use super::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
 
     fn project_session() -> ProjectSession {
@@ -355,23 +341,6 @@ mod tests {
         assert!(ProjectSessionStatus::Completed.is_terminal());
         assert!(ProjectSessionStatus::Abandoned.is_terminal());
         assert!(!ProjectSessionStatus::Waiting.is_terminal());
-    }
-
-    #[test]
-    fn wave_observes_project_control_outcomes_not_transport_chatter() {
-        let event = |state| ProjectEventKind::CommandChanged {
-            command_id: ChildCommandId::new(),
-            state,
-            effect: None,
-            error: None,
-        };
-
-        assert!(!event(ChildCommandState::Persisted).is_wave_observable());
-        assert!(!event(ChildCommandState::Claimed).is_wave_observable());
-        assert!(!event(ChildCommandState::Delivering).is_wave_observable());
-        assert!(event(ChildCommandState::Accepted).is_wave_observable());
-        assert!(event(ChildCommandState::Failed).is_wave_observable());
-        assert!(event(ChildCommandState::Uncertain).is_wave_observable());
     }
 
     #[test]

@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use clap::{Args, Parser, Subcommand};
 
 pub mod commands;
@@ -274,20 +272,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ProjectCommand,
     },
-    /// Review accumulated parent-reviewed work across one Wave
-    Reviews {
-        #[command(subcommand)]
-        cmd: ReviewsCommand,
-    },
     /// Linear-backed Task Session lifecycle
     Task {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Durable interactive work handed from an agent to a human
-    Handoff {
+    /// Inspect, attach, and hand back provider or opaque process Launches
+    Launch {
         #[command(subcommand)]
-        cmd: HandoffCommand,
+        cmd: LaunchCommand,
     },
     /// Internal: run one durable Task Session process generation
     #[command(name = "__task", hide = true)]
@@ -643,89 +636,37 @@ pub enum RadioCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum HandoffCommand {
-    /// Open or return the parent's one unresolved interactive handoff
-    Open {
-        /// Parent reference: wave:<id>, project:<id>, or task:<id>
-        #[arg(long)]
-        parent: String,
-        /// Canonical execution Home, e.g. jack@local or ssh://jack@host
-        #[arg(long)]
-        home: String,
-        /// Absolute worktree/current directory on that Home
-        #[arg(long)]
-        cwd: PathBuf,
-        /// Provider that owns the resumed history
-        #[arg(long)]
-        provider: String,
-        /// Provider transcript/session id, when one exists
-        #[arg(long = "provider-session")]
-        provider_session: Option<String>,
-        /// Existing parent body generation being handed off
-        #[arg(long)]
-        generation: u32,
-        /// Why human interaction is required
-        #[arg(long)]
-        reason: String,
-        /// Required environment entry as KEY=VALUE (repeatable)
-        #[arg(long = "env")]
-        environment: Vec<String>,
-        /// Emit the durable Session as JSON
-        #[arg(long)]
-        json: bool,
-        /// Structured attach argv after `--`
-        #[arg(last = true, required = true)]
-        attach_argv: Vec<String>,
-    },
-    /// List durable interactive handoffs across the machine
+pub enum LaunchCommand {
+    /// List Launches backed by the normalized Run controller
     List {
-        /// Only handoffs still waiting on or attached to a human
+        /// Include only Launches whose containment may still be live
         #[arg(long)]
         active: bool,
-        /// Restrict to one parent: wave:<id>, project:<id>, or task:<id>
-        #[arg(long)]
-        parent: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Show one durable handoff Session
+    /// Show one Launch and its generic attach route
     Status {
-        session_id: String,
+        launch_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record first attach and return its descriptor; never streams terminal bytes
+    /// Return the generic attach descriptor without changing Launch state
     Attach {
-        session_id: String,
+        launch_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record successful completion
-    Complete {
-        session_id: String,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Hand unfinished work back to the parent agent
-    Back {
-        session_id: String,
-        #[arg(long)]
-        summary: String,
+    /// Record explicit terminal evidence for an opaque Launch boundary
+    Handback {
+        launch_id: String,
+        #[arg(long, value_parser = ["succeeded", "failed", "interrupted", "unknown"])]
+        outcome: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record terminal interactive-body failure
-    Fail {
-        session_id: String,
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Attach and exec into the interactive terminal session
-    Present { session_id: String },
+    /// Exec the Launch's generic attach route
+    Present { launch_id: String },
 }
 
 fn reject_retired_sub(_: &str) -> Result<String, String> {
@@ -821,27 +762,6 @@ pub enum ReceiptCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum ProjectReviewCommand {
-    /// Ask the reviewed Task a FIFO follow-up question
-    Message {
-        review_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Complete the review with an explicit disposition and findings
-    Complete {
-        review_id: String,
-        #[arg(long, value_parser = ["approved", "changes-requested"])]
-        disposition: String,
-        #[arg(long)]
-        outcome: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
     /// Create a Linear Project first, then start its durable Project Session
     Start {
@@ -882,21 +802,6 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Read or wait for one durable Project command receipt
-    Receipt {
-        command_id: String,
-        #[arg(long, value_enum)]
-        until: Option<crate::ops::ChildReceiptUntil>,
-        #[arg(long, default_value = "30s")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Conduct an interactive exercise assigned by a child Task
-    Review {
-        #[command(subcommand)]
-        command: ProjectReviewCommand,
-    },
     /// Wait without polling an LM
     Wait {
         project_id: String,
@@ -934,46 +839,6 @@ pub enum ProjectCommand {
         /// Parent wave (default: ambient wave)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum TaskReviewCommand {
-    /// Send the human reviewer's next FIFO message to the existing Task session
-    Message {
-        review_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reply to the reviewer without replacing the current Task direction
-    Reply {
-        review_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Finish a human review with an explicit disposition and evidence
-    Complete {
-        review_id: String,
-        #[arg(long, value_parser = ["approved", "changes-requested"])]
-        disposition: String,
-        #[arg(long)]
-        outcome: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ReviewsCommand {
-    /// Run one human catch-up exercise over the Wave's deferred reviews
-    CatchUp {
-        #[arg(long, default_value = "demo", value_parser = ["demo", "code-review"])]
-        skill: String,
-        /// Print the assembled review evidence without launching an agent
-        #[arg(long)]
-        plan: bool,
     },
 }
 
@@ -1065,21 +930,6 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         json: bool,
-    },
-    /// Read or wait for one durable command receipt
-    Receipt {
-        command_id: String,
-        #[arg(long, value_enum)]
-        until: Option<crate::ops::ChildReceiptUntil>,
-        #[arg(long, default_value = "30s")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Continue the dialogue for the current interactive exercise
-    Review {
-        #[command(subcommand)]
-        command: TaskReviewCommand,
     },
     /// Wait without polling an LM
     Wait {
@@ -2267,136 +2117,6 @@ mod tests {
     }
 
     #[test]
-    fn interaction_review_dialogue_commands_parse() {
-        let project = Cli::try_parse_from([
-            "lf",
-            "project",
-            "review",
-            "complete",
-            "ir_review",
-            "--disposition",
-            "changes-requested",
-            "--outcome",
-            "Cover the empty state",
-        ])
-        .expect("parse Project review completion");
-        assert!(matches!(
-            project.command,
-            Some(Commands::Project {
-                cmd: ProjectCommand::Review {
-                    command: ProjectReviewCommand::Complete {
-                        review_id,
-                        disposition,
-                        outcome,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review"
-                && disposition == "changes-requested"
-                && outcome == "Cover the empty state"
-        ));
-
-        let task = Cli::try_parse_from([
-            "lf",
-            "task",
-            "review",
-            "reply",
-            "ir_review",
-            "The empty state is now visible",
-        ])
-        .expect("parse Task review reply");
-        assert!(matches!(
-            task.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Review {
-                    command: TaskReviewCommand::Reply {
-                        review_id,
-                        message,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review" && message == "The empty state is now visible"
-        ));
-
-        let human_message = Cli::try_parse_from([
-            "lf",
-            "task",
-            "review",
-            "message",
-            "ir_review",
-            "Show me the empty state",
-        ])
-        .expect("parse human review message");
-        assert!(matches!(
-            human_message.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Review {
-                    command: TaskReviewCommand::Message {
-                        review_id,
-                        message,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review" && message == "Show me the empty state"
-        ));
-
-        let human_complete = Cli::try_parse_from([
-            "lf",
-            "task",
-            "review",
-            "complete",
-            "ir_review",
-            "--disposition",
-            "approved",
-            "--outcome",
-            "The empty state is proven",
-        ])
-        .expect("parse human review completion");
-        assert!(matches!(
-            human_complete.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Review {
-                    command: TaskReviewCommand::Complete {
-                        review_id,
-                        disposition,
-                        outcome,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review"
-                && disposition == "approved"
-                && outcome == "The empty state is proven"
-        ));
-    }
-
-    #[test]
-    fn wave_review_catch_up_selects_a_bounded_human_exercise() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "--wave",
-            "product",
-            "reviews",
-            "catch-up",
-            "--skill",
-            "code-review",
-            "--plan",
-        ])
-        .expect("parse Wave review catch-up");
-
-        assert_eq!(cli.wave.as_deref(), Some("product"));
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Reviews {
-                cmd: ReviewsCommand::CatchUp {
-                    skill,
-                    plan: true,
-                }
-            }) if skill == "code-review"
-        ));
-        assert!(Cli::try_parse_from(["lf", "reviews", "catch-up", "--skill", "design",]).is_err());
-    }
-
-    #[test]
     fn task_completion_and_pr_dispositions_parse() {
         let complete = Cli::try_parse_from([
             "lf",
@@ -2509,33 +2229,6 @@ mod tests {
     }
 
     #[test]
-    fn task_receipt_parses_the_durable_id() {
-        let receipt = Cli::try_parse_from([
-            "lf",
-            "task",
-            "receipt",
-            "cc_00000000000000000000000000000000",
-            "--until",
-            "applied",
-            "--timeout",
-            "30s",
-            "--json",
-        ])
-        .expect("parse task receipt");
-        assert!(matches!(
-            receipt.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Receipt {
-                    until: Some(crate::ops::ChildReceiptUntil::Applied),
-                    timeout,
-                    json: true,
-                    ..
-                }
-            }) if timeout == "30s"
-        ));
-    }
-
-    #[test]
     fn task_steer_is_the_only_authored_direction_command() {
         let steer = Cli::try_parse_from([
             "lf",
@@ -2594,7 +2287,7 @@ mod tests {
     }
 
     #[test]
-    fn project_session_controls_parse_durable_ids_and_waits() {
+    fn project_steer_parses() {
         let steer = Cli::try_parse_from([
             "lf",
             "project",
@@ -2613,29 +2306,6 @@ mod tests {
                     json: true,
                 },
             }) if project_id == "project-uuid" && message == "prioritize the CLI path"
-        ));
-
-        let receipt = Cli::try_parse_from([
-            "lf",
-            "project",
-            "receipt",
-            "cc_00000000000000000000000000000000",
-            "--until",
-            "applied",
-            "--timeout",
-            "30s",
-        ])
-        .expect("parse project receipt");
-        assert!(matches!(
-            receipt.command,
-            Some(Commands::Project {
-                cmd: ProjectCommand::Receipt {
-                    command_id,
-                    until: Some(crate::ops::ChildReceiptUntil::Applied),
-                    timeout,
-                    ..
-                },
-            }) if command_id.starts_with("cc_") && timeout == "30s"
         ));
     }
 
@@ -2721,117 +2391,27 @@ mod tests {
             }) if issue == "PRD-9" && reason == "the abandoned work is still valid"
         ));
     }
-
     #[test]
-    fn cli_parses_interactive_handoff_contract() {
-        let open = Cli::try_parse_from([
+    fn cli_parses_generic_launch_contract() {
+        let cli = Cli::try_parse_from([
             "lf",
-            "handoff",
-            "open",
-            "--parent",
-            "task:ts_00000000000000000000000000000000",
-            "--home",
-            "jack@local",
-            "--cwd",
-            "/src/loopflow.task",
-            "--provider",
-            "codex",
-            "--provider-session",
-            "thread-1",
-            "--generation",
-            "3",
-            "--reason",
-            "OAuth login required",
-            "--env",
-            "LF_HOME=/tmp/lf",
-            "--json",
-            "--",
-            "tmux",
-            "attach-session",
-            "-t",
-            "lf-task-interactive",
-        ])
-        .expect("parse handoff open");
-        assert!(matches!(
-            open.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::Open {
-                    generation: 3,
-                    json: true,
-                    attach_argv,
-                    ..
-                }
-            }) if attach_argv == ["tmux", "attach-session", "-t", "lf-task-interactive"]
-        ));
-
-        let back = Cli::try_parse_from([
-            "lf",
-            "handoff",
-            "back",
-            "ih_00000000000000000000000000000000",
-            "--summary",
-            "finish the review fixes headlessly",
+            "launch",
+            "handback",
+            "launch_1",
+            "--outcome",
+            "unknown",
             "--json",
         ])
-        .expect("parse handoff back");
+        .expect("parse Launch handback");
         assert!(matches!(
-            back.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::Back {
-                    summary,
+            cli.command,
+            Some(Commands::Launch {
+                cmd: LaunchCommand::Handback {
+                    launch_id,
+                    outcome,
                     json: true,
-                    ..
                 }
-            }) if summary == "finish the review fixes headlessly"
-        ));
-
-        let list = Cli::try_parse_from([
-            "lf",
-            "handoff",
-            "list",
-            "--active",
-            "--parent",
-            "wave:00000000-0000-4000-8000-000000000001",
-            "--json",
-        ])
-        .expect("parse handoff list");
-        assert!(matches!(
-            list.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::List {
-                    active: true,
-                    json: true,
-                    parent: Some(parent),
-                }
-            }) if parent == "wave:00000000-0000-4000-8000-000000000001"
-        ));
-
-        let bare_list = Cli::try_parse_from(["lf", "handoff", "list"]).expect("parse bare list");
-        assert!(matches!(
-            bare_list.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::List {
-                    active: false,
-                    json: false,
-                    parent: None,
-                }
-            })
-        ));
-
-        let present = Cli::try_parse_from([
-            "lf",
-            "handoff",
-            "present",
-            "ih_00000000000000000000000000000000",
-        ])
-        .expect("parse handoff present");
-        assert!(matches!(
-            present.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::Present {
-                    session_id,
-                }
-            }) if session_id == "ih_00000000000000000000000000000000"
+            }) if launch_id == "launch_1" && outcome == "unknown"
         ));
     }
 

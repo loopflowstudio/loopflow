@@ -163,15 +163,6 @@ pub enum RunState {
 }
 
 impl RunState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Reserved => "reserved",
-            Self::Active => "active",
-            Self::Stopping => "stopping",
-            Self::Ended => "ended",
-        }
-    }
-
     pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
         match value {
             "reserved" => Ok(Self::Reserved),
@@ -305,15 +296,6 @@ pub enum LaunchState {
 }
 
 impl LaunchState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Live => "live",
-            Self::Stopping => "stopping",
-            Self::Ended => "ended",
-        }
-    }
-
     pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
         match value {
             "starting" => Ok(Self::Starting),
@@ -360,6 +342,17 @@ impl BoundaryState {
         )
     }
 
+    pub(crate) fn parse_handback(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
+            "unknown" => Ok(Self::Unknown),
+            value => Err(DurableDataError::InvalidLaunchState(format!(
+                "invalid Launch handback state: {value}"
+            ))),
+        }
+    }
 
     pub(crate) fn as_launch_outcome(self) -> &'static str {
         match self {
@@ -588,6 +581,16 @@ pub struct RunLease {
     _token: RunLeaseToken,
 }
 
+/// Direct lifecycle control observed by the exact active Run.
+///
+/// This is a projection over Run, Epoch, Launch, and Turn state. It is not a
+/// stored inbox: the mutation already landed on the authority it controls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunControl {
+    Interrupt,
+    Abandon { reason: String },
+}
+
 impl RunLease {
     pub(crate) fn new(run_id: RunId, work: WorkRef, basis: Basis, token: RunLeaseToken) -> Self {
         Self {
@@ -597,7 +600,6 @@ impl RunLease {
             _token: token,
         }
     }
-
 
     pub(crate) fn token_hash(&self) -> String {
         self._token.hash()
@@ -612,7 +614,6 @@ impl RunLeaseToken {
     pub(crate) fn from_child(value: &str) -> Self {
         Self(format!("rl_child_{value}"))
     }
-
 
     pub(crate) fn new() -> Self {
         Self(format!("rl_{}", uuid::Uuid::new_v4().simple()))
@@ -649,7 +650,6 @@ pub enum WorkStatus {
     Abandoned,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowPosition {
     pub work: WorkRef,
@@ -677,6 +677,19 @@ pub struct Review {
     pub position: FlowPosition,
     pub attention: AttentionRoute,
     pub opened_at: OffsetDateTime,
+}
+
+/// The generic surface for reopening an opaque or provider-backed Launch.
+/// Attach is a route projection; it does not create identity or liveness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaunchSurface {
+    pub launch: Launch,
+    pub work: WorkRef,
+    pub wave_id: WaveId,
+    pub home_route: String,
+    pub attention: Option<AttentionRoute>,
+    pub handback: Option<BoundaryState>,
+    pub attach_argv: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -722,7 +735,7 @@ pub enum ControlCtx<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Basis, BoundarySeed, EpochId, Steer};
+    use super::{Basis, BoundarySeed, EpochId, LaunchSurface, Steer};
     use crate::durable::{Author, ProjectId, SteerId, WorkRef};
 
     #[test]
@@ -755,5 +768,21 @@ mod tests {
                 seed.basis.epoch_id
             )
         );
+    }
+
+    #[test]
+    fn launch_surface_fixture_round_trips() {
+        let fixture = include_str!("../../../tests/fixtures/dto/launch_surface.json");
+        let surface: LaunchSurface = serde_json::from_str(fixture).unwrap();
+        assert_eq!(surface.launch.route.provider, "opaque");
+        assert_eq!(surface.work.kind(), "task");
+        assert!(matches!(
+            surface.attention,
+            Some(super::AttentionRoute::User)
+        ));
+
+        let encoded = serde_json::to_string(&surface).unwrap();
+        let decoded: LaunchSurface = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, surface);
     }
 }

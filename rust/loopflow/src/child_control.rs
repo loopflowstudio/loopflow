@@ -1,22 +1,19 @@
 //! Provider-neutral lifecycle control and live Steer delivery for child Work.
 //!
-//! Authored direction never enters the command ledger. Runners render it from
-//! the durable Work boundary and may attempt a same-Turn Send as a latency
-//! optimization. Interrupt, resume, abandon, and CI wake remain typed lifecycle
-//! commands while the shared Run controller absorbs them.
+//! Runners render authored direction from the durable Work boundary and may
+//! attempt a same-Turn Send as a latency optimization. Lifecycle control is a
+//! projection over the active Run, Launch, Turn, and Epoch.
 
 use std::collections::VecDeque;
 
 use anyhow::Result;
 
-use crate::child_session::{
-    ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandState, ChildRef, ChildWriteLease,
-};
+use crate::child_session::{ChildRef, ChildWriteLease};
 use crate::durable::{Basis, BoundarySeed, SendState};
 use crate::harness::{Harness, SendCurrentOutcome};
-use crate::project_session::{ProjectEventKind, ProjectSessionId};
+use crate::project_session::ProjectSessionId;
 use crate::store::SharedStore;
-use crate::task::{TaskEventKind, TaskSessionId};
+use crate::task::TaskSessionId;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChildTarget<'a> {
@@ -44,125 +41,6 @@ impl<'a> ChildTarget<'a> {
             .await?;
         Ok(())
     }
-
-    async fn command_is_deliverable(
-        self,
-        store: &SharedStore,
-        command_id: &ChildCommandId,
-    ) -> Result<bool> {
-        let claimed = store
-            .get_child_command(command_id)
-            .await?
-            .is_some_and(|command| {
-                let targets_match = match (self, &command.target) {
-                    (Self::Project(target_id, _), ChildRef::Project(command_id)) => {
-                        target_id == command_id
-                    }
-                    (Self::Task(target_id, _), ChildRef::Task(command_id)) => {
-                        target_id == command_id
-                    }
-                    _ => false,
-                };
-                targets_match
-                    && matches!(
-                        command.state,
-                        ChildCommandState::Claimed | ChildCommandState::Delivering
-                    )
-            });
-        Ok(claimed)
-    }
-
-    async fn record_claimed(self, store: &SharedStore, command_id: ChildCommandId) -> Result<()> {
-        self.record_command_changed(store, command_id, ChildCommandState::Claimed, None)
-            .await
-    }
-
-    pub(crate) async fn accept_command(
-        self,
-        store: &SharedStore,
-        command_id: ChildCommandId,
-    ) -> Result<()> {
-        let target = self.as_ref();
-        store
-            .accept_child_command_for_lease(&target, self.lease(), &command_id, None)
-            .await?;
-        self.record_command_changed(store, command_id, ChildCommandState::Accepted, None)
-            .await
-    }
-
-    pub(crate) async fn supersede_command(
-        self,
-        store: &SharedStore,
-        command_id: ChildCommandId,
-        reason: &str,
-    ) -> Result<()> {
-        let target = self.as_ref();
-        store
-            .supersede_child_command_for_lease(&target, self.lease(), &command_id)
-            .await?;
-        self.record_command_changed(
-            store,
-            command_id,
-            ChildCommandState::Superseded,
-            Some(crate::security::sanitize_operator_message(reason)),
-        )
-        .await
-    }
-
-    pub(crate) async fn fail_command(
-        self,
-        store: &SharedStore,
-        command_id: ChildCommandId,
-        error: &str,
-    ) -> Result<()> {
-        let error = crate::security::sanitize_operator_message(error);
-        let target = self.as_ref();
-        store
-            .fail_child_command_for_lease(&target, self.lease(), &command_id, None, error.clone())
-            .await?;
-        self.record_command_changed(store, command_id, ChildCommandState::Failed, Some(error))
-            .await
-    }
-
-    async fn record_command_changed(
-        self,
-        store: &SharedStore,
-        command_id: ChildCommandId,
-        state: ChildCommandState,
-        error: Option<String>,
-    ) -> Result<()> {
-        match self {
-            Self::Project(session_id, lease) => {
-                store
-                    .append_project_event_for_lease(
-                        session_id,
-                        lease,
-                        &ProjectEventKind::CommandChanged {
-                            command_id,
-                            state,
-                            effect: None,
-                            error,
-                        },
-                    )
-                    .await?;
-            }
-            Self::Task(session_id, lease) => {
-                store
-                    .append_task_event_for_lease(
-                        session_id,
-                        lease,
-                        &TaskEventKind::CommandChanged {
-                            command_id,
-                            state,
-                            effect: None,
-                            error,
-                        },
-                    )
-                    .await?;
-            }
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -182,6 +60,32 @@ pub(crate) enum CommandStop {
     Abandoned(String),
 }
 
+/// Apply direct Run/Work control to the provider boundary owned by this body.
+pub(crate) async fn absorb_run_control(
+    store: &SharedStore,
+    target: ChildTarget<'_>,
+    harness: &mut dyn Harness,
+    turn_active: bool,
+    active_turn_id: Option<&str>,
+) -> Result<Option<CommandStop>> {
+    target.validate_write_lease(store).await?;
+    let run_lease = store
+        .run_lease_for_child(&target.as_ref(), target.lease())
+        .await?;
+    match store.run_control(&run_lease, active_turn_id).await? {
+        Some(crate::durable::RunControl::Interrupt) => {
+            if turn_active {
+                harness.interrupt().await?;
+            }
+            Ok(Some(CommandStop::Interrupted))
+        }
+        Some(crate::durable::RunControl::Abandon { reason }) => {
+            Ok(Some(CommandStop::Abandoned(reason)))
+        }
+        None => Ok(None),
+    }
+}
+
 pub(crate) async fn take_current_input(
     _store: &SharedStore,
     _target: ChildTarget<'_>,
@@ -196,54 +100,6 @@ pub(crate) async fn input_is_current(
     _input: &PendingInput,
 ) -> Result<bool> {
     Ok(true)
-}
-
-pub(crate) async fn absorb_commands(
-    store: &SharedStore,
-    target: ChildTarget<'_>,
-    commands: impl IntoIterator<Item = ChildCommand>,
-    harness: &mut dyn Harness,
-    turn_active: bool,
-    _pending: &mut VecDeque<PendingInput>,
-) -> Result<Option<CommandStop>> {
-    for command in commands {
-        if !target.command_is_deliverable(store, &command.id).await? {
-            continue;
-        }
-        target.record_claimed(store, command.id.clone()).await?;
-        match command.kind {
-            ChildCommandKind::Interrupt => {
-                if turn_active {
-                    target.validate_write_lease(store).await?;
-                    if let Err(error) = harness.interrupt().await {
-                        target
-                            .fail_command(store, command.id, &error.to_string())
-                            .await?;
-                        return Err(error);
-                    }
-                }
-                target.accept_command(store, command.id).await?;
-                return Ok(Some(CommandStop::Interrupted));
-            }
-            ChildCommandKind::Resume => {
-                target.accept_command(store, command.id).await?;
-            }
-            ChildCommandKind::CiFix { .. } => {
-                target
-                    .supersede_command(
-                        store,
-                        command.id,
-                        "a live body already owns this PR; the ci-fix wake arrived too late to seed it",
-                    )
-                    .await?;
-            }
-            ChildCommandKind::Abandon { reason } => {
-                target.accept_command(store, command.id).await?;
-                return Ok(Some(CommandStop::Abandoned(reason)));
-            }
-        }
-    }
-    Ok(None)
 }
 
 /// Attempt each outstanding Steer once against the exact observed Turn.
@@ -303,24 +159,4 @@ pub(crate) async fn apply_input(
 ) -> Result<()> {
     target.validate_write_lease(store).await?;
     harness.send_input(&input.text).await
-}
-
-pub(crate) async fn reconcile_stale_deliveries(
-    store: &SharedStore,
-    target: ChildTarget<'_>,
-) -> Result<()> {
-    let commands = store
-        .mark_stale_child_deliveries_uncertain_for_lease(&target.as_ref(), target.lease())
-        .await?;
-    for command in commands {
-        target
-            .record_command_changed(
-                store,
-                command.id,
-                ChildCommandState::Uncertain,
-                command.error,
-            )
-            .await?;
-    }
-    Ok(())
 }

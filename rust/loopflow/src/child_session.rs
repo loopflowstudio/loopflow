@@ -1,9 +1,4 @@
-//! Durable control shared by Project and Task Sessions.
-//!
-//! This module owns typed child identity, control attribution, process
-//! generations, commands, directives, decisions, and observation envelopes.
-//! Project and Task keep their own lifecycle states, events, runners, and
-//! public CLI nouns; there is no generic child lifecycle.
+//! Compatibility types for Project and Task process containment.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,7 +8,7 @@ use time::OffsetDateTime;
 
 use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
-use crate::task::{CiCheck, TaskEvent, TaskEventKind, TaskSessionId};
+use crate::task::{TaskEvent, TaskEventKind, TaskSessionId};
 
 pub(crate) const PROJECT_LEASE_TOKEN_ENV: &str = "LF_PROJECT_LEASE_TOKEN";
 pub(crate) const PROJECT_GENERATION_ENV: &str = "LF_PROJECT_GENERATION";
@@ -81,13 +76,6 @@ pub enum ChildSessionDataError {
     #[error("invalid child write lease: {0}")]
     InvalidWriteLease(String),
 }
-
-prefixed_uuid_id!(
-    ChildCommandId,
-    "cc_",
-    ChildSessionDataError,
-    ChildSessionDataError::InvalidId
-);
 
 /// Opaque capability held only by the body allowed to write for a Session.
 ///
@@ -349,137 +337,6 @@ pub struct AbandonIntent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ChildCommandKind {
-    Interrupt,
-    Resume,
-    Abandon {
-        reason: String,
-    },
-    /// An automatic wake for a failed required-check head on this Task's open PR.
-    ///
-    /// Unlike every other variant this is not input to a live body: it is a
-    /// launch intent whose payload becomes the born body's seed, consumed before
-    /// a harness exists. `incident_identity` is the dedup key — minted by and
-    /// shared with [`crate::task::CiIncident`], so one (repo, PR, failed head,
-    /// failure set) mints one command, forever.
-    ///
-    /// The command stays [`ChildCommandState::Claimed`] for the whole bounded
-    /// repair turn: the claim predicate reassigns `persisted`/`claimed` rows to a
-    /// successor generation, so the reclaim *is* the durable "this body exists to
-    /// repair CI" signal across a crash. Settling it is the repair turn's job,
-    /// not the wake's.
-    ///
-    /// The repository is deliberately absent: the command's `target` fixes the
-    /// Task and therefore the repo, and `incident_identity` encodes it again. A
-    /// third copy could only drift.
-    CiFix {
-        incident_identity: String,
-        pr_number: u32,
-        head_sha: String,
-        failing_checks: Vec<CiCheck>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ChildCommandState {
-    Persisted,
-    Claimed,
-    /// Provider delivery has begun. A process crash from here is ambiguous.
-    Delivering,
-    Accepted,
-    Failed,
-    Superseded,
-    /// The process died after delivery began but before Loopflow recorded the outcome.
-    Uncertain,
-}
-
-impl ChildCommandState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Persisted => "persisted",
-            Self::Claimed => "claimed",
-            Self::Delivering => "delivering",
-            Self::Accepted => "accepted",
-            Self::Failed => "failed",
-            Self::Superseded => "superseded",
-            Self::Uncertain => "uncertain",
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Accepted | Self::Failed | Self::Superseded | Self::Uncertain
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ChildCommandEffect {
-    LiveSteer,
-    NextTurn,
-    Replacement,
-    Decision,
-}
-
-impl ChildCommandEffect {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::LiveSteer => "live_steer",
-            Self::NextTurn => "next_turn",
-            Self::Replacement => "replacement",
-            Self::Decision => "decision",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
-pub enum ChildCommandSource {
-    Wave(WaveId),
-    Project(ProjectSessionId),
-    Human,
-    Attachment,
-    System,
-    /// A human edit or comment observed on the linked Linear issue, ingested as
-    /// Task direction. Distinct from `Human` so receipts and status can show the
-    /// direction came from Linear, and so it never carries the operator-resume
-    /// affordance that `Human` does.
-    Linear,
-}
-
-/// Who is issuing a Task/Project control command, resolved **once** at the
-/// invocation boundary from ambient context and then passed down — never
-/// re-derived from the environment deeper in the stack. It maps 1:1 onto the
-/// stored [`ChildCommandSource`]; the separate type exists so the resolution
-/// rule (fail-closed on an inconsistent managed session, live-route validation
-/// for a Project caller) has one home and cannot drift between the Task and
-/// Project control paths.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CallerAuthority {
-    /// A human at the CLI, or any process carrying no managed-session marker.
-    Operator,
-    Wave(WaveId),
-    Project(ProjectSessionId),
-}
-
-impl CallerAuthority {
-    /// The stored provenance this authority records on the command.
-    pub fn into_source(self) -> ChildCommandSource {
-        match self {
-            Self::Operator => ChildCommandSource::Human,
-            Self::Wave(id) => ChildCommandSource::Wave(id),
-            Self::Project(id) => ChildCommandSource::Project(id),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum ChildRef {
     Project(ProjectSessionId),
@@ -500,44 +357,6 @@ impl ChildRef {
             Self::Task(id) => id.as_str(),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChildCommand {
-    pub id: ChildCommandId,
-    pub target: ChildRef,
-    pub source: ChildCommandSource,
-    pub kind: ChildCommandKind,
-    pub state: ChildCommandState,
-    pub effect: Option<ChildCommandEffect>,
-    pub created_at: OffsetDateTime,
-    pub claimed_by_generation: Option<u32>,
-    pub accepted_at: Option<OffsetDateTime>,
-    pub error: Option<String>,
-}
-
-impl ChildCommand {
-    pub fn new(target: ChildRef, source: ChildCommandSource, kind: ChildCommandKind) -> Self {
-        let effect = None;
-        Self {
-            id: ChildCommandId::new(),
-            target,
-            source,
-            kind,
-            state: ChildCommandState::Persisted,
-            effect,
-            created_at: OffsetDateTime::now_utc(),
-            claimed_by_generation: None,
-            accepted_at: None,
-            error: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BoundaryResult<S> {
-    Commands(Vec<ChildCommand>),
-    Stopped(S),
 }
 
 // ── Body observation ────────────────────────────────────────────────────────
@@ -680,38 +499,15 @@ pub(crate) fn body_progress_age(
 pub(crate) enum BodyRecoveryPlan {
     /// The observation is not a stall, so recovery has no work.
     LeaveAlone,
-    /// No provider delivery is ambiguous; revoke, reap, and start generation+1.
+    /// Revoke, reap, and start another Run from durable Work input.
     Restart,
-    /// Delivery began without a recorded outcome. Reap the body, preserve these
-    /// commands as uncertain, and wait for a human instead of replaying them.
-    NeedsInput { commands: Vec<ChildCommandId> },
 }
 
-pub(crate) fn plan_body_recovery(
-    observation: &BodyObservation,
-    commands: &[ChildCommand],
-    generation: u32,
-) -> BodyRecoveryPlan {
+pub(crate) fn plan_body_recovery(observation: &BodyObservation) -> BodyRecoveryPlan {
     if observation.category != BodyCategory::Stalled {
         return BodyRecoveryPlan::LeaveAlone;
     }
-    let uncertain = commands
-        .iter()
-        .filter(|command| {
-            matches!(
-                command.state,
-                ChildCommandState::Delivering | ChildCommandState::Uncertain
-            ) && command.claimed_by_generation == Some(generation)
-        })
-        .map(|command| command.id.clone())
-        .collect::<Vec<_>>();
-    if uncertain.is_empty() {
-        BodyRecoveryPlan::Restart
-    } else {
-        BodyRecoveryPlan::NeedsInput {
-            commands: uncertain,
-        }
-    }
+    BodyRecoveryPlan::Restart
 }
 
 /// Consecutive automatic recovery attempts a strand gets before Loopflow stops
@@ -1003,10 +799,9 @@ mod tests {
     use super::{
         body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
         plan_stranded_recovery, BodyCategory, BodyControl, BodyEvidence, BodyIntent, BodyOwner,
-        BodyRecoveryPlan, ChildBodyOutcome, ChildCommand, ChildCommandId, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildLeaseState, ChildLeaseToken,
-        ChildProcessGeneration, ChildRef, ChildWriteLease, Duration, StrandedPlan, TaskEvent,
-        TaskEventKind, TaskSessionId, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
+        BodyRecoveryPlan, ChildBodyOutcome, ChildLeaseState, ChildLeaseToken,
+        ChildProcessGeneration, ChildWriteLease, Duration, StrandedPlan, TaskEvent, TaskEventKind,
+        TaskSessionId, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
     };
 
     fn evidence(intent: BodyIntent, alive: bool, progress: Duration) -> BodyEvidence {
@@ -1018,66 +813,6 @@ mod tests {
             step: Some("task_pursue".to_string()),
             reason: "running".to_string(),
         }
-    }
-
-    #[test]
-    fn linear_command_source_round_trips_on_the_wire() {
-        use super::ChildCommandSource;
-        let json = serde_json::to_string(&ChildCommandSource::Linear).expect("serialize");
-        assert_eq!(json, r#"{"kind":"linear"}"#);
-        let parsed: ChildCommandSource = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed, ChildCommandSource::Linear);
-    }
-
-    /// The wake rides `child_commands.kind_json`, so its shape is the migration
-    /// this change did not need. It must survive the trip intact: the payload is
-    /// the body's seed and the identity is the dedup key, and a field lost on the
-    /// wire is a repair aimed at the wrong failure.
-    #[test]
-    fn a_ci_fix_wake_round_trips_its_payload_on_the_wire() {
-        let kind = ChildCommandKind::CiFix {
-            incident_identity: "github:ci:loopflow/loopflow:1042:a1b2c3d:9f0e".to_string(),
-            pr_number: 1042,
-            head_sha: "a1b2c3d".to_string(),
-            failing_checks: vec![
-                crate::task::CiCheck {
-                    name: "cargo-fmt".to_string(),
-                    url: Some("https://ci/fmt".to_string()),
-                },
-                crate::task::CiCheck {
-                    name: "clippy".to_string(),
-                    url: None,
-                },
-            ],
-        };
-        let json = serde_json::to_string(&kind).expect("serialize");
-        assert!(
-            json.contains(r#""kind":"ci_fix""#),
-            "the variant is tagged on `kind` like every other command, got: {json}"
-        );
-        let parsed: ChildCommandKind = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed, kind);
-    }
-
-    /// A wake is a command, not direction. It must not allocate a Steer revision
-    /// or make completion wait on input no User or parent Run authored.
-    #[test]
-    fn a_ci_fix_wake_has_no_effect_on_a_live_turn() {
-        let command = ChildCommand::new(
-            ChildRef::Task(crate::task::TaskSessionId::new()),
-            ChildCommandSource::System,
-            ChildCommandKind::CiFix {
-                incident_identity: "github:ci:owner/repo:1:h1:d".to_string(),
-                pr_number: 1,
-                head_sha: "h1".to_string(),
-                failing_checks: vec![],
-            },
-        );
-        assert_eq!(
-            command.effect, None,
-            "a wake's effect is a launch, not a delivery into an existing turn"
-        );
-        assert_eq!(command.state, ChildCommandState::Persisted);
     }
 
     #[test]
@@ -1143,34 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn stalled_recovery_refuses_to_replay_an_ambiguous_delivery() {
-        let observation = observe(
-            &evidence(BodyIntent::Active, true, Duration::from_secs(31 * 60)),
-            DEFAULT_STALL_AFTER,
-        );
-        let target = ChildRef::Task(crate::task::TaskSessionId::new());
-        let mut delivering = ChildCommand::new(
-            target.clone(),
-            ChildCommandSource::Human,
-            ChildCommandKind::Interrupt,
-        );
-        delivering.state = ChildCommandState::Delivering;
-        delivering.claimed_by_generation = Some(7);
-        let mut claimed =
-            ChildCommand::new(target, ChildCommandSource::Human, ChildCommandKind::Resume);
-        claimed.state = ChildCommandState::Claimed;
-        claimed.claimed_by_generation = Some(7);
-
-        assert_eq!(
-            plan_body_recovery(&observation, &[delivering.clone(), claimed], 7),
-            BodyRecoveryPlan::NeedsInput {
-                commands: vec![delivering.id],
-            }
-        );
-    }
-
-    #[test]
-    fn stalled_recovery_restarts_only_from_a_replay_safe_boundary() {
+    fn stalled_recovery_reconstructs_from_durable_work() {
         let stalled = observe(
             &evidence(BodyIntent::Active, true, Duration::from_secs(31 * 60)),
             DEFAULT_STALL_AFTER,
@@ -1179,42 +887,9 @@ mod tests {
             &evidence(BodyIntent::Active, true, Duration::from_secs(1)),
             DEFAULT_STALL_AFTER,
         );
-        let mut claimed = ChildCommand::new(
-            ChildRef::Task(crate::task::TaskSessionId::new()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume,
-        );
-        claimed.state = ChildCommandState::Claimed;
-        claimed.claimed_by_generation = Some(7);
 
-        assert_eq!(
-            plan_body_recovery(&stalled, &[claimed.clone()], 7),
-            BodyRecoveryPlan::Restart,
-        );
-        assert_eq!(
-            plan_body_recovery(&working, &[claimed], 7),
-            BodyRecoveryPlan::LeaveAlone,
-        );
-    }
-
-    #[test]
-    fn uncertainty_from_an_older_generation_does_not_poison_its_successor() {
-        let stalled = observe(
-            &evidence(BodyIntent::Active, true, Duration::from_secs(31 * 60)),
-            DEFAULT_STALL_AFTER,
-        );
-        let mut old = ChildCommand::new(
-            ChildRef::Task(crate::task::TaskSessionId::new()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Interrupt,
-        );
-        old.state = ChildCommandState::Uncertain;
-        old.claimed_by_generation = Some(6);
-
-        assert_eq!(
-            plan_body_recovery(&stalled, &[old], 7),
-            BodyRecoveryPlan::Restart,
-        );
+        assert_eq!(plan_body_recovery(&stalled), BodyRecoveryPlan::Restart);
+        assert_eq!(plan_body_recovery(&working), BodyRecoveryPlan::LeaveAlone);
     }
 
     #[test]
@@ -1272,13 +947,6 @@ mod tests {
             obs.controls,
             vec![BodyControl::Resume, BodyControl::Abandon]
         );
-    }
-
-    #[test]
-    fn child_ids_are_prefixed_and_round_trip() {
-        let command = ChildCommandId::new();
-
-        assert_eq!(ChildCommandId::parse(command.as_str()).unwrap(), command);
     }
 
     #[test]

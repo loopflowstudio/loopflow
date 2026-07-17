@@ -1,9 +1,7 @@
-//! Durable Project and Task Sessions: commands, directives, events, and the
-//! observation outbox that links each event to its next responsible recipient.
+//! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child_session::{
-    AbandonIntent, BoundaryResult, ChildBodyHandoffRequest, ChildBodyOutcome, ChildCommand,
-    ChildCommandEffect, ChildCommandId, ChildProcessGeneration, ChildRef, ChildWriteLease,
+    ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ChildRef, ChildWriteLease,
     ObservationRecipient,
 };
 use crate::durable::Author;
@@ -241,7 +239,20 @@ impl Store {
         let _promotion_lock = _acquire_promotion_reservation_lock().await?;
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_process(&session, expected_status)
+            store.reserve_task_process(&session, expected_status, None)
+        })
+        .await
+    }
+
+    pub(crate) async fn reserve_task_process_for_trigger(
+        &self,
+        session: &TaskSession,
+        expected_status: TaskSessionStatus,
+        trigger: crate::durable::RunTrigger,
+    ) -> StoreResult<Option<ChildWriteLease>> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_task_process(&session, expected_status, Some(&trigger))
         })
         .await
     }
@@ -471,14 +482,6 @@ impl Store {
         .await
     }
 
-    pub async fn create_child_command(&self, command: &ChildCommand) -> StoreResult<()> {
-        let command = command.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_child_command(&command)
-        })
-        .await
-    }
-
     pub async fn task_linear_observation(
         &self,
         session_id: &TaskSessionId,
@@ -526,254 +529,18 @@ impl Store {
         .await
     }
 
-    pub async fn create_child_abandon_command(
-        &self,
-        command: &ChildCommand,
-        intent: &AbandonIntent,
-    ) -> StoreResult<()> {
-        let command = command.clone();
-        let intent = intent.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_child_abandon_command(&command, &intent)
-        })
-        .await
-    }
-
-    /// Create a `ci-fix` wake unless this incident identity already has one.
-    /// Returns the surviving command and whether it was created.
-    pub async fn ensure_child_ci_fix_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<(ChildCommand, bool)> {
-        let command = command.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.ensure_child_ci_fix_command(&command)
-        })
-        .await
-    }
-
-    pub async fn supersede_and_create_child_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<Vec<ChildCommandId>> {
-        let command = command.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.supersede_and_insert_child_command(&command)
-        })
-        .await
-    }
-
-    pub async fn get_child_command(
-        &self,
-        command_id: &ChildCommandId,
-    ) -> StoreResult<Option<ChildCommand>> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.child_command(&command_id)).await
-    }
-
-    pub async fn list_child_commands(&self, target: &ChildRef) -> StoreResult<Vec<ChildCommand>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| store.child_commands(&target)).await
-    }
-
-    pub async fn claim_child_commands(
-        &self,
-        target: &ChildRef,
-        generation: u32,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.claim_child_commands(&target, generation)
-        })
-        .await
-    }
-
-    pub(crate) async fn claim_child_commands_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let target = target.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.claim_child_commands_for_lease(&target, &lease)
-        })
-        .await
-    }
-
-    pub async fn claim_task_commands_or_stop(
-        &self,
-        session_id: &TaskSessionId,
-        generation: u32,
-        stopped_status: TaskSessionStatus,
-        reason: &str,
-    ) -> StoreResult<BoundaryResult<TaskSession>> {
-        let session_id = session_id.clone();
-        let reason = reason.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.claim_task_commands_or_stop(&session_id, generation, stopped_status, &reason)
-        })
-        .await
-    }
-
-    pub(crate) async fn claim_task_commands_or_stop_for_lease(
+    pub(crate) async fn stop_task_for_lease(
         &self,
         session_id: &TaskSessionId,
         lease: &ChildWriteLease,
         stopped_status: TaskSessionStatus,
         reason: &str,
-    ) -> StoreResult<BoundaryResult<TaskSession>> {
+    ) -> StoreResult<TaskSession> {
         let session_id = session_id.clone();
         let lease = lease.clone();
         let reason = reason.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_task_commands_or_stop_for_lease(
-                &session_id,
-                &lease,
-                stopped_status,
-                &reason,
-            )
-        })
-        .await
-    }
-
-    pub async fn accept_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-    ) -> StoreResult<()> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.accept_child_command(&command_id, effect)
-        })
-        .await
-    }
-
-    pub(crate) async fn accept_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-    ) -> StoreResult<()> {
-        let target = target.clone();
-        let lease = lease.clone();
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.accept_child_command_for_lease(&target, &lease, &command_id, effect)
-        })
-        .await
-    }
-
-    pub async fn mark_child_command_delivering(
-        &self,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_child_command_delivering(&command_id, effect)
-        })
-        .await
-    }
-
-    pub async fn mark_stale_child_deliveries_uncertain(
-        &self,
-        target: &ChildRef,
-        generation: u32,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let target = target.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_stale_child_deliveries_uncertain(&target, generation)
-        })
-        .await
-    }
-
-    pub(crate) async fn mark_stale_child_deliveries_uncertain_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let target = target.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_stale_child_deliveries_uncertain_for_lease(&target, &lease)
-        })
-        .await
-    }
-
-    pub async fn set_child_command_effect(
-        &self,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_child_command_effect(&command_id, effect)
-        })
-        .await
-    }
-
-    pub async fn fail_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-        error: String,
-    ) -> StoreResult<()> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.fail_child_command(&command_id, effect, &error)
-        })
-        .await
-    }
-
-    /// Pre-delivery rejection of a still-`persisted` command (never claimed),
-    /// recording `error`. The supervisor-`Resume` open-PR race uses this to
-    /// terminalize the command it just created without racing a body: unlike
-    /// [`fail_child_command`], whose UPDATE matches only `claimed`/`delivering`,
-    /// this matches only `persisted`.
-    pub async fn reject_persisted_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        error: String,
-    ) -> StoreResult<()> {
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reject_persisted_child_command(&command_id, &error)
-        })
-        .await
-    }
-
-    /// Mark one claimed command superseded because circumstances made it moot.
-    /// Unlike failing it, this records no error — nothing went wrong.
-    pub(crate) async fn supersede_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-    ) -> StoreResult<()> {
-        let target = target.clone();
-        let lease = lease.clone();
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.supersede_child_command_for_lease(&target, &lease, &command_id)
-        })
-        .await
-    }
-
-    pub(crate) async fn fail_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-        error: String,
-    ) -> StoreResult<()> {
-        let target = target.clone();
-        let lease = lease.clone();
-        let command_id = command_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.fail_child_command_for_lease(&target, &lease, &command_id, effect, &error)
+            store.stop_task_for_lease(&session_id, &lease, stopped_status, &reason)
         })
         .await
     }
@@ -1027,7 +794,7 @@ impl Store {
         let _promotion_lock = _acquire_promotion_reservation_lock().await?;
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_project_process(&session, expected_status)
+            store.reserve_project_process(&session, expected_status, None)
         })
         .await
     }
@@ -1078,36 +845,17 @@ impl Store {
         .await
     }
 
-    pub async fn claim_project_commands_or_stop(
-        &self,
-        session_id: &ProjectSessionId,
-        generation: u32,
-        stopped_status: ProjectSessionStatus,
-        reason: String,
-    ) -> StoreResult<BoundaryResult<ProjectSession>> {
-        let session_id = session_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.claim_project_commands_or_stop(&session_id, generation, stopped_status, &reason)
-        })
-        .await
-    }
-
-    pub(crate) async fn claim_project_commands_or_stop_for_lease(
+    pub(crate) async fn stop_project_for_lease(
         &self,
         session_id: &ProjectSessionId,
         lease: &ChildWriteLease,
         stopped_status: ProjectSessionStatus,
         reason: String,
-    ) -> StoreResult<BoundaryResult<ProjectSession>> {
+    ) -> StoreResult<ProjectSession> {
         let session_id = session_id.clone();
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.claim_project_commands_or_stop_for_lease(
-                &session_id,
-                &lease,
-                stopped_status,
-                &reason,
-            )
+            store.stop_project_for_lease(&session_id, &lease, stopped_status, &reason)
         })
         .await
     }

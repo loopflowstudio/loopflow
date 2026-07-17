@@ -11,20 +11,15 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    prefixed_uuid_id, AbandonIntent, ChildCommandEffect, ChildCommandId, ChildCommandState,
-    ChildLeaseState, ChildProcessGeneration,
+    prefixed_uuid_id, AbandonIntent, ChildLeaseState, ChildProcessGeneration,
 };
+use crate::durable::RunId;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
-use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
-    InteractionReviewMessageAuthor,
-};
 use crate::project_session::ProjectSessionId;
 use crate::session_context::TaskLaunchReceipt;
 
 pub mod actions;
-pub(crate) mod interactive_rendezvous;
 pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -347,7 +342,7 @@ impl CiObservation {
     ///
     /// This asks only about legality. Whether a wake has already fired for this
     /// exact failure is a separate question with a separate owner — the durable
-    /// `ChildCommandKind::CiFix` ledger, keyed on the incident identity. Those
+    /// CI incident, keyed on the incident identity and claimed by one Run. Those
     /// two questions used to be conflated in one mutable JSON marker on this
     /// struct, which meant the wake was deduplicated by a value re-derived on
     /// every reconcile and committed only once a body had already been born.
@@ -414,7 +409,9 @@ pub struct CiIncident {
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,
     pub webhook_received_at: Option<OffsetDateTime>,
-    pub trigger_command_id: Option<ChildCommandId>,
+    /// Active or most recent Run selected to repair this incident. A successor
+    /// may replace it only after the prior Run lost execution authority.
+    pub claimed_run_id: Option<RunId>,
     pub responded_at: Option<OffsetDateTime>,
     pub green_at: Option<OffsetDateTime>,
     pub merged_at: Option<OffsetDateTime>,
@@ -815,9 +812,8 @@ impl TaskSession {
     /// current-head failure evidence — never a blind wake over passing or pending
     /// work, and never past the terminal, abandon, or publishing bars.
     ///
-    /// The bar answers legality only. "Have we already woken for this failure?"
-    /// is the command ledger's question, answered once by the incident identity
-    /// on `ChildCommandKind::CiFix` — not asked again here.
+    /// The bar answers legality only. The incident's Run claim answers whether
+    /// this failure already owns execution.
     pub fn ci_fix_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
             return Some(bar);
@@ -1049,27 +1045,8 @@ pub enum TaskEventKind {
         to: TaskSessionStatus,
         reason: String,
     },
-    CommandChanged {
-        command_id: ChildCommandId,
-        state: ChildCommandState,
-        effect: Option<ChildCommandEffect>,
-        error: Option<String>,
-    },
     Progress {
         summary: String,
-    },
-    InteractionReviewRequested {
-        review: Box<InteractionReview>,
-    },
-    InteractionReviewMessage {
-        review_id: InteractionReviewId,
-        author: InteractionReviewMessageAuthor,
-        text: String,
-    },
-    InteractionReviewCompleted {
-        review_id: InteractionReviewId,
-        disposition: InteractionReviewDisposition,
-        outcome: String,
     },
     PrStarted {
         pr_id: TaskPrId,
@@ -1104,16 +1081,10 @@ impl TaskEventKind {
     pub fn is_project_observable(&self) -> bool {
         match self {
             Self::Started | Self::Progress { .. } => false,
-            Self::InteractionReviewMessage {
-                author: InteractionReviewMessageAuthor::Reviewer,
-                ..
-            }
-            | Self::InteractionReviewCompleted { .. } => false,
             Self::BodyLeaseChanged { process } => matches!(
                 process.state,
                 ChildLeaseState::Revoked | ChildLeaseState::Finished
             ),
-            Self::CommandChanged { state, .. } => state.is_terminal(),
             _ => true,
         }
     }
@@ -1123,12 +1094,6 @@ impl TaskEventKind {
     /// escalates by emitting its own `DecisionRequested` event.
     pub fn is_root_wave_observable(&self) -> bool {
         self.is_project_observable()
-            && !matches!(
-                self,
-                Self::InteractionReviewRequested { .. }
-                    | Self::InteractionReviewMessage { .. }
-                    | Self::InteractionReviewCompleted { .. }
-            )
     }
 }
 
@@ -1145,7 +1110,6 @@ pub struct TaskObservation {
     pub session_id: TaskSessionId,
     pub issue_identifier: String,
     pub event_id: i64,
-    pub control_source: Option<crate::child_session::ChildCommandSource>,
     pub event: TaskEventKind,
 }
 
@@ -1155,11 +1119,8 @@ impl TaskObservation {
     }
 
     pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&serde_json::json!({
-            "control_source": self.control_source,
-            "event": self.event,
-        }))
-        .expect("Task observation always serializes to structured JSON");
+        let payload = serde_json::to_string(&self.event)
+            .expect("Task observation always serializes to structured JSON");
         format!(
             "<task_observation session_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
             self.session_id, self.issue_identifier, self.event_id, payload
@@ -1227,8 +1188,8 @@ pub struct LinearObservationOutcome {
 /// Linear observation cursor and ingested-comment ledger onto it; `false` when a
 /// non-terminal successor already existed (a concurrent or retried run), in
 /// which case the carry transaction was a no-op and the existing Session is
-/// returned. Historical lifecycle commands and authored Steers stay on the
-/// predecessor for attribution in both cases.
+/// returned. Historical authored Steers stay on the predecessor for attribution
+/// in both cases.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSessionSuccession {
     pub session: TaskSession,
@@ -1238,10 +1199,9 @@ pub struct TaskSessionSuccession {
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, ChildCommandId, ChildCommandState, GithubPr, PmWritebackOperation,
-        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskGateProposal,
-        TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr, TaskPrId, TaskSession,
-        TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
+        TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr, TaskPrId,
+        TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
@@ -1307,7 +1267,6 @@ mod tests {
             session_id: TaskSessionId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
-            control_source: None,
             event: super::TaskEventKind::Failed {
                 error: "provider stopped".to_string(),
                 resumable: true,
@@ -1325,23 +1284,6 @@ mod tests {
         assert!(TaskSessionStatus::Abandoned.is_terminal());
         assert!(!TaskSessionStatus::Waiting.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
-    }
-
-    #[test]
-    fn project_observes_command_outcomes_not_transport_chatter() {
-        let event = |state| TaskEventKind::CommandChanged {
-            command_id: ChildCommandId::new(),
-            state,
-            effect: None,
-            error: None,
-        };
-
-        assert!(!event(ChildCommandState::Persisted).is_project_observable());
-        assert!(!event(ChildCommandState::Claimed).is_project_observable());
-        assert!(!event(ChildCommandState::Delivering).is_project_observable());
-        assert!(event(ChildCommandState::Accepted).is_project_observable());
-        assert!(event(ChildCommandState::Failed).is_project_observable());
-        assert!(event(ChildCommandState::Uncertain).is_project_observable());
     }
 
     #[test]

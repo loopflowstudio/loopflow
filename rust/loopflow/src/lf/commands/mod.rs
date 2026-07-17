@@ -7,16 +7,15 @@ pub mod doctor;
 #[cfg(test)]
 pub(crate) mod fixtures;
 pub mod flow;
-pub mod handoff;
 pub mod home;
 pub mod install;
+pub mod launch;
 pub mod list;
 pub mod memory;
 pub mod ops;
 pub mod profile;
 pub mod radio;
 pub mod receipt;
-pub mod reviews;
 pub mod run;
 pub mod runs;
 pub mod ssh;

@@ -5,14 +5,14 @@ import SwiftUI
 /// Active Sessions: a machine-wide census of every live body, grouped by Wave.
 /// The projection (`ActiveSessionsCensus`) owns every rule — red propagation,
 /// evidence classification, and which rows are view-only. This view only renders
-/// what the census decided and, for a deliberate interactive handoff, offers the
+/// what the census decided and, for a deliberate interactive launch, offers the
 /// one mutation: Open, which re-attaches the exact durable Session in Ghostty.
 struct ActiveSessionsView: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
 
     @Environment(\.palette) private var palette
     @State private var reading = ActiveSessionsReading()
-    @State private var openTarget: InteractiveHandoffListRow?
+    @State private var openTarget: LaunchSurfaceRecord?
 
     var body: some View {
         ScrollView {
@@ -32,7 +32,7 @@ struct ActiveSessionsView: View {
                         emptyState
                     }
                     ForEach(census.groups) { group in
-                        WaveGroupView(group: group, onOpen: openHandoff)
+                        WaveGroupView(group: group, onOpen: openLaunch)
                     }
                 } else if reading.error == nil {
                     ProgressView().padding(Spacing.xxl)
@@ -49,8 +49,8 @@ struct ActiveSessionsView: View {
             }
         }
         .refreshable { await load() }
-        .sheet(item: $openTarget) { handoff in
-            HandoffAttachSheet(handoff: handoff, query: query) { openTarget = nil }
+        .sheet(item: $openTarget) { launch in
+            LaunchAttachSheet(launch: launch, query: query) { openTarget = nil }
         }
         .accessibilityIdentifier("control-active-sessions")
     }
@@ -74,10 +74,10 @@ struct ActiveSessionsView: View {
             .textSelection(.enabled)
     }
 
-    private func openHandoff(_ sessionId: String) {
-        // Open needs the durable row's provider, Home, and provider session id to
+    private func openLaunch(_ launchId: String) {
+        // Open needs the durable row's provider, Home, and resume token to
         // resolve the surface; look it up from the same list the census read.
-        openTarget = reading.handoffs.first { $0.sessionId == sessionId }
+        openTarget = reading.launches.first { $0.id == launchId }
     }
 
     private func load() async {
@@ -91,23 +91,23 @@ struct ActiveSessionsView: View {
                 runs = []
                 notices.append("Direct executions unavailable: \(error.localizedDescription)")
             }
-            let handoffs: [InteractiveHandoffListRow]
+            let launches: [LaunchSurfaceRecord]
             do {
-                handoffs = try await query.activeHandoffs()
+                launches = try await query.activeLaunches()
             } catch {
-                handoffs = []
-                notices.append("Interactive handoffs unavailable: \(error.localizedDescription)")
+                launches = []
+                notices.append("Interactive launches unavailable: \(error.localizedDescription)")
             }
             reading = ActiveSessionsReading(
-                census: ActiveSessionsCensus(roadmap: roadmap, runs: runs, handoffs: handoffs),
-                handoffs: handoffs,
+                census: ActiveSessionsCensus(roadmap: roadmap, runs: runs, launches: launches),
+                launches: launches,
                 notices: notices,
                 error: nil
             )
         } catch {
             reading = ActiveSessionsReading(
                 census: nil,
-                handoffs: [],
+                launches: [],
                 notices: [],
                 error: "Active Sessions unavailable: \(error.localizedDescription)"
             )
@@ -117,7 +117,7 @@ struct ActiveSessionsView: View {
 
 private struct ActiveSessionsReading {
     var census: ActiveSessionsCensus?
-    var handoffs: [InteractiveHandoffListRow] = []
+    var launches: [LaunchSurfaceRecord] = []
     var notices: [String] = []
     var error: String?
 }
@@ -243,7 +243,7 @@ private struct SessionRowView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
                 }
-                if let reason = row.reason, !reason.isEmpty, row.kind != .handoff {
+                if let reason = row.reason, !reason.isEmpty, row.kind != .launch {
                     Text(reason)
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
@@ -253,11 +253,11 @@ private struct SessionRowView: View {
 
             Spacer(minLength: Spacing.sm)
 
-            if row.isOpenable, let sessionId = row.handoffSessionId {
+            if row.isOpenable, let sessionId = row.launchId {
                 Button("Open") { onOpen(sessionId) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .accessibilityLabel("Open interactive handoff")
+                    .accessibilityLabel("Open interactive launch")
                     .accessibilityHint(row.reason ?? "")
             }
         }
@@ -274,7 +274,7 @@ private struct SessionRowView: View {
         case .project: "square.stack.3d.up"
         case .task: "checklist"
         case .directExecution: "bolt"
-        case .handoff: "hand.raised"
+        case .launch: "hand.raised"
         }
     }
 
@@ -289,7 +289,7 @@ private struct SessionRowView: View {
         }
         if let step = row.step { parts.append(step) }
         if let age = row.ageSecs { parts.append("\(RelativeAge.phrase(age)) ago") }
-        if let owner = row.nextOwner, row.kind != .handoff {
+        if let owner = row.nextOwner, row.kind != .launch {
             parts.append("→ \(owner.rawValue)")
         }
         return parts.joined(separator: " · ")
@@ -352,21 +352,21 @@ private enum RelativeAge {
 
 // MARK: - Open: present the exact durable Session in the remembered surface
 
-/// Open resolves *where* to present the handoff — the last successful surface for
+/// Open resolves *where* to present the launch — the last successful surface for
 /// this provider on this Home, then the last overall, then embedded Ghostty — and
 /// records the choice only after a launch succeeds. Every target attaches the one
 /// durable Session by running the argv the contract hands back; this view owns no
 /// lifecycle and never creates or names the Session.
-private struct HandoffAttachSheet: View {
-    let handoff: InteractiveHandoffListRow
+private struct LaunchAttachSheet: View {
+    let launch: LaunchSurfaceRecord
     let query: RegistryQuery
     let onClose: () -> Void
-    var preferences: HandoffSurfacePreferences = .shared
+    var preferences: LaunchTargetPreferences = .shared
 
     @Environment(\.palette) private var palette
-    @State private var attach: InteractiveHandoffAttach?
-    @State private var capability: HandoffSurfaceCapability?
-    @State private var surface: HandoffSurface?
+    @State private var attach: LaunchSurfaceRecord?
+    @State private var capability: LaunchTargetCapability?
+    @State private var surface: LaunchTarget?
     @State private var externalNote: String?
     @State private var fallbackNotice: String?
     @State private var error: String?
@@ -384,7 +384,7 @@ private struct HandoffAttachSheet: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            Text("Interactive handoff")
+            Text("Interactive launch")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             if let fallbackNotice {
@@ -401,16 +401,16 @@ private struct HandoffAttachSheet: View {
                 Image(systemName: "xmark").font(Typography.caption())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Close handoff")
+            .accessibilityLabel("Close launch")
         }
         .padding(Spacing.md)
     }
 
-    /// The honest picker: only surfaces that can reach this handoff, each labeled
+    /// The honest picker: only surfaces that can reach this launch, each labeled
     /// by the reach it delivers so a worktree-only option never overclaims.
     private func surfaceMenu(
-        capability: HandoffSurfaceCapability,
-        attach: InteractiveHandoffAttach
+        capability: LaunchTargetCapability,
+        attach: LaunchSurfaceRecord
     ) -> some View {
         Menu {
             ForEach(capability.offeredOptions) { option in
@@ -423,18 +423,18 @@ private struct HandoffAttachSheet: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .accessibilityLabel("Choose where to open the handoff")
+        .accessibilityLabel("Choose where to open the launch")
     }
 
     @ViewBuilder
     private var content: some View {
         if let attach, surface == .ghostty {
-            let command = HandoffSurfaceLauncher.command(for: attach, home: handoff.home)
+            let command = LaunchTargetLauncher.command(for: attach, home: launch.home)
             GhosttyTerminalView(
                 workingDirectory: command.cwd,
                 argv: command.argv,
                 env: command.environment,
-                sessionId: "handoff-\(attach.sessionId)"
+                sessionId: "launch-\(attach.sessionId)"
             )
             .id(attach.sessionId)
         } else if let surface, let externalNote {
@@ -462,22 +462,22 @@ private struct HandoffAttachSheet: View {
 
     private func start() async {
         do {
-            let descriptor = try await query.attachHandoff(sessionId: handoff.sessionId)
+            let descriptor = try await query.attachLaunch(launchId: launch.id)
             attach = descriptor
             // Consume the descriptor's Home, not a local-only assumption: a remote
             // worktree makes local editors and plain windows unavailable. The
             // provider and session id determine whether an IDE can attach (Claude
             // with a known session id) or is worktree-only.
-            let cap = HandoffSurfaceLauncher.capability(
+            let cap = LaunchTargetLauncher.capability(
                 host: descriptor.host,
                 cwd: descriptor.cwd,
-                provider: handoff.provider,
-                providerSessionId: handoff.providerSessionId
+                provider: launch.provider,
+                providerSessionId: launch.providerSessionId
             )
             capability = cap
-            let resolution = HandoffSurfaceResolver.resolve(
-                provider: handoff.provider,
-                home: handoff.home,
+            let resolution = LaunchTargetResolver.resolve(
+                provider: launch.provider,
+                home: launch.home,
                 memory: preferences.memory,
                 capability: cap
             )
@@ -490,7 +490,7 @@ private struct HandoffAttachSheet: View {
         }
     }
 
-    /// Present the handoff in `target`. Ghostty embeds; an external target
+    /// Present the launch in `target`. Ghostty embeds; an external target
     /// launches through the shared command. The preference advances only when a
     /// user-initiated *attach* launch succeeds — an auto-resolved fallback never
     /// rewrites the remembered surface (so a briefly-unavailable app returns), and
@@ -498,9 +498,9 @@ private struct HandoffAttachSheet: View {
     /// (opening a folder is not the surface the human attaches through). A failed
     /// launch falls back visibly to the embedded terminal.
     private func present(
-        _ target: HandoffSurface,
-        attach: InteractiveHandoffAttach,
-        capability: HandoffSurfaceCapability,
+        _ target: LaunchTarget,
+        attach: LaunchSurfaceRecord,
+        capability: LaunchTargetCapability,
         userInitiated: Bool
     ) async {
         error = nil
@@ -516,10 +516,10 @@ private struct HandoffAttachSheet: View {
             return
         }
 
-        let result = await HandoffSurfaceLauncher.launch(
+        let result = await LaunchTargetLauncher.launch(
             target,
             attach: attach,
-            home: handoff.home,
+            home: launch.home,
             reach: reach
         )
         switch result {
@@ -542,15 +542,15 @@ private struct HandoffAttachSheet: View {
     }
 
     private func recordIfEarned(
-        _ surface: HandoffSurface,
-        reach: HandoffSurfaceReach,
+        _ surface: LaunchTarget,
+        reach: LaunchTargetReach,
         userInitiated: Bool,
         launched: Bool
     ) {
         preferences.recordLaunch(
             surface,
-            provider: handoff.provider,
-            home: handoff.home,
+            provider: launch.provider,
+            home: launch.home,
             reach: reach,
             userInitiated: userInitiated,
             launchSucceeded: launched

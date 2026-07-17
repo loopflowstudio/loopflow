@@ -580,6 +580,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: 10,
+            control: None,
         };
         let turn = AgentTurnRow {
             id: turn_id.to_string(),

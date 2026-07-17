@@ -1012,6 +1012,7 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
+                control: None,
             },
         )
         .unwrap();
@@ -1056,6 +1057,7 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
+                control: None,
             },
         )
         .unwrap();

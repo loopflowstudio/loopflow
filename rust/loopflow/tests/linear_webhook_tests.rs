@@ -121,8 +121,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         .expect("no target");
     assert_eq!(outcome, WebhookOutcome::NoTarget);
 
-    // Exactly two ordered Steers landed; authored direction never enters the
-    // lifecycle command ledger.
+    // Exactly two ordered Steers landed.
     let work = rt
         .block_on(task.store.work_for_child(&target))
         .expect("work");
@@ -132,8 +131,4 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     assert_eq!(seed.steers.len(), 2);
     assert!(seed.steers[0].text.contains("New title"));
     assert!(seed.steers[1].text.contains("please prioritize"));
-    assert!(rt
-        .block_on(task.store.list_child_commands(&target))
-        .expect("commands")
-        .is_empty());
 }

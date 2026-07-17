@@ -369,6 +369,33 @@ const MIGRATIONS: &[Migration] = &[
         name: "run_launch_attention",
         sql: include_str!("migrations/0.11.032_run_launch_attention.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 33,
+        },
+        name: "launch_attention_only",
+        sql: include_str!("migrations/0.11.033_launch_attention_only.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 34,
+        },
+        name: "typed_ci_runs",
+        sql: include_str!("migrations/0.11.034_typed_ci_runs.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 35,
+        },
+        name: "drop_child_commands",
+        sql: include_str!("migrations/0.11.035_drop_child_commands.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1544,7 +1571,8 @@ mod tests {
             conn.query_row(
                 "SELECT COUNT(*) FROM sqlite_schema
                  WHERE type='table' AND name IN (
-                    'child_directives', 'launches', 'turns', 'done_proposals'
+                    'child_directives', 'launches', 'turns',
+                    'interaction_reviews', 'interactive_handoffs'
                  )",
                 [],
                 |row| row.get::<_, i64>(0),
@@ -1603,7 +1631,11 @@ mod tests {
                 "0.11.027_accounts_first".to_string(),
                 "0.11.029_ci_incident_repaired_head".to_string(),
                 "0.11.030_one_spend_grain".to_string(),
-                "0.11.031_durable_input_spine".to_string()
+                "0.11.031_durable_input_spine".to_string(),
+                "0.11.032_run_launch_attention".to_string(),
+                "0.11.033_launch_attention_only".to_string(),
+                "0.11.034_typed_ci_runs".to_string(),
+                "0.11.035_drop_child_commands".to_string()
             ]
         );
     }

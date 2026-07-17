@@ -2,10 +2,12 @@ mod support;
 
 use std::process::{Command, Output};
 
+use loopflow::child_session::ChildRef;
+use loopflow::durable::{
+    AdvanceReceipt, AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance, RunTrigger,
+};
 use loopflow::engine::InteractionPolicy;
-use loopflow::interaction_review::InteractionReviewId;
 use loopflow_test_support::TestRepo;
-use rusqlite::{params, Connection};
 use support::{register_task, RegisteredTask};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -51,50 +53,76 @@ fn run_headless(repo: &TestRepo, home: &std::path::Path) -> Output {
         .expect("run lf task run --headless")
 }
 
-fn seed_current_human_review(home: &std::path::Path, task: &RegisteredTask) -> InteractionReviewId {
-    let connection = Connection::open(home.join("loopflow.db")).expect("open Task store");
-    connection
-        .execute(
-            "UPDATE task_sessions SET lifecycle_phase='kickoff' WHERE id=?1",
-            [task.session.id.as_str()],
-        )
-        .expect("move Task to kickoff waitpoint");
-
-    let review_id = InteractionReviewId::new();
-    connection
-        .execute(
-            "INSERT INTO interaction_reviews (
-                id, wave_id, project_session_id, task_session_id,
-                phase, phase_epoch, flow, step, step_index, phase_iteration, policy,
-                reviewer_kind, reviewer_id, status, reason, prompt,
-                worktree, branch, base_commit, head_commit, worktree_fingerprint,
-                pr_number, pr_url, requested_by_generation, reviewer_generation,
-                disposition, outcome, requested_at, completed_at
-             ) VALUES (
-                ?1, ?2, ?3, ?4,
-                'kickoff', ?5, ?6, 'review-design', ?7, ?8, 'require',
-                'human', NULL, 'requested', 'Review the Task design', 'Review the Task design',
-                ?9, ?10, ?11, ?11, 'test-fingerprint',
-                NULL, NULL, 1, NULL,
-                NULL, NULL, ?12, NULL
-             )",
-            params![
-                review_id.as_str(),
-                task.session.wave_id.as_str(),
-                task.session.project_session_id.as_str(),
-                task.session.id.as_str(),
-                i64::from(task.session.phase_epoch),
-                task.session.lifecycle.kickoff.flow,
-                i64::from(task.session.phase_cursor),
-                i64::from(task.session.phase_iteration),
-                task.session.worktree.display().to_string(),
-                task.pr.branch,
-                task.pr.base_commit,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            ],
-        )
-        .expect("seed current Human review");
-    review_id
+fn seed_current_user_review(task: &RegisteredTask) {
+    let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
+    runtime.block_on(async {
+        let work = task
+            .store
+            .work_for_child(&ChildRef::Task(task.session.id.clone()))
+            .await
+            .expect("resolve Task Work");
+        let boundary = task.store.boundary_seed(&work).await.expect("read Basis");
+        let home = task.store.home("test@local").await.expect("create Home");
+        let (_run, lease) = task
+            .store
+            .reserve_run(&work, &home.id, RunTrigger::User)
+            .await
+            .expect("reserve Run");
+        let launch = match task
+            .store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "opaque".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "task-headless-review".to_string(),
+                    },
+                    cwd: task.session.worktree.clone(),
+                    surface: "terminal".to_string(),
+                    opaque: true,
+                    resume_token: None,
+                },
+            )
+            .await
+            .expect("start Launch")
+        {
+            AdvanceReceipt::Launch(launch) => launch,
+            receipt => panic!("expected Launch, got {receipt:?}"),
+        };
+        task.store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchLive {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .expect("mark Launch live");
+        task.store
+            .set_flow_position(
+                &lease,
+                FlowPosition {
+                    work,
+                    epoch_id: boundary.basis.epoch_id,
+                    flow: task.session.lifecycle.kickoff.flow.clone(),
+                    step: "review-design".to_string(),
+                    step_index: 0,
+                    iteration: 0,
+                    interactive: true,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .expect("record flow position");
+        task.store
+            .route_review(&lease, &launch.id, AttentionRoute::User)
+            .await
+            .expect("route User attention");
+    });
 }
 
 #[test]
@@ -119,18 +147,18 @@ fn task_run_headless_existing_task_persists_all_policies() {
 }
 
 #[test]
-fn task_run_headless_existing_task_refuses_current_human_review() {
+fn task_run_headless_existing_task_refuses_current_user_review() {
     let repo = TestRepo::new();
     let branch = "jack/task-headless-human-review";
     repo.create_branch(branch);
     let home = tempfile::tempdir().expect("Task home");
     let task = register_task(home.path(), repo.path(), branch, &repo.head_sha());
-    let review_id = seed_current_human_review(home.path(), &task);
+    seed_current_user_review(&task);
     let before = lifecycle_config(&task);
 
     let output = run_headless(&repo, home.path());
-    assert!(!output.status.success(), "current Human review must refuse");
+    assert!(!output.status.success(), "current User review must refuse");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains(review_id.as_str()), "{stderr}");
+    assert!(stderr.contains("current interactive step"), "{stderr}");
     assert_eq!(lifecycle_config(&task), before);
 }

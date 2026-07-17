@@ -135,12 +135,10 @@ impl StoreObserver {
                     crate::project_session::ChildEventPayload::Task { event },
                 ) => match self.store.get_task_session(&session_id).await {
                     Ok(Some(session)) => {
-                        let control_source = self.task_control_source(&session_id, &event).await;
                         self.runtime.deliver_task_observation(TaskObservation {
                             session_id,
                             issue_identifier: session.launch.issue.identifier,
                             event_id: observation.event_id,
-                            control_source,
                             event,
                         });
                         true
@@ -156,13 +154,11 @@ impl StoreObserver {
                     crate::project_session::ChildEventPayload::Project { event },
                 ) => match self.store.get_project_session(&session_id).await {
                     Ok(Some(session)) => {
-                        let control_source = self.project_control_source(&session_id, &event).await;
                         self.runtime.deliver_project_observation(
                             crate::project_session::ProjectObservation {
                                 session_id,
                                 project: session.launch.project.slug,
                                 event_id: observation.event_id,
-                                control_source,
                                 event,
                             },
                         );
@@ -185,40 +181,6 @@ impl StoreObserver {
             if should_ack {
                 let _ = self.store.mark_observation_delivered(observation.id).await;
             }
-        }
-    }
-
-    async fn task_control_source(
-        &self,
-        _session_id: &crate::task::TaskSessionId,
-        event: &crate::task::TaskEventKind,
-    ) -> Option<crate::child_session::ChildCommandSource> {
-        match event {
-            crate::task::TaskEventKind::CommandChanged { command_id, .. } => self
-                .store
-                .get_child_command(command_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|command| command.source),
-            _ => None,
-        }
-    }
-
-    async fn project_control_source(
-        &self,
-        _session_id: &crate::project_session::ProjectSessionId,
-        event: &crate::project_session::ProjectEventKind,
-    ) -> Option<crate::child_session::ChildCommandSource> {
-        match event {
-            crate::project_session::ProjectEventKind::CommandChanged { command_id, .. } => self
-                .store
-                .get_child_command(command_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|command| command.source),
-            _ => None,
         }
     }
 }

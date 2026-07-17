@@ -2,8 +2,9 @@ use crate::child_session::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ContainmentObservation,
     ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt, LaunchId,
-    Review, Run, RunAdvance, RunLease, RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt,
-    StopCause, StopReceipt, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    LaunchSurface, Review, Run, RunAdvance, RunControl, RunLease, RunTrigger, Send, SendId,
+    SendState, SteerId, SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -33,6 +34,19 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.current_run(&work)).await
     }
 
+    pub(crate) async fn run_lease_for_child(
+        &self,
+        target: &crate::child_session::ChildRef,
+        lease: &crate::child_session::ChildWriteLease,
+    ) -> StoreResult<RunLease> {
+        let target = target.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.run_for_child_lease(&target, &lease)
+        })
+        .await
+    }
+
     pub async fn advance_run(
         &self,
         lease: &RunLease,
@@ -54,6 +68,19 @@ impl Store {
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.stop_run(&lease, &cause, containment)
+        })
+        .await
+    }
+
+    pub(crate) async fn run_control(
+        &self,
+        lease: &RunLease,
+        active_turn_id: Option<&str>,
+    ) -> StoreResult<Option<RunControl>> {
+        let lease = lease.clone();
+        let active_turn_id = active_turn_id.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.run_control(&lease, active_turn_id.as_deref())
         })
         .await
     }
@@ -87,6 +114,30 @@ impl Store {
     pub async fn review(&self, work: &WorkRef) -> StoreResult<Option<Review>> {
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| store.review(&work)).await
+    }
+
+    pub async fn launch_surface(&self, launch_id: &LaunchId) -> StoreResult<Option<LaunchSurface>> {
+        let launch_id = launch_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.launch_surface(&launch_id)).await
+    }
+
+    pub async fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.launch_surfaces(active_only)
+        })
+        .await
+    }
+
+    pub async fn handback_launch(
+        &self,
+        launch_id: &LaunchId,
+        outcome: crate::durable::BoundaryState,
+    ) -> StoreResult<LaunchSurface> {
+        let launch_id = launch_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.handback_launch(&launch_id, outcome)
+        })
+        .await
     }
 
     pub async fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<Review>> {
@@ -294,9 +345,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::durable::{
-        AttentionRoute, AuthenticatedRequest, BoundaryState, Containment,
-        ContainmentObservation, ControlCtx, FlowPosition, LaunchRoute, RunAdvance, RunState,
-        RunTrigger, StopCause, WorkRef, WorkStatus,
+        AttentionRoute, AuthenticatedRequest, BoundaryState, Containment, ContainmentObservation,
+        ControlCtx, FlowPosition, LaunchRoute, RunAdvance, RunState, RunTrigger, StopCause,
+        WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::store::{open_store, StorageConfig, StoreError};
@@ -412,11 +463,7 @@ mod tests {
         ));
         assert!(matches!(
             store
-                .close_review(
-                    &ControlCtx::User(&request),
-                    &work,
-                    &steer.steer.basis,
-                )
+                .close_review(&ControlCtx::User(&request), &work, &steer.steer.basis,)
                 .await
                 .unwrap(),
             WorkStatus::Running { .. }
@@ -443,11 +490,7 @@ mod tests {
             .is_err());
 
         let reaped = store
-            .stop_run(
-                &lease,
-                StopCause::Recovery,
-                ContainmentObservation::Absent,
-            )
+            .stop_run(&lease, StopCause::Recovery, ContainmentObservation::Absent)
             .await
             .unwrap();
         assert_eq!(reaped.run.state, RunState::Ended);
@@ -481,5 +524,46 @@ mod tests {
             .unwrap();
         store.done(&lease, &basis).await.unwrap();
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+    }
+
+    #[tokio::test]
+    async fn launch_surface_reopens_without_owning_liveness_and_handback_clears_attention() {
+        let (store, work, home) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, &home, true).await;
+        let basis = launch.opaque_basis.clone().unwrap();
+        store
+            .set_flow_position(
+                &lease,
+                FlowPosition {
+                    work: work.clone(),
+                    epoch_id: basis.epoch_id,
+                    flow: "wave-pursue".to_string(),
+                    step: "demo".to_string(),
+                    step_index: 0,
+                    iteration: 0,
+                    interactive: true,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .route_review(&lease, &launch.id, AttentionRoute::User)
+            .await
+            .unwrap();
+
+        let first = store.launch_surface(&launch.id).await.unwrap().unwrap();
+        let reopened = store.launch_surface(&launch.id).await.unwrap().unwrap();
+        assert_eq!(first, reopened);
+        assert_eq!(first.attach_argv.as_ref().unwrap()[0], "tmux");
+        assert!(store.review(&work).await.unwrap().is_some());
+
+        let ended = store
+            .handback_launch(&launch.id, BoundaryState::Unknown)
+            .await
+            .unwrap();
+        assert_eq!(ended.launch.state, crate::durable::LaunchState::Ended);
+        assert_eq!(ended.handback, Some(BoundaryState::Unknown));
+        assert!(store.review(&work).await.unwrap().is_none());
     }
 }

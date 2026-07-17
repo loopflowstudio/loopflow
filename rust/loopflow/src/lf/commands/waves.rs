@@ -24,9 +24,6 @@ use crate::child_session::{
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
-use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewStatus,
-};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
@@ -1340,15 +1337,10 @@ async fn snapshot_task_detail(
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
                 None => None,
             };
-            let review_gate = store
-                .interaction_review_at(
-                    &session.id,
-                    session.phase_epoch,
-                    session.phase_iteration,
-                    session.phase_cursor,
-                )
-                .await?
-                .map(|r| review_gate_from(&r));
+            let work = store
+                .work_for_child(&ChildRef::Task(session.id.clone()))
+                .await?;
+            let review_gate = store.review(&work).await?.map(|_| ReviewGateState::Active);
             Some(TaskActionEvidence {
                 status: session.status,
                 latest_pr_phase: latest.map(TaskPr::phase),
@@ -1540,20 +1532,6 @@ fn inspect_task_local_progress(
         authored_commits,
         recovery_required,
         reason: None,
-    }
-}
-
-fn review_gate_from(review: &InteractionReview) -> ReviewGateState {
-    match review.status {
-        InteractionReviewStatus::Requested => ReviewGateState::Requested,
-        InteractionReviewStatus::Active => ReviewGateState::Active,
-        InteractionReviewStatus::Completed => match review.disposition {
-            Some(InteractionReviewDisposition::Approved) => ReviewGateState::Approved,
-            Some(InteractionReviewDisposition::ChangesRequested) => {
-                ReviewGateState::ChangesRequested
-            }
-            None => ReviewGateState::Approved,
-        },
     }
 }
 

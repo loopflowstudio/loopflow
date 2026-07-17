@@ -6,10 +6,10 @@ use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, Containment,
     ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState,
     FlowPosition, Home, HomeId, InterruptReceipt, Launch, LaunchId, LaunchRoute, LaunchState,
-    ProjectId, Review, Run, RunAdvance, RunId, RunLease, RunLeaseToken, RunState, RunTrigger, Send,
-    SendId, SendState, SendVia, Steer, SteerId, SteerReceipt, StopCause, StopReceipt, TaskId,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn,
-    WorkRef, WorkStatus,
+    LaunchSurface, ProjectId, Review, Run, RunAdvance, RunId, RunLease, RunLeaseToken, RunState,
+    RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId, SteerReceipt, StopCause,
+    StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, Turn, TurnId,
+    Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSession;
@@ -86,12 +86,7 @@ impl SqliteStore {
                 run.created_at.unix_timestamp(),
             ],
         )?;
-        let lease = RunLease::new(
-            run.id.clone(),
-            work.clone(),
-            epoch.current_basis,
-            token,
-        );
+        let lease = RunLease::new(run.id.clone(), work.clone(), epoch.current_basis, token);
         tx.commit()?;
         Ok((run, lease))
     }
@@ -357,6 +352,45 @@ impl SqliteStore {
         Ok(StopReceipt { run, containment })
     }
 
+    pub fn run_control(
+        &self,
+        lease: &RunLease,
+        active_turn_id: Option<&str>,
+    ) -> StoreResult<Option<crate::durable::RunControl>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let run = validate_stop_lease(&conn, lease)?;
+        let epoch_state: String = conn.query_row(
+            "SELECT state FROM epochs WHERE id=?1",
+            [run.epoch_id.as_str()],
+            |row| row.get(0),
+        )?;
+        if epoch_state == "abandoned" {
+            let reason = conn
+                .query_row(
+                    "SELECT stop_reason FROM runs WHERE id=?1",
+                    [run.id.as_str()],
+                    |row| row.get::<_, Option<String>>(0),
+                )?
+                .unwrap_or_else(|| "Work was abandoned".to_string());
+            return Ok(Some(crate::durable::RunControl::Abandon { reason }));
+        }
+        let Some(turn_id) = active_turn_id else {
+            return Ok(None);
+        };
+        let interrupted = conn
+            .query_row(
+                "SELECT t.status='interrupted'
+                 FROM agent_turns t
+                 JOIN agent_launches l ON l.id=t.launch_id
+                 WHERE t.id=?1 AND l.product_run_id=?2",
+                params![turn_id, run.id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        Ok(interrupted.then_some(crate::durable::RunControl::Interrupt))
+    }
+
     pub fn set_flow_position(
         &self,
         lease: &RunLease,
@@ -416,9 +450,7 @@ impl SqliteStore {
         validate_attention_route(&tx, &run.work, attention)?;
         let (attention_kind, attention_work_kind, attention_work_id) = match attention {
             AttentionRoute::User => ("user", None, None),
-            AttentionRoute::Parent(work) => {
-                ("parent", Some(work.kind()), Some(work.id()))
-            }
+            AttentionRoute::Parent(work) => ("parent", Some(work.kind()), Some(work.id())),
         };
         tx.execute(
             "UPDATE agent_launches SET
@@ -441,6 +473,67 @@ impl SqliteStore {
     pub fn review(&self, work: &WorkRef) -> StoreResult<Option<Review>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         review_in(&conn, work)
+    }
+
+    pub fn launch_surface(&self, launch_id: &LaunchId) -> StoreResult<Option<LaunchSurface>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        launch_surface_in(&conn, launch_id)
+    }
+
+    pub fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let sql = if active_only {
+            "SELECT id FROM agent_launches
+             WHERE product_run_id IS NOT NULL AND launch_state != 'ended'
+             ORDER BY started_at, id"
+        } else {
+            "SELECT id FROM agent_launches
+             WHERE product_run_id IS NOT NULL ORDER BY started_at, id"
+        };
+        let mut statement = conn.prepare(sql)?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .map(|id| {
+                let id = LaunchId::parse(&id).map_err(invalid_durable)?;
+                launch_surface_in(&conn, &id)?.ok_or(StoreError::NotFound)
+            })
+            .collect()
+    }
+
+    pub fn handback_launch(
+        &self,
+        launch_id: &LaunchId,
+        outcome: BoundaryState,
+    ) -> StoreResult<LaunchSurface> {
+        if !outcome.is_terminal() {
+            return Err(StoreError::InvalidData(
+                "Launch handback outcome must be terminal".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if tx.execute(
+            "UPDATE agent_launches
+             SET launch_state='ended', ended_at=COALESCE(ended_at, ?2),
+                 outcome=?3, handback_state=?4,
+                 attention_kind=NULL, attention_work_kind=NULL,
+                 attention_work_id=NULL, attention_at=NULL
+             WHERE id=?1 AND product_run_id IS NOT NULL AND launch_state != 'ended'",
+            params![
+                launch_id.as_str(),
+                now_unix(),
+                outcome.as_launch_outcome(),
+                handback_state(outcome),
+            ],
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
+        }
+        let surface = launch_surface_in(&tx, launch_id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(surface)
     }
 
     pub fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<Review>> {
@@ -650,8 +743,7 @@ impl SqliteStore {
         )?;
         epoch.state = EpochState::Abandoned;
         epoch.terminal_at = Some(
-            OffsetDateTime::from_unix_timestamp(now)
-                .expect("current Unix timestamp must be valid"),
+            OffsetDateTime::from_unix_timestamp(now).expect("current Unix timestamp must be valid"),
         );
         tx.commit()?;
         Ok(EpochReceipt { epoch })
@@ -1025,8 +1117,7 @@ fn map_home(conn: &Connection, route: &str) -> StoreResult<Home> {
         Ok(Home {
             id: HomeId::parse(&id).map_err(invalid_durable)?,
             route,
-            created_at: OffsetDateTime::from_unix_timestamp(created_at)
-                .map_err(invalid_durable)?,
+            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
             observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
                 .map_err(invalid_durable)?,
         })
@@ -1187,11 +1278,7 @@ fn run_by_id_in(conn: &Connection, run_id: &RunId) -> StoreResult<Run> {
     })
 }
 
-fn insert_control_launch(
-    tx: &Transaction<'_>,
-    run: &Run,
-    launch: &Launch,
-) -> StoreResult<()> {
+fn insert_control_launch(tx: &Transaction<'_>, run: &Run, launch: &Launch) -> StoreResult<()> {
     let (wave, project, task, repo) = work_labels(tx, &run.work)?;
     let cwd = launch.cwd.display().to_string();
     let (containment_kind, containment_id) = launch.containment.parts();
@@ -1248,14 +1335,7 @@ fn work_labels(
             .query_row(
                 "SELECT name, repo FROM waves WHERE id=?1",
                 [id.as_str()],
-                |row| {
-                    Ok((
-                        Some(row.get::<_, String>(0)?),
-                        None,
-                        None,
-                        row.get(1)?,
-                    ))
-                },
+                |row| Ok((Some(row.get::<_, String>(0)?), None, None, row.get(1)?)),
             )
             .map_err(StoreError::from),
         WorkRef::Project(id) => conn
@@ -1384,11 +1464,101 @@ fn control_launch_in(conn: &Connection, launch_id: &LaunchId) -> StoreResult<Lau
     })
 }
 
-fn require_turn_for_run(
+fn launch_surface_in(
     conn: &Connection,
-    turn_id: &TurnId,
-    run_id: &RunId,
-) -> StoreResult<()> {
+    launch_id: &LaunchId,
+) -> StoreResult<Option<LaunchSurface>> {
+    let row = conn
+        .query_row(
+            "SELECT r.id, e.wave_id, e.project_id, e.task_id, h.route,
+                    l.attention_kind, l.attention_work_kind, l.attention_work_id,
+                    l.handback_state
+             FROM agent_launches l
+             JOIN runs r ON r.id=l.product_run_id
+             JOIN epochs e ON e.id=r.epoch_id
+             JOIN homes h ON h.id=l.home_id
+             WHERE l.id=?1 AND l.product_run_id IS NOT NULL",
+            [launch_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let work = work_from_parts((row.1, row.2, row.3))?;
+    let attention = match (row.5.as_deref(), row.6, row.7) {
+        (None, None, None) => None,
+        (Some("user"), None, None) => Some(AttentionRoute::User),
+        (Some("parent"), Some(kind), Some(id)) => {
+            Some(AttentionRoute::Parent(parse_work_ref(&kind, &id)?))
+        }
+        _ => {
+            return Err(StoreError::InvalidData(
+                "stored Launch attention route is inconsistent".to_string(),
+            ))
+        }
+    };
+    let handback = row
+        .8
+        .as_deref()
+        .map(BoundaryState::parse_handback)
+        .transpose()
+        .map_err(invalid_durable)?;
+    let launch = control_launch_in(conn, launch_id)?;
+    let attach_argv = match &launch.containment {
+        Containment::Tmux { name } => Some(vec![
+            "tmux".to_string(),
+            "attach-session".to_string(),
+            "-t".to_string(),
+            name.clone(),
+        ]),
+        Containment::ProcessGroup { .. } => None,
+    };
+    debug_assert_eq!(launch.run_id.as_str(), row.0);
+    let wave_id = match &work {
+        WorkRef::Wave(id) => id.clone(),
+        WorkRef::Project(id) => {
+            let value: String = conn.query_row(
+                "SELECT wave_id FROM projects WHERE id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )?;
+            WaveId::parse(&value).map_err(invalid_durable)?
+        }
+        WorkRef::Task(id) => {
+            let value: String = conn.query_row(
+                "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id
+                 WHERE t.id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )?;
+            WaveId::parse(&value).map_err(invalid_durable)?
+        }
+    };
+    Ok(Some(LaunchSurface {
+        launch,
+        work,
+        wave_id,
+        home_route: row.4,
+        attention,
+        handback,
+        attach_argv,
+    }))
+}
+
+fn require_turn_for_run(conn: &Connection, turn_id: &TurnId, run_id: &RunId) -> StoreResult<()> {
     conn.query_row(
         "SELECT 1 FROM agent_turns t
          JOIN agent_launches l ON l.id=t.launch_id
@@ -1476,8 +1646,7 @@ fn flow_position_in(
             step_index: row.2 as u32,
             iteration: row.3 as u32,
             interactive: row.4,
-            updated_at: OffsetDateTime::from_unix_timestamp(row.5)
-                .map_err(invalid_durable)?,
+            updated_at: OffsetDateTime::from_unix_timestamp(row.5).map_err(invalid_durable)?,
         })
     })
 }
@@ -1557,9 +1726,7 @@ fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
     }
     let attention = match (kind.as_str(), parent_kind, parent_id) {
         ("user", None, None) => AttentionRoute::User,
-        ("parent", Some(kind), Some(id)) => {
-            AttentionRoute::Parent(parse_work_ref(&kind, &id)?)
-        }
+        ("parent", Some(kind), Some(id)) => AttentionRoute::Parent(parse_work_ref(&kind, &id)?),
         _ => {
             return Err(StoreError::InvalidData(
                 "stored attention route is inconsistent".to_string(),
@@ -1572,8 +1739,7 @@ fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
         basis: epoch.current_basis,
         position,
         attention,
-        opened_at: OffsetDateTime::from_unix_timestamp(opened_at)
-            .map_err(invalid_durable)?,
+        opened_at: OffsetDateTime::from_unix_timestamp(opened_at).map_err(invalid_durable)?,
     }))
 }
 
@@ -1978,6 +2144,7 @@ pub(crate) fn reserve_run_for_child(
     target: &ChildRef,
     generation: u32,
     lease_token: &str,
+    trigger: Option<&RunTrigger>,
 ) -> StoreResult<RunId> {
     let work = work_for_child_in(tx, target)?;
     let epoch = current_epoch_in(tx, &work)?;
@@ -1986,10 +2153,11 @@ pub(crate) fn reserve_run_for_child(
         [],
         |row| row.get(0),
     )?;
-    let trigger_json = serde_json::to_string(&RunTrigger::Input {
+    let default_trigger = RunTrigger::Input {
         basis: epoch.current_basis.clone(),
-    })
-    .expect("run trigger must serialize");
+    };
+    let trigger_json = serde_json::to_string(trigger.unwrap_or(&default_trigger))
+        .expect("run trigger must serialize");
     let lease_hash = crate::durable::RunLeaseToken::from_child(lease_token).hash();
     let run_id = RunId::new();
     tx.execute(

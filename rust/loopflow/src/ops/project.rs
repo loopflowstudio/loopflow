@@ -2,11 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::child_session::{
-    project_write_lease_from_env, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildProcessGeneration, ChildRef,
-};
-use crate::durable::Author;
+use crate::child_session::{ChildProcessGeneration, ChildRef};
+use crate::durable::{AuthenticatedRequest, Author, ControlCtx};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{
@@ -14,10 +11,7 @@ use crate::engine::process::{
     tmux_session_slug,
 };
 use crate::id::WaveId;
-use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
-};
-use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
+use crate::ops::{OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
@@ -55,34 +49,7 @@ pub struct ProjectSessionSnapshot {
 pub struct ProjectControlResult {
     pub project_id: String,
     pub session_id: String,
-    pub command_id: String,
-    pub state: ChildCommandState,
-    pub effect: Option<ChildCommandEffect>,
-    pub generation: Option<u32>,
-    pub accepted_at: Option<time::OffsetDateTime>,
-    pub error: Option<String>,
-}
-
-fn project_control_result(
-    project_id: String,
-    result: super::child::ChildControlResult,
-) -> ProjectControlResult {
-    ProjectControlResult {
-        project_id,
-        session_id: result.session_id,
-        command_id: result.command_id,
-        state: result.state,
-        effect: result.effect,
-        generation: result.generation,
-        accepted_at: result.accepted_at,
-        error: result.error,
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectReceiptRead {
-    pub receipt: ProjectControlResult,
-    pub timed_out: bool,
+    pub receipt: super::child::WorkControlReceipt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -706,52 +673,6 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
     })
 }
 
-async fn validate_project_caller_authority(
-    store: &SharedStore,
-    session: &ProjectSession,
-    authority: &CallerAuthority,
-) -> OpsResult<ChildCommandSource> {
-    // A Project target has no project-session caller arm (a Project is not
-    // controlled through `LF_PROJECT_SESSION_ID`), so pass `None` for the route:
-    // the funnel classifies it by wave / operator / fail-closed only.
-    let target = crate::child_session::ChildRef::Project(session.id.clone());
-    super::util::validate_caller_authority(
-        store,
-        &session.wave_id,
-        &target,
-        None,
-        &format!("Project {}", session.launch.project.slug),
-        authority,
-    )
-    .await
-}
-
-fn queue_project_command(
-    project: &str,
-    authority: CallerAuthority,
-    kind: ChildCommandKind,
-) -> OpsResult<ProjectControlResult> {
-    block_on_project(async move {
-        let store = project_store().await?;
-        let mut session = store
-            .get_project_session_by_project(project)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
-        reconcile_project_liveness(&store, &mut session).await?;
-        let project_id = session.launch.project.id.as_str().to_string();
-        let source = validate_project_caller_authority(&store, &session, &authority).await?;
-        let result = super::child::queue_command(
-            &store,
-            super::child::ChildSession::Project(Box::new(session)),
-            source,
-            kind,
-        )
-        .await?;
-        Ok(project_control_result(project_id, result))
-    })
-}
-
 fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
@@ -761,29 +682,16 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
-        let source = project_command_source(&store, &session).await?;
-        let receipt = super::child::append_steer(
-            &store,
-            ChildRef::Project(session.id.clone()),
-            source,
-            &message,
-        )
-        .await?;
+        let receipt =
+            super::child::append_steer(&store, ChildRef::Project(session.id.clone()), &message)
+                .await?;
         if !session.status.is_process_active() {
             launch_project_process(&store, &mut session).await?;
         }
         Ok(ProjectControlResult {
             project_id: session.launch.project.id.as_str().to_string(),
             session_id: session.id.to_string(),
-            command_id: receipt.steer.id.to_string(),
-            state: ChildCommandState::Accepted,
-            effect: None,
-            generation: session
-                .latest_process
-                .as_ref()
-                .map(|process| process.generation),
-            accepted_at: Some(receipt.steer.issued_at),
-            error: None,
+            receipt: super::child::WorkControlReceipt::Steer { receipt },
         })
     })
 }
@@ -793,7 +701,34 @@ pub fn project_steer(project: &str, message: String) -> OpsResult<ProjectControl
 }
 
 pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ChildCommandKind::Interrupt)
+    block_on_project(async move {
+        let store = project_store().await?;
+        let mut session = store
+            .get_project_session_by_project(project)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
+        reconcile_project_liveness(&store, &mut session).await?;
+        let work = store
+            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        let run = store
+            .current_run(&work)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error("Project has no active Run to interrupt"))?;
+        let request = AuthenticatedRequest::cli();
+        let receipt = store
+            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        Ok(ProjectControlResult {
+            project_id: session.launch.project.id.as_str().to_string(),
+            session_id: session.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Interrupt { receipt },
+        })
+    })
 }
 
 pub fn project_resume(
@@ -810,140 +745,58 @@ pub fn project_resume(
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
         let project_id = session.launch.project.id.as_str().to_string();
-        let source = validate_project_caller_authority(&store, &session, &authority).await?;
-        let result = super::child::resume_session(
+        let session_id = session.id.to_string();
+        let run = super::child::resume_session(
             &store,
             super::child::ChildSession::Project(Box::new(session)),
-            source,
             model,
             reason,
         )
         .await?;
-        Ok(project_control_result(project_id, result))
-    })
-}
-
-pub fn project_review_message(
-    review_id: &str,
-    text: String,
-) -> OpsResult<crate::durable::SteerReceipt> {
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| project_error(format!("invalid interaction review: {error}")))?;
-    block_on_project(async move {
-        let store = project_store().await?;
-        let review = store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error(format!("interaction review {review_id} not found")))?;
-        let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
-            project_error("review messages must run inside the assigned Project Session")
-        })?;
-        let ambient_id = ProjectSessionId::parse(&ambient).map_err(|error| {
-            project_error(format!("invalid ambient Project Session id: {error}"))
-        })?;
-        if !acting_session_may_conduct_review(&store, &ambient_id, &review.project_session_id)
-            .await?
-        {
-            return Err(project_error(format!(
-                "Project Session {ambient} cannot conduct review {review_id} assigned to {}; it is not the live successor for that Project",
-                review.project_session_id
-            )));
-        }
-        let lease = project_write_lease_from_env().map_err(|error| {
-            project_error(format!("Project body has no write authority: {error}"))
-        })?;
-        store
-            .send_project_interaction_review_message(&review_id, &ambient_id, &lease, &text)
-            .await
-            .map_err(|error| project_error(error.to_string()))
-    })
-}
-
-pub fn project_review_complete(
-    review_id: &str,
-    disposition: &str,
-    outcome: String,
-) -> OpsResult<InteractionReview> {
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| project_error(format!("invalid interaction review: {error}")))?;
-    let disposition = disposition
-        .replace('-', "_")
-        .parse::<InteractionReviewDisposition>()
-        .map_err(|error| project_error(error.to_string()))?;
-    block_on_project(async move {
-        let store = project_store().await?;
-        let review = store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error(format!("interaction review {review_id} not found")))?;
-        let ambient = std::env::var("LF_PROJECT_SESSION_ID").map_err(|_| {
-            project_error("review completion must run inside the assigned Project Session")
-        })?;
-        let ambient_id = ProjectSessionId::parse(&ambient).map_err(|error| {
-            project_error(format!("invalid ambient Project Session id: {error}"))
-        })?;
-        if !acting_session_may_conduct_review(&store, &ambient_id, &review.project_session_id)
-            .await?
-        {
-            return Err(project_error(format!(
-                "Project Session {ambient} cannot complete review {review_id} assigned to {}; it is not the live successor for that Project",
-                review.project_session_id
-            )));
-        }
-        let lease = project_write_lease_from_env().map_err(|error| {
-            project_error(format!("Project body has no write authority: {error}"))
-        })?;
-        let (completed, _) = store
-            .complete_project_interaction_review(
-                &review_id,
-                &ambient_id,
-                &lease,
-                disposition,
-                &outcome,
-            )
-            .await
-            .map_err(|error| project_error(error.to_string()))?;
-        Ok(completed)
+        Ok(ProjectControlResult {
+            project_id,
+            session_id,
+            receipt: super::child::WorkControlReceipt::Resume { run },
+        })
     })
 }
 
 pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectControlResult> {
-    queue_project_command(project, ChildCommandKind::Abandon { reason })
-}
-
-pub fn project_receipt(
-    command_id: &str,
-    until: Option<ChildReceiptUntil>,
-    timeout: Duration,
-) -> OpsResult<ProjectReceiptRead> {
-    let command_id =
-        ChildCommandId::parse(command_id).map_err(|error| project_error(error.to_string()))?;
     block_on_project(async move {
         let store = project_store().await?;
-        let (command, timed_out) = if let Some(until) = until {
-            super::child::wait_for_receipt_condition(&store, &command_id, until, timeout).await?
-        } else {
-            (
-                super::child::read_receipt(&store, &command_id).await?,
-                false,
-            )
-        };
-        let ChildRef::Project(session_id) = &command.target else {
-            return Err(project_error(format!(
-                "command {command_id} belongs to a Task Session"
-            )));
-        };
-        let session = store
-            .get_project_session(session_id)
+        let mut session = store
+            .get_project_session_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error("Project Session disappeared"))?;
-        let result = super::child::control_result(&store, &command, command.clone()).await?;
-        Ok(ProjectReceiptRead {
-            receipt: project_control_result(session.launch.project.id.as_str().to_string(), result),
-            timed_out,
+            .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
+        reconcile_project_liveness(&store, &mut session).await?;
+        let work = store
+            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        let basis = store
+            .current_epoch(&work)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .current_basis;
+        let receipt = store
+            .abandon(&work, &reason, &basis)
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        if !session.status.is_process_active() {
+            session.set_status(
+                ProjectSessionStatus::Abandoned,
+                format!("Project explicitly abandoned: {}", reason.trim()),
+            );
+            store
+                .update_project_session(&session)
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
+        }
+        Ok(ProjectControlResult {
+            project_id: session.launch.project.id.as_str().to_string(),
+            session_id: session.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Abandon { receipt },
         })
     })
 }
@@ -1130,40 +983,6 @@ pub(crate) async fn wake_task_project_route(store: &Store, task: &TaskSession) -
         }
     }
 }
-
-/// Whether the acting Project Session may conduct a review assigned to
-/// `review_project_session_id`. The acting session must be the live (non-
-/// terminal) session for the same Linear project — the successor conducting a
-/// review assigned to a terminal predecessor. The historical assignment is
-/// preserved; routing is resolved, not rewritten.
-async fn acting_session_may_conduct_review(
-    store: &SharedStore,
-    acting: &ProjectSessionId,
-    review_project_session_id: &ProjectSessionId,
-) -> OpsResult<bool> {
-    if acting == review_project_session_id {
-        return Ok(true);
-    }
-    let Some(acting_session) = store
-        .get_project_session(acting)
-        .await
-        .map_err(|error| project_error(error.to_string()))?
-    else {
-        return Ok(false);
-    };
-    if acting_session.status.is_terminal() {
-        return Ok(false);
-    }
-    let Some(review_session) = store
-        .get_project_session(review_project_session_id)
-        .await
-        .map_err(|error| project_error(error.to_string()))?
-    else {
-        return Ok(false);
-    };
-    Ok(acting_session.launch.project.id.as_str() == review_session.launch.project.id.as_str())
-}
-
 /// Complete the mechanical half of an authored project-promotion flow: pin
 /// the registry ancestry, start the child residency, and wait for its endpoint.
 pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<String> {

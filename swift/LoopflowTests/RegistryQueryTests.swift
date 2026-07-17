@@ -377,7 +377,7 @@ struct RegistryQueryTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
-    @Test("Task handoff refreshes the Wave plan before launch")
+    @Test("Task launch refreshes the Wave plan before launch")
     func planCanSyncProjects() async throws {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["pm", "show", "--wave", "goals", "--json", "--sync"])

@@ -7,10 +7,7 @@ use tracing::{debug, warn};
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{
-    Cli, Commands, InstallCommand, ProjectCommand, ProjectReviewCommand, RunsCommand, TaskCommand,
-    TaskReviewCommand,
-};
+use loopflow::lf::{Cli, Commands, InstallCommand, ProjectCommand, RunsCommand, TaskCommand};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -751,16 +748,11 @@ fn print_task_control(
     if json {
         println!("{}", serde_json::to_string_pretty(result)?);
     } else {
-        let effect = result
-            .effect
-            .map(|effect| effect.as_str())
-            .unwrap_or("none");
         println!(
-            "{} → {} (state={}, effect={})",
-            result.command_id,
+            "{} → {} ({})",
+            result.receipt.label(),
             result.issue_id,
-            result.state.as_str(),
-            effect
+            result.receipt.action(),
         );
         match &result.observation {
             loopflow::task::Observation::Cached { observed_at } => {
@@ -815,16 +807,11 @@ fn print_project_control(
     if json {
         println!("{}", serde_json::to_string_pretty(result)?);
     } else {
-        let effect = result
-            .effect
-            .map(|effect| effect.as_str())
-            .unwrap_or("none");
         println!(
-            "{} → {} (state={}, effect={})",
-            result.command_id,
+            "{} → {} ({})",
+            result.receipt.label(),
             result.project_id,
-            result.state.as_str(),
-            effect
+            result.receipt.action(),
         );
     }
     Ok(())
@@ -884,57 +871,6 @@ fn run_project_command(
             let result = loopflow::ops::project::project_interrupt(project_id)?;
             print_project_control(&result, *json)
         }
-        ProjectCommand::Receipt {
-            command_id,
-            until,
-            timeout,
-            json,
-        } => {
-            let read = loopflow::ops::project::project_receipt(
-                command_id,
-                *until,
-                parse_duration(timeout)?,
-            )?;
-            print_project_control(&read.receipt, *json)?;
-            if read.timed_out {
-                std::process::exit(124);
-            }
-            Ok(())
-        }
-        ProjectCommand::Review { command } => match command {
-            ProjectReviewCommand::Message {
-                review_id,
-                message,
-                json,
-            } => {
-                let command =
-                    loopflow::ops::project::project_review_message(review_id, message.clone())?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&command)?);
-                } else {
-                    println!("{} → {}", review_id, command.steer.id);
-                }
-                Ok(())
-            }
-            ProjectReviewCommand::Complete {
-                review_id,
-                disposition,
-                outcome,
-                json,
-            } => {
-                let review = loopflow::ops::project::project_review_complete(
-                    review_id,
-                    disposition,
-                    outcome.clone(),
-                )?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → {}", review.id, review.status.as_str());
-                }
-                Ok(())
-            }
-        },
         ProjectCommand::Wait {
             project_id,
             until,
@@ -1126,66 +1062,6 @@ fn run_task_command(
             let result = loopflow::ops::task::task_interrupt(issue)?;
             print_task_control(&result, *json)
         }
-        TaskCommand::Receipt {
-            command_id,
-            until,
-            timeout,
-            json,
-        } => {
-            let timeout = parse_duration(timeout)?;
-            let read = loopflow::ops::task::task_receipt(command_id, *until, timeout)?;
-            print_task_control(&read.receipt, *json)?;
-            if read.timed_out {
-                std::process::exit(124);
-            }
-            Ok(())
-        }
-        TaskCommand::Review { command } => match command {
-            TaskReviewCommand::Message {
-                review_id,
-                message,
-                json,
-            } => {
-                let review = loopflow::ops::task::task_review_message(review_id, message.clone())?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → human message queued", review.id);
-                }
-                Ok(())
-            }
-            TaskReviewCommand::Reply {
-                review_id,
-                message,
-                json,
-            } => {
-                let review = loopflow::ops::task::task_review_reply(review_id, message.clone())?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → reply recorded", review.id);
-                }
-                Ok(())
-            }
-            TaskReviewCommand::Complete {
-                review_id,
-                disposition,
-                outcome,
-                json,
-            } => {
-                let review = loopflow::ops::task::task_review_complete(
-                    review_id,
-                    disposition,
-                    outcome.clone(),
-                )?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → {}", review.id, review.status.as_str());
-                }
-                Ok(())
-            }
-        },
         TaskCommand::Wait {
             issue,
             until,
@@ -1461,30 +1337,12 @@ fn main() -> anyhow::Result<()> {
                     resolve_project_command_authority(cmd, explicit_wave.as_ref())?;
                 in_repo_runtime(&args, |repo| run_project_command(repo, cmd, &authority))
             }
-            Some(Commands::Reviews { cmd }) => in_repo_runtime(&args, |repo| {
-                let plan = loopflow::lf::commands::reviews::prepare(cmd, cli.wave.as_deref())?;
-                if plan.preview {
-                    println!("{}", plan.prompt);
-                    return Ok(());
-                }
-                eprintln!(
-                    "catching up {} parent reviews with {}",
-                    plan.review_count, plan.skill
-                );
-                run_target_in_repo(
-                    repo,
-                    &plan.skill,
-                    Some(&plan.prompt),
-                    &cli,
-                    &args,
-                )
-            }),
             Some(Commands::Task { cmd }) => {
                 let authority = loopflow::ops::resolve_caller_authority(explicit_wave.as_ref())?;
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd, &authority))
             }
-            Some(Commands::Handoff { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::handoff::run(cmd))
+            Some(Commands::Launch { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::launch::run(cmd))
             }
             Some(Commands::TaskRunner {
                 session_id,

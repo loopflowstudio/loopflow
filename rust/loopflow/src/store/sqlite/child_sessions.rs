@@ -13,10 +13,8 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    AbandonIntent, BoundaryResult, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome,
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildLeaseState, ChildLeaseToken, ChildProcessGeneration, ChildRef,
-    ChildWriteLease, ObservationRecipient,
+    AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
+    ChildLeaseToken, ChildProcessGeneration, ChildRef, ChildWriteLease, ObservationRecipient,
 };
 use crate::durable::Author;
 use crate::engine::InteractionPolicy;
@@ -672,6 +670,7 @@ impl SqliteStore {
         &self,
         session: &TaskSession,
         expected_status: TaskSessionStatus,
+        trigger: Option<&crate::durable::RunTrigger>,
     ) -> StoreResult<Option<ChildWriteLease>> {
         validate_task_session(session)?;
         let process = session.latest_process.as_ref().ok_or_else(|| {
@@ -728,6 +727,7 @@ impl SqliteStore {
             &ChildRef::Task(session.id.clone()),
             process.generation,
             token.as_str(),
+            trigger,
         )?;
         insert_task_event_in(
             &transaction,
@@ -1100,145 +1100,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn insert_child_command(&self, command: &ChildCommand) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        insert_child_command(&conn, command)
-    }
-
-    /// Queue an Abandon command and stamp the Session's abandon intent in the
-    /// same transaction.
-    ///
-    /// These two writes must not be separable. The intent is what every launch
-    /// path reads to refuse a restart; if the command could land without it, the
-    /// window between "abandon queued" and "runner consumed it" would still be a
-    /// window in which a supervisor revives the Session.
-    pub fn insert_child_abandon_command(
-        &self,
-        command: &ChildCommand,
-        intent: &AbandonIntent,
-    ) -> StoreResult<()> {
-        let ChildCommandKind::Abandon { .. } = &command.kind else {
-            return Err(StoreError::InvalidData(
-                "abandon command required".to_string(),
-            ));
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_child_command(&transaction, command)?;
-        let table = match command.target {
-            ChildRef::Project(_) => "project_sessions",
-            ChildRef::Task(_) => "task_sessions",
-        };
-        let updated = transaction.execute(
-            &format!(
-                "UPDATE {table} SET abandon_requested_at=?2, abandon_reason=?3, updated_at=?4
-                 WHERE id=?1"
-            ),
-            params![
-                command.target.target_id(),
-                intent.requested_at.unix_timestamp(),
-                intent.reason,
-                now_unix(),
-            ],
-        )?;
-        if updated == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "{} {} not found",
-                command.target.target_kind(),
-                command.target.target_id()
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    /// Insert a `ci-fix` wake unless one already exists for the same incident
-    /// identity, in which case return the existing row and `false`.
-    ///
-    /// This is the whole dedup: one (repo, PR, failed head, failure set) wakes
-    /// exactly one body, and the fact is a durable row written before any process
-    /// starts rather than a marker stamped once one has. A repeated observation,
-    /// a coalesced multi-check delivery, and a restart between observation and
-    /// arming all land here and all find the same command.
-    ///
-    /// State is *not* consulted, terminal included: an identity that already has
-    /// a wake must never mint a second, however that wake settled. Re-arming is
-    /// the job of a new identity — a moved head or a changed failure set.
-    pub fn ensure_child_ci_fix_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<(ChildCommand, bool)> {
-        let ChildCommandKind::CiFix {
-            incident_identity, ..
-        } = &command.kind
-        else {
-            return Err(StoreError::InvalidData(
-                "ci-fix command required".to_string(),
-            ));
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing = {
-            let mut statement = transaction.prepare(&format!(
-                "{CHILD_COMMAND_COLUMNS}
-                 WHERE target_kind=?1 AND session_id=?2
-                 ORDER BY created_at, id"
-            ))?;
-            let rows = statement.query_map(
-                params![command.target.target_kind(), command.target.target_id()],
-                map_child_command_row,
-            )?;
-            let mut existing = None;
-            for row in rows {
-                let candidate = row?;
-                if matches!(
-                    &candidate.kind,
-                    ChildCommandKind::CiFix {
-                        incident_identity: candidate_identity,
-                        ..
-                    } if candidate_identity == incident_identity
-                ) {
-                    existing = Some(candidate);
-                    break;
-                }
-            }
-            existing
-        };
-        if let Some(existing) = existing {
-            return Ok((existing, false));
-        }
-        insert_child_command(&transaction, command)?;
-        transaction.commit()?;
-        Ok((command.clone(), true))
-    }
-
-    pub fn supersede_and_insert_child_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<Vec<ChildCommandId>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let superseded = supersede_child_commands(
-            &transaction,
-            command.target.target_kind(),
-            command.target.target_id(),
-        )?;
-        insert_child_command(&transaction, command)?;
-        transaction.commit()?;
-        Ok(superseded)
-    }
-
-    pub fn child_command(&self, command_id: &ChildCommandId) -> StoreResult<Option<ChildCommand>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            &format!("{CHILD_COMMAND_COLUMNS} WHERE id=?1"),
-            params![command_id.as_str()],
-            map_child_command_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
     pub fn task_linear_observation(
         &self,
         session_id: &TaskSessionId,
@@ -1427,107 +1288,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn child_commands(&self, target: &ChildRef) -> StoreResult<Vec<ChildCommand>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(&format!(
-            "{CHILD_COMMAND_COLUMNS}
-             WHERE target_kind=?1 AND session_id=?2
-             ORDER BY created_at, id"
-        ))?;
-        let rows = statement.query_map(
-            params![target.target_kind(), target.target_id()],
-            map_child_command_row,
-        )?;
-        let mut commands = Vec::new();
-        for row in rows {
-            commands.push(row?);
-        }
-        Ok(commands)
-    }
-
-    pub fn claim_child_commands(
-        &self,
-        target: &ChildRef,
-        generation: u32,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        claim_child_commands_in(&transaction, target, generation)?;
-        let commands = read_claimed_child_commands(&transaction, target, generation)?;
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub(crate) fn claim_child_commands_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        claim_child_commands_in(&transaction, target, lease.generation)?;
-        let commands = read_claimed_child_commands(&transaction, target, lease.generation)?;
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub fn claim_task_commands_or_stop(
-        &self,
-        session_id: &TaskSessionId,
-        generation: u32,
-        stopped_status: TaskSessionStatus,
-        reason: &str,
-    ) -> StoreResult<BoundaryResult<TaskSession>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                TASK_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_task_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        if session
-            .latest_process
-            .as_ref()
-            .map(|process| process.generation)
-            != Some(generation)
-            || !session.status.is_process_active()
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} generation {generation} is not active"
-            )));
-        }
-        let target = ChildRef::Task(session_id.clone());
-        claim_child_commands_in(&transaction, &target, generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
-
-        session.set_status(stopped_status, reason);
-        let parameters = task_session_control_params(&session);
-        let changed = transaction.execute(
-            TASK_SESSION_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
-    }
-
-    pub(crate) fn claim_task_commands_or_stop_for_lease(
+    pub(crate) fn stop_task_for_lease(
         &self,
         session_id: &TaskSessionId,
         lease: &ChildWriteLease,
         stopped_status: TaskSessionStatus,
         reason: &str,
-    ) -> StoreResult<BoundaryResult<TaskSession>> {
+    ) -> StoreResult<TaskSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let target = ChildRef::Task(session_id.clone());
@@ -1540,12 +1307,6 @@ impl SqliteStore {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        claim_child_commands_in(&transaction, &target, lease.generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, lease.generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
         session.set_status(stopped_status, reason);
         if update_task_session_for_lease_in(&transaction, &session, lease, ChildLeaseState::Active)?
             == 0
@@ -1553,349 +1314,7 @@ impl SqliteStore {
             return Err(lease_revoked("Task Session", session_id.as_str(), lease));
         }
         transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
-    }
-
-    pub fn accept_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let accepted_at = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
-             WHERE id = ?3 AND state IN ('persisted', 'claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                accepted_at,
-                command_id.as_str()
-            ],
-        )?;
-        if changed == 0 {
-            let exists: bool = transaction.query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM child_commands
-                    WHERE id = ?1
-                 )",
-                params![command_id.as_str()],
-                |row| row.get(0),
-            )?;
-            return if exists {
-                Err(StoreError::InvalidData(format!(
-                    "child command {command_id} is already resolved"
-                )))
-            } else {
-                Err(StoreError::NotFound)
-            };
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub(crate) fn accept_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let accepted_at = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
-             WHERE id = ?3 AND target_kind=?4 AND session_id=?5
-               AND state IN ('persisted', 'claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                accepted_at,
-                command_id.as_str(),
-                target.target_kind(),
-                target.target_id()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is already resolved or belongs to another Session"
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn mark_child_command_delivering(
-        &self,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands SET state='delivering', effect=?1
-             WHERE id=?2 AND state='claimed'",
-            params![effect.as_str(), command_id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is not claimed"
-            )));
-        }
-        Ok(())
-    }
-
-    pub fn mark_stale_child_deliveries_uncertain(
-        &self,
-        target: &ChildRef,
-        generation: u32,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut commands = {
-            let mut statement = transaction.prepare(&format!(
-                "{CHILD_COMMAND_COLUMNS}
-                 WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-                   AND claimed_by_generation<>?3
-                 ORDER BY created_at, id"
-            ))?;
-            let rows = statement.query_map(
-                params![
-                    target.target_kind(),
-                    target.target_id(),
-                    i64::from(generation)
-                ],
-                map_child_command_row,
-            )?;
-            let mut commands = Vec::new();
-            for row in rows {
-                commands.push(row?);
-            }
-            commands
-        };
-        if commands.is_empty() {
-            transaction.commit()?;
-            return Ok(commands);
-        }
-        let error = "provider delivery outcome is unknown after process restart; inspect the child transcript before retrying";
-        transaction.execute(
-            "UPDATE child_commands
-             SET state='uncertain',
-                 error=?4
-             WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-               AND claimed_by_generation<>?3",
-            params![
-                target.target_kind(),
-                target.target_id(),
-                i64::from(generation),
-                error
-            ],
-        )?;
-        for command in &mut commands {
-            command.state = ChildCommandState::Uncertain;
-            command.error = Some(error.to_string());
-        }
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub(crate) fn mark_stale_child_deliveries_uncertain_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let mut commands = {
-            let mut statement = transaction.prepare(&format!(
-                "{CHILD_COMMAND_COLUMNS}
-                 WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-                   AND claimed_by_generation<>?3
-                 ORDER BY created_at, id"
-            ))?;
-            let rows = statement.query_map(
-                params![
-                    target.target_kind(),
-                    target.target_id(),
-                    i64::from(lease.generation)
-                ],
-                map_child_command_row,
-            )?;
-            let mut commands = Vec::new();
-            for row in rows {
-                commands.push(row?);
-            }
-            commands
-        };
-        let error = "provider delivery outcome is unknown after process restart; inspect the child transcript before retrying";
-        if !commands.is_empty() {
-            transaction.execute(
-                "UPDATE child_commands SET state='uncertain', error=?4
-                 WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-                   AND claimed_by_generation<>?3",
-                params![
-                    target.target_kind(),
-                    target.target_id(),
-                    i64::from(lease.generation),
-                    error
-                ],
-            )?;
-            for command in &mut commands {
-                command.state = ChildCommandState::Uncertain;
-                command.error = Some(error.to_string());
-            }
-        }
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub fn set_child_command_effect(
-        &self,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands SET effect = ?1
-             WHERE id = ?2 AND state = 'claimed'",
-            params![effect.as_str(), command_id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is not claimed"
-            )));
-        }
-        Ok(())
-    }
-
-    pub fn fail_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-        error: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands
-             SET state = 'failed', effect = COALESCE(?1, effect), error = ?2
-             WHERE id = ?3 AND state IN ('claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                error,
-                command_id.as_str()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is already resolved"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Pre-delivery rejection: transition a still-`persisted` command to
-    /// `failed`, recording `error`. Distinct from [`fail_child_command`], which
-    /// owns the post-delivery `claimed`/`delivering` → `failed` transition. The
-    /// `WHERE state = 'persisted'` clause means this can only terminalize a
-    /// command that was never claimed, so it never races a body that has since
-    /// taken ownership — a `changed == 0` is a genuine "no longer persisted".
-    pub fn reject_persisted_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        error: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands
-             SET state = 'failed', error = ?2
-             WHERE id = ?1 AND state = 'persisted'",
-            params![command_id.as_str(), error],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is not persisted; cannot pre-delivery reject"
-            )));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn fail_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-        error: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state='failed', effect=COALESCE(?1, effect), error=?2
-             WHERE id=?3 AND target_kind=?4 AND session_id=?5
-               AND state IN ('claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                error,
-                command_id.as_str(),
-                target.target_kind(),
-                target.target_id()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is already resolved or belongs to another Session"
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    /// Displace one undelivered command that circumstances made moot.
-    ///
-    /// Distinct from `fail_child_command_for_lease`: nothing went wrong, so the
-    /// `error` column stays null and `lf task status` does not report a fault.
-    /// The reason rides the event instead.
-    ///
-    /// `delivering` is deliberately **not** superseded. That state means a
-    /// provider call is in flight and a crash from here is genuinely ambiguous;
-    /// resolving it is `reconcile_stale_deliveries`' job, which moves it to
-    /// `uncertain` so a human inspects the transcript before anything retries.
-    /// Superseding it instead would erase that ambiguity — recording "this never
-    /// mattered" about input the provider may well have received. No caller needs
-    /// it: the only command kind that supersedes from a moot state is `CiFix`,
-    /// which never enters `delivering` at all.
-    pub(crate) fn supersede_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state='superseded'
-             WHERE id=?1 AND target_kind=?2 AND session_id=?3
-               AND state IN ('persisted', 'claimed')",
-            params![
-                command_id.as_str(),
-                target.target_kind(),
-                target.target_id()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is resolved, mid-delivery, or belongs to another Session"
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
+        Ok(session)
     }
 
     pub(crate) fn validate_child_write_lease(
@@ -2302,6 +1721,7 @@ impl SqliteStore {
         &self,
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
+        trigger: Option<&crate::durable::RunTrigger>,
     ) -> StoreResult<Option<ChildWriteLease>> {
         validate_project_session(session)?;
         let process = session.latest_process.as_ref().ok_or_else(|| {
@@ -2357,6 +1777,7 @@ impl SqliteStore {
             &ChildRef::Project(session.id.clone()),
             process.generation,
             token.as_str(),
+            trigger,
         )?;
         insert_project_event_in(
             &transaction,
@@ -2484,58 +1905,13 @@ impl SqliteStore {
         Ok(sessions)
     }
 
-    pub fn claim_project_commands_or_stop(
-        &self,
-        session_id: &ProjectSessionId,
-        generation: u32,
-        stopped_status: ProjectSessionStatus,
-        reason: &str,
-    ) -> StoreResult<BoundaryResult<ProjectSession>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                PROJECT_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_project_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        if session
-            .latest_process
-            .as_ref()
-            .map(|process| process.generation)
-            != Some(generation)
-            || !session.status.is_process_active()
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Project Session {session_id} generation {generation} is not active"
-            )));
-        }
-        let target = ChildRef::Project(session_id.clone());
-        claim_child_commands_in(&transaction, &target, generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
-        session.set_status(stopped_status, reason);
-        let parameters = project_session_control_params(&session);
-        transaction.execute(
-            PROJECT_SESSION_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
-    }
-
-    pub(crate) fn claim_project_commands_or_stop_for_lease(
+    pub(crate) fn stop_project_for_lease(
         &self,
         session_id: &ProjectSessionId,
         lease: &ChildWriteLease,
         stopped_status: ProjectSessionStatus,
         reason: &str,
-    ) -> StoreResult<BoundaryResult<ProjectSession>> {
+    ) -> StoreResult<ProjectSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let target = ChildRef::Project(session_id.clone());
@@ -2548,12 +1924,6 @@ impl SqliteStore {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        claim_child_commands_in(&transaction, &target, lease.generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, lease.generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
         session.set_status(stopped_status, reason);
         if update_project_session_for_lease_in(
             &transaction,
@@ -2565,7 +1935,7 @@ impl SqliteStore {
             return Err(lease_revoked("Project Session", session_id.as_str(), lease));
         }
         transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
+        Ok(session)
     }
 
     pub fn append_project_event(
@@ -3245,41 +2615,6 @@ const TASK_PR_SELECT: &str = "SELECT
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error
     FROM task_prs WHERE id=?1";
-const CHILD_COMMAND_COLUMNS: &str = "SELECT
-    id, target_kind, session_id, source_json, kind_json, created_at,
-    claimed_by_generation, accepted_at, state, effect, error
-    FROM child_commands";
-
-fn supersede_child_commands(
-    conn: &Connection,
-    target_kind: &str,
-    target_id: &str,
-) -> StoreResult<Vec<ChildCommandId>> {
-    let superseded = {
-        let mut statement = conn.prepare(
-            "SELECT id FROM child_commands
-             WHERE target_kind=?1 AND session_id=?2
-               AND state IN ('persisted', 'claimed')
-             ORDER BY created_at, id",
-        )?;
-        let rows = statement.query_map(params![target_kind, target_id], |row| {
-            Ok(ChildCommandId::from_raw(row.get::<_, String>(0)?))
-        })?;
-        let mut ids = Vec::new();
-        for row in rows {
-            ids.push(row?);
-        }
-        ids
-    };
-    conn.execute(
-        "UPDATE child_commands SET state='superseded', effect=NULL, error=NULL
-         WHERE target_kind=?1 AND session_id=?2
-           AND state IN ('persisted', 'claimed')",
-        params![target_kind, target_id],
-    )?;
-    Ok(superseded)
-}
-
 /// Persist one Linear comment as a Steer exactly once. The insert
 /// into `task_linear_ingested_comments` is the guard — the command is written
 /// only when the comment id is new to the ledger, so a redelivered webhook or an
@@ -3304,31 +2639,6 @@ fn ingest_linear_comment(
     } else {
         Ok(None)
     }
-}
-
-pub(super) fn insert_child_command(conn: &Connection, command: &ChildCommand) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO child_commands (
-            id, target_kind, session_id, source_json, kind_json, created_at,
-            claimed_by_generation, accepted_at, state, effect, error
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![
-            command.id.as_str(),
-            command.target.target_kind(),
-            command.target.target_id(),
-            serde_json::to_string(&command.source)?,
-            serde_json::to_string(&command.kind)?,
-            command.created_at.unix_timestamp_nanos() as i64,
-            command.claimed_by_generation.map(i64::from),
-            command
-                .accepted_at
-                .map(|at| at.unix_timestamp_nanos() as i64),
-            command.state.as_str(),
-            command.effect.map(ChildCommandEffect::as_str),
-            command.error.as_deref(),
-        ],
-    )?;
-    Ok(())
 }
 
 fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
@@ -3779,11 +3089,6 @@ fn invalid_column(
     rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(error))
 }
 
-fn task_command_datetime(index: usize, value: i64) -> rusqlite::Result<time::OffsetDateTime> {
-    time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(value))
-        .map_err(|error| invalid_column(index, error))
-}
-
 pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
     let status_text: String = row.get(10)?;
     let status = status_text
@@ -3983,46 +3288,6 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
     };
     pr.validate().map_err(|error| invalid_column(6, error))?;
     Ok(pr)
-}
-
-fn map_child_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildCommand> {
-    let target_id: String = row.get(2)?;
-    let target = match row.get::<_, String>(1)?.as_str() {
-        "project" => ChildRef::Project(ProjectSessionId::from_raw(target_id)),
-        "task" => ChildRef::Task(TaskSessionId::from_raw(target_id)),
-        value => {
-            return Err(invalid_column(
-                1,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("unknown child command target {value:?}"),
-                ),
-            ))
-        }
-    };
-    let source_json: String = row.get(3)?;
-    let kind_json: String = row.get(4)?;
-    let source: ChildCommandSource =
-        serde_json::from_str(&source_json).map_err(|error| invalid_column(3, error))?;
-    let kind: ChildCommandKind =
-        serde_json::from_str(&kind_json).map_err(|error| invalid_column(4, error))?;
-    let state = parse_command_state(row.get::<_, String>(8)?.as_str(), 8)?;
-    let effect = parse_command_effect(row.get::<_, Option<String>>(9)?.as_deref(), 9)?;
-    Ok(ChildCommand {
-        id: ChildCommandId::from_raw(row.get::<_, String>(0)?),
-        target,
-        source,
-        kind,
-        state,
-        effect,
-        created_at: task_command_datetime(5, row.get(5)?)?,
-        claimed_by_generation: row.get::<_, Option<i64>>(6)?.map(|value| value as u32),
-        accepted_at: row
-            .get::<_, Option<i64>>(7)?
-            .map(|value| task_command_datetime(7, value))
-            .transpose()?,
-        error: row.get(10)?,
-    })
 }
 
 fn map_task_linear_observation_row(
@@ -4327,90 +3592,6 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         created_at: crate::store::rows::unix_to_datetime(row.get(20)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(21)?),
     })
-}
-
-fn claim_child_commands_in(
-    conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE child_commands SET claimed_by_generation=?1, state='claimed'
-         WHERE target_kind=?2 AND session_id=?3
-           AND state IN ('persisted', 'claimed')
-           AND (claimed_by_generation IS NULL OR claimed_by_generation<>?1)",
-        params![
-            i64::from(generation),
-            target.target_kind(),
-            target.target_id()
-        ],
-    )?;
-    Ok(())
-}
-
-fn read_claimed_child_commands(
-    conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<Vec<ChildCommand>> {
-    let mut statement = conn.prepare(&format!(
-        "{CHILD_COMMAND_COLUMNS}
-         WHERE target_kind=?1 AND session_id=?2
-           AND claimed_by_generation=?3 AND state='claimed'
-         ORDER BY created_at, id"
-    ))?;
-    let rows = statement.query_map(
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation)
-        ],
-        map_child_command_row,
-    )?;
-    let mut commands = Vec::new();
-    for row in rows {
-        commands.push(row?);
-    }
-    Ok(commands)
-}
-
-fn parse_command_state(value: &str, index: usize) -> rusqlite::Result<ChildCommandState> {
-    match value {
-        "persisted" => Ok(ChildCommandState::Persisted),
-        "claimed" => Ok(ChildCommandState::Claimed),
-        "delivering" => Ok(ChildCommandState::Delivering),
-        "accepted" => Ok(ChildCommandState::Accepted),
-        "failed" => Ok(ChildCommandState::Failed),
-        "superseded" => Ok(ChildCommandState::Superseded),
-        "uncertain" => Ok(ChildCommandState::Uncertain),
-        value => Err(invalid_column(
-            index,
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("unknown command state {value:?}"),
-            ),
-        )),
-    }
-}
-
-fn parse_command_effect(
-    value: Option<&str>,
-    index: usize,
-) -> rusqlite::Result<Option<ChildCommandEffect>> {
-    match value {
-        None => Ok(None),
-        Some("live_steer") => Ok(Some(ChildCommandEffect::LiveSteer)),
-        Some("next_turn") => Ok(Some(ChildCommandEffect::NextTurn)),
-        Some("replacement") => Ok(Some(ChildCommandEffect::Replacement)),
-        Some("decision") => Ok(Some(ChildCommandEffect::Decision)),
-        Some(value) => Err(invalid_column(
-            index,
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("unknown command effect {value:?}"),
-            ),
-        )),
-    }
 }
 
 fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEvent> {

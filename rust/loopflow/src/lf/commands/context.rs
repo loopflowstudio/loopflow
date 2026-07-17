@@ -2705,6 +2705,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 0,
             conversation_bytes: 0,
+            control: None,
         }
     }
 

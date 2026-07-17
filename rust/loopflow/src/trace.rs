@@ -18,60 +18,10 @@ use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::id::{ExecId, TraceId};
 use crate::store::{StoreError, StoreResult};
 
+pub use crate::durable::{LaunchId, TurnId};
+
 pub const TRACE_SCHEMA_VERSION: u32 = 1;
 pub const TOKENIZER: &str = "cl100k_base";
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct LaunchId(String);
-
-impl LaunchId {
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for LaunchId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl Default for LaunchId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct TurnId(String);
-
-impl TurnId {
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for TurnId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl Default for TurnId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct TraceCaptureContext {
@@ -757,6 +707,17 @@ pub struct AgentLaunchRow {
     pub provider_session_path: Option<String>,
     pub conversation_event_count: i64,
     pub conversation_bytes: i64,
+    pub control: Option<ControlLaunch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControlLaunch {
+    pub run_id: crate::durable::RunId,
+    pub home_id: crate::durable::HomeId,
+    pub account_id: Option<String>,
+    pub containment: crate::durable::Containment,
+    pub resume_token: Option<String>,
+    pub opaque_basis: Option<crate::durable::Basis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -820,9 +781,22 @@ pub struct CaptureStart {
     pub render_ms: u64,
     pub raw_provider: bool,
     pub basis: Option<crate::durable::Basis>,
+    pub control: Option<ControlLaunch>,
 }
 
 impl CaptureHandle {
+    pub fn launch_id(&self) -> crate::durable::LaunchId {
+        let id = self
+            .0
+            .lock()
+            .expect("trace capture mutex poisoned")
+            .launch
+            .id
+            .clone();
+        crate::durable::LaunchId::parse(&id)
+            .expect("TraceCapture stores a generated durable Launch id")
+    }
+
     pub fn artifact_dir(&self) -> PathBuf {
         let relative = self
             .0
@@ -1051,6 +1025,7 @@ impl TraceCapture {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: initial_bytes as i64,
+            control: start.control,
         };
         let turn = AgentTurnRow {
             id: turn_id.to_string(),
@@ -1128,7 +1103,10 @@ impl TraceCapture {
             schema_version: TRACE_SCHEMA_VERSION,
             seq: self.event_seq,
             ts: OffsetDateTime::now_utc(),
-            turn_id: Some(TurnId(self.turn.id.clone())),
+            turn_id: Some(
+                TurnId::parse(&self.turn.id)
+                    .expect("TraceCapture stores a generated durable Turn id"),
+            ),
             payload,
         };
         let bytes = append_json_line(&self.conversation_path, &event)?;
@@ -1860,6 +1838,7 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
+                control: None,
             },
         )
         .unwrap();

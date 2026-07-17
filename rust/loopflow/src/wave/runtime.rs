@@ -1621,7 +1621,6 @@ mod tests {
             session_id: crate::task::TaskSessionId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 7,
-            control_source: None,
             event: crate::task::TaskEventKind::Progress {
                 summary: "Task needs parent attention".to_string(),
             },
@@ -1689,7 +1688,6 @@ mod tests {
             session_id: crate::project_session::ProjectSessionId::from_raw("ps_example"),
             project: "developer-efficiency".to_string(),
             event_id: 8,
-            control_source: None,
             event: crate::project_session::ProjectEventKind::Completed {
                 summary: "all KRs hold".to_string(),
             },

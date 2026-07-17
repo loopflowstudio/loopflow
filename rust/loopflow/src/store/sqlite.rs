@@ -24,8 +24,6 @@ use crate::wave::Wave;
 mod child_sessions;
 mod ci_incidents;
 mod durable;
-mod interaction_reviews;
-mod interactive_handoffs;
 mod provider_deliveries;
 
 #[derive(Debug, Clone)]
@@ -302,6 +300,17 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
     })
 }
 
+fn to_sqlite_conversion_error(error: impl std::fmt::Display) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            error.to_string(),
+        )),
+    )
+}
+
 impl SqliteStore {
     /// Open the store for ordinary use. This never advances the shared release
     /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
@@ -509,13 +518,7 @@ impl SqliteStore {
                 wave.parent_wave_id(),
             ],
         )?;
-        durable::create_wave_spine(
-            &tx,
-            wave.id(),
-            wave.name(),
-            wave.repo(),
-            created_at,
-        )?;
+        durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
         tx.commit()?;
         Ok(())
     }
@@ -1541,15 +1544,50 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (
+            product_run_id,
+            home_id,
+            account_id,
+            containment_kind,
+            containment_id,
+            resume_token,
+            opaque_epoch_id,
+            opaque_basis_rev,
+        ) = launch
+            .control
+            .as_ref()
+            .map(|control| {
+                let (kind, id) = control.containment.parts();
+                (
+                    Some(control.run_id.as_str()),
+                    Some(control.home_id.as_str()),
+                    control.account_id.as_deref(),
+                    Some(kind),
+                    Some(id),
+                    control.resume_token.as_deref(),
+                    control
+                        .opaque_basis
+                        .as_ref()
+                        .map(|basis| basis.epoch_id.as_str()),
+                    control
+                        .opaque_basis
+                        .as_ref()
+                        .map(|basis| basis.revision as i64),
+                )
+            })
+            .unwrap_or((None, None, None, None, None, None, None, None));
         tx.execute(
             "INSERT INTO agent_launches (
                 id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                 skill, project, task, provider, model, surface, capture_status,
                 incomplete_reason, outcome, artifact_dir, conversation_path,
                 provider_events_path, provider_session_id, provider_session_path,
-                conversation_event_count, conversation_bytes
+                conversation_event_count, conversation_bytes, product_run_id, home_id,
+                account_id, launch_state, containment_kind, containment_id, resume_token,
+                opaque_epoch_id, opaque_basis_rev
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+                ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
             params![
                 launch.id,
                 launch.run_id,
@@ -1576,8 +1614,35 @@ impl SqliteStore {
                 launch.provider_session_path,
                 launch.conversation_event_count,
                 launch.conversation_bytes,
+                product_run_id,
+                home_id,
+                account_id,
+                product_run_id.map(|_| "live"),
+                containment_kind,
+                containment_id,
+                resume_token,
+                opaque_epoch_id,
+                opaque_basis_rev,
             ],
         )?;
+        if let Some(run_id) = product_run_id {
+            if tx.execute(
+                "UPDATE runs SET state='active' WHERE id=?1 AND state='reserved'",
+                [run_id],
+            )? == 0
+            {
+                let active: bool = tx.query_row(
+                    "SELECT state='active' FROM runs WHERE id=?1",
+                    [run_id],
+                    |row| row.get(0),
+                )?;
+                if !active {
+                    return Err(StoreError::InvalidAuthority(format!(
+                        "Run {run_id} cannot own a Launch"
+                    )));
+                }
+            }
+        }
         insert_agent_turn(&tx, turn)?;
         insert_context_rows(&tx, assets, decisions)?;
         tx.commit()?;
@@ -1608,7 +1673,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE agent_launches
-             SET provider_session_id = ?2, provider_session_path = ?3
+             SET provider_session_id = ?2, provider_session_path = ?3,
+                 resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?2 END
              WHERE id = ?1",
             params![
                 launch.id,
@@ -1630,7 +1696,17 @@ impl SqliteStore {
             "UPDATE agent_launches SET
                 ended_at = ?2, capture_status = ?3, incomplete_reason = ?4, outcome = ?5,
                 conversation_event_count = ?6, conversation_bytes = ?7,
-                provider_session_id = ?8, provider_session_path = ?9
+                provider_session_id = ?8, provider_session_path = ?9,
+                launch_state=CASE WHEN product_run_id IS NULL THEN launch_state ELSE 'ended' END,
+                handback_state=CASE
+                    WHEN product_run_id IS NULL THEN handback_state
+                    WHEN ?5='completed' THEN 'succeeded'
+                    WHEN ?5='interrupted' THEN 'interrupted'
+                    ELSE 'failed'
+                END,
+                attention_kind=NULL, attention_work_kind=NULL,
+                attention_work_id=NULL, attention_at=NULL,
+                resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?8 END
              WHERE id = ?1",
             params![
                 launch.id,
@@ -1686,7 +1762,9 @@ impl SqliteStore {
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
              FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
@@ -1698,7 +1776,9 @@ impl SqliteStore {
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
              FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
@@ -1738,6 +1818,48 @@ impl SqliteStore {
                 provider_session_path: row.get(22)?,
                 conversation_event_count: row.get(23)?,
                 conversation_bytes: row.get(24)?,
+                control: match (
+                    row.get::<_, Option<String>>(25)?,
+                    row.get::<_, Option<String>>(26)?,
+                    row.get::<_, Option<String>>(29)?,
+                    row.get::<_, Option<String>>(30)?,
+                    row.get::<_, Option<String>>(31)?,
+                ) {
+                    (Some(run_id), Some(home_id), Some(kind), Some(id), resume_token) => {
+                        let opaque_epoch_id = row.get::<_, Option<String>>(32)?;
+                        let opaque_basis_rev = row.get::<_, Option<i64>>(33)?;
+                        let opaque_basis = match (opaque_epoch_id, opaque_basis_rev) {
+                            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
+                                epoch_id: crate::durable::EpochId::parse(&epoch_id)
+                                    .map_err(to_sqlite_conversion_error)?,
+                                revision: revision as u64,
+                            }),
+                            (None, None) => None,
+                            _ => {
+                                return Err(to_sqlite_conversion_error(
+                                    "stored opaque Launch Basis is incomplete",
+                                ))
+                            }
+                        };
+                        Some(crate::trace::ControlLaunch {
+                            run_id: crate::durable::RunId::parse(&run_id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            home_id: crate::durable::HomeId::parse(&home_id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            account_id: row.get(27)?,
+                            containment: crate::durable::Containment::parse(&kind, id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            resume_token,
+                            opaque_basis,
+                        })
+                    }
+                    (None, None, None, None, None) => None,
+                    _ => {
+                        return Err(to_sqlite_conversion_error(
+                            "stored control Launch metadata is incomplete",
+                        ))
+                    }
+                },
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()

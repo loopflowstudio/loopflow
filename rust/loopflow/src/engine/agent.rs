@@ -983,6 +983,7 @@ pub fn launch_agent(
                         render_ms: 0,
                         raw_provider: process.auto,
                         basis: None,
+                        control: None,
                     },
                 )
             })

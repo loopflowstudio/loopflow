@@ -1,0 +1,37 @@
+{
+  "launch": {
+    "id": "launch_00000000000000000000000000000001",
+    "run_id": "run_00000000000000000000000000000002",
+    "home_id": "home_00000000000000000000000000000003",
+    "route": {
+      "provider": "opaque",
+      "model": null,
+      "account_id": null
+    },
+    "cwd": "/src/loopflow.task",
+    "surface": "terminal",
+    "state": "live",
+    "containment": {
+      "kind": "tmux",
+      "name": "lf-task"
+    },
+    "opaque_basis": {
+      "epoch_id": "epoch_00000000000000000000000000000004",
+      "revision": 7
+    },
+    "resume_token": null,
+    "started_at": "2026-07-17T12:00:00Z",
+    "ended_at": null
+  },
+  "work": {
+    "kind": "task",
+    "id": "task_00000000000000000000000000000005"
+  },
+  "wave_id": "00000000-0000-4000-8000-000000000006",
+  "home_route": "jack@local",
+  "attention": {
+    "kind": "user"
+  },
+  "handback": null,
+  "attach_argv": ["tmux", "attach-session", "-t", "lf-task"]
+}

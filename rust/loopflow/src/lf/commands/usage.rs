@@ -490,6 +490,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: 1,
+            control: None,
         }
     }
 

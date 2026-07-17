@@ -1926,98 +1926,32 @@ async fn a_real_ci_fix_turn_preserves_the_gate_cursor_and_settles_its_wake() {
     );
 }
 
-/// W2-303 generation 4 reached the real runner from Iterate: durable flow
-/// `task`, transient playhead `ci-fix`. The generic completion path rejected
-/// that playhead against the parent's flow before the repair could settle.
+/// One bounded repair turn, driven through the real runner from a given
+/// lifecycle phase, asserting the two properties that make the boundary real:
+/// the parent's cursor is exactly where the repair found it, and the wake
+/// terminalizes once.
 ///
-/// The Gate proof above is not evidence about this one. Each phase reaches the
-/// parent's cursor through a different path, and only running the phase proves
-/// the phase.
-#[tokio::test]
-async fn a_real_ci_fix_turn_preserves_the_iterate_cursor_and_settles_its_wake() {
+/// `sends` is the load-bearing one and the reason this drives the real runner
+/// rather than calling settlement directly: the Kickoff defect spent a
+/// `task_clarify` turn and left the wake `Claimed`, which every cursor
+/// assertion here would have happily passed. A second send means a parent
+/// lifecycle path ran ahead of the repair's exit.
+async fn a_ci_fix_turn_preserves_the_cursor_of(
+    phase: crate::task::TaskLifecyclePhase,
+    epoch: u32,
+    cursor: u32,
+    iteration: u32,
+) {
     let mut harness = Harness::new().await;
-    assert_eq!(
-        harness.task.lifecycle_phase,
-        crate::task::TaskLifecyclePhase::Iterate,
-        "the fixture Task iterates; the durable flow is `task`"
-    );
-    harness.task.phase_epoch = 2;
-    harness.task.phase_cursor = 1;
-    harness.task.phase_iteration = 3;
+    harness.task.lifecycle_phase = phase;
+    harness.task.phase_epoch = epoch;
+    harness.task.phase_cursor = cursor;
+    harness.task.phase_iteration = iteration;
     harness
         .store
         .update_task_session_for_lease(&harness.task, &harness.lease)
         .await
-        .expect("persist the Iterate cursor before the repair");
-
-    harness.head("h1");
-    harness.checks_failing();
-    let (command, _) = harness.observe().await.expect("a red head mints a wake");
-    assert!(
-        harness.arm().await.is_some(),
-        "the predecessor generation claims and arms the wake"
-    );
-
-    let (generation, sends) = harness.run_real_body().await;
-    assert_eq!(
-        sends, 1,
-        "the repair spends one provider turn, and no iteration step"
-    );
-
-    let session = harness
-        .store
-        .get_task_session(&harness.task.id)
-        .await
-        .expect("read task")
-        .expect("task exists");
-    assert_eq!(
-        session.lifecycle_phase,
-        crate::task::TaskLifecyclePhase::Iterate
-    );
-    assert_eq!(session.phase_epoch, 2);
-    assert_eq!(
-        session.phase_cursor, 1,
-        "the transient playhead never lands here"
-    );
-    assert_eq!(session.phase_iteration, 3);
-    assert_eq!(session.gate_cycle, 0);
-    assert!(session.gate_proposal.is_none());
-    assert_eq!(session.status, TaskSessionStatus::Waiting);
-    let process = session.latest_process.expect("the successor generation");
-    assert_eq!(process.generation, generation);
-    assert_eq!(process.state, ChildLeaseState::Finished);
-    assert_eq!(
-        process.outcome,
-        Some(crate::child_session::ChildBodyOutcome::Completed)
-    );
-    assert_eq!(
-        harness.command_state(&command).await,
-        ChildCommandState::Accepted,
-        "settlement terminates the exact wake reclaimed from the predecessor"
-    );
-}
-
-/// W2-309 generation 2 (PR #1062, 2026-07-17) reached the real runner from
-/// Kickoff and failed *silently*: the Kickoff-completion path ran ahead of the
-/// repair's exit, entered Iterate, discarded the `ci-fix` playhead for a fresh
-/// `task` flow, and spent a `task_clarify` turn — leaving the wake `Claimed`
-/// with its incident already stamped `responded_at`.
-///
-/// Nothing rejected anything, which is why this phase needs its own proof: the
-/// Iterate and Gate fixtures above pass with this hole fully present. Kickoff
-/// does not validate the cursor, it replaces it.
-#[tokio::test]
-async fn a_kickoff_ci_fix_turn_settles_before_iterate_and_spends_no_lifecycle_turn() {
-    let mut harness = Harness::new().await;
-    harness.task.lifecycle_phase = crate::task::TaskLifecyclePhase::Kickoff;
-    harness.task.phase_epoch = 1;
-    harness.task.phase_cursor = 1;
-    harness.task.phase_iteration = 0;
-    harness
-        .store
-        .update_task_session_for_lease(&harness.task, &harness.lease)
-        .await
-        .expect("persist the Kickoff cursor before the repair");
+        .expect("persist the parent cursor before the repair");
 
     harness.head("h1");
     harness.checks_failing();
@@ -2041,19 +1975,18 @@ async fn a_kickoff_ci_fix_turn_settles_before_iterate_and_spends_no_lifecycle_tu
         .expect("read task")
         .expect("task exists");
     assert_eq!(
-        session.lifecycle_phase,
-        crate::task::TaskLifecyclePhase::Kickoff,
-        "a repair is not Task progress: kickoff is still where the Task stands, \
-         and its design review is still where the human left it"
+        session.lifecycle_phase, phase,
+        "a repair is not Task progress: the phase is still where the Task stands"
     );
     assert_eq!(
-        session.phase_epoch, 1,
-        "entering iterate would bump the epoch"
+        session.phase_epoch, epoch,
+        "entering another phase would bump the epoch"
     );
-    assert_eq!(session.phase_cursor, 1);
-    assert_eq!(session.phase_iteration, 0);
-    assert_eq!(session.gate_cycle, 0);
-    assert!(session.gate_proposal.is_none());
+    assert_eq!(
+        session.phase_cursor, cursor,
+        "the transient playhead never lands in the durable cursor"
+    );
+    assert_eq!(session.phase_iteration, iteration);
     assert_eq!(session.status, TaskSessionStatus::Waiting);
     let process = session.latest_process.expect("the successor generation");
     assert_eq!(process.generation, generation);
@@ -2065,14 +1998,39 @@ async fn a_kickoff_ci_fix_turn_settles_before_iterate_and_spends_no_lifecycle_tu
     assert_eq!(
         harness.command_state(&command).await,
         ChildCommandState::Accepted,
-        "the wake settles exactly once; W2-309 left it Claimed forever, and \
-         `ensure_child_ci_fix_command` mints no second wake for a spent identity"
+        "settlement terminates the exact wake reclaimed from the predecessor"
     );
     assert_eq!(
         harness.ci_fix_commands().await.len(),
         1,
         "and no second wake exists to mint a second body"
     );
+}
+
+/// W2-303 generation 4 reached the real runner from Iterate: durable flow
+/// `task`, transient playhead `ci-fix`. The generic completion path rejected
+/// that playhead against the parent's flow before the repair could settle.
+///
+/// The Gate proof above is not evidence about this one. Each phase reaches the
+/// parent's cursor through a different path, and only running the phase proves
+/// the phase.
+#[tokio::test]
+async fn a_real_ci_fix_turn_preserves_the_iterate_cursor_and_settles_its_wake() {
+    a_ci_fix_turn_preserves_the_cursor_of(crate::task::TaskLifecyclePhase::Iterate, 2, 1, 3).await;
+}
+
+/// W2-309 generation 2 (PR #1062, 2026-07-17) reached the real runner from
+/// Kickoff and failed *silently*: the Kickoff-completion path ran ahead of the
+/// repair's exit, entered Iterate, discarded the `ci-fix` playhead for a fresh
+/// `task` flow, and spent a `task_clarify` turn — leaving the wake `Claimed`
+/// with its incident already stamped `responded_at`.
+///
+/// Nothing rejected anything, which is why this phase needs its own case: the
+/// Iterate and Gate proofs pass with this hole fully present. Kickoff does not
+/// validate the cursor, it replaces it.
+#[tokio::test]
+async fn a_kickoff_ci_fix_turn_settles_before_iterate_and_spends_no_lifecycle_turn() {
+    a_ci_fix_turn_preserves_the_cursor_of(crate::task::TaskLifecyclePhase::Kickoff, 1, 1, 0).await;
 }
 
 /// The parent's interactive rendezvous is the third way a `ci-fix` playhead

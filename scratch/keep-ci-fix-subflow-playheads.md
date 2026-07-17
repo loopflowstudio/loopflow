@@ -35,34 +35,39 @@ This PR lands second in a ladder: W2-309 → **W2-294 (this)** → W2-308. W2-30
 adds a claimed-wake preempt to `task/runner.rs`, the same file and the same
 turn-completion arm. It inherits what is below; it does not resolve around it.
 
-**Where the boundary is.** `exit_bounded_ci_fix_turn(store, session, lease,
-harness, wake, CiFixTurnEnd { flow_iteration_completed, status,
-head_before_turn }, capture) -> Result<bool>`, in `task/runner.rs`, called from
-the `TurnCompleted` arm immediately after the Abandoned check and immediately
-before the inner lifecycle `loop`.
+**Where the boundary is.** `settle_ci_fix_turn` is the sole named boundary and
+already existed. The change is *where it is called from*: one
+`if let Some(wake) = ci_fix_wake.as_ref()` branch in the `TurnCompleted` arm,
+immediately after the Abandoned check and immediately **above** the inner
+lifecycle `loop`. There is no wrapper to call and no new name to learn.
 
 **What a later caller may assume.**
 
-- `true` means *the body is over*: the wake is settled, the Session is parked,
-  the process is finished. Return `Ok(())` at once; touch nothing else.
-- `false` means this body has no wake, or its repair is still mid-flow. It is a
-  no-op for every non-repair body (`wake: None`), so nothing needs to ask first.
-- It is idempotent-by-position, not by call: it performs terminal writes when it
-  returns `true`. Call it once per turn end.
-- **Everything below it may assume no ci-fix body is live.** That is the whole
-  contract. Kickoff-to-Iterate, the changes-requested gate return, gate
-  approval, rotation, and successor steps all sit below and are unreachable for
-  a repair body.
-- **A new path that reads or writes the Task's lifecycle goes BELOW this call.**
-  Above it belongs only to repair-owned decisions that leave the parent cursor
-  alone. Placing a lifecycle path above is exactly how this defect class comes
-  back — and it comes back *silently*: Kickoff never validated the cursor, so it
-  survived #1054's guard with a green suite.
-- It decides **when**, never **what**. The verdict is `settle_ci_fix_turn` via
-  `decide_open_pr_status`; the incident identity comes from the wake that
-  `arm_ci_fix_wake` minted through `current_ci_incident` (ops/task.rs:2685). The
-  boundary re-derives neither, and adds no seventh spelling of "is this failing
-  head actionable?" — the six that exist are already one too many.
+- **Everything below that branch may assume no ci-fix body is live.** That is
+  the whole contract. Kickoff-to-Iterate, the changes-requested gate return,
+  gate approval, rotation, and successor steps all sit below and are
+  unreachable for a repair body.
+- **A new path that reads or writes the Task's lifecycle goes BELOW it.** Above
+  belongs only to repair-owned decisions that leave the parent cursor alone.
+  Placing a lifecycle path above is exactly how this class comes back — and it
+  comes back *silently*: Kickoff never validated the cursor, so it survived
+  #1054's guard with a green suite.
+- It decides **when**, never **what**. The verdict is `decide_open_pr_status`
+  inside `settle_ci_fix_turn`; the incident identity comes from the wake
+  `arm_ci_fix_wake` minted through `current_ci_incident` (ops/task.rs:2685).
+  Nothing here re-derives either, and no seventh spelling of "is this failing
+  head actionable?" is added — the six that exist are already one too many.
+
+The durable statement of all of this is the rustdoc on `settle_ci_fix_turn`
+(`scratch/` does not survive `lf pr land`; that doc comment does).
+
+**Review log.** The first implementation wrapped the hoist in a named
+`exit_bounded_ci_fix_turn` + `CiFixTurnEnd` param struct. Project review
+rejected that at head `5ce139e7b` and it is gone: a named wrapper around a
+one-call-site helper *hides the very position it exists to announce*, and the
+position is the entire fix. Inlined, the ordering is visible at the site it
+governs, and `settle_ci_fix_turn` remains the one name. Production went from
++117/-19 to roughly +37 net.
 
 ## Approach
 
@@ -72,12 +77,6 @@ parks: no gate, no successor step, no PR rotation."* It just sits at the bottom
 of the arm, downstream of every path it forbids. Move it up.
 
 One change, two touch points, no new state:
-
-0. **Name it.** The hoist becomes `exit_bounded_ci_fix_turn` — a boundary with a
-   spelling, not a rearrangement that only reads correctly in place. W2-308's
-   preempt lands in this same arm and must compose with it; an inlined `if` would
-   force that Task to re-derive the ordering, and a rebase agent would then pick
-   one of the two designs on its own (as it did in W2-287/#1034, silently).
 
 1. **Hoist the ci-fix exit** above the inner lifecycle `loop`. A completed (or
    interrupted) ci-fix flow reconciles its PR, settles its wake, and returns —

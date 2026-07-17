@@ -542,15 +542,13 @@ The durable reviewer outcome is:\n{}",
                                 continue 'runner;
                             }
                         }
-                        // A repair never parks on the parent's rendezvous. Its
-                        // boot skips `reconcile_interactive_rendezvous_at_birth`,
-                        // so a prior body's pending handoff survives into this
-                        // one — and parking here would write the transient
-                        // `ci-fix` playhead into the phase's durable cursor,
-                        // which is the same rejection by a second route. The
-                        // handoff stays pending for the next parent body's birth
-                        // reconcile, and the ci-fix exit below parks the Task
-                        // regardless, which is all this park wanted.
+                        // A repair never parks on the parent's rendezvous: ci-fix
+                        // boot skips the birth reconcile, so a prior body's
+                        // handoff is still pending here, and parking would write
+                        // the `ci-fix` playhead into the phase's cursor — the
+                        // same rejection by a second route. It stays pending for
+                        // the next parent body, and the exit below parks the Task
+                        // anyway, which is all this park wanted.
                         if ci_fix_wake.is_none()
                             && flow_turn_active
                             && status == Lifecycle::Completed
@@ -663,25 +661,35 @@ The durable reviewer outcome is:\n{}",
                             store.finish_task_process(&session, lease).await?;
                             return Ok(());
                         }
-                        // The bounded repair's exit boundary. It stands above
-                        // every parent-lifecycle path below, and that position
-                        // is the fix: see `exit_bounded_ci_fix_turn`.
-                        if exit_bounded_ci_fix_turn(
-                            &store,
-                            &mut session,
-                            lease,
-                            harness.as_mut(),
-                            ci_fix_wake.as_ref(),
-                            CiFixTurnEnd {
-                                flow_iteration_completed,
-                                status,
-                                head_before_turn: iteration_start_head.as_deref(),
-                            },
-                            capture.as_ref(),
-                        )
-                        .await?
-                        {
-                            return Ok(());
+                        // A ci-fix body is one bounded turn, and this is its exit.
+                        // Standing above the lifecycle loop rather than at its
+                        // tail is the whole fix, and every path below may assume
+                        // no repair body is live — `settle_ci_fix_turn` documents
+                        // why, and why a new lifecycle path belongs below it.
+                        if let Some(wake) = ci_fix_wake.as_ref() {
+                            // The flow ended, or the turn was cut short. Anything
+                            // else is a repair still mid-flow.
+                            if flow_iteration_completed || status == Lifecycle::Interrupted {
+                                let observed_pr = crate::ops::task::reconcile_task_pr_for_lease(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                )
+                                .await
+                                .map_err(|error| anyhow!(error.to_string()))?;
+                                let _ = harness.stop().await;
+                                return settle_ci_fix_turn(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    wake,
+                                    observed_pr.as_ref(),
+                                    iteration_start_head.as_deref(),
+                                    status,
+                                    capture.as_ref(),
+                                )
+                                .await;
+                            }
                         }
                         flow_turn_active = false;
                         loop {
@@ -2490,92 +2498,6 @@ async fn arm_ci_fix_wake(
     ))
 }
 
-/// How a provider turn ended, as [`exit_bounded_ci_fix_turn`] reads it.
-///
-/// Grouped rather than passed loose because the three travel together and mean
-/// nothing apart: they are one answer to "did this body's turn end, and where
-/// did it start from".
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CiFixTurnEnd<'a> {
-    /// The flow reached the end of its steps this turn.
-    pub flow_iteration_completed: bool,
-    /// The status the provider reported for the turn.
-    pub status: Lifecycle,
-    /// The PR head as it read *before* this turn — the baseline the settlement
-    /// compares against to decide whether the repair actually pushed anything.
-    pub head_before_turn: Option<&'a str>,
-}
-
-/// **The ci-fix exit boundary.** Call this wherever a body's provider turn can
-/// end. `true` means the body is over: the wake is settled, the Session is
-/// parked, the process is finished, and the caller must return immediately
-/// without touching the Task's lifecycle.
-///
-/// # Why this is a boundary and not an inlined branch
-///
-/// A ci-fix body borrows a live Task Session's generation to run a *different
-/// flow*: its playhead reads `ci-fix` while the phase's durable cursor reads
-/// `task-kickoff`, `task`, or `task-gate`. Every generic path in the runner's
-/// turn-completion arm assumes those agree — it validates the cursor, rewrites
-/// it, or advances the phase that owns it. So this boundary must run **before**
-/// all of them: Kickoff-to-Iterate, the changes-requested gate return, gate
-/// approval, PR rotation, and any successor step. Three live incidents in three
-/// phases, each through a different path, are what that ordering is paying for
-/// (W2-280/W2-298 in Gate, W2-303 in Iterate, W2-309 in Kickoff).
-///
-/// **What a later caller may assume.** Placing a new path *above* this call is
-/// how the class comes back: Kickoff is proof, since it never validated the
-/// cursor — it replaced it — and so it survived the guard that fixed Gate and
-/// Iterate with a green suite. Anything that wants to act on a body whose turn
-/// just ended belongs **below** this boundary if it touches the Task's
-/// lifecycle, and **above** it only if it is a repair-owned decision that
-/// leaves the parent cursor alone. The boundary is a no-op for every body
-/// without a wake (`wake: None`), so a caller need not ask first.
-///
-/// The verdict itself, the incident identity, and the failing-head question are
-/// **not** re-derived here: [`settle_ci_fix_turn`] owns the verdict via
-/// `decide_open_pr_status`, and the wake names its own incident from
-/// `arm_ci_fix_wake`. This boundary decides *when*, never *what*.
-///
-/// A durable instruction absorbed during the repair stays `Claimed` and is
-/// reclaimed by the Task's next body — the same contract a crash mid-turn has
-/// (see [`arm_ci_fix_wake`]). A bounded repair turn is not the body a Task
-/// instruction is for.
-async fn exit_bounded_ci_fix_turn(
-    store: &SharedStore,
-    session: &mut TaskSession,
-    lease: &ChildWriteLease,
-    harness: &mut dyn Harness,
-    wake: Option<&CiFixWake>,
-    turn: CiFixTurnEnd<'_>,
-    capture: Option<&crate::trace::CaptureHandle>,
-) -> Result<bool> {
-    let Some(wake) = wake else {
-        return Ok(false);
-    };
-    // The turn ended, or it was cut short. Anything else is a repair still
-    // mid-flow, which is not this boundary's business.
-    if !turn.flow_iteration_completed && turn.status != Lifecycle::Interrupted {
-        return Ok(false);
-    }
-    let observed_pr = crate::ops::task::reconcile_task_pr_for_lease(store, session, lease)
-        .await
-        .map_err(|error| anyhow!(error.to_string()))?;
-    let _ = harness.stop().await;
-    settle_ci_fix_turn(
-        store,
-        session,
-        lease,
-        wake,
-        observed_pr.as_ref(),
-        turn.head_before_turn,
-        turn.status,
-        capture,
-    )
-    .await?;
-    Ok(true)
-}
-
 /// What a finished ci-fix turn does to the wake that started it. Named apart from
 /// the writes so the verdict is decided before anything is durable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2618,6 +2540,23 @@ enum CiFixVerdict {
 /// The body parks: no gate, no successor step, no PR rotation. A repair pushes to
 /// an existing branch; advancing the Task on its behalf would credit a repair as
 /// progress the Task never made.
+///
+/// **Where the caller must stand.** That last paragraph is only true because the
+/// sole call site sits *above* the runner's parent-lifecycle loop, not at its
+/// tail. Every path in that loop reads, validates, or rewrites a cursor a repair
+/// body does not own: its playhead is `ci-fix` while the phase's flow is
+/// `task-kickoff`, `task`, or `task-gate`. Three phases proved it three
+/// different ways — Gate and Iterate *rejected* the playhead
+/// (W2-280/W2-298, W2-303), and Kickoff silently *replaced* it, spending a
+/// `task_clarify` turn and stranding the wake `Claimed` (W2-309). So a new path
+/// that touches the Task's lifecycle belongs **below** that call; one placed
+/// above re-opens the class, and Kickoff is the proof it re-opens quietly —
+/// it validated nothing, so it survived #1054's cursor guard with a green suite.
+///
+/// This decides *when* a repair ends, never *what* the head deserves:
+/// `decide_open_pr_status` owns the verdict and the wake names its own incident
+/// from [`arm_ci_fix_wake`], so nothing here re-derives "is this failing head
+/// actionable?".
 #[allow(clippy::too_many_arguments)] // capture is a terminal-path output, not a knob
 async fn settle_ci_fix_turn(
     store: &SharedStore,

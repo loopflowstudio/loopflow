@@ -37,8 +37,8 @@ use crate::session_context::{
 };
 use crate::store::{open_store, SharedStore, StorageConfig};
 use crate::task::{
-    AfterMerge, CiState, GithubPr, PrPublication, TaskPr, TaskPrId, TaskSession, TaskSessionId,
-    TaskSessionStatus,
+    AfterMerge, CiState, GithubPr, PrPhase, PrPublication, TaskPr, TaskPrId, TaskSession,
+    TaskSessionId, TaskSessionStatus,
 };
 use crate::wave::Wave;
 
@@ -495,12 +495,17 @@ impl Harness {
 
     /// Age the last GitHub read past both the fresh TTL and the degraded
     /// backoff, so the next reconcile really talks to the fake `gh`.
+    ///
+    /// Resolves the newest row, mirroring `reconcile_subject`: `active_task_pr`
+    /// returns `None` for an abandoned row, which would skip the expiry and leave
+    /// reconcile serving a cached reading the reopen never reached.
     async fn expire_read_cache(&self) {
         let Some(mut pr) = self
             .store
-            .active_task_pr(&self.task.id)
+            .task_prs(&self.task.id)
             .await
-            .expect("read active pr")
+            .expect("read task prs")
+            .pop()
         else {
             return;
         };
@@ -717,6 +722,24 @@ impl Harness {
 
     fn head(&self, sha: &str) {
         self.gh.set_pr(self.pr_number, "open", sha);
+    }
+
+    /// Every read fails the way an exhausted quota does, which
+    /// `classify_pr_read_failure` turns into a `Degraded` observation.
+    ///
+    /// Replaces the script rather than deleting it: `AmbientGuard` prepends its
+    /// bin dir to the real `PATH`, so a deleted fake falls through to the host's
+    /// `gh`, which 404s on `test/repo` and lands in `NotFound` — freshness stays
+    /// `Fresh` and the outage never happens.
+    fn outage(&self) {
+        write_fake_gh(
+            self._guard._bin.path(),
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo "gh version 2.40.0 (fake)"; exit 0; fi
+echo "API rate limit exceeded for installation" >&2
+exit 1
+"#,
+        );
     }
 }
 
@@ -1220,4 +1243,136 @@ async fn a_gh_outage_degrades_the_read_without_inventing_a_reading() {
         harness.command_state(&wake).await,
         ChildCommandState::Claimed
     );
+}
+
+// ---------------------------------------------------------------------------
+// Reopening
+// ---------------------------------------------------------------------------
+
+/// A reopened PR is the same PR: it returns to active at its own identity, its
+/// red head is visible and wakes one body, and it mints no successor.
+///
+/// Pins ENG-20/#1026, where `abandoned_at` was stamped from GitHub's closed
+/// state and never cleared, so the reopened PR stayed unobserved while an empty
+/// sequence 2 was cut at main.
+#[tokio::test]
+async fn a_reopened_pr_is_restored_red_woken_once_and_mints_no_successor() {
+    let mut harness = Harness::new().await;
+    let original = harness
+        .store
+        .active_task_pr(&harness.task.id)
+        .await
+        .expect("read active pr")
+        .expect("the fixture PR is active");
+
+    harness.head("h1");
+    harness.checks_pending();
+    harness.reconcile().await;
+
+    // Closed by GitHub, the real writer of `abandoned_at`.
+    harness.gh.set_pr(harness.pr_number, "closed", "h1");
+    harness.reconcile().await;
+    assert!(
+        harness
+            .store
+            .active_task_pr(&harness.task.id)
+            .await
+            .expect("read active pr")
+            .is_none(),
+        "a closed PR leaves the active set — the state that used to rotate"
+    );
+
+    // Reopened, and red.
+    harness.gh.set_pr(harness.pr_number, "open", "h1");
+    harness.checks_failing();
+    harness.reconcile().await;
+
+    let reopened = harness
+        .store
+        .active_task_pr(&harness.task.id)
+        .await
+        .expect("read active pr")
+        .expect("a reopened PR is active again");
+    assert_eq!(reopened.phase(), PrPhase::Open);
+    assert_eq!(
+        reopened.id, original.id,
+        "the reopened PR keeps its identity"
+    );
+    assert_eq!(reopened.sequence, 1);
+    assert_eq!(reopened.branch, original.branch);
+    assert_eq!(reopened.abandoned_at, None);
+
+    let observation = harness.observation().await.expect("the head is read again");
+    assert_eq!(observation.state, CiState::Failing);
+    let incidents = harness.incidents().await;
+    assert_eq!(incidents.len(), 1, "the red head is visible to `lf ci`");
+    assert_eq!(incidents[0].incident.pr_number, harness.pr_number);
+
+    let (wake, created) = harness.observe().await.expect("the red head wakes a body");
+    assert!(created, "the reopened failure mints its wake");
+    let (again, created_again) = harness.observe().await.expect("the head is still red");
+    assert_eq!(again, wake);
+    assert!(!created_again, "a repeat observation mints no second wake");
+    assert_eq!(
+        harness
+            .arm()
+            .await
+            .expect("the body arms for it")
+            .command_id,
+        wake
+    );
+
+    crate::ops::task::ensure_working_pr_for_lease(
+        &harness.store,
+        &mut harness.task,
+        &harness.lease,
+    )
+    .await
+    .expect("a reopened PR needs no rotation");
+    let prs = harness
+        .store
+        .task_prs(&harness.task.id)
+        .await
+        .expect("read task prs");
+    assert_eq!(prs.len(), 1, "a reopened PR mints no empty successor");
+    assert_eq!(prs[0].id, original.id);
+}
+
+/// A predecessor GitHub could not be re-read is not a settled predecessor: under
+/// an outage the stale `abandoned_at` stands, and rotating on it would mint the
+/// same empty successor.
+#[tokio::test]
+async fn a_degraded_read_refuses_to_rotate_past_an_abandoned_pr() {
+    let mut harness = Harness::new().await;
+    harness.head("h1");
+    harness.checks_pending();
+    harness.reconcile().await;
+    harness.gh.set_pr(harness.pr_number, "closed", "h1");
+    harness.reconcile().await;
+
+    harness.outage();
+    harness.expire_read_cache().await;
+
+    let error = crate::ops::task::ensure_working_pr_for_lease(
+        &harness.store,
+        &mut harness.task,
+        &harness.lease,
+    )
+    .await
+    .expect_err("an unconfirmable predecessor must not be rotated past");
+
+    // The message, not merely `is_err`: this path also touches git, and a
+    // rotation that failed on an unrelated git error would pass a bare `is_err`
+    // while minting the branch this test forbids.
+    let message = error.to_string();
+    assert!(
+        message.contains(&format!("#{}", harness.pr_number)) && message.contains("is closed"),
+        "the refusal must name the PR it could not confirm, got: {message}"
+    );
+    let prs = harness
+        .store
+        .task_prs(&harness.task.id)
+        .await
+        .expect("read task prs");
+    assert_eq!(prs.len(), 1, "a refused rotation mints no successor");
 }

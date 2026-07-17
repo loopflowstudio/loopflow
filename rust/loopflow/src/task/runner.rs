@@ -655,8 +655,11 @@ The durable reviewer outcome is:\n{}",
                             iteration_start_head = observed_pr
                                 .as_ref()
                                 .and_then(|pr| pr.head_sha().map(str::to_string));
-                            let settled_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
-                                pr.is_settled()
+                            // Merged, not merely settled: the branch below reports
+                            // this PR as merged and waits on its review gate, which
+                            // is false of an abandoned one.
+                            let merged_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
+                                pr.phase() == crate::task::PrPhase::Merged
                                     && pr
                                         .publication
                                         .as_ref()
@@ -665,7 +668,7 @@ The durable reviewer outcome is:\n{}",
                                                 == crate::task::AfterMerge::CompleteTask
                                         })
                             });
-                            let needs_rotation = if settled_completing_pr {
+                            let needs_rotation = if merged_completing_pr {
                                 // A completing PR settles the Task, never rotates to a next PR.
                                 false
                             } else if observed_pr
@@ -697,7 +700,7 @@ The durable reviewer outcome is:\n{}",
                                     TaskSessionStatus::Waiting,
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
-                            } else if settled_completing_pr {
+                            } else if merged_completing_pr {
                                 // The PR merged to complete the Task, but a required review is
                                 // still open. Wait for the gate to close before completion; do
                                 // not rotate to another PR.

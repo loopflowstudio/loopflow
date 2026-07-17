@@ -1325,6 +1325,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Snapshot inherited session identity before any journaling can mint
+    // LF_RUN_ID/LF_PROCESS_ID into this process's own environment — human
+    // review authority is decided by what the process was launched with.
+    loopflow::ops::task::capture_review_authority_at_entry();
+
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't

@@ -4835,18 +4835,35 @@ pub fn task_review_reply(review_id: &str, text: String) -> OpsResult<Interaction
     })
 }
 
-fn _require_human_review_authority() -> OpsResult<()> {
-    for variable in [
+static ENTRY_SESSION_MARKERS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+fn session_markers_present() -> bool {
+    [
         "LF_TASK_SESSION_ID",
         "LF_PROJECT_SESSION_ID",
         "LF_RUN_ID",
         "LF_PROCESS_ID",
-    ] {
-        if std::env::var_os(variable).is_some() {
-            return Err(task_error(
-                "human review commands cannot run inside a Task, Project, or Wave agent session",
-            ));
-        }
+    ]
+    .iter()
+    .any(|variable| std::env::var_os(variable).is_some())
+}
+
+/// Record, before anything else runs, whether this process was *launched
+/// inside* an agent session. The journal exports `LF_RUN_ID`/`LF_PROCESS_ID`
+/// into the process's own environment when a run starts, so reading the
+/// environment at review time sees the id the process just minted for itself
+/// and refuses every human invocation. Authority is about what the process
+/// inherited, so it must be read at entry.
+pub fn capture_review_authority_at_entry() {
+    let _ = ENTRY_SESSION_MARKERS.set(session_markers_present());
+}
+
+fn _require_human_review_authority() -> OpsResult<()> {
+    let inherited = *ENTRY_SESSION_MARKERS.get_or_init(session_markers_present);
+    if inherited {
+        return Err(task_error(
+            "human review commands cannot run inside a Task, Project, or Wave agent session",
+        ));
     }
     Ok(())
 }
@@ -5011,6 +5028,38 @@ mod tests {
     use std::process::Command;
     use std::sync::Arc;
     use std::time::Duration;
+
+    /// Review authority is decided by what the process inherited at entry —
+    /// the run id the journal mints into this process's own environment later
+    /// must not revoke it (it did: every human `lf task review` was refused).
+    #[test]
+    fn self_minted_run_identity_does_not_revoke_review_authority() {
+        let _lock = crate::journal::test_env_lock();
+        let saved: Vec<(&str, Option<std::ffi::OsString>)> = [
+            "LF_TASK_SESSION_ID",
+            "LF_PROJECT_SESSION_ID",
+            "LF_RUN_ID",
+            "LF_PROCESS_ID",
+        ]
+        .iter()
+        .map(|name| (*name, std::env::var_os(name)))
+        .collect();
+        for (name, _) in &saved {
+            std::env::remove_var(name);
+        }
+
+        super::capture_review_authority_at_entry();
+        std::env::set_var("LF_RUN_ID", "run_self_minted");
+        let verdict = super::_require_human_review_authority();
+
+        for (name, value) in saved {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        verdict.expect("entry snapshot grants authority despite self-minted run id");
+    }
 
     use super::{
         _defer_task_interactions, _recover_abandoned_task, cached_github_observation,

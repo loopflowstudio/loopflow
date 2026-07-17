@@ -5110,6 +5110,7 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader};
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
     use std::path::Path;
     use std::process::Command;
@@ -8340,9 +8341,6 @@ mod tests {
 
     #[tokio::test]
     async fn completion_is_withheld_over_work_committed_past_the_merged_tip() {
-        // W2-293/#1042: GitHub merged the recorded head; the body then committed
-        // acknowledged follow-up on top. Completing would leave that commit owned
-        // by no PR, so the gate and the reconcile advance must both withhold.
         let repo = TestRepo::new();
         let branch = "jack/gate-proof";
         let base = repo.head_sha();
@@ -8353,44 +8351,64 @@ mod tests {
         let merged_tip = repo.head_sha();
 
         let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let mut merged = pr.clone();
-        merged
-            .publication
+        let mut open = pr.clone();
+        open.merge_commit = None;
+        open.github_observation = None;
+        open.publication
             .as_mut()
             .and_then(|publication| publication.github.as_mut())
             .expect("published github PR")
-            .head_sha = Some(merged_tip);
-        store.update_task_pr(&merged).await.expect("record tip");
+            .head_sha = Some(merged_tip.clone());
+        store.update_task_pr(&open).await.expect("open fixture PR");
 
-        // The branch ends at the merged tip: completion is owed and fires.
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-        assert!(
-            gate.satisfied,
-            "a completing PR with no follow-up must still complete: {:?}",
-            gate.blockers
-        );
-
-        // The body commits the follow-up its directive asked for, after the merge.
         repo.create_file("follow-up.txt", "acknowledged follow-up\n");
         repo.stage_all();
         repo.commit("follow-up the directive asked for");
 
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate with follow-up");
-        assert!(
-            !gate.satisfied,
-            "completion must not fire over committed follow-up"
+        git(
+            repo.path(),
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/test/repo.git",
+            ],
         );
-        assert!(
-            gate.reason().contains(&format!("#{}", 912)),
-            "blocker should name the merged PR: {}",
-            gate.reason()
+        let bin = tempfile::tempdir().expect("fake gh bin");
+        let gh = bin.path().join("gh");
+        std::fs::write(
+            &gh,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s\\n' '{{\"merged\":true,\"state\":\"closed\",\"merge_commit_sha\":\"merge-912\",\"number\":912,\"html_url\":\"https://example.com/pr/912\",\"head\":{{\"sha\":\"{merged_tip}\"}}}}'\n"
+            ),
+        )
+        .expect("write fake gh");
+        let mut permissions = std::fs::metadata(&gh).expect("stat fake gh").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&gh, permissions).expect("make fake gh executable");
+        let _env_lock = crate::journal::test_env_lock();
+        let previous_path = std::env::var_os("PATH");
+        let path = match &previous_path {
+            Some(previous) => format!("{}:{}", bin.path().display(), previous.to_string_lossy()),
+            None => bin.path().display().to_string(),
+        };
+        std::env::set_var("PATH", path);
+        let observed = reconcile_task_pr(&store, &mut session).await;
+        match previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        let observed = observed
+            .expect("observe merged PR")
+            .expect("persist merged PR");
+        assert_eq!(observed.phase(), PrPhase::Merged);
+        assert_ne!(
+            session.status,
+            TaskSessionStatus::Completed,
+            "merge observation must not complete over committed follow-up"
         );
 
-        // The reconcile advance honours the same gate: no completion, and no
-        // writeback that would close the Linear issue over the commit.
-        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
         reconcile_task_completion(&store, &mut session, None)
             .await
             .expect("reconcile with follow-up outstanding");

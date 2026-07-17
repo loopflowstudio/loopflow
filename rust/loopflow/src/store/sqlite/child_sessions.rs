@@ -3365,7 +3365,10 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     current_directive_version=MAX(current_directive_version, ?28),
     incorporated_directive_version=MAX(incorporated_directive_version, ?29),
     lf_bin=?30, db_path=?31, lf_home=?32,
-    abandon_requested_at=?33, abandon_reason=?34
+    abandon_requested_at=?33, abandon_reason=?34,
+    iterate_flow=?35, iterate_interaction_policy=?36,
+    kickoff_flow=?45, kickoff_interaction_policy=?46,
+    gate_flow=?47, gate_interaction_policy=?48
     WHERE id=?1";
 const TASK_SESSION_LEASE_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
@@ -3763,9 +3766,15 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     ]
 }
 
+/// `TASK_SESSION_UPDATE`'s highest bound parameter. The control statement owns
+/// configuration; the lease statement owns execution state. Parameters
+/// ?37..?44 are bound but unreferenced because lease state is interleaved with
+/// the lifecycle configuration in `task_session_params`.
+const TASK_SESSION_CONTROL_PARAMS: usize = 48;
+
 fn task_session_control_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     let mut parameters = task_session_params(session);
-    parameters.truncate(34);
+    parameters.truncate(TASK_SESSION_CONTROL_PARAMS);
     parameters
 }
 

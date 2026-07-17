@@ -28,6 +28,7 @@ use crate::engine::worktrees::{
 use crate::engine::{expand_flow, load_flow, ConcreteStep, InteractionPolicy};
 use crate::interaction_review::{
     InteractionReview, InteractionReviewDisposition, InteractionReviewId, InteractionReviewStatus,
+    InteractionReviewer,
 };
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
@@ -434,6 +435,21 @@ fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {
     Ok(true)
 }
 
+fn _refuse_current_human_review(
+    session: &TaskSession,
+    review: Option<&InteractionReview>,
+) -> OpsResult<()> {
+    if let Some(review) = review.filter(|review| {
+        review.reviewer == InteractionReviewer::Human && !review.status.is_terminal()
+    }) {
+        return Err(task_error(format!(
+            "Task {} is awaiting human interaction review {}; no interaction policy was changed",
+            session.launch.issue.identifier, review.id
+        )));
+    }
+    Ok(())
+}
+
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSession> {
     let TaskLaunchOptions {
         name,
@@ -533,6 +549,18 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                         session.launch.issue.identifier,
                     )));
                 }
+            }
+            if headless && !session.lifecycle.all_interactions_deferred() {
+                let review = store
+                    .interaction_review_at(
+                        &session.id,
+                        session.phase_epoch,
+                        session.phase_iteration,
+                        session.phase_cursor,
+                    )
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+                _refuse_current_human_review(session, review.as_ref())?;
             }
             if headless && _defer_task_interactions(session)? {
                 store

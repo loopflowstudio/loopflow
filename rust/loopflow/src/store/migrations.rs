@@ -506,8 +506,11 @@ fn backup_before_migration(
     if !requires_migration_sqlite(conn)? {
         return Ok(None);
     }
-    let previous =
-        latest_applied_version_sqlite(conn)?.unwrap_or_else(|| "uninitialized".to_string());
+    // Nothing applied: no previous generation to preserve, and the fingerprint
+    // below reads `schema_migrations`, which does not exist yet.
+    let Some(previous) = latest_applied_version_sqlite(conn)? else {
+        return Ok(None);
+    };
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -1157,18 +1160,23 @@ pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult
     Ok(applied_versions(conn)?.last().cloned())
 }
 
+/// Whether this database still owes migration work.
+///
+/// An uninitialized database owes all of it — no user tables, or an empty
+/// `schema_migrations` as its only table. Neither is "nothing to do"; only a
+/// current schema is.
 pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreResult<bool> {
     let tables = user_tables(conn)?;
     if !tables.iter().any(|table| table == "schema_migrations") {
         return if tables.is_empty() {
-            Ok(false)
+            Ok(true)
         } else {
             Err(incompatible())
         };
     }
     let applied = applied_versions(conn)?;
     if applied.is_empty() && tables.len() == 1 {
-        return Ok(false);
+        return Ok(true);
     }
     if applied.as_slice() == [LEGACY_BASELINE_VERSION] {
         return Ok(true);
@@ -2363,6 +2371,35 @@ mod tests {
         apply_sqlite_with_backup(&current, &path).unwrap();
 
         writer.execute_batch("ROLLBACK").unwrap();
+    }
+
+    /// What a process killed mid-migration leaves: the file keeps its header,
+    /// the tables are gone. `SqliteStore::new` still routes it to the migrate
+    /// path, because `existing_database` asks whether the file has bytes, not
+    /// whether it holds a schema.
+    #[test]
+    fn an_existing_schema_less_database_still_gets_its_schema() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA user_version = 1;").unwrap();
+        }
+        assert!(
+            std::fs::metadata(&path).unwrap().len() > 0,
+            "this is not the case under test unless the file has bytes already"
+        );
+
+        let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
+
+        // A bare `Ok` is not the proof: the regression opened fine and failed
+        // on the first read of a table it never created.
+        assert!(store.list_run_events_since(0).unwrap().is_empty());
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
     }
 
     #[test]

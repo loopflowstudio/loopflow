@@ -33,10 +33,11 @@ use tokio::sync::mpsc;
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::child_session::{
     ChildCommand, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDirective, ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
+    ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
 };
+use crate::durable::Author;
 use crate::engine::agent::AgentConfig;
-use crate::harness::{Capabilities, Harness as ProviderHarness};
+use crate::harness::Harness as ProviderHarness;
 use crate::id::WaveId;
 use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
 use crate::session_context::{
@@ -330,12 +331,6 @@ impl ProviderHarness for PushingHarness {
         Ok(())
     }
 
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            supports_steer: false,
-        }
-    }
-
     fn provider_session_id(&self) -> Option<String> {
         Some("scripted-ci-fix".to_string())
     }
@@ -445,12 +440,6 @@ impl ProviderHarness for LiveIdleHarness {
 
     async fn stop(&mut self) -> anyhow::Result<()> {
         Ok(())
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            supports_steer: false,
-        }
     }
 
     fn provider_session_id(&self) -> Option<String> {
@@ -682,13 +671,13 @@ impl Harness {
         let mut task = make_task(&wave, &project, repo.path());
         let pr_number = 1009;
         let mut pr = make_task_pr(&task);
-        let directive = ChildDirective::initial(
-            ChildRef::Task(task.id.clone()),
-            task.launch.issue.description.clone(),
-            ChildCommandSource::System,
-        );
         store
-            .reserve_task_session_with_directive(&task, &pr, &directive)
+            .create_task_session_with_steer(
+                &task,
+                &pr,
+                Author::User,
+                &task.launch.issue.description,
+            )
             .await
             .expect("create task session");
         publish(&mut pr, pr_number, "h1");

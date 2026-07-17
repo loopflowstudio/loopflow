@@ -1934,7 +1934,7 @@ mod tests {
     fn accounts_first_migration_preserves_asymmetric_routes_venues_and_session_pins() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
+        apply_set(&conn, prefix_before("accounts_first")).unwrap();
         conn.execute_batch(
             "INSERT INTO provider_accounts (
                 provider, account_id, home, login_email, credential_state,

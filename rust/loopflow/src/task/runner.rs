@@ -303,6 +303,7 @@ The durable reviewer outcome is:\n{}",
                 gather_ms: prepared.turn.context_gather_ms,
                 render_ms: prepared.turn.context_render_ms,
                 raw_provider: true,
+                basis: None,
             },
         ) {
             Ok(capture) => Some(capture),
@@ -2933,12 +2934,6 @@ mod tests {
 
         async fn stop(&mut self) -> Result<()> {
             Ok(())
-        }
-
-        fn capabilities(&self) -> Capabilities {
-            Capabilities {
-                supports_steer: false,
-            }
         }
 
         fn provider_session_id(&self) -> Option<String> {

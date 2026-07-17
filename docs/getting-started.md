@@ -16,8 +16,8 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | I want to... | Start here |
 |---|---|
 | Try loopflow from terminal | `lf init` |
-| Run autonomous waves | `lf init` → `lf wave <name>` |
-| Use Wave Chat (macOS) | Download Loopflow and open a repository |
+| Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
+| Steer and inspect from terminal | `lf home start <name>` → `lf chat --steer` / `lf status` |
 | Run on another machine | Set the wave's `home:` and run `lf home start <name>` ([Go Remote](#go-remote)) |
 
 ---
@@ -150,21 +150,17 @@ when chat, child observations, crons, or a heartbeat wake them.
 Linear Projects and tasks, starts durable Task Sessions, and supervises their
 results.
 
-Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `crons:` and `pm:`), then run the agent:
-
-```bash
-lf wave shipper
-```
+Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
+frontmatter sets machine config such as `crons:` and `pm:`), then open it in
+**Loopflow** (macOS) — the home for running waves. Select the repository and
+the Wave to get its persistent conversation beside the Linear-backed
+Project → Task work map; the app starts the Wave's resident process when
+needed. From the CLI, `lf home start shipper` does the same start.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
 <issue-id>`, and stays steerable while the Task Session works in its immutable
 worktree. CI failures and review feedback return to the same session; linked
 events land in the Wave thread.
-
-**Loopflow** (macOS) is the native Wave experience. Select a repository and a
-Wave to open its persistent conversation beside the Linear-backed Project →
-Task work map. The app queries local state through its bundled `lf` and starts
-the selected Wave's `lf wave` process when needed.
 
 Detached processes use named tmux sessions:
 
@@ -174,12 +170,11 @@ tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
 Use `lf project attach <project>` or `lf task attach <issue>` for a writable,
-audited control prompt. Stop a foreground Wave with Ctrl-C or run
-`lf stop <name>`.
+audited control prompt. Stop a running Wave with `lf stop <name>`.
 
 You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
-[Waves →](waves.md) · [The Fleet →](fleet.md)
+[Waves →](waves.md) · [Conducting →](conducting.md)
 
 ---
 

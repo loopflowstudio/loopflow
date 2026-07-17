@@ -197,7 +197,7 @@ DOCS_NAV = [
     ("Waves", "waves"),
     ("Authoring", "authoring"),
     ("The Agent API", "agent-api"),
-    ("The Fleet", "fleet"),
+    ("Conducting", "conducting"),
     ("Architecture", "architecture"),
     # Reference
     ("lf", "lf"),
@@ -734,7 +734,7 @@ def get():
                         Div(
                             H2("Mac app"),
                             P(
-                                "The fleet cockpit: wave chat, the machine-wide roadmap, and every task's worktree — a pure client over the same local state.",
+                                "The podium: wave chat, the machine-wide roadmap, and every task's worktree — a pure client over the same local state.",
                                 cls="install-desc",
                             ),
                             A(

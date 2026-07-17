@@ -28,7 +28,7 @@ same stroke, the distributed system was deleted — the daemon, the remote-exec
 door, the HTTP routes, all of it. What remained is one binary, a local store,
 and the substrates everyone already runs: Linear, GitHub, SSH.
 
-**Now.** The frontier is fleet-scale: waves with Homes on other machines,
+**Now.** The frontier is conducting at scale: waves with Homes on other machines,
 provider accounts that rotate on rate limits, ledgers that can prove — not
 estimate — how much of the work happened unattended.
 

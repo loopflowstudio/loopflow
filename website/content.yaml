@@ -3,7 +3,7 @@
 
 homepage:
   hero:
-    tagline: "A fleet of persistent agents you can steer. No server."
+    tagline: "Conduct an orchestra of coding agents. No server."
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
   story:
@@ -39,7 +39,7 @@ homepage:
           truth is Linear and GitHub; machines reach each other over SSH with
           credentials that die with the process. Deployable across a company
           with nothing central to run.
-      - title: "A fleet on one screen"
+      - title: "The whole orchestra on one screen"
         description: >-
           `lf roadmap` buckets every open task by what it needs from you.
           Trace what any agent was told, what it spent, and what it shipped.

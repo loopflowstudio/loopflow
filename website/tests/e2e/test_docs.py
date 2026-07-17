@@ -6,7 +6,7 @@ NAV_SLUGS = [
     "waves",
     "authoring",
     "agent-api",
-    "fleet",
+    "conducting",
     "architecture",
     "lf",
     "config",
@@ -51,7 +51,8 @@ def test_docs_nonexistent_redirects(page: Page, base_url: str):
 
 
 def test_retired_docs_redirect(page: Page, base_url: str):
-    # wave-authoring merged into waves, ops merged into lf; neither slug may 500
-    for retired in ("wave-authoring", "ops"):
+    # wave-authoring merged into waves, ops merged into lf, fleet renamed
+    # to conducting; no retired slug may 500
+    for retired in ("wave-authoring", "ops", "fleet"):
         page.goto(f"{base_url}/docs/{retired}")
         assert page.url == f"{base_url}/docs"

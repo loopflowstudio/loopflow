@@ -1,43 +1,15 @@
 # Loopflow
 
-Create and run **Waves** — persistent agents that work toward an outcome.
-Write a Wave's goal once; it coordinates Linear-backed Projects and Tasks,
-remembers what it learns, and keeps one steerable conversation beside the live
-work map.
+Loopflow creates and runs **Waves** — persistent agents that work toward an
+outcome. Write a Wave's goal once; it coordinates Linear-backed Projects and
+Tasks, remembers what it learns, and keeps one steerable conversation beside
+the live work map.
 
 Everything is one binary. `lf` is the command humans type *and* the API agents
-call to launch, steer, and observe other agents. There is no server: state
-lives in a local SQLite store and an append-only journal, shared truth lives in
-Linear and GitHub, and remote machines are reached over plain SSH.
-
-## Try it
-
-```bash
-curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
-lf init
-lf debug -c        # copy an error to the clipboard, watch it fix
-```
-
-Then run a Wave:
-
-```bash
-# author wave/engbot/GOAL.md, then:
-lf wave engbot            # one persistent Wave, until Ctrl-C
-lf chat --steer "ship the parser fix first"
-lf status engbot          # its live Project → Task hierarchy
-```
-
-## The Journey
-
-| Where you are | What to read |
-|---|---|
-| Just installed, want to try it | [Get Started](getting-started.md) |
-| Automating with a persistent agent | [Waves](waves.md) |
-| Writing skills, flows, and goals | [Authoring](authoring.md) |
-| Writing an agent that drives other agents | [The Agent API](agent-api.md) |
-| Watching and steering many agents | [The Fleet](fleet.md) |
-| Understanding how it works with no server | [Architecture](architecture.md) |
-| Looking up a command | [`lf` reference](lf.md) |
+call to launch, steer, and observe other agents. There is no centralized
+server: state lives in a local SQLite store and append-only journals, shared
+truth lives in Linear and GitHub, and remote machines are reached over plain
+SSH.
 
 ## The Model
 
@@ -57,6 +29,38 @@ A wave is a named agent with a goal. Everything that defines its durable
 operating context — goal, memory, crons, Home — is authored in the repo and
 reviewed like code. Projects and Tasks live in Linear. Only a Task Session
 owns a worktree; that is where every file change happens.
+
+## Try it
+
+```bash
+curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
+lf init
+lf debug -c        # copy an error to the clipboard, watch it fix
+```
+
+Then author a Wave and let it run. **Loopflow** (macOS) is the home for
+running waves — open the repository and start it there — or start it from the
+CLI:
+
+```bash
+# author wave/engbot/GOAL.md, then:
+lf home start engbot      # idempotently start the Wave on its Home
+lf chat --steer "ship the parser fix first"
+lf status engbot          # its live Project → Task hierarchy
+lf stop engbot
+```
+
+## The Journey
+
+| Where you are | What to read |
+|---|---|
+| Just installed, want to try it | [Get Started](getting-started.md) |
+| Automating with a persistent agent | [Waves](waves.md) |
+| Writing skills, flows, and goals | [Authoring](authoring.md) |
+| Writing an agent that drives other agents | [The Agent API](agent-api.md) |
+| Watching and steering many agents | [Conducting](conducting.md) |
+| Understanding how it works with no server | [Architecture](architecture.md) |
+| Looking up a command | [`lf` reference](lf.md) |
 
 ## Skills, flows, directions
 
@@ -132,7 +136,7 @@ wave/                     # Wave goals and memory (persists)
 
 ## Next
 
-[Get Started →](getting-started.md) · [Waves →](waves.md) · [The Agent API →](agent-api.md) · [The Fleet →](fleet.md)
+[Get Started →](getting-started.md) · [Waves →](waves.md) · [The Agent API →](agent-api.md) · [Conducting →](conducting.md)
 
 ## Reference
 

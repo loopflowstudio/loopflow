@@ -96,7 +96,7 @@ this repo:
 | [Get Started](docs/getting-started.md) | Install, first commands, building features, going remote |
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
-| [The Fleet](docs/fleet.md) | Monitoring and steering many agents; the Mac cockpit |
+| [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
 | [Authoring](docs/authoring.md) | Writing skills, flows, directions, and goals |
 | [Architecture](docs/architecture.md) | No server: the store, the journal, Homes, `lf ssh`, `lfd` |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |

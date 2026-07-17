@@ -9,7 +9,7 @@ whoever is watching. The map:
 | A human running prompts | [Basic Usage](#basic-usage), [Context Flags](#context-flags) | [Get Started](getting-started.md) |
 | A human operating waves | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
 | An agent driving other agents | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [The Agent Bus](#the-agent-bus) | [The Agent API](agent-api.md) |
-| Watching the whole machine | [Reading the Local Ledger](#reading-the-local-ledger) | [The Fleet](fleet.md) |
+| Watching the whole machine | [Reading the Local Ledger](#reading-the-local-ledger) | [Conducting](conducting.md) |
 
 Every read surface takes `--json`; that JSON is the same wire the Mac app
 renders.
@@ -612,6 +612,10 @@ lf npx/explain-code                # already-cached skill (no network)
 
 ## PR Operations
 
+The publish/submit/land contract every launched agent receives is
+`rust/loopflow/src/engine/builtins/LOOPFLOW.md` — that file is canonical for
+agent-facing semantics; this section is the human reference.
+
 ### lf pr publish
 
 Push and create or refresh a PR, then print its state and URL. Opens no
@@ -816,4 +820,4 @@ harness can start, Loopflow writes deterministic notes from the same context.
 
 ## See Also
 
-[The Agent API](agent-api.md) · [The Fleet](fleet.md) · [Authoring](authoring.md) · [Get Started](getting-started.md) · [Configuration](config.md)
+[The Agent API](agent-api.md) · [Conducting](conducting.md) · [Authoring](authoring.md) · [Get Started](getting-started.md) · [Configuration](config.md)

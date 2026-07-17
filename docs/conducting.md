@@ -1,8 +1,8 @@
-# The Fleet
+# Conducting
 
-Running one agent is a conversation. Running many is an operations problem:
-what is live, what is stuck, what needs a human, what did it cost, and how do
-you redirect work without killing it. Loopflow answers all of that from the
+Running one agent is a conversation. Running many is conducting: knowing what
+is playing, what is stuck, what needs you, what it cost — and redirecting a
+performer without stopping the piece. Loopflow answers all of that from the
 local ledger — every command below reads machine-local truth and takes
 `--json`.
 
@@ -51,7 +51,7 @@ much of CI repair happened without a human.
 
 ## Steer
 
-Reading is half; the fleet stays steerable while it runs.
+Reading is half; the orchestra stays steerable while it plays.
 
 ```bash
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
@@ -71,9 +71,9 @@ listed, and completes back into the owning Session.
 
 ## The Mac app
 
-The Loopflow app is the fleet cockpit. It opens on a repository rail, the wave
-list, and the machine-wide roadmap, and it is a pure client over `lf --json` —
-no second database, no machine-wide service. What the CLI reads, it renders:
+The Loopflow app is the podium. It opens on a repository rail, the wave list,
+and the machine-wide roadmap, and it is a pure client over `lf --json` — no
+second database, no machine-wide service. What the CLI reads, it renders:
 
 - **Wave Chat** — the persistent conversation, with send, steer, and interrupt.
 - **Roadmap** — every Task across every wave with lifecycle controls and

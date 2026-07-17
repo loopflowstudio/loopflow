@@ -12,12 +12,20 @@ Two files author a wave, both living in your repo and reviewed like code:
 | **`wave/<name>/GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
 
+Waves live in **Loopflow** (macOS): open the repository, select the wave, and
+start it beside its conversation and work map. The same controls exist from
+the CLI:
+
 ```bash
-lf wave shipper                        # start the Wave (Ctrl-C to stop)
+lf home start shipper                  # idempotently start the Wave on its Home
 lf chat --steer "invoices first"       # steer the live body, else queue
 lf status shipper                      # its Project → Task hierarchy
 lf stop shipper                        # stop listener and resident gracefully
 ```
+
+(`lf wave shipper` runs the resident process itself, foreground until Ctrl-C —
+that is what the app and `lf home start` launch for you; run it directly when
+developing a goal.)
 
 ## The planning model
 
@@ -198,8 +206,8 @@ missed, not replayed.
 
 Draft with `lf design` or write the files by hand — see
 [Authoring → Drafting](authoring.md#drafting). Once `wave/<name>/` exists,
-`lf wave <name>` runs it and the Mac app picks it up. To remove a wave, stop
-it, then delete `wave/<name>/`.
+the Mac app picks it up, and `lf home start <name>` starts it from the CLI.
+To remove a wave, stop it, then delete `wave/<name>/`.
 
 ## Worked example
 
@@ -225,7 +233,7 @@ file-writing change. Each shipped PR folds into memory and closes its task.
 
 ## Next
 
-[The Agent API →](agent-api.md) · [The Fleet →](fleet.md) · [Get Started →](getting-started.md)
+[The Agent API →](agent-api.md) · [Conducting →](conducting.md) · [Get Started →](getting-started.md)
 
 ## Reference
 

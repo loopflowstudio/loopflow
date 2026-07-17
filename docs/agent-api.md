@@ -121,7 +121,7 @@ it only when a human asked to see the PR.
 
 ## Observe
 
-Every read the fleet surfaces offer is `--json`:
+Every read the conducting surfaces offer is `--json`:
 
 ```bash
 lf status <wave> --json     # live Project → Task hierarchy
@@ -130,7 +130,7 @@ lf runs --task INF-123 --json
 lf trace <exec-id> --json
 ```
 
-[The Fleet →](fleet.md) covers the full monitoring surface. The Mac app is
+[Conducting →](conducting.md) covers the full monitoring surface. The Mac app is
 built on exactly these calls — it keeps no second database.
 
 ## The contract
@@ -149,4 +149,4 @@ Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.
 
 ## Next
 
-[The Fleet →](fleet.md) · [Waves →](waves.md) · [`lf` reference](lf.md)
+[Conducting →](conducting.md) · [Waves →](waves.md) · [`lf` reference](lf.md)

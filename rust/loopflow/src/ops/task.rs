@@ -2849,7 +2849,10 @@ async fn reconcile_task_pr_with_authority(
                 .as_ref()
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
                 && !has_pending_directive(session)
-                && committed_follow_up_range(&session.worktree, &pr)?.is_none();
+                && matches!(
+                    committed_follow_up_range(&session.worktree, &pr)?,
+                    CommittedFollowUp::ProvenEmpty
+                );
             if completes {
                 // The completion gate: even with the PR merged, the Task cannot
                 // be completed in the PM until every required review is
@@ -3250,32 +3253,40 @@ impl RotateOptions {
     }
 }
 
-/// The commit range of follow-up work committed on the settled branch *after*
-/// its PR merged, or `None` when there is nothing to carry. The merged branch
-/// tip is `head_sha` — recorded by reconcile from GitHub's `headRefOid`; commits
-/// reachable from the branch but not from `head_sha` are the post-merge
-/// follow-up. Returns `None` when no tip was recorded, the branch has no commits
-/// beyond it, or the recorded tip is not an ancestor of the branch (a rewrite,
-/// or the object is absent locally) — an ambiguous cut skips the carry rather
-/// than misapplying already-merged work.
-fn committed_follow_up_range(
-    worktree: &Path,
-    settled: &TaskPr,
-) -> OpsResult<Option<(String, String)>> {
+enum CommittedFollowUp {
+    ProvenEmpty,
+    Range { from: String, to: String },
+    Unprovable { reason: &'static str },
+}
+
+/// Classify follow-up work committed on the settled branch *after* its PR
+/// merged. The merged branch tip is `head_sha` — recorded by reconcile from
+/// GitHub's `headRefOid`; commits reachable from the branch but not from
+/// `head_sha` are the post-merge follow-up. A missing or unrelated recorded tip
+/// cannot prove the range empty: rotation still skips an unsafe carry, while
+/// completion fails closed until the boundary becomes provable.
+fn committed_follow_up_range(worktree: &Path, settled: &TaskPr) -> OpsResult<CommittedFollowUp> {
     let Some(head_sha) = settled.github().and_then(|github| github.head_sha.clone()) else {
-        return Ok(None);
+        return Ok(CommittedFollowUp::Unprovable {
+            reason: "the published pull request head is missing",
+        });
     };
     let tip = rev_parse(worktree, &settled.branch)
         .map_err(|error| task_error(format!("failed to resolve settled branch tip: {error}")))?;
     if tip == head_sha {
-        return Ok(None);
+        return Ok(CommittedFollowUp::ProvenEmpty);
     }
     let ancestor = is_ancestor(worktree, &head_sha, &settled.branch)
         .map_err(|error| task_error(format!("failed to check follow-up ancestry: {error}")))?;
     if !ancestor {
-        return Ok(None);
+        return Ok(CommittedFollowUp::Unprovable {
+            reason: "the published pull request head is not an ancestor of the settled branch",
+        });
     }
-    Ok(Some((head_sha, settled.branch.clone())))
+    Ok(CommittedFollowUp::Range {
+        from: head_sha,
+        to: settled.branch.clone(),
+    })
 }
 
 /// A directive was accepted (its version advanced) but the body has not yet
@@ -3357,7 +3368,7 @@ async fn ensure_working_pr_with_authority(
         .publication
         .as_ref()
         .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-        && committed_carry.is_none()
+        && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
     {
         return Ok(None);
     }
@@ -3439,7 +3450,7 @@ async fn ensure_working_pr_with_authority(
                 )));
             }
         }
-        if let Some((from, to)) = &committed_carry {
+        if let CommittedFollowUp::Range { from, to } = &committed_carry {
             if let Err(error) = cherry_pick_range(&session.worktree, from, to) {
                 roll_back_failed_rotation(&session.worktree, &settled.branch, &branch, stashed)
                     .map_err(|recovery_error| {
@@ -3935,15 +3946,20 @@ pub(crate) async fn task_completion_gate(
                 .publication
                 .as_ref()
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-            && committed_follow_up_range(&session.worktree, newest)?.is_some()
         {
-            gate.blockers.push(format!(
-                "follow-up work is committed past merged pull request #{}",
-                newest
-                    .github()
-                    .map(|github| github.number)
-                    .unwrap_or_default()
-            ));
+            let number = newest
+                .github()
+                .map(|github| github.number)
+                .unwrap_or_default();
+            match committed_follow_up_range(&session.worktree, newest)? {
+                CommittedFollowUp::ProvenEmpty => {}
+                CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
+                    "follow-up work is committed past merged pull request #{number}"
+                )),
+                CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
+                    "cannot prove merged pull request #{number} has no committed follow-up: {reason}"
+                )),
+            }
         }
     }
 
@@ -8245,7 +8261,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 912,
                 url: "https://example.com/pr/912".to_string(),
-                head_sha: None,
+                head_sha: Some(repo.head_sha()),
             }),
         });
         merged.merge_commit = Some("merge-912".to_string());
@@ -8336,6 +8352,73 @@ mod tests {
             gate.satisfied,
             "gate should be satisfied: {:?}",
             gate.blockers
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_gate_blocks_when_follow_up_range_is_unprovable() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        let base = repo.head_sha();
+        repo.create_branch(branch);
+        let (_home, store, session, pr) = gate_task(&repo, branch, &base).await;
+
+        let mut unprovable = pr.clone();
+        unprovable
+            .publication
+            .as_mut()
+            .and_then(|publication| publication.github.as_mut())
+            .expect("published github PR")
+            .head_sha = None;
+        unprovable.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&unprovable)
+            .await
+            .expect("remove published head");
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate with missing head");
+        assert!(!gate.satisfied);
+        assert!(
+            gate.reason()
+                .contains("published pull request head is missing"),
+            "missing head must fail closed: {}",
+            gate.reason()
+        );
+
+        git(
+            repo.path(),
+            &["checkout", "--orphan", "jack/rewritten-head"],
+        );
+        git(
+            repo.path(),
+            &["commit", "--allow-empty", "-m", "rewritten published head"],
+        );
+        let rewritten_head = repo.head_sha();
+        git(repo.path(), &["checkout", branch]);
+
+        unprovable
+            .publication
+            .as_mut()
+            .and_then(|publication| publication.github.as_mut())
+            .expect("published github PR")
+            .head_sha = Some(rewritten_head);
+        unprovable.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&unprovable)
+            .await
+            .expect("record rewritten published head");
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate with rewritten head");
+        assert!(!gate.satisfied);
+        assert!(
+            gate.reason()
+                .contains("published pull request head is not an ancestor"),
+            "rewritten head must fail closed: {}",
+            gate.reason()
         );
     }
 

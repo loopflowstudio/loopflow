@@ -1891,7 +1891,10 @@ async fn a_real_ci_fix_turn_preserves_the_gate_cursor_and_settles_its_wake() {
     );
 
     let (generation, sends) = harness.run_real_body().await;
-    assert_eq!(sends, 1, "the repair spends one provider turn, and no gate step");
+    assert_eq!(
+        sends, 1,
+        "the repair spends one provider turn, and no gate step"
+    );
 
     let session = harness
         .store
@@ -1972,7 +1975,10 @@ async fn a_real_ci_fix_turn_preserves_the_iterate_cursor_and_settles_its_wake() 
         crate::task::TaskLifecyclePhase::Iterate
     );
     assert_eq!(session.phase_epoch, 2);
-    assert_eq!(session.phase_cursor, 1, "the transient playhead never lands here");
+    assert_eq!(
+        session.phase_cursor, 1,
+        "the transient playhead never lands here"
+    );
     assert_eq!(session.phase_iteration, 3);
     assert_eq!(session.gate_cycle, 0);
     assert!(session.gate_proposal.is_none());
@@ -2040,7 +2046,10 @@ async fn a_kickoff_ci_fix_turn_settles_before_iterate_and_spends_no_lifecycle_tu
         "a repair is not Task progress: kickoff is still where the Task stands, \
          and its design review is still where the human left it"
     );
-    assert_eq!(session.phase_epoch, 1, "entering iterate would bump the epoch");
+    assert_eq!(
+        session.phase_epoch, 1,
+        "entering iterate would bump the epoch"
+    );
     assert_eq!(session.phase_cursor, 1);
     assert_eq!(session.phase_iteration, 0);
     assert_eq!(session.gate_cycle, 0);

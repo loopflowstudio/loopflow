@@ -1,5 +1,57 @@
 # Open questions — W2-280
 
+## 7. OPEN, BLOCKING PR 3: Done-When #1 has no test seam (found 2026-07-17)
+
+I asserted "an automated test proves a Session runner's turn usage reaches
+`agent_turns` with real token values, and goes red when sabotaged" — and the
+reviewer rightly held me to it as the load-bearing proof. **It is not achievable
+as written.** Verified, not inferred:
+
+- `run_task_session` is called from exactly one place: `bin/lf.rs:1530`. No test
+  drives it, and `grep` over the whole crate finds no other caller.
+- `task/runner/ci_fix_lifecycle_tests.rs` — the one runner-adjacent test module —
+  never touches the event loop; it exercises `child_session`/task lifecycle
+  helpers.
+- The runner builds its provider inline: `default_create_harness(&harness_name,
+  ApprovalPolicy::AutoApprove, event_tx)` (`task/runner.rs:160`) is a free
+  function resolved through `HarnessKind::parse`. There is no fake kind, no
+  closure, no parameter — no seam to inject a scripted harness.
+
+So proving the wiring end-to-end requires **adding** that seam, and CLAUDE.md is
+explicit: *"Never reshape production code for tests. If you're adding a factory
+trait, an interface, a constructor overload, or an extra parameter solely
+because tests need it, stop."* plus *"No factory patterns."*
+
+Testing `TraceCapture` directly instead would be the trap wave MEMORY already
+records twice: it proves the layer below (trace.rs, which `flowloop/wave.rs`
+already exercises in production) and would stay green with the runner's
+`record_conversation` call deleted. That is a fixture pin, not a guard.
+
+**This is my error, not the reviewer's.** Clarify declared the design computable
+on the strength of a proof I never checked was reachable — the same
+"assert a capability without running the command" shape I have been catching
+elsewhere this session.
+
+**Three ways out; this needs a decision, not a coin flip:**
+
+1. **Give the runner a harness seam on production grounds.** A runner that
+   hard-codes its own provider factory is a real architectural wart, not just a
+   test obstacle — it is why the Task/Project runners drifted away from
+   `flowloop/wave.rs` and lost capture in the first place. If the seam is
+   justified by production need, the style-guide bar is met and the test follows.
+   Most honest, largest diff.
+2. **Extract the event→capture routing into a unit and test that.** Cheap, but it
+   proves a function, not that the runner calls it. Sabotaging the call site
+   would leave it green — the exact trap above. Weakest.
+3. **Prove by dogfood:** run a Task body, query `agent_turns ⋈ agent_launches`
+   for its process. Real end-to-end evidence, and the design's own demo — but it
+   cannot fail in CI, which is precisely what the reviewer refused.
+
+**My recommendation: (1).** The seam earns its keep independently of testing, and
+it is the same divergence this Task exists to close. PR 3 is left unstarted
+rather than half-refactored — wave MEMORY records what a rushed partial refactor
+of this runner costs.
+
 ## 0. PR boundary after the failed recovery (CLOSED 2026-07-17)
 
 **Resolved.** #1031 is CLOSED (`gh api pulls/1031` → `closed_at 01:04:18Z, merged=false`);

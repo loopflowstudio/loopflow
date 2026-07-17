@@ -161,13 +161,13 @@ fn validate_chrome_profile_identifier(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn chrome_local_state_path() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())?;
     Ok(home.join("Library/Application Support/Google/Chrome/Local State"))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(test)))]
 fn chrome_local_state_path() -> Result<PathBuf, String> {
     Err("Chrome profile discovery is currently supported on macOS only".to_string())
 }

@@ -58,7 +58,8 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1" = "api" ]; then
-  echo '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"head-912"}}'
+  head=$(git rev-parse HEAD)
+  printf '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"%s"}}\n' "$head"
   exit 0
 fi
 exit 0

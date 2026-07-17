@@ -2840,12 +2840,19 @@ async fn reconcile_task_pr_with_authority(
             merged_at = Some(now);
             // Record the merge, but withhold completion while an accepted
             // directive is unincorporated — an auto-merge armed by `lf pr land`
-            // must not silently erase direction accepted after it was armed.
+            // must not silently erase direction accepted after it was armed — or
+            // while the branch holds follow-up committed past the merged tip,
+            // which another serial PR still owes. The PR is settling in flight and
+            // is not on disk yet, so its range is read from it directly.
             let completes = pr
                 .publication
                 .as_ref()
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-                && !has_pending_directive(session);
+                && !has_pending_directive(session)
+                && matches!(
+                    committed_follow_up_range(&session.worktree, &pr)?,
+                    CommittedFollowUp::ProvenEmpty
+                );
             if completes {
                 // The completion gate: even with the PR merged, the Task cannot
                 // be completed in the PM until every required review is
@@ -3246,32 +3253,40 @@ impl RotateOptions {
     }
 }
 
-/// The commit range of follow-up work committed on the settled branch *after*
-/// its PR merged, or `None` when there is nothing to carry. The merged branch
-/// tip is `head_sha` — recorded by reconcile from GitHub's `headRefOid`; commits
-/// reachable from the branch but not from `head_sha` are the post-merge
-/// follow-up. Returns `None` when no tip was recorded, the branch has no commits
-/// beyond it, or the recorded tip is not an ancestor of the branch (a rewrite,
-/// or the object is absent locally) — an ambiguous cut skips the carry rather
-/// than misapplying already-merged work.
-fn committed_follow_up_range(
-    worktree: &Path,
-    settled: &TaskPr,
-) -> OpsResult<Option<(String, String)>> {
+enum CommittedFollowUp {
+    ProvenEmpty,
+    Range { from: String, to: String },
+    Unprovable { reason: &'static str },
+}
+
+/// Classify follow-up work committed on the settled branch *after* its PR
+/// merged. The merged branch tip is `head_sha` — recorded by reconcile from
+/// GitHub's `headRefOid`; commits reachable from the branch but not from
+/// `head_sha` are the post-merge follow-up. A missing or unrelated recorded tip
+/// cannot prove the range empty: rotation still skips an unsafe carry, while
+/// completion fails closed until the boundary becomes provable.
+fn committed_follow_up_range(worktree: &Path, settled: &TaskPr) -> OpsResult<CommittedFollowUp> {
     let Some(head_sha) = settled.github().and_then(|github| github.head_sha.clone()) else {
-        return Ok(None);
+        return Ok(CommittedFollowUp::Unprovable {
+            reason: "the published pull request head is missing",
+        });
     };
     let tip = rev_parse(worktree, &settled.branch)
         .map_err(|error| task_error(format!("failed to resolve settled branch tip: {error}")))?;
     if tip == head_sha {
-        return Ok(None);
+        return Ok(CommittedFollowUp::ProvenEmpty);
     }
     let ancestor = is_ancestor(worktree, &head_sha, &settled.branch)
         .map_err(|error| task_error(format!("failed to check follow-up ancestry: {error}")))?;
     if !ancestor {
-        return Ok(None);
+        return Ok(CommittedFollowUp::Unprovable {
+            reason: "the published pull request head is not an ancestor of the settled branch",
+        });
     }
-    Ok(Some((head_sha, settled.branch.clone())))
+    Ok(CommittedFollowUp::Range {
+        from: head_sha,
+        to: settled.branch.clone(),
+    })
 }
 
 /// A directive was accepted (its version advanced) but the body has not yet
@@ -3343,13 +3358,17 @@ async fn ensure_working_pr_with_authority(
             )));
         }
     }
-    // A settled completing PR never rotates: completion is pending on the
-    // review gate, not on a follow-up PR. `reconcile_task_completion` advances
-    // the Session to `Completed` once the gate closes.
+    let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
+    // A settled completing PR normally never rotates: completion is pending on
+    // the review gate, not on a follow-up PR. `reconcile_task_completion`
+    // advances the Session to `Completed` once the gate closes. The one exception
+    // is follow-up committed past the merged tip: the completion gate refuses to
+    // settle over it, so one more serial PR is the only way it lands.
     if settled
         .publication
         .as_ref()
         .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+        && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
     {
         return Ok(None);
     }
@@ -3379,7 +3398,6 @@ async fn ensure_working_pr_with_authority(
     // already-merged work and the follow-up the worker committed on top after the
     // merge. Rotation carries that committed range forward — plus any dirty edits
     // — so no work is dropped when moving onto the next serial branch.
-    let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
     let current = current_branch(&session.worktree)
         .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
         .ok_or_else(|| task_error("Task worktree is detached"))?;
@@ -3432,7 +3450,7 @@ async fn ensure_working_pr_with_authority(
                 )));
             }
         }
-        if let Some((from, to)) = &committed_carry {
+        if let CommittedFollowUp::Range { from, to } = &committed_carry {
             if let Err(error) = cherry_pick_range(&session.worktree, from, to) {
                 roll_back_failed_rotation(&session.worktree, &settled.branch, &branch, stashed)
                     .map_err(|recovery_error| {
@@ -3912,6 +3930,42 @@ pub(crate) async fn task_completion_gate(
             "directive v{} is not yet incorporated; acknowledge it or re-steer before completing",
             session.current_directive_version
         ));
+    }
+
+    // Work committed past the tip GitHub merged is owned by no PR; completing
+    // would strand it outside the Task. Only the newest PR can still hold it: a
+    // rotation carries the range onto its successor but leaves the settled
+    // branch's commits in place, so scanning every merged PR would never clear.
+    let prs = store
+        .task_prs(&session.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    if let Some(newest) = prs.last() {
+        if newest.phase() == PrPhase::Merged
+            && newest
+                .publication
+                .as_ref()
+                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+        {
+            let number = newest
+                .github()
+                .map(|github| github.number)
+                .unwrap_or_default();
+            match committed_follow_up_range(&session.worktree, newest)? {
+                CommittedFollowUp::ProvenEmpty => {}
+                CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
+                    "follow-up work is committed past merged pull request #{number}"
+                )),
+                // Missing later evidence blocks entry into completion, but it
+                // cannot reverse a terminal fact. Repair still reopens on a
+                // proven range or any other concrete gate blocker.
+                CommittedFollowUp::Unprovable { .. }
+                    if session.status == TaskSessionStatus::Completed => {}
+                CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
+                    "cannot prove merged pull request #{number} has no committed follow-up: {reason}"
+                )),
+            }
+        }
     }
 
     // Every active PR must be settled (merged or explicitly abandoned).
@@ -5077,6 +5131,7 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader};
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
     use std::path::Path;
     use std::process::Command;
@@ -6731,6 +6786,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_completing_pr_rotates_only_to_carry_committed_follow_up() {
+        // A completing PR has nothing to rotate to — except follow-up committed
+        // past the merged tip (W2-293), which the completion gate refuses to
+        // settle over. Both halves read the same range, so both are proven here.
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let settled_branch = "jack/task-pr-proof";
+        repo.create_branch(settled_branch);
+        repo.create_file("merged.txt", "merged work\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let merged_tip = repo.head_sha();
+        git(repo.path(), &["push", "origin", "jack/task-pr-proof:main"]);
+
+        let (_home, store, mut session, mut settled) =
+            rotation_task(&repo, settled_branch, &base).await;
+        settled.publication = Some(PrPublication {
+            requested_at: OffsetDateTime::now_utc(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 1042,
+                url: "https://example.com/pr/1042".to_string(),
+                head_sha: Some(merged_tip.clone()),
+            }),
+        });
+        settled.merge_commit = Some("merge-1042".to_string());
+        settled.updated_at = OffsetDateTime::now_utc();
+        store
+            .settle_task_pr(&settled, None)
+            .await
+            .expect("settle merged completing PR");
+
+        // Nothing past the merged tip: the completing PR does not rotate.
+        let none =
+            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
+                .await
+                .expect("completing PR with no follow-up");
+        assert!(
+            none.is_none(),
+            "a completing PR with no follow-up must not mint a successor"
+        );
+
+        // The body commits the follow-up its directive asked for, after the merge.
+        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
+        repo.stage_all();
+        repo.commit("follow-up the directive asked for");
+
+        let next =
+            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
+                .await
+                .expect("rotate to carry follow-up")
+                .expect("successor PR");
+
+        assert_eq!(next.sequence, 2);
+        assert_eq!(
+            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+            next.branch
+        );
+        // The follow-up survives on the successor, and only the follow-up: the
+        // merged work rides in from the base rather than being re-applied.
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("follow-up.txt")).expect("follow-up carried"),
+            "acknowledged follow-up\n"
+        );
+        let beyond = git(
+            repo.path(),
+            &["log", "origin/main..HEAD", "--oneline", "--format=%s"],
+        );
+        assert_eq!(
+            beyond.lines().collect::<Vec<_>>(),
+            vec!["follow-up the directive asked for"]
+        );
+    }
+
+    #[tokio::test]
     async fn failed_committed_carry_restores_the_settled_branch_for_retry() {
         let repo = TestRepo::new();
         let base = repo.head_sha();
@@ -8135,7 +8266,7 @@ mod tests {
             github: Some(GithubPr {
                 number: 912,
                 url: "https://example.com/pr/912".to_string(),
-                head_sha: None,
+                head_sha: Some(repo.head_sha()),
             }),
         });
         merged.merge_commit = Some("merge-912".to_string());
@@ -8227,6 +8358,156 @@ mod tests {
             "gate should be satisfied: {:?}",
             gate.blockers
         );
+    }
+
+    #[tokio::test]
+    async fn completion_gate_blocks_when_follow_up_range_is_unprovable() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        let base = repo.head_sha();
+        repo.create_branch(branch);
+        let (_home, store, session, pr) = gate_task(&repo, branch, &base).await;
+
+        let mut unprovable = pr.clone();
+        unprovable
+            .publication
+            .as_mut()
+            .and_then(|publication| publication.github.as_mut())
+            .expect("published github PR")
+            .head_sha = None;
+        unprovable.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&unprovable)
+            .await
+            .expect("remove published head");
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate with missing head");
+        assert!(!gate.satisfied);
+        assert!(
+            gate.reason()
+                .contains("published pull request head is missing"),
+            "missing head must fail closed: {}",
+            gate.reason()
+        );
+
+        git(
+            repo.path(),
+            &["checkout", "--orphan", "jack/rewritten-head"],
+        );
+        git(
+            repo.path(),
+            &["commit", "--allow-empty", "-m", "rewritten published head"],
+        );
+        let rewritten_head = repo.head_sha();
+        git(repo.path(), &["checkout", branch]);
+
+        unprovable
+            .publication
+            .as_mut()
+            .and_then(|publication| publication.github.as_mut())
+            .expect("published github PR")
+            .head_sha = Some(rewritten_head);
+        unprovable.updated_at = OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&unprovable)
+            .await
+            .expect("record rewritten published head");
+
+        let gate = task_completion_gate(&store, &session)
+            .await
+            .expect("gate with rewritten head");
+        assert!(!gate.satisfied);
+        assert!(
+            gate.reason()
+                .contains("published pull request head is not an ancestor"),
+            "rewritten head must fail closed: {}",
+            gate.reason()
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn completion_is_withheld_over_work_committed_past_the_merged_tip() {
+        let repo = TestRepo::new();
+        let branch = "jack/gate-proof";
+        let base = repo.head_sha();
+        repo.create_branch(branch);
+        repo.create_file("merged.txt", "merged work\n");
+        repo.stage_all();
+        repo.commit("merged work");
+        let merged_tip = repo.head_sha();
+
+        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
+        let mut open = pr.clone();
+        open.merge_commit = None;
+        open.github_observation = None;
+        open.publication
+            .as_mut()
+            .and_then(|publication| publication.github.as_mut())
+            .expect("published github PR")
+            .head_sha = Some(merged_tip.clone());
+        store.update_task_pr(&open).await.expect("open fixture PR");
+
+        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
+        repo.stage_all();
+        repo.commit("follow-up the directive asked for");
+
+        git(
+            repo.path(),
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/test/repo.git",
+            ],
+        );
+        let bin = tempfile::tempdir().expect("fake gh bin");
+        let gh = bin.path().join("gh");
+        std::fs::write(
+            &gh,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s\\n' '{{\"merged\":true,\"state\":\"closed\",\"merge_commit_sha\":\"merge-912\",\"number\":912,\"html_url\":\"https://example.com/pr/912\",\"head\":{{\"sha\":\"{merged_tip}\"}}}}'\n"
+            ),
+        )
+        .expect("write fake gh");
+        let mut permissions = std::fs::metadata(&gh).expect("stat fake gh").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&gh, permissions).expect("make fake gh executable");
+        let _env_lock = crate::journal::test_env_lock();
+        let previous_path = std::env::var_os("PATH");
+        let path = match &previous_path {
+            Some(previous) => format!("{}:{}", bin.path().display(), previous.to_string_lossy()),
+            None => bin.path().display().to_string(),
+        };
+        std::env::set_var("PATH", path);
+        let observed = reconcile_task_pr(&store, &mut session).await;
+        match previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        let observed = observed
+            .expect("observe merged PR")
+            .expect("persist merged PR");
+        assert_eq!(observed.phase(), PrPhase::Merged);
+        assert_ne!(
+            session.status,
+            TaskSessionStatus::Completed,
+            "merge observation must not complete over committed follow-up"
+        );
+
+        reconcile_task_completion(&store, &mut session, None)
+            .await
+            .expect("reconcile with follow-up outstanding");
+        assert_ne!(
+            session.status,
+            TaskSessionStatus::Completed,
+            "reconcile must not complete over committed follow-up"
+        );
+        assert_eq!(session.pm_writeback, PmWritebackState::Current);
+        assert!(repo.path().join("follow-up.txt").exists());
     }
 
     #[tokio::test]

@@ -71,6 +71,53 @@ def _stage_bundle(spec: install.BundleSpec, binaries: tuple[str, ...]) -> None:
         (spec.resources_dir / resource.name).write_bytes(b"x")
 
 
+def _write_fake_promotion_boundary(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """#!/usr/bin/env python3
+import os
+import pathlib
+import shutil
+import sys
+
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("lf 9.9.9")
+    raise SystemExit(0)
+if args[:2] != ["install", "promote"]:
+    raise SystemExit(2)
+
+log = pathlib.Path(os.environ["PROMOTION_LOG"])
+log.write_text(" ".join(args) + "\\n")
+immutable = pathlib.Path(os.environ["PROMOTED_BINARY"])
+shutil.copy2(pathlib.Path(sys.argv[0]), immutable)
+immutable.chmod(0o555)
+
+def option(name):
+    return pathlib.Path(args[args.index(name) + 1])
+
+cli_target = option("--cli-target")
+cli_target.parent.mkdir(parents=True, exist_ok=True)
+temporary = cli_target.with_name(".lf.fake-boundary")
+temporary.unlink(missing_ok=True)
+temporary.symlink_to(immutable)
+temporary.replace(cli_target)
+
+if "--app-source" in args:
+    app_source = option("--app-source")
+    app_target = option("--app-target")
+    if app_target.exists():
+        shutil.rmtree(app_target)
+    shutil.copytree(app_source, app_target, symlinks=True)
+    (app_target / ".rust-promotion-boundary").write_text("committed")
+    legacy = option("--legacy-app-target")
+    if legacy.exists():
+        shutil.rmtree(legacy)
+"""
+    )
+    path.chmod(0o755)
+
+
 def _patch_subprocess(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -177,27 +224,6 @@ def test_stage_binaries_errors_on_missing_cargo_output(
         install._stage_binaries(tmp_path / "local-bin")
 
 
-def test_sync_skills_runs_fresh_lf_with_yes(tmp_path: Path) -> None:
-    log = tmp_path / "sync.log"
-    lf = tmp_path / "lf"
-    lf.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > {log}\nprintf 'synced\\n'\n")
-    lf.chmod(0o755)
-
-    install._sync_skills(lf)
-
-    assert log.read_text() == "sync-skills --yes\n"
-
-
-def test_sync_skills_warns_without_failing_when_lf_cannot_run(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    install._sync_skills(Path("/not/a/real/lf"))
-
-    captured = capsys.readouterr()
-    assert "skill sync failed" in captured.err
-    assert "binaries installed, skills unchanged" in captured.err
-
-
 def test_only_canonical_or_tagged_installs_receive_migration_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -224,26 +250,73 @@ def test_only_canonical_or_tagged_installs_receive_migration_authority(
     assert install._migration_authority() == "validation_only"
 
 
-def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) -> None:
-    local_bin = tmp_path / "local-bin"
-    local_bin.mkdir()
-    (local_bin / "lf").write_text("lf")
-    (local_bin / "Loopflow.app" / "Contents").mkdir(parents=True)
-    (local_bin / "Loopflow.app" / "Contents" / "marker").write_text("new app")
-
-    install_dir = tmp_path / "bin"
+@pytest.mark.parametrize("no_pull", [False, True])
+def test_refresh_routes_default_no_pull_and_custom_dir_through_rust_promotion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, no_pull: bool
+) -> None:
+    root = tmp_path / "repo"
+    candidate = root / "target" / "release" / "lf"
+    _write_fake_promotion_boundary(candidate)
+    install_dir = tmp_path / "custom-bin"
     install_dir.mkdir()
-    (install_dir / "lf").write_text("old lf")
+    (install_dir / "lf").write_text("python-direct-copy")
+    log = tmp_path / "promotion.log"
+    immutable = tmp_path / "immutable-lf"
+    refreshed: list[Path] = []
 
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "_build_cli_binaries", lambda: None)
+    monkeypatch.setattr(install, "_refresh_default_branch", refreshed.append)
+    monkeypatch.setenv("PROMOTION_LOG", str(log))
+    monkeypatch.setenv("PROMOTED_BINARY", str(immutable))
+
+    install.refresh(no_pull=no_pull, install_dir=install_dir)
+
+    assert (install_dir / "lf").is_symlink()
+    assert (install_dir / "lf").resolve() == immutable
+    command = log.read_text()
+    assert command.startswith("install promote ")
+    assert f"--cli-target {install_dir / 'lf'}" in command
+    assert "--sync-skills" in command
+    assert refreshed == ([] if no_pull else [root])
+
+
+def test_local_use_routes_cli_app_bundled_helper_and_skills_through_rust_promotion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    _stage_build_artifacts(root)
+    _write_fake_promotion_boundary(root / "target" / "release" / "lf")
+    local_bin = root / "local-bin"
+    install_dir = tmp_path / "bin"
     applications = tmp_path / "Applications"
+    install_dir.mkdir()
+    (install_dir / "lf").write_text("python-direct-copy")
     (applications / "Loopflow.app").mkdir(parents=True)
     (applications / "Loopflow.app" / "old").write_text("old app")
     (applications / "Concerto.app").mkdir()
+    log = tmp_path / "promotion.log"
+    immutable = tmp_path / "immutable-lf"
 
-    install._promote(local_bin, install_dir, applications_dir=applications)
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "LOCAL_BIN", local_bin)
+    monkeypatch.setattr(install, "APPLICATIONS_DIR", applications)
+    monkeypatch.setattr(install, "_resolve_install_dir", lambda: install_dir)
+    monkeypatch.setattr(install, "_run_parallel_builds", lambda _skip: None)
+    monkeypatch.setattr(install, "read_release_version", lambda _root: "9.9.9")
+    monkeypatch.setenv("PROMOTION_LOG", str(log))
+    monkeypatch.setenv("PROMOTED_BINARY", str(immutable))
+    _patch_subprocess(monkeypatch)
+
+    install.local(use=True, dry_run=False, skip=[])
 
     assert (install_dir / "lf").is_symlink()
-    assert (install_dir / "lf").readlink() == local_bin / "lf"
-    assert (applications / "Loopflow.app" / "Contents" / "marker").read_text() == "new app"
-    assert not (applications / "Loopflow.app" / "old").exists()
+    assert (install_dir / "lf").resolve() == immutable
+    installed_app = applications / "Loopflow.app"
+    assert (installed_app / ".rust-promotion-boundary").read_text() == "committed"
+    assert (installed_app / "Contents" / "MacOS" / "lf").exists()
     assert not (applications / "Concerto.app").exists()
+    command = log.read_text()
+    assert f"--app-source {local_bin / 'Loopflow.app'}" in command
+    assert f"--app-target {installed_app}" in command
+    assert "--sync-skills" in command

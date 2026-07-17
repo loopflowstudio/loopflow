@@ -239,12 +239,9 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                 TaskAction::NoAction => "action available: fix failing required checks".into(),
             },
         ),
-        Some(CiState::Passing) | None => one_action(
+        Some(CiState::Passing) => one_action(
             TaskAction::Review,
-            match evidence.ci {
-                Some(_) => "checks passed; awaiting review",
-                None => "awaiting review",
-            },
+            "checks passed; awaiting review",
             |a| match a {
                 TaskAction::Review => unreachable!(),
                 TaskAction::Resume => {
@@ -254,6 +251,18 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                 TaskAction::StartNextPr => "PR is open, not merged".into(),
                 TaskAction::Recover => "body is not dead; PR is open for review".into(),
                 TaskAction::NoAction => "action available: review the PR".into(),
+            },
+        ),
+        None => one_action(
+            TaskAction::NoAction,
+            "required checks have not been observed",
+            |a| match a {
+                TaskAction::NoAction => unreachable!(),
+                TaskAction::Review => "required checks have not been observed".into(),
+                TaskAction::Resume => "awaiting CI evidence".into(),
+                TaskAction::Complete => "PR is open, not merged".into(),
+                TaskAction::StartNextPr => "PR is open, not merged".into(),
+                TaskAction::Recover => "body is not dead; awaiting CI evidence".into(),
             },
         ),
     }
@@ -679,6 +688,23 @@ mod tests {
                 "CI {state:?} should recommend {expected:?}"
             );
         }
+    }
+
+    #[test]
+    fn open_pr_without_ci_evidence_waits_instead_of_advertising_review() {
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.active_pr_phase = Some(PrPhase::Open);
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(
+            model.status(TaskAction::NoAction).unwrap().reason,
+            "required checks have not been observed"
+        );
+        assert_eq!(
+            model.status(TaskAction::Review).unwrap().reason,
+            "required checks have not been observed"
+        );
     }
 
     #[test]

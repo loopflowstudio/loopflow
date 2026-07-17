@@ -5207,6 +5207,7 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::io::{BufRead, BufReader};
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
@@ -5223,8 +5224,9 @@ mod tests {
         reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
         recover_stranded_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
         require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
-        succession_workspace_slug, task_recovery_adoption, verify_task_pr_range_with_authority,
-        RotateOptions, TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
+        succession_workspace_slug, supervise_project_task_bodies, task_recovery_adoption,
+        verify_task_pr_range_with_authority, RotateOptions, TaskControlResult,
+        TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
@@ -5261,6 +5263,71 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    struct TaskLaunchEnv {
+        previous: Vec<(&'static str, Option<OsString>)>,
+        _bin: tempfile::TempDir,
+    }
+
+    impl TaskLaunchEnv {
+        fn install(home: &Path) -> Self {
+            let bin = tempfile::tempdir().expect("fake tmux bin");
+            let tmux = bin.path().join("tmux");
+            std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").expect("write fake tmux");
+            let mut permissions = std::fs::metadata(&tmux)
+                .expect("stat fake tmux")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&tmux, permissions).expect("make fake tmux executable");
+
+            let keys = [
+                "PATH",
+                "LF_BIN",
+                "LF_HOME",
+                "LF_DB_PATH",
+                "LF_CONTROL_BIN",
+                "LF_CONTROL_HOME",
+                "LF_CONTROL_DB_PATH",
+                crate::provider_account::FORWARDED_PROFILE_BUNDLE_ENV,
+            ];
+            let previous = keys
+                .into_iter()
+                .map(|key| (key, std::env::var_os(key)))
+                .collect::<Vec<_>>();
+            let path = std::env::var_os("PATH").map_or_else(
+                || bin.path().as_os_str().to_os_string(),
+                |path| {
+                    let mut paths = vec![bin.path().to_path_buf()];
+                    paths.extend(std::env::split_paths(&path));
+                    std::env::join_paths(paths).expect("join fake tmux PATH")
+                },
+            );
+            let db = home.join("loopflow.db");
+            std::env::set_var("PATH", path);
+            std::env::set_var("LF_BIN", "/usr/bin/true");
+            std::env::set_var("LF_HOME", home);
+            std::env::set_var("LF_DB_PATH", &db);
+            std::env::set_var("LF_CONTROL_BIN", "/usr/bin/true");
+            std::env::set_var("LF_CONTROL_HOME", home);
+            std::env::set_var("LF_CONTROL_DB_PATH", db);
+            std::env::remove_var(crate::provider_account::FORWARDED_PROFILE_BUNDLE_ENV);
+            Self {
+                previous,
+                _bin: bin,
+            }
+        }
+    }
+
+    impl Drop for TaskLaunchEnv {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
     }
 
     #[test]
@@ -5556,6 +5623,69 @@ mod tests {
             .await
             .expect("create Task");
         (home, store, session, pr)
+    }
+
+    async fn parked_gate_task(
+        repo: &TestRepo,
+        branch: &str,
+        ci_state: Option<CiState>,
+        phase_cursor: u32,
+    ) -> (
+        tempfile::TempDir,
+        SharedStore,
+        ProjectSession,
+        TaskSession,
+        TaskPr,
+    ) {
+        let base = repo.head_sha();
+        repo.create_branch(branch);
+        let (home, store, session, mut pr) =
+            gate_task_fixture(repo, branch, &base, false, phase_cursor).await;
+        let project = store
+            .get_project_session(&session.project_session_id)
+            .await
+            .expect("read Project")
+            .expect("Project exists");
+        let now = OffsetDateTime::now_utc();
+        let head = repo.head_sha();
+
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 1054,
+                url: "https://github.com/loopflowstudio/loopflow/pull/1054".to_string(),
+                head_sha: Some(head.clone()),
+            }),
+        });
+        pr.github_observation = Some(GithubObservation {
+            checked_at: now,
+            result: GithubObservationResult::Fresh,
+        });
+        pr.ci_observation = ci_state.map(|state| CiObservation {
+            head_sha: head,
+            state,
+            failing_checks: if state == CiState::Failing {
+                vec![CiCheck {
+                    name: "rust-test".to_string(),
+                    url: Some("https://ci.example/rust-test".to_string()),
+                }]
+            } else {
+                Vec::new()
+            },
+            observed_at: now,
+        });
+        pr.updated_at = now;
+        store.update_task_pr(&pr).await.expect("publish fixture PR");
+        if let Some(incident) = super::current_ci_incident(&pr) {
+            store
+                .observe_ci_incident(&incident)
+                .await
+                .expect("record failing CI incident");
+        }
+
+        (home, store, project, session, pr)
     }
 
     /// Settle a rotation Task PR as merged, optionally recording a `next_slug`.
@@ -8203,12 +8333,13 @@ mod tests {
         PmWritebackOperation, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
     };
 
-    /// A Gate-phase Task Session with one merged `CompleteTask` PR, ready for a
-    /// required review to be opened against its gate waitpoint.
-    async fn gate_task(
+    /// A Gate-phase Task Session whose initial PR may be left working or settled.
+    async fn gate_task_fixture(
         repo: &TestRepo,
         branch: &str,
         base_commit: &str,
+        settle: bool,
+        phase_cursor: u32,
     ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
         let home = tempfile::tempdir().expect("task home");
         let db_path = home.path().join("loopflow.db");
@@ -8289,7 +8420,7 @@ mod tests {
             lifecycle: TaskLifecyclePlan::standard("task"),
             lifecycle_phase: TaskLifecyclePhase::Gate,
             phase_epoch: 2,
-            phase_cursor: 0,
+            phase_cursor,
             phase_iteration: 0,
             gate_cycle: 1,
             gate_proposal: Some(TaskGateProposal {
@@ -8333,6 +8464,9 @@ mod tests {
             .create_task_session(&session, &pr)
             .await
             .expect("create Task");
+        if !settle {
+            return (home, store, session, pr);
+        }
         // Settle the PR as merged-with-complete-task after creation (the session
         // is created with a sequence-1 Working PR).
         let mut merged = pr.clone();
@@ -8353,6 +8487,16 @@ mod tests {
             .await
             .expect("settle merged PR");
         (home, store, session, merged)
+    }
+
+    /// A Gate-phase Task Session with one merged `CompleteTask` PR, ready for a
+    /// required review to be opened against its gate waitpoint.
+    async fn gate_task(
+        repo: &TestRepo,
+        branch: &str,
+        base_commit: &str,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
+        gate_task_fixture(repo, branch, base_commit, true, 0).await
     }
 
     /// Open a required Human review at the Session's gate waitpoint and return
@@ -8748,6 +8892,168 @@ mod tests {
                 .iter()
                 .any(|review| review.id == review_id),
             "review row must survive repair"
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
+    async fn project_supervision_keeps_pending_and_unknown_gate_tasks_parked() {
+        let _env_lock = crate::journal::test_env_lock();
+        for (label, state) in [("pending", Some(CiState::Pending)), ("unknown", None)] {
+            let repo = TestRepo::new();
+            let branch = format!("jack/gate-{label}");
+            let (home, store, project, session, _pr) =
+                parked_gate_task(&repo, &branch, state, 0).await;
+            let _launch_env = TaskLaunchEnv::install(home.path());
+
+            supervise_project_task_bodies(&store, &project)
+                .await
+                .expect("supervise parked Gate");
+
+            let persisted = store
+                .get_task_session(&session.id)
+                .await
+                .expect("read Task")
+                .expect("Task exists");
+            assert_eq!(persisted.status, TaskSessionStatus::Waiting, "{label}");
+            assert_eq!(
+                persisted.lifecycle_phase,
+                crate::task::TaskLifecyclePhase::Gate,
+                "{label}"
+            );
+            assert_eq!(persisted.phase_cursor, 0, "{label}");
+            assert!(persisted.latest_process.is_none(), "{label}");
+            assert!(
+                store
+                    .list_child_commands(&ChildRef::Task(session.id.clone()))
+                    .await
+                    .expect("read Task commands")
+                    .is_empty(),
+                "{label}"
+            );
+            assert!(
+                store
+                    .list_interaction_reviews(Some(&session.wave_id))
+                    .await
+                    .expect("read interaction reviews")
+                    .is_empty(),
+                "{label}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
+    async fn project_supervision_creates_one_existing_ci_fix_wake_for_red() {
+        let _env_lock = crate::journal::test_env_lock();
+        let repo = TestRepo::new();
+        let (home, store, project, session, _pr) =
+            parked_gate_task(&repo, "jack/gate-red", Some(CiState::Failing), 0).await;
+        let _launch_env = TaskLaunchEnv::install(home.path());
+
+        supervise_project_task_bodies(&store, &project)
+            .await
+            .expect("first red supervision");
+        supervise_project_task_bodies(&store, &project)
+            .await
+            .expect("duplicate red supervision");
+
+        let commands = store
+            .list_child_commands(&ChildRef::Task(session.id.clone()))
+            .await
+            .expect("read Task commands");
+        assert_eq!(
+            commands.len(),
+            1,
+            "the incident identity deduplicates wakes"
+        );
+        assert!(matches!(commands[0].kind, ChildCommandKind::CiFix { .. }));
+        let persisted = store
+            .get_task_session(&session.id)
+            .await
+            .expect("read Task")
+            .expect("Task exists");
+        assert_eq!(
+            persisted
+                .latest_process
+                .as_ref()
+                .expect("ci-fix launch reserves a generation")
+                .generation,
+            1
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
+    async fn project_supervision_relaunches_a_fresh_green_gate_exactly_once() {
+        let _env_lock = crate::journal::test_env_lock();
+        let repo = TestRepo::new();
+        let (home, store, project, session, _pr) =
+            parked_gate_task(&repo, "jack/gate-green", Some(CiState::Passing), 0).await;
+        let _launch_env = TaskLaunchEnv::install(home.path());
+
+        supervise_project_task_bodies(&store, &project)
+            .await
+            .expect("first green supervision");
+        supervise_project_task_bodies(&store, &project)
+            .await
+            .expect("duplicate green supervision");
+
+        let persisted = store
+            .get_task_session(&session.id)
+            .await
+            .expect("read Task")
+            .expect("Task exists");
+        assert_eq!(persisted.status, TaskSessionStatus::Starting);
+        assert_eq!(
+            persisted
+                .latest_process
+                .as_ref()
+                .expect("green Gate relaunch reserves a generation")
+                .generation,
+            1,
+            "the second observation must not reserve another generation"
+        );
+        assert!(
+            store
+                .list_interaction_reviews(Some(&session.wave_id))
+                .await
+                .expect("read interaction reviews")
+                .is_empty(),
+            "Project reconciliation launches Gate; the Gate body owns review creation"
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
+    async fn project_supervision_does_not_relaunch_green_after_gate_advances() {
+        let _env_lock = crate::journal::test_env_lock();
+        let repo = TestRepo::new();
+        let (home, store, project, session, _pr) =
+            parked_gate_task(&repo, "jack/gate-advanced", Some(CiState::Passing), 1).await;
+        let _launch_env = TaskLaunchEnv::install(home.path());
+
+        supervise_project_task_bodies(&store, &project)
+            .await
+            .expect("supervise advanced Gate");
+
+        let persisted = store
+            .get_task_session(&session.id)
+            .await
+            .expect("read Task")
+            .expect("Task exists");
+        assert_eq!(persisted.phase_cursor, 1);
+        assert!(
+            persisted.latest_process.is_none(),
+            "green observation cannot reopen an advanced Gate"
+        );
+        assert!(
+            store
+                .list_interaction_reviews(Some(&session.wave_id))
+                .await
+                .expect("read interaction reviews")
+                .is_empty(),
+            "Project reconciliation cannot create a second review"
         );
     }
 

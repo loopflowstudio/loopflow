@@ -1,54 +1,101 @@
-# Architecture cutover review
+# Architecture foundation review
 
-## Implemented slice
+## What was implemented
 
-- Replaced provider-wide `supports_steer` with one per-Turn
-  `send_current` outcome: Sent, NotSteerable, Failed, or Unknown.
-- Correlated Codex `turn/steer` with its JSON-RPC response and exact expected
-  Turn id before reporting Sent.
-- Made plain Steer additive: it never interrupts, and every delivery outcome
-  remains input to the next boundary.
-- Drove the four control shapes — live accepted, live rejected, ambiguous
-  response, and opaque TUI without Turns — through the real controller.
-- Typed Codex steer rejections from probed live evidence, and released the
-  pending waiter on every terminal path.
-- Renamed trace-only Rust ids to `TraceId` / `ExecId` and capture ids to
-  `LaunchId` / `TurnId`, freeing the product Run vocabulary.
+- Researched the current Wave/Project/Task runtime and wrote the core cutover
+  plan around `Work → Epoch → Run → Launch → optional Turn`, with Steer, Basis,
+  Wait, Home authority, migration rules, races, and deletion guards made
+  explicit. This branch implements foundation slices, not that full cutover.
+- Added a prompt-authoring surface: `lf prompt`, the canonical `PROMPTS.md`
+  guide, focused evidence methods in the skills that exercise them, and a small
+  universal Evidence Loop in the standard operating prompt. The website serves
+  the same guide at `/docs/prompts` rather than maintaining a second copy.
+- Replaced provider-wide steering capability with a per-active-Turn
+  `send_current` outcome: `Sent`, `NotSteerable`, `Failed`, or `Unknown`. Codex
+  correlates `turn/steer` with the exact expected vendor Turn and its JSON-RPC
+  response; Claude, OpenCode, and opaque TUIs fall back to the next seed without
+  ordinary Steer interrupting execution.
+- Made `agent_turns` the sole additive spend store. `run_events` now owns only
+  exec/trace lineage; `usage`, `top`, `runs`, `doctor`, JSON, and Mac telemetry
+  read the same Turn query. The public Turn-spend wire names Turn, Launch,
+  trace, and exec and is pinned by one Rust/Swift fixture.
 
-## Review findings
+## Key choices
 
-- **Fixed:** live Wave steering initially consumed a Sent message. It now
-  requeues it because provider acceptance cannot advance the active Turn's
-  immutable Basis.
-- **Fixed:** Codex initially treated enqueueing JSON-RPC onto the local writer as
-  Sent. It now waits for the correlated provider response; timeout or disconnect
-  becomes Unknown.
-- **Fixed:** the control-shape test asserted literals it had just read out of
-  `control_contract.json`, so it passed against any controller — including one
-  that dropped the Steer entirely. The fixture is deleted; the shapes now run
-  through `absorb_commands`/`apply_input` and assert the durable outcome. A
-  mutation that drops an ambiguous Steer turns the replacement red.
-- **Fixed:** every Codex steer rejection is JSON-RPC `-32600`, so the expected
-  Turn-boundary race reported `Failed` and warned on the normal path. Rejections
-  are now classified by message, with unrecognized errors staying `Failed`.
-- **Fixed:** a timed-out steer left its waiter in `pending_requests` until a late
-  response or shutdown. A `PendingReply` guard now releases the slot on drop.
-- **Retained boundary:** Project/Task still use `ChildCommand` as the transport
-  receipt. The Steer/Send/Basis persistence checkpoint must replace it rather
-  than grow another compatibility layer.
-- **Known gap, needs Phase 1+3:** a confirmed live Send requeues an anonymous
-  in-memory `PendingInput::system`, so a crash after `Sent` can still lose the
-  seed. Durable Steer plus Basis is the fix; no ChildCommand patch should
-  simulate it.
+1. **Provider acceptance is transport evidence, not incorporation.** Every
+   steering outcome remains available to a later seed. `Sent` improves latency
+   but cannot bless the active Turn's older Basis.
+2. **Dynamic outcome, not static capability.** Steerability changes by exact
+   Turn kind and races its boundary. The controller asks the active Turn and
+   handles the typed result.
+3. **No temporary ChildCommand incorporation layer.** Crash-proof live steering
+   needs the planned Steer + Basis persistence transaction. Patching the old
+   command ledger would create the dual architecture this cutover is removing.
+4. **One additive usage fact.** A provider measures Turns. Exec boundaries,
+   raw Codex log files, and UI groupings do not get parallel totals. Missing,
+   zero, and cache-only measurements remain distinguishable.
+5. **Prompt doctrine rides where it is exercised.** The universal prompt pays
+   only for the evidence floor; authoring doctrine lives in `PROMPTS.md` and
+   `lf prompt`; research/debug/QA/portfolio methods stay in their own skills.
+
+## How it fits together
+
+```text
+authored direction ──> controller ──> send_current(exact Turn)
+       │                                  │
+       └──────────── later seed <─────────┘  Sent / reject / fail / unknown
+
+provider events ──> agent_turns ──> one Turn-spend query
+                                      ├─ lf usage / lf top / lf runs / doctor
+                                      └─ Mac telemetry
+```
+
+The architecture documents define the intended authority and lifecycle model.
+The code in this branch clears two prerequisites: provider-neutral delivery
+outcomes and one execution-usage authority. The existing Session/body runtime
+remains authoritative until the structural migration can replace it in one
+cutover.
+
+## Risks and bottlenecks
+
+- A confirmed Project/Task live Send still becomes an anonymous in-memory seed
+  after its `ChildCommand` is accepted. A controller crash can lose that seed.
+  This is the explicit Phase 1+3 blocker: immutable Steer plus Basis must land
+  together before live steering is crash-durable or completion-fenced.
+- Codex 0.144.5 uses JSON-RPC `-32600` for policy races and malformed requests
+  alike. The adapter matches the two observed race messages and treats unknown
+  wording as loud `Failed`; vendor prose changes degrade noisily, not silently.
+- A timed-out Codex request keeps only a retired request id until a late response
+  arrives or the Launch ends. This prevents a late rejection from becoming a
+  new Turn failure without retaining its oneshot waiter.
+- OpenCode Task/Project launches still do not report usage. The one ledger now
+  exposes that gap through `lf doctor`; normalizing the two parser/producer paths
+  is separate W2-289 work.
+- The architecture plan is intentionally large. Phase 0 must still reconcile
+  the workshop document into executable transition tables before persistence
+  changes begin.
+
+## What's not included
+
+- Work/Epoch/Basis/Home persistence or migration;
+- Run/Launch containment and keeper recovery;
+- durable Steer/Send rows, typed decision inputs, and completion fencing;
+- reconstruction without provider transcripts;
+- Wait/attention/status collapse and removal of Handoff/Review concepts;
+- OpenCode usage parser normalization;
+- the final Session/body/ChildCommand purge.
 
 ## Validation
 
-- `cargo test -p loopflow --lib --no-fail-fast` — 1,563 passed.
-- `cargo clippy -p loopflow --all-targets -- -D warnings` — passed.
-- `cargo fmt --all -- --check` — passed.
+- Focused Rust steering, Turn-spend, trace attribution, and top tests pass.
+- Shared Rust/Swift `turn_spend.json` round-trips; focused Swift DTO and registry
+  query suites pass (25 tests).
+- Website suite passes: 61 passed, 3 skipped.
+- Final all-suite results are recorded in the PR body after the complete gate.
 
-Each new test was checked against the defect it claims to catch: reverting the
-rejection classification, neutering the `PendingReply` guard, and dropping an
-ambiguous Steer in `send_current_input` each turn the matching test red. The
-count falls by one because the deleted fixture test is not replaced 1:1 — it
-proved nothing a controller test does not now prove better.
+The gate caught four cross-surface faults and fixed them: Mac telemetry still
+decoded the deleted boundary-span JSON; `lf top` still mixed a raw Codex reader
+with Turn totals; and a late timed-out Codex rejection could surface as a fresh
+provider error after its waiter was released. The full Wave-resolution matrix
+also invoked the real provider after resolving `project promote`; it now puts a
+failing provider stub first on `PATH`, keeping the resolution test hermetic.

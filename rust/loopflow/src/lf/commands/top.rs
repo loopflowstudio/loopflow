@@ -1,16 +1,10 @@
 //! `lf top` — one-hour provider throughput and live Loopflow activity.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
-use serde_json::Value;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 use crate::lf::output::{format_int, truncate};
 use crate::store::{sqlite::SqliteStore, TurnSpendRow};
@@ -52,11 +46,10 @@ impl ProcessKind {
 
 pub fn run() -> Result<()> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let home = dirs::home_dir().ok_or_else(|| anyhow!("home directory unavailable"))?;
-    let ledger_path = home.join(".lf/loopflow.db");
+    let ledger_path = crate::store::database_path_from_env()?;
     let spend = read_turn_spend(&ledger_path, now - (WINDOW_MINUTES as i64 * BUCKET_SECONDS))?;
-    let (mut buckets, has_codex_activity) = codex_token_buckets(&codex_session_roots(&home), now);
-    add_ledger_tokens(&mut buckets, &spend, now, !has_codex_activity);
+    let mut buckets = [0_u64; WINDOW_MINUTES];
+    add_ledger_tokens(&mut buckets, &spend, now);
     let processes = running_loopflow_processes()?;
 
     print!("{}", render_dashboard(&buckets, &processes));
@@ -87,145 +80,17 @@ pub fn running_workspace_paths() -> HashSet<PathBuf> {
 fn read_turn_spend(path: &Path, since: i64) -> Result<Vec<TurnSpendRow>> {
     SqliteStore::open_run_ledger_read_only(path)
         .and_then(|store| store.turn_spend_since(since))
-        .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))
+        .map_err(|error| anyhow!("failed to read Turn ledger {}: {error}", path.display()))
 }
 
-fn add_ledger_tokens(
-    buckets: &mut [u64; WINDOW_MINUTES],
-    spend: &[TurnSpendRow],
-    now: i64,
-    include_codex: bool,
-) {
+fn add_ledger_tokens(buckets: &mut [u64; WINDOW_MINUTES], spend: &[TurnSpendRow], now: i64) {
     for turn in spend {
-        // Codex's session log reports incremental usage throughout a turn. Its
-        // turn receipt contains the same tokens and would count them twice here.
-        if !include_codex && turn.provider == "codex" {
-            continue;
-        }
         let Some(index) = bucket_index(turn.at, now) else {
             continue;
         };
         let output = turn.output_tokens.unwrap_or(0).max(0) as u64;
         buckets[index] = buckets[index].saturating_add(output);
     }
-}
-
-fn codex_token_buckets(roots: &[PathBuf], now: i64) -> ([u64; WINDOW_MINUTES], bool) {
-    let mut buckets = [0_u64; WINDOW_MINUTES];
-    let mut has_activity = false;
-    let mut files = Vec::new();
-    for root in roots {
-        collect_recent_jsonl(root, now, &mut files);
-    }
-    for path in files {
-        has_activity |= add_codex_session_tokens(&mut buckets, &path, now);
-    }
-    (buckets, has_activity)
-}
-
-fn codex_session_roots(home: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![home.join(".codex/sessions")];
-    let accounts = home.join(".lf/accounts/codex");
-    let Ok(entries) = fs::read_dir(accounts) else {
-        return roots;
-    };
-    for entry in entries.flatten() {
-        let sessions = entry.path().join("sessions");
-        if sessions.is_dir() {
-            roots.push(sessions);
-        }
-    }
-    roots
-}
-
-fn collect_recent_jsonl(directory: &Path, now: i64, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(directory) else {
-        return;
-    };
-    let window_start = UNIX_EPOCH
-        + Duration::from_secs(
-            (now - WINDOW_MINUTES as i64 * BUCKET_SECONDS)
-                .max(0)
-                .try_into()
-                .unwrap_or(0),
-        );
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_recent_jsonl(&path, now, files);
-            continue;
-        }
-        if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let is_recent = entry
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .is_ok_and(|modified| modified >= window_start);
-        if is_recent {
-            files.push(path);
-        }
-    }
-}
-
-fn add_codex_session_tokens(buckets: &mut [u64; WINDOW_MINUTES], path: &Path, now: i64) -> bool {
-    let Ok(file) = File::open(path) else {
-        return false;
-    };
-    let mut previous_total = None;
-    let mut has_activity = false;
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
-        if !line.contains("\"token_count\"") {
-            continue;
-        }
-        let Ok(record) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-        if record.get("type").and_then(Value::as_str) != Some("event_msg")
-            || record.pointer("/payload/type").and_then(Value::as_str) != Some("token_count")
-        {
-            continue;
-        }
-        let Some(total) = record
-            .pointer("/payload/info/total_token_usage/output_tokens")
-            .and_then(Value::as_u64)
-        else {
-            continue;
-        };
-        let delta = previous_total.map_or_else(
-            || {
-                record
-                    .pointer("/payload/info/last_token_usage/output_tokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(total)
-            },
-            |previous| {
-                if total >= previous {
-                    total - previous
-                } else {
-                    record
-                        .pointer("/payload/info/last_token_usage/output_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(total)
-                }
-            },
-        );
-        previous_total = Some(total);
-        let Some(timestamp) = record
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
-            .map(OffsetDateTime::unix_timestamp)
-        else {
-            continue;
-        };
-        let Some(index) = bucket_index(timestamp, now) else {
-            continue;
-        };
-        has_activity = true;
-        buckets[index] = buckets[index].saturating_add(delta);
-    }
-    has_activity
 }
 
 fn bucket_index(timestamp: i64, now: i64) -> Option<usize> {
@@ -238,7 +103,7 @@ fn bucket_index(timestamp: i64, now: i64) -> Option<usize> {
 fn render_dashboard(buckets: &[u64; WINDOW_MINUTES], processes: &[RunningProcess]) -> String {
     let mut output = String::new();
     output.push_str("LOOPFLOW THROUGHPUT · LAST 60 MINUTES\n");
-    output.push_str("provider-reported output tokens/s · one-minute activity buckets\n\n");
+    output.push_str("persisted provider Turn output tokens/s · one-minute activity buckets\n\n");
     output.push_str(&render_graph(buckets));
     output.push('\n');
     output.push_str(&render_processes(processes));
@@ -440,16 +305,17 @@ fn render_processes(processes: &[RunningProcess]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        add_codex_session_tokens, add_ledger_tokens, codex_session_roots, parse_lsof_workspaces,
-        parse_processes, read_turn_spend, render_dashboard, ProcessKind, RunningProcess,
-        WINDOW_MINUTES,
+        add_ledger_tokens, parse_lsof_workspaces, parse_processes, read_turn_spend,
+        render_dashboard, ProcessKind, RunningProcess, WINDOW_MINUTES,
     };
     use crate::store::{sqlite::SqliteStore, TurnSpendRow};
 
     fn spend(recorded_at: i64, output: i64, provider: &str) -> TurnSpendRow {
         TurnSpendRow {
-            run_id: "run".to_string(),
-            process_id: "process".to_string(),
+            turn_id: format!("turn-{recorded_at}"),
+            launch_id: "launch".to_string(),
+            trace_id: "trace".to_string(),
+            exec_id: "exec".to_string(),
             repo: "/src/loopflow".to_string(),
             wave: None,
             flow: None,
@@ -497,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn ledger_buckets_non_codex_completion_tokens() {
+    fn ledger_buckets_every_provider_turn() {
         let now = 10_000;
         let mut buckets = [0; WINDOW_MINUTES];
         add_ledger_tokens(
@@ -505,54 +371,15 @@ mod tests {
             &[
                 spend(now - 3_599, 30, "claude"),
                 spend(now - 1, 60, "gemini"),
-                spend(now, 9_999, "codex"),
+                spend(now, 90, "codex"),
                 spend(now - 3_600, 9_999, "claude"),
             ],
             now,
-            false,
         );
 
         assert_eq!(buckets[0], 30);
-        assert_eq!(buckets[WINDOW_MINUTES - 1], 60);
-        assert_eq!(buckets.iter().sum::<u64>(), 90);
-    }
-
-    #[test]
-    fn codex_buckets_incremental_session_tokens() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("rollout.jsonl");
-        std::fs::write(
-            &path,
-            concat!(
-                "{\"timestamp\":\"2026-07-15T22:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"output_tokens\":100},\"last_token_usage\":{\"output_tokens\":100}}}}\n",
-                "{\"timestamp\":\"2026-07-15T22:59:30Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"output_tokens\":160},\"last_token_usage\":{\"output_tokens\":60}}}}\n",
-                "{\"timestamp\":\"2026-07-15T23:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"output_tokens\":190},\"last_token_usage\":{\"output_tokens\":30}}}}\n"
-            ),
-        )
-        .unwrap();
-        let now = time::OffsetDateTime::parse(
-            "2026-07-15T23:00:00Z",
-            &time::format_description::well_known::Rfc3339,
-        )
-        .unwrap()
-        .unix_timestamp();
-        let mut buckets = [0; WINDOW_MINUTES];
-
-        assert!(add_codex_session_tokens(&mut buckets, &path, now));
-
-        assert_eq!(buckets[WINDOW_MINUTES - 1], 90);
-        assert_eq!(buckets.iter().sum::<u64>(), 90);
-    }
-
-    #[test]
-    fn codex_roots_include_default_and_managed_accounts() {
-        let home = tempfile::tempdir().unwrap();
-        let managed = home.path().join(".lf/accounts/codex/engineering/sessions");
-        std::fs::create_dir_all(&managed).unwrap();
-
-        let roots = codex_session_roots(home.path());
-
-        assert_eq!(roots, vec![home.path().join(".codex/sessions"), managed]);
+        assert_eq!(buckets[WINDOW_MINUTES - 1], 150);
+        assert_eq!(buckets.iter().sum::<u64>(), 180);
     }
 
     #[test]
@@ -571,7 +398,7 @@ mod tests {
         );
 
         assert!(rendered.contains("LOOPFLOW THROUGHPUT · LAST 60 MINUTES"));
-        assert!(rendered.contains("provider-reported output tokens/s"));
+        assert!(rendered.contains("persisted provider Turn output tokens/s"));
         assert!(rendered
             .contains("total 120 tokens · avg 0.03 tok/s · peak 2.0 tok/s · current 2.0 tok/s"));
         assert!(rendered.contains("RUNNING LF + PROVIDER PROCESSES (1)"));

@@ -8,6 +8,15 @@
   Steer/Send migration. The controller now keeps every live, rejected, failed,
   or unknown Steer in the next-boundary seed, but crash-proof incorporation
   still depends on replacing that ledger with immutable Send plus Basis.
+- Gate found that `lf usage --json` had moved to Turn rows while the Mac still
+  decoded the removed process-boundary shape. The wire now names Turn, Launch,
+  trace, and exec and is pinned by one Rust/Swift fixture. `lf top`'s parallel
+  raw Codex reader was deleted, so every additive total reads the same Turn
+  query.
+- A timed-out Codex waiter was released, but a later error response could still
+  fall through as a fresh provider failure. Timed-out request ids are now
+  retired until the late response arrives or the Launch ends; no oneshot waiter
+  remains allocated.
 
 ## Codex steer rejections: what the live app-server proved
 

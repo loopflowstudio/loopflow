@@ -448,10 +448,10 @@ lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # subscription % per account + spend by repo/provider
 lf usage --refresh              # poll every account's provider now
-lf usage --json --days 30       # additive skill/run boundary rows
+lf usage --json --days 30       # one additive row per measured provider Turn
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
-lf top                          # last-hour provider throughput + live sessions
+lf top                          # persisted last-hour Turn throughput + live processes
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
@@ -479,7 +479,7 @@ from stored observations (harness streams report them mid-run) topped up by a
 live poll when older than 15 minutes. `--refresh` polls everything now;
 `--cached` skips polling. A revoked credential shows the fix
 (`lf auth connect <provider>`), not a blank. The spend table below it sums
-per-boundary delta rows; TOTAL is input+output with cache reads their own
+provider-measured Turn rows; TOTAL is input+output with cache reads their own
 column, and `% TOKENS` is each row's slice of all tokens in the window — a
 distribution across repos, not a subscription measure.
 

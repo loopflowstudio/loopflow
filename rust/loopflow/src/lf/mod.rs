@@ -314,7 +314,7 @@ pub enum Commands {
     },
     /// Show subscription state per account and token spend by repo/provider
     Usage {
-        /// Emit per-boundary spend (skill, provider:model, repo) as JSON
+        /// Emit one additive row per provider-measured Turn as JSON
         #[arg(long)]
         json: bool,
         /// Spend window, in days

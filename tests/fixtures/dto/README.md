@@ -45,3 +45,8 @@ session-set query, including explicit missing token coverage and immutable trace
 addresses. Revision evidence carries both Rust's effective-content hash and the
 current source-file hash used to reject a stale Task worktree without
 reimplementing prompt transformations in Swift.
+
+`turn_spend.json` is the additive `lf usage --json` wire. Each row names its
+Turn, Launch, trace, and exec; the second row proves a cache-only measurement
+survives while absent token and cost fields remain explicit nulls. Rust and
+Swift both round-trip it.

@@ -7,6 +7,27 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Turn spend fixture preserves additive identity and absent measurements")
+    func turnSpendFixtureRoundTrips() throws {
+        let data = try loadFixtureData("turn_spend.json")
+        let turns = try JSONDecoder().decode([TurnSpend].self, from: data)
+
+        #expect(turns.map(\.id) == ["turn-1", "turn-2"])
+        #expect(turns[0].launchId == "launch-1")
+        #expect(turns[0].traceId == "trace-1")
+        #expect(turns[0].execId == "exec-1")
+        #expect(turns[0].totalTokens == 1200)
+        #expect(turns[0].agent == "claude:opus")
+        #expect(turns[1].inputTokens == nil)
+        #expect(turns[1].outputTokens == 0)
+        #expect(turns[1].cacheReadTokens == 150)
+        #expect(turns[1].costUsd == nil)
+
+        let encoded = try JSONEncoder().encode(turns)
+        let decoded = try JSONDecoder().decode([TurnSpend].self, from: encoded)
+        #expect(decoded == turns)
+    }
+
     @Test("Context Lab fixture preserves missing coverage and trace identity")
     func contextLabFixturePreservesResearchTruth() throws {
         let data = try loadFixtureData("context_lab_snapshot.json")

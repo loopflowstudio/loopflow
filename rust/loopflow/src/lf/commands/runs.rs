@@ -1163,7 +1163,7 @@ fn trace_spans(events: &[RunEventRow], spend: &[TurnSpendRow]) -> Vec<SpanDto> {
     let mut spend_by_process: BTreeMap<&str, Vec<&TurnSpendRow>> = BTreeMap::new();
     for turn in spend {
         spend_by_process
-            .entry(&turn.process_id)
+            .entry(&turn.exec_id)
             .or_default()
             .push(turn);
     }
@@ -1183,6 +1183,12 @@ fn trace_spans(events: &[RunEventRow], spend: &[TurnSpendRow]) -> Vec<SpanDto> {
                 .copied();
             let turns = spend_by_process.get(process_id);
             let turns = || turns.into_iter().flatten();
+            let providers = turns()
+                .map(|turn| turn.provider.as_str())
+                .collect::<BTreeSet<_>>();
+            let models = turns()
+                .map(|turn| turn.model.as_deref())
+                .collect::<BTreeSet<_>>();
             SpanDto {
                 run_id: started.run_id.clone(),
                 process_id: started.process_id.clone(),
@@ -1207,8 +1213,12 @@ fn trace_spans(events: &[RunEventRow], spend: &[TurnSpendRow]) -> Vec<SpanDto> {
                 output_tokens: sum_optional_i64(turns().map(|turn| turn.output_tokens)),
                 cache_read_tokens: sum_optional_i64(turns().map(|turn| turn.cache_read_tokens)),
                 cost_usd: sum_optional_f64(turns().map(|turn| turn.cost_usd)),
-                provider: turns().next().map(|turn| turn.provider.clone()),
-                model: turns().find_map(|turn| turn.model.clone()),
+                provider: (providers.len() == 1)
+                    .then(|| providers.first().map(|provider| (*provider).to_string()))
+                    .flatten(),
+                model: (models.len() == 1)
+                    .then(|| models.first().copied().flatten().map(str::to_string))
+                    .flatten(),
             }
         })
         .collect();
@@ -1593,8 +1603,10 @@ mod tests {
 
     fn turn(process: &str, at: i64, input: i64, cost: f64) -> TurnSpendRow {
         TurnSpendRow {
-            run_id: process.to_string(),
-            process_id: process.to_string(),
+            turn_id: format!("turn-{process}-{at}"),
+            launch_id: format!("launch-{process}"),
+            trace_id: process.to_string(),
+            exec_id: process.to_string(),
             repo: "/src/loopflow".to_string(),
             wave: None,
             flow: None,
@@ -1729,6 +1741,22 @@ mod tests {
 
         assert_eq!(parent.input_tokens, None);
         assert_eq!(child.input_tokens, Some(70));
+    }
+
+    #[test]
+    fn a_mixed_provider_process_is_not_misattributed_to_one_provider() {
+        let events = vec![row("process", 0, 100, "run", "completed")];
+        let mut codex = turn("process", 120, 30, 0.25);
+        codex.turn_id = "turn-codex".to_string();
+        codex.launch_id = "launch-codex".to_string();
+        codex.provider = "codex".to_string();
+        codex.model = None;
+
+        let spans = trace_spans(&events, &[turn("process", 110, 70, 0.5), codex]);
+
+        assert_eq!(spans[0].input_tokens, Some(100));
+        assert_eq!(spans[0].provider, None);
+        assert_eq!(spans[0].model, None);
     }
 
     #[test]

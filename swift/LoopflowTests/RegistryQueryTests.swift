@@ -259,25 +259,23 @@ struct RegistryQueryTests {
         #expect(runs[1].task == nil)
     }
 
-    @Test("lf usage --json preserves lineage and unspent spans")
+    @Test("lf usage --json decodes one additive Turn row")
     func spendDecodes() async throws {
         let json = """
-        [{"run_id":"abc","process_id":"child","parent_process_id":"parent","seq":7,"node":"run","name":"lf pm show","repo":null,"wave":null,"flow":null,"skill":null,"started_at":100,"ended_at":null,"status":"open","input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cost_usd":null,"duration_secs":null,"provider":null,"model":null}]
+        [{"turn_id":"turn-1","launch_id":"launch-1","trace_id":"abc","exec_id":"child","repo":"/src/loopflow","wave":null,"flow":"build","skill":"gate","provider":"claude","model":"opus","at":100,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25}]
         """
         let query = RegistryQuery { args, _ in
             #expect(args == ["usage", "--json", "--days", "30"])
             return json
         }
 
-        let spans = try await query.spend()
-        #expect(spans[0].processId == "child")
-        #expect(spans[0].id == "child-7")
-        #expect(spans[0].parentProcessId == "parent")
-        #expect(spans[0].status == "open")
-        #expect(spans[0].endedAt == nil)
-        // A span that spent nothing carries nulls, not zeros.
-        #expect(spans[0].totalTokens == 0)
-        #expect(spans[0].agent == "unattributed")
+        let turns = try await query.spend()
+        #expect(turns[0].id == "turn-1")
+        #expect(turns[0].launchId == "launch-1")
+        #expect(turns[0].traceId == "abc")
+        #expect(turns[0].execId == "child")
+        #expect(turns[0].totalTokens == 1200)
+        #expect(turns[0].agent == "claude:opus")
     }
 
     @Test("lf doctor decodes every check")

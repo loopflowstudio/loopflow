@@ -13,6 +13,7 @@
 
 use std::collections::HashSet;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -615,6 +616,16 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
 
+    // `project promote` reaches an authored agent flow after successful Wave
+    // resolution. Keep this resolution test hermetic instead of invoking the
+    // developer's real provider CLI.
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).expect("test bin");
+    let codex = bin.join("codex");
+    std::fs::write(&codex, "#!/bin/sh\nexit 1\n").expect("fake codex");
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755))
+        .expect("fake codex permissions");
+
     // Git repo on a clean main — `lf project start` requires this before
     // reaching wave resolution.
     let git = |args: &[&str]| {
@@ -716,6 +727,14 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
         .args(&args)
         .current_dir(repo)
         .env("LF_HOME", home)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                home.join("bin").display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         // Redirect HOME so `lf cron add` writes plists into the temp dir,
         // not the real ~/Library/LaunchAgents.
         .env("HOME", home)

@@ -79,8 +79,8 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 5. **Codex outcome cleanup is incomplete. Done (2026-07-17).** A `PendingReply` guard releases the waiter on every terminal path, and rejections are typed from probed live evidence (see `scratch/questions.md`): codex 0.144.5 answers *every* rejection with `-32600`, so only the message separates the expected Turn-boundary race from a Loopflow bug. Timeout, late response, disconnect, mismatched Turn, and explicit rejection are covered; each test was verified to fail against the pre-fix behavior. The `Sent` response shape remains assumed rather than observed.
 6. **The usage cutover is the right independent reduction but is not done until every reader moves.** At review time the working tree had removed `RunEventRow` spend fields before all consumers and JSON serialization compiled. The final query must also retain a Turn whose only reported measurement is cache usage and preserve absent versus zero.
 7. **One table still has two parser/producer paths.** Legacy agent launches update Turn usage through `StreamEvent::Usage`; harness launches use `ConversationEvent::TurnUsage`. Both reach `agent_turns`, but W2-289 remains possible until one normalization function/event owns replacement-versus-accumulation semantics.
-8. **`lf top` still has a parallel Codex usage reader.** It reads raw Codex session logs and conditionally suppresses Codex Turn rows. That may be useful live evidence, but it cannot remain a second additive spend authority. Either persist it through the Turn producer or expose it as explicitly provisional, non-additive activity that budgets and totals never consume.
-9. **Deleting the old spend ledger must not delete coverage diagnosis.** The working usage slice removes `lf doctor`'s “agent ran but no usage was captured” check because it depended on `run_events`. Re-express that check over Launch/Turn rows; do not make missing usage invisible merely because it is now correctly `None`.
+8. **Fixed during gate:** `lf top` no longer reads raw Codex session logs or conditionally suppresses persisted Codex Turns. Its throughput chart reads the same `turn_spend_since` query as `lf usage`; live process inspection remains a separate non-spend signal.
+9. **Fixed during the usage cutover:** `lf doctor`'s “agent ran but no usage was captured” check moved from `run_events` to terminal Launch/Turn evidence. It reports absent provider usage without converting it to zero, which is how the remaining OpenCode parser gap stays visible.
 
 No more behavior should be adapted around `ChildCommand`. Finish the independent usage cutover, harden the provider outcome seam, then take Phases 1–3 as one core branch: no intermediate state may accept a Steer without durable Basis fencing.
 
@@ -475,7 +475,8 @@ Two consequences worth keeping:
 Still open here:
 
 - one parser must own usage end to end (W2-289) — `StreamEvent::Usage` accumulates and `ConversationEvent::TurnUsage` replaces, and they reach captures through different launch surfaces;
-- `lf top` still reads raw Codex session logs as a parallel reader and suppresses Codex Turn rows when it finds activity. It must either persist through the Turn producer or be labelled provisional and never combined with Turn spend.
+- ~~`lf top` reads a parallel raw Codex total~~ **fixed during gate** — the raw reader is deleted; every provider reaches the one persisted Turn query.
+- `lf usage --json` now names the exact Turn, Launch, trace, and exec. A shared Rust/Swift fixture pins that wire, including cache-only and explicit-null measurements; the Mac telemetry dashboard consumes it directly instead of decoding the removed boundary-span shape.
 
 Done when:
 
@@ -691,7 +692,7 @@ Record after each checkpoint:
 | Authored-direction domain types | command + directive + review + handoff | unchanged | 1: Steer |
 | Public Run lifecycle verbs | at least reserve/activate/finish/revoke/reap plus runner variants | unchanged | 3 internal: reserve/advance/stop |
 | Stored Work lifecycle states | multiple Session/lease/interaction enums | unchanged | 3 Epoch states |
-| Additive usage authorities | 2 | 1 Turn ledger (store landed; `lf top`'s raw Codex log reader still parallel) | 1 Turn ledger |
+| Additive usage authorities | 2 | 1 Turn ledger and query; parser normalization remains | 1 Turn ledger |
 | Executable provider-independent steering shapes | fragmented | 4 shapes through the controller | 4 shapes, one contract |
 | Files containing core deletion symbols | 31 | 31 | 0 |
 

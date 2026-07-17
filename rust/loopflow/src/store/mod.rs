@@ -49,13 +49,16 @@ pub struct RunEventRow {
 /// was spent. This is the only additive usage grain: `lf usage`, `lf top`, and
 /// the trace tree all sum these rows, and every total is a grouping of them.
 ///
-/// Token fields stay `Option`: a provider that reported nothing is unknown, not
-/// zero. `lf usage --json` emits this shape, so every field is required or
-/// explicitly optional — no wire defaults.
+/// Token fields stay `Option`: a provider can report one measurement and omit
+/// another, and omission is not zero. Turns with no usage report at all do not
+/// materialize in this additive view. `lf usage --json` emits this shape, so
+/// every field is required or explicitly optional — no wire defaults.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TurnSpendRow {
-    pub run_id: String,
-    pub process_id: String,
+    pub turn_id: String,
+    pub launch_id: String,
+    pub trace_id: String,
+    pub exec_id: String,
     pub repo: String,
     pub wave: Option<String>,
     pub flow: Option<String>,

@@ -438,7 +438,132 @@ mod tests {
         account_statuses, aggregate_spend, format_share, format_window, short_repo, Totals,
         UsageRow,
     };
-    use crate::store::{AccountLimitWindow, TurnSpendRow};
+    use crate::store::{sqlite::SqliteStore, AccountLimitWindow, TurnSpendRow};
+    use crate::trace::{AgentLaunchRow, AgentTurnRow};
+
+    const TURN_SPEND_FIXTURE: &str =
+        include_str!("../../../../../tests/fixtures/dto/turn_spend.json");
+
+    #[test]
+    fn turn_spend_fixture_round_trips_the_public_wire() {
+        let turns: Vec<TurnSpendRow> =
+            serde_json::from_str(TURN_SPEND_FIXTURE).expect("turn spend fixture");
+
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].turn_id, "turn-1");
+        assert_eq!(turns[0].launch_id, "launch-1");
+        assert_eq!(turns[1].input_tokens, None);
+        assert_eq!(turns[1].output_tokens, Some(0));
+        assert_eq!(turns[1].cache_read_tokens, Some(150));
+        assert_eq!(turns[1].cost_usd, None);
+        assert_eq!(
+            serde_json::to_value(&turns).expect("serialize turn spend"),
+            serde_json::from_str::<serde_json::Value>(TURN_SPEND_FIXTURE)
+                .expect("turn spend fixture value")
+        );
+    }
+
+    fn launch(id: &str) -> AgentLaunchRow {
+        AgentLaunchRow {
+            id: format!("launch-{id}"),
+            run_id: format!("trace-{id}"),
+            process_id: format!("exec-{id}"),
+            started_at: 100,
+            ended_at: Some(110),
+            repo: "/src/loopflow".to_string(),
+            worktree: "/src/loopflow".to_string(),
+            wave: None,
+            flow: Some("build".to_string()),
+            skill: Some("gate".to_string()),
+            project: None,
+            task: None,
+            provider: "claude".to_string(),
+            model: Some("opus".to_string()),
+            surface: "headless".to_string(),
+            capture_status: "complete".to_string(),
+            incomplete_reason: None,
+            outcome: "completed".to_string(),
+            artifact_dir: "traces/launch".to_string(),
+            conversation_path: "traces/launch/conversation.jsonl".to_string(),
+            provider_events_path: None,
+            provider_session_id: None,
+            provider_session_path: None,
+            conversation_event_count: 1,
+            conversation_bytes: 1,
+        }
+    }
+
+    fn measured_turn(
+        launch: &AgentLaunchRow,
+        output: Option<i64>,
+        cache_read: Option<i64>,
+    ) -> AgentTurnRow {
+        AgentTurnRow {
+            id: launch.id.replacen("launch", "turn", 1),
+            launch_id: launch.id.clone(),
+            ordinal: 1,
+            provider_turn_id: None,
+            started_at: 100,
+            ended_at: Some(110),
+            status: "completed".to_string(),
+            input_op: "initial".to_string(),
+            context_coverage: "unknown".to_string(),
+            tokenizer: "o200k_base".to_string(),
+            system_prompt_path: None,
+            task_prompt_path: "prompt.md".to_string(),
+            system_tokens: 0,
+            task_tokens: 0,
+            supplied_context_tokens: 0,
+            provider_input_tokens: None,
+            provider_total_input_tokens: None,
+            peak_input_tokens: None,
+            context_window_tokens: None,
+            provider_output_tokens: output,
+            reasoning_tokens: None,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: None,
+            cost_usd: None,
+            context_gather_ms: 0,
+            context_render_ms: 0,
+            context_persist_ms: 0,
+            first_event_seq: None,
+            last_event_seq: None,
+        }
+    }
+
+    #[test]
+    fn spend_query_keeps_zero_and_cache_only_but_omits_absent_usage() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::new(&directory.path().join("loopflow.db")).expect("store");
+        for (id, output, cache_read) in [
+            ("absent", None, None),
+            ("zero", Some(0), None),
+            ("cache", None, Some(150)),
+        ] {
+            let launch = launch(id);
+            let turn = measured_turn(&launch, output, cache_read);
+            store
+                .insert_trace_capture(&launch, &turn, &[], &[])
+                .expect("insert capture");
+        }
+
+        let rows = store.turn_spend_since(0).expect("turn spend");
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.turn_id != "turn-absent"));
+        let zero = rows
+            .iter()
+            .find(|row| row.turn_id == "turn-zero")
+            .expect("zero report");
+        assert_eq!(zero.output_tokens, Some(0));
+        let cache = rows
+            .iter()
+            .find(|row| row.turn_id == "turn-cache")
+            .expect("cache-only report");
+        assert_eq!(cache.input_tokens, None);
+        assert_eq!(cache.output_tokens, None);
+        assert_eq!(cache.cache_read_tokens, Some(150));
+    }
 
     fn row(repo: &str, provider: &str, input: u64) -> UsageRow {
         UsageRow {
@@ -538,8 +663,10 @@ mod tests {
 
     fn turn(process: &str, at: i64, provider: &str, input: i64) -> TurnSpendRow {
         TurnSpendRow {
-            run_id: "trace".to_string(),
-            process_id: process.to_string(),
+            turn_id: format!("turn-{process}-{at}"),
+            launch_id: format!("launch-{process}"),
+            trace_id: "trace".to_string(),
+            exec_id: process.to_string(),
             repo: "/src/loopflow".to_string(),
             wave: None,
             flow: Some("ship".to_string()),

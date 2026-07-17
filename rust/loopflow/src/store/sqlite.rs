@@ -1413,8 +1413,8 @@ impl SqliteStore {
     pub fn turn_spend_since(&self, since_unix: i64) -> StoreResult<Vec<TurnSpendRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT l.run_id, l.process_id, l.repo, l.wave, l.flow, l.skill, l.provider, l.model,
-                    COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
+            "SELECT t.id, l.id, l.run_id, l.process_id, l.repo, l.wave, l.flow, l.skill,
+                    l.provider, l.model, COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
                     t.provider_output_tokens, t.cache_read_tokens, t.cost_usd
              FROM agent_turns t
              JOIN agent_launches l ON l.id = t.launch_id
@@ -1427,19 +1427,21 @@ impl SqliteStore {
         )?;
         let rows = stmt.query_map(params![since_unix], |row| {
             Ok(TurnSpendRow {
-                run_id: row.get(0)?,
-                process_id: row.get(1)?,
-                repo: row.get(2)?,
-                wave: row.get(3)?,
-                flow: row.get(4)?,
-                skill: row.get(5)?,
-                provider: row.get(6)?,
-                model: row.get(7)?,
-                at: row.get(8)?,
-                input_tokens: row.get(9)?,
-                output_tokens: row.get(10)?,
-                cache_read_tokens: row.get(11)?,
-                cost_usd: row.get(12)?,
+                turn_id: row.get(0)?,
+                launch_id: row.get(1)?,
+                trace_id: row.get(2)?,
+                exec_id: row.get(3)?,
+                repo: row.get(4)?,
+                wave: row.get(5)?,
+                flow: row.get(6)?,
+                skill: row.get(7)?,
+                provider: row.get(8)?,
+                model: row.get(9)?,
+                at: row.get(10)?,
+                input_tokens: row.get(11)?,
+                output_tokens: row.get(12)?,
+                cache_read_tokens: row.get(13)?,
+                cost_usd: row.get(14)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()

@@ -184,12 +184,11 @@ public struct RegistryQuery: Sendable {
         )
     }
 
-    /// Per-boundary spend over a window: what each skill, and each terminal run,
-    /// actually spent. `lf usage --json` applies the cumulative-diff rule, so
-    /// these rows are additive and sum to the totals `lf usage` prints.
-    public func spend(days: Int = 30) async throws -> [TraceSpan] {
+    /// Provider-measured Turn spend over a window. Rows are additive and sum
+    /// exactly to the totals `lf usage` prints.
+    public func spend(days: Int = 30) async throws -> [TurnSpend] {
         let stdout = try await run(["usage", "--json", "--days", String(days)], nil)
-        return try Self.decode([TraceSpan].self, from: stdout)
+        return try Self.decode([TurnSpend].self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
@@ -544,56 +543,47 @@ public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-/// One process in `lf trace --json`. Mirrors Rust `SpanDto` exactly.
-public struct TraceSpan: Decodable, Sendable, Identifiable {
-    /// A process contributes several boundaries. Their event sequence is the
-    /// stable discriminator even when one skill completes twice in one second.
-    public var id: String { "\(processId)-\(seq)" }
+/// One provider-measured Turn from `lf usage --json`. Mirrors Rust
+/// `TurnSpendRow` exactly; every absent provider measurement remains `nil`.
+public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
+    public var id: String { turnId }
 
-    public let runId: String
-    public let processId: String
-    public let parentProcessId: String?
-    public let seq: Int
-    public let node: String
-    public let name: String?
-    public let repo: String?
+    public let turnId: String
+    public let launchId: String
+    public let traceId: String
+    public let execId: String
+    public let repo: String
     public let wave: String?
     public let flow: String?
     public let skill: String?
-    public let startedAt: Int
-    public let endedAt: Int?
-    public let status: String
+    public let provider: String
+    public let model: String?
+    public let at: Int
     public let inputTokens: Int?
     public let outputTokens: Int?
     public let cacheReadTokens: Int?
     public let costUsd: Double?
-    public let durationSecs: Double?
-    public let provider: String?
-    public let model: String?
 
     /// `provider:model` — the harness and the model it drove.
     public var agent: String {
-        switch (provider, model) {
-        case let (provider?, model?): return "\(provider):\(model)"
-        case let (provider?, nil): return provider
-        default: return "unattributed"
+        switch model {
+        case let model?: return "\(provider):\(model)"
+        case nil: return provider
         }
     }
 
     public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
 
     enum CodingKeys: String, CodingKey {
-        case seq, node, name, status, provider, model, repo, wave, flow, skill
-        case runId = "run_id"
-        case processId = "process_id"
-        case parentProcessId = "parent_process_id"
-        case startedAt = "started_at"
-        case endedAt = "ended_at"
+        case repo, wave, flow, skill, provider, model, at
+        case turnId = "turn_id"
+        case launchId = "launch_id"
+        case traceId = "trace_id"
+        case execId = "exec_id"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case cacheReadTokens = "cache_read_tokens"
         case costUsd = "cost_usd"
-        case durationSecs = "duration_secs"
     }
 }
 

@@ -90,6 +90,7 @@ enum OutboundRpc {
 
 type RpcResult = std::result::Result<Value, String>;
 type PendingRequests = Arc<Mutex<HashMap<i64, oneshot::Sender<RpcResult>>>>;
+type RetiredRequests = Arc<Mutex<HashSet<i64>>>;
 
 /// Holds a correlated request's slot in `pending_requests` and releases it on
 /// drop, so a caller that stops waiting (timeout, early return) never strands
@@ -98,6 +99,7 @@ type PendingRequests = Arc<Mutex<HashMap<i64, oneshot::Sender<RpcResult>>>>;
 struct PendingReply {
     id: i64,
     requests: PendingRequests,
+    retired: RetiredRequests,
     rx: Option<oneshot::Receiver<RpcResult>>,
 }
 
@@ -111,10 +113,17 @@ impl PendingReply {
 
 impl Drop for PendingReply {
     fn drop(&mut self) {
-        self.requests
+        let removed = self
+            .requests
             .lock()
             .expect("codex pending requests lock poisoned")
             .remove(&self.id);
+        if removed.is_some() {
+            self.retired
+                .lock()
+                .expect("codex retired requests lock poisoned")
+                .insert(self.id);
+        }
     }
 }
 
@@ -505,6 +514,9 @@ pub struct CodexHarness {
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
     pending_requests: PendingRequests,
+    /// Correlated calls whose callers stopped waiting. A late response for one
+    /// of these is transport history, not a new provider failure.
+    retired_requests: RetiredRequests,
     writer_task: Option<JoinHandle<()>>,
     reader_task: Option<JoinHandle<()>>,
     stderr_task: Option<JoinHandle<()>>,
@@ -549,6 +561,7 @@ impl CodexHarness {
             child: None,
             outbound_tx: None,
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            retired_requests: Arc::new(Mutex::new(HashSet::new())),
             writer_task: None,
             reader_task: None,
             stderr_task: None,
@@ -598,6 +611,7 @@ impl CodexHarness {
         let pending = PendingReply {
             id,
             requests: self.pending_requests.clone(),
+            retired: self.retired_requests.clone(),
             rx: Some(reply_rx),
         };
         if outbound
@@ -664,6 +678,10 @@ impl CodexHarness {
         self.pending_requests
             .lock()
             .expect("codex pending requests lock poisoned")
+            .clear();
+        self.retired_requests
+            .lock()
+            .expect("codex retired requests lock poisoned")
             .clear();
     }
 }
@@ -970,6 +988,7 @@ impl CodexHarness {
         let initialize_request_id = self.initialize_request_id.clone();
         let thread_start_request_id = self.thread_start_request_id.clone();
         let pending_requests = self.pending_requests.clone();
+        let retired_requests = self.retired_requests.clone();
         let account_route = self.account_route.clone();
         let reader_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
@@ -1017,6 +1036,14 @@ impl CodexHarness {
                             None => Ok(value.get("result").cloned().unwrap_or(Value::Null)),
                         };
                         let _ = pending.send(result);
+                        continue;
+                    }
+                    if id.is_some_and(|id| {
+                        retired_requests
+                            .lock()
+                            .expect("codex retired requests lock poisoned")
+                            .remove(&id)
+                    }) {
                         continue;
                     }
                     if let Some(error) = value.get("error") {
@@ -1115,6 +1142,10 @@ impl CodexHarness {
                     .expect("codex pending requests lock poisoned"),
             );
             drop(pending);
+            retired_requests
+                .lock()
+                .expect("codex retired requests lock poisoned")
+                .clear();
             if !shutdown_requested.load(Ordering::Relaxed) {
                 let _ = event_tx.send(ConversationEvent::Error {
                     code: "codex_disconnected".to_string(),
@@ -1371,6 +1402,7 @@ mod tests {
         CodexHarness,
         mpsc::Receiver<OutboundRpc>,
         PendingRequests,
+        RetiredRequests,
         mpsc::UnboundedReceiver<ConversationEvent>,
     ) {
         let (events, event_rx) = mpsc::unbounded_channel();
@@ -1381,7 +1413,8 @@ mod tests {
         let (outbound, outbound_rx) = mpsc::channel(1);
         harness.outbound_tx = Some(outbound);
         let pending = harness.pending_requests.clone();
-        (harness, outbound_rx, pending, event_rx)
+        let retired = harness.retired_requests.clone();
+        (harness, outbound_rx, pending, retired, event_rx)
     }
 
     /// Await the steer request and answer it with `reply`.
@@ -1438,7 +1471,7 @@ mod tests {
     /// so it reports NotSteerable and the input falls back to the next seed.
     #[tokio::test]
     async fn steer_against_an_ended_turn_is_not_steerable() {
-        let (mut harness, mut outbound_rx, pending, _events) = steerable_harness();
+        let (mut harness, mut outbound_rx, pending, _retired, _events) = steerable_harness();
         let send = tokio::spawn(async move { harness.send_current("change direction").await });
 
         answer_steer(
@@ -1462,7 +1495,7 @@ mod tests {
     /// observed, so it stays Unknown rather than claiming Sent.
     #[tokio::test]
     async fn steer_confirming_a_different_turn_is_unknown() {
-        let (mut harness, mut outbound_rx, pending, _events) = steerable_harness();
+        let (mut harness, mut outbound_rx, pending, _retired, _events) = steerable_harness();
         let send = tokio::spawn(async move { harness.send_current("change direction").await });
 
         answer_steer(
@@ -1485,7 +1518,7 @@ mod tests {
     /// hold the input. It reports Unknown and never silently retries.
     #[tokio::test]
     async fn steer_losing_the_connection_is_unknown_and_releases_its_waiter() {
-        let (mut harness, mut outbound_rx, pending, _events) = steerable_harness();
+        let (mut harness, mut outbound_rx, pending, _retired, _events) = steerable_harness();
         let send = tokio::spawn(async move { harness.send_current("change direction").await });
 
         let OutboundRpc::Request { id, .. } = outbound_rx.recv().await.expect("steer request")
@@ -1513,7 +1546,7 @@ mod tests {
     /// server leaked one entry per attempt.
     #[tokio::test(start_paused = true)]
     async fn steer_timeout_is_unknown_and_releases_its_waiter() {
-        let (mut harness, mut outbound_rx, pending, _events) = steerable_harness();
+        let (mut harness, mut outbound_rx, pending, _retired, _events) = steerable_harness();
         let leaked = pending.clone();
         let send = tokio::spawn(async move { harness.send_current("change direction").await });
 
@@ -1537,7 +1570,7 @@ mod tests {
     /// dropped. It must not panic or resurrect a duplicate same-Turn attempt.
     #[tokio::test(start_paused = true)]
     async fn a_late_steer_response_cannot_revive_a_timed_out_send() {
-        let (mut harness, mut outbound_rx, pending, _events) = steerable_harness();
+        let (mut harness, mut outbound_rx, pending, retired, _events) = steerable_harness();
         let late = pending.clone();
         let send = tokio::spawn(async move { harness.send_current("change direction").await });
 
@@ -1550,8 +1583,11 @@ mod tests {
             SendCurrentOutcome::Unknown { .. }
         ));
 
-        // The reader's late-response path: no waiter remains to answer.
+        // The reader's late-response path: no waiter remains to answer, and
+        // the retired id consumes the response without turning it into a new
+        // provider error.
         assert!(late.lock().expect("pending lock").remove(&id).is_none());
+        assert!(retired.lock().expect("retired lock").remove(&id));
     }
 
     #[tokio::test]

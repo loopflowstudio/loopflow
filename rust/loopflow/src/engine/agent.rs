@@ -104,8 +104,8 @@ pub struct AgentConfig {
     pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
-    /// Existing provider session to resume for this turn.
-    pub resume_id: Option<String>,
+    /// Opaque provider continuation token for this launch.
+    pub resume_token: Option<String>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
     /// Skip permission prompts
@@ -132,7 +132,7 @@ impl std::fmt::Debug for AgentConfig {
             )
             .field("agent", &self.agent)
             .field("max_turns", &self.max_turns)
-            .field("resume_id", &self.resume_id)
+            .field("resume_token", &self.resume_token)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
@@ -595,14 +595,14 @@ pub enum AgentFailure {
     /// Retryable provider pressure or transport failure.
     Transient(TransientFailure),
     /// The selected managed account exhausted a subscription window.
-    AccountSubscriptionLimit(RateLimitSignal),
+    AccountSubscriptionLimit { resets_at: Option<i64> },
 }
 
 impl AgentFailure {
     fn label(&self) -> &'static str {
         match self {
             Self::Transient(failure) => failure.label(),
-            Self::AccountSubscriptionLimit(_) => "account subscription limit",
+            Self::AccountSubscriptionLimit { .. } => "account subscription limit",
         }
     }
 }
@@ -722,7 +722,7 @@ pub fn build_claude_command(
         max_turns: launch.max_turns,
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
-        resume_id: launch.resume_id.clone(),
+        resume_id: launch.resume_token.clone(),
     };
     cmd.extend(claude_args.to_args());
 
@@ -742,7 +742,7 @@ pub fn build_codex_command(
     // `codex exec` for batch/auto mode, `codex` for interactive
     let mut cmd = if process.auto {
         let mut cmd = vec!["codex".to_string(), "exec".to_string()];
-        if launch.resume_id.is_some() {
+        if launch.resume_token.is_some() {
             cmd.push("resume".to_string());
         }
         cmd
@@ -795,8 +795,8 @@ pub fn build_codex_command(
     ));
 
     if process.auto {
-        if let Some(resume_id) = &launch.resume_id {
-            cmd.push(resume_id.clone());
+        if let Some(resume_token) = &launch.resume_token {
+            cmd.push(resume_token.clone());
         }
     }
 
@@ -999,20 +999,20 @@ fn _launch_with_transient_retries(
         let Some(failure) = failure else {
             return Ok(result);
         };
-        if matches!(failure, AgentFailure::AccountSubscriptionLimit(_)) && !account_failover {
+        if matches!(failure, AgentFailure::AccountSubscriptionLimit { .. }) && !account_failover {
             return Ok(result);
         }
         let Some(transient_delay) = retry_delays.get(attempt - 1).copied() else {
             return Ok(result);
         };
         let limit_resets_at = match &failure {
-            AgentFailure::AccountSubscriptionLimit(signal) => signal.resets_at,
+            AgentFailure::AccountSubscriptionLimit { resets_at } => *resets_at,
             AgentFailure::Transient(_) => None,
         };
 
         attempt_config = launch.clone();
         let (delay, failover) = match &failure {
-            AgentFailure::AccountSubscriptionLimit(_) => {
+            AgentFailure::AccountSubscriptionLimit { .. } => {
                 attempt_config.task_prompt = format!(
                     "{FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1020,10 +1020,10 @@ fn _launch_with_transient_retries(
                 (Duration::ZERO, true)
             }
             AgentFailure::Transient(_) => {
-                let resume_id = _provider_session_id(&result).or(launch.resume_id.clone());
+                let resume_token = _provider_resume_token(&result).or(launch.resume_token.clone());
                 if matches!(harness.as_str(), "claude" | "codex") {
-                    if let Some(resume_id) = resume_id {
-                        attempt_config.resume_id = Some(resume_id);
+                    if let Some(resume_token) = resume_token {
+                        attempt_config.resume_token = Some(resume_token);
                         attempt_config.task_prompt = RETRY_PROMPT.to_string();
                     }
                 }
@@ -1037,7 +1037,7 @@ fn _launch_with_transient_retries(
             next_attempt = attempt + 1,
             max_attempts = retry_delays.len() + 1,
             delay_ms = delay.as_millis(),
-            resumed = attempt_config.resume_id.is_some(),
+            resumed = attempt_config.resume_token.is_some(),
             account_failover = failover,
             limit_resets_at,
             "recoverable agent failure; retrying"
@@ -1063,52 +1063,72 @@ fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<Agent
         return None;
     }
     if let Some(signal) = _account_limit_signal(harness, result).filter(|signal| signal.limited) {
-        return Some(AgentFailure::AccountSubscriptionLimit(signal));
+        return Some(AgentFailure::AccountSubscriptionLimit {
+            resets_at: signal.resets_at,
+        });
     }
     _classify_transient_failure(result).map(AgentFailure::Transient)
 }
 
-fn _classify_transient_failure(result: &LaunchResult) -> Option<TransientFailure> {
+fn _find_provider_error<T>(
+    result: &LaunchResult,
+    classify: fn(&str) -> Option<T>,
+) -> Option<T> {
     for line in result.stdout.lines() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        let event_type = value
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let is_error = matches!(event_type, "turn.failed" | "error")
-            || (event_type == "result"
-                && (value
-                    .get("is_error")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-                    || value
-                        .get("subtype")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|subtype| {
-                            matches!(subtype, "failed" | "error") || subtype.contains("error")
-                        })));
-        if !is_error {
+        if !_is_provider_error(&value) {
             continue;
         }
-        for field in ["message", "error", "result"] {
-            if let Some(failure) = value.get(field).and_then(_classify_transient_value) {
-                return Some(failure);
-            }
+        if let Some(failure) = ["message", "error", "result"]
+            .into_iter()
+            .filter_map(|field| value.get(field))
+            .find_map(|value| _classify_provider_error_value(value, classify))
+        {
+            return Some(failure);
         }
     }
-
-    result.stderr.lines().find_map(_classify_transient_text)
+    result.stderr.lines().find_map(classify)
 }
 
-fn _classify_transient_value(value: &serde_json::Value) -> Option<TransientFailure> {
+fn _is_provider_error(value: &serde_json::Value) -> bool {
+    let event_type = value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    matches!(event_type, "turn.failed" | "error")
+        || (event_type == "result"
+            && (value
+                .get("is_error")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+                || value
+                    .get("subtype")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|subtype| {
+                        matches!(subtype, "failed" | "error") || subtype.contains("error")
+                    })))
+}
+
+fn _classify_provider_error_value<T>(
+    value: &serde_json::Value,
+    classify: fn(&str) -> Option<T>,
+) -> Option<T> {
     match value {
-        serde_json::Value::String(text) => _classify_transient_text(text),
-        serde_json::Value::Object(fields) => fields.values().find_map(_classify_transient_value),
-        serde_json::Value::Array(values) => values.iter().find_map(_classify_transient_value),
+        serde_json::Value::String(text) => classify(text),
+        serde_json::Value::Object(fields) => fields
+            .values()
+            .find_map(|value| _classify_provider_error_value(value, classify)),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(|value| _classify_provider_error_value(value, classify)),
         _ => None,
     }
+}
+
+fn _classify_transient_failure(result: &LaunchResult) -> Option<TransientFailure> {
+    _find_provider_error(result, _classify_transient_text)
 }
 
 fn _classify_transient_text(text: &str) -> Option<TransientFailure> {
@@ -1172,44 +1192,12 @@ fn _account_limit_signal(harness: &str, result: &LaunchResult) -> Option<RateLim
 }
 
 fn _has_subscription_limit_error(result: &LaunchResult) -> bool {
-    result.stdout.lines().any(|line| {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            return false;
-        };
-        let event_type = value
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let is_error = matches!(event_type, "turn.failed" | "error")
-            || (event_type == "result"
-                && (value
-                    .get("is_error")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-                    || value
-                        .get("subtype")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|subtype| subtype.contains("error"))));
-        is_error
-            && ["message", "error", "result"]
-                .into_iter()
-                .filter_map(|field| value.get(field))
-                .any(_value_has_subscription_limit)
-    }) || result.stderr.lines().any(_text_has_subscription_limit)
+    _find_provider_error(result, _classify_subscription_limit).is_some()
 }
 
-fn _value_has_subscription_limit(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::String(text) => _text_has_subscription_limit(text),
-        serde_json::Value::Object(fields) => fields.values().any(_value_has_subscription_limit),
-        serde_json::Value::Array(values) => values.iter().any(_value_has_subscription_limit),
-        _ => false,
-    }
-}
-
-fn _text_has_subscription_limit(text: &str) -> bool {
+fn _classify_subscription_limit(text: &str) -> Option<()> {
     let text = text.to_ascii_lowercase();
-    text.contains("you've hit your usage limit")
+    (text.contains("you've hit your usage limit")
         || text.contains("you have hit your usage limit")
         || text.contains("usage limit reached")
         || text.contains("usage limit has been reached")
@@ -1217,10 +1205,11 @@ fn _text_has_subscription_limit(text: &str) -> bool {
         || text.contains("subscription quota")
         || text.contains("quota exceeded")
         || text.contains("insufficient_quota")
-        || text.contains("rate_limit_reached")
+        || text.contains("rate_limit_reached"))
+    .then_some(())
 }
 
-fn _provider_session_id(result: &LaunchResult) -> Option<String> {
+fn _provider_resume_token(result: &LaunchResult) -> Option<String> {
     result.stdout.lines().find_map(|line| {
         let value: serde_json::Value = serde_json::from_str(line).ok()?;
         let session_id = [
@@ -1297,7 +1286,7 @@ fn _launch_agent_once(
         _ => None,
     };
     let account_route = managed_provider
-        .map(|provider| resolve_provider_account_blocking(provider, launch.resume_id.clone()))
+        .map(|provider| resolve_provider_account_blocking(provider, launch.resume_token.clone()))
         .transpose()
         .map_err(|error| {
             CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))

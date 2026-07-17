@@ -225,26 +225,6 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    pub(crate) fn pin_session_blocking(
-        &self,
-        provider_session_id: &str,
-    ) -> Result<(), ProviderAccountError> {
-        let route = self.clone();
-        let provider_session_id = provider_session_id.to_string();
-        std::thread::Builder::new()
-            .name(format!("lf-{}-account-pin", self.provider.as_str()))
-            .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-                runtime.block_on(route.pin_session(&provider_session_id))
-            })
-            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
-            .join()
-            .map_err(|_| ProviderAccountError::Runtime("account pin worker panicked".to_string()))?
-    }
-
     pub(crate) async fn record_rate_limit(
         &self,
         signal: &RateLimitSignal,
@@ -261,26 +241,35 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    pub(crate) fn record_rate_limit_blocking(
+    pub(crate) fn record_launch_blocking(
         &self,
-        signal: &RateLimitSignal,
+        provider_session_id: Option<String>,
+        signal: Option<RateLimitSignal>,
     ) -> Result<(), ProviderAccountError> {
+        if provider_session_id.is_none() && signal.is_none() {
+            return Ok(());
+        }
         let route = self.clone();
-        let signal = signal.clone();
         std::thread::Builder::new()
-            .name(format!("lf-{}-account-limit", self.provider.as_str()))
+            .name(format!("lf-{}-account-record", self.provider.as_str()))
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-                runtime.block_on(route.record_rate_limit(&signal))
+                runtime.block_on(async {
+                    if let Some(signal) = signal {
+                        route.record_rate_limit(&signal).await?;
+                    }
+                    if let Some(provider_session_id) = provider_session_id {
+                        route.pin_session(&provider_session_id).await?;
+                    }
+                    Ok(())
+                })
             })
             .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
             .join()
-            .map_err(|_| {
-                ProviderAccountError::Runtime("account limit worker panicked".to_string())
-            })?
+            .map_err(|_| ProviderAccountError::Runtime("account worker panicked".to_string()))?
     }
 }
 

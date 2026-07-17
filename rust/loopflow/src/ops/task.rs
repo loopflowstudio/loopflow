@@ -6417,8 +6417,13 @@ mod tests {
     /// probe reads the body as genuinely gone — the same evidence a
     /// `tmux kill-session` produces. No human command is issued anywhere in this
     /// test; the supervision path decides on its own.
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     #[tokio::test]
     async fn a_killed_body_under_a_live_task_is_redispatched_with_no_human_action() {
+        // `pin_unlaunchable_body` mutates process-global LF_BIN, and the sibling
+        // test below pins it too: without this lock one restores LF_BIN while the
+        // other still depends on it, and the launch it requires to fail succeeds.
+        let _env_lock = crate::journal::test_env_lock();
         let repo = TestRepo::new();
         let (_home, store, mut session) = stranded_task(&repo, "jack/w2-267-recovers").await;
 
@@ -6452,8 +6457,10 @@ mod tests {
     /// W2-210 shape, where the body's binary is gone. Each failed launch counts
     /// as an attempt (`launch_task_process` reaps as `Lost` on the way out), so
     /// the budget is spent by design rather than reset.
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     #[tokio::test]
     async fn an_unlaunchable_strand_exhausts_instead_of_minting_dead_generations() {
+        let _env_lock = crate::journal::test_env_lock();
         let repo = TestRepo::new();
         let (_home, store, mut session) = stranded_task(&repo, "jack/w2-267-exhausts").await;
 
@@ -6610,6 +6617,11 @@ mod tests {
             .as_ref()
             .expect("seeded generation")
             .clone();
+        // tmux answers `no sessions`, so this test's subject is the lease and the
+        // real process group -- not whether the host running it has tmux. Without
+        // it the (correct) production rule reads an unspawnable tmux as
+        // Unprovable and decides the probe before the group is ever asked.
+        let _tmux = crate::engine::process::FakeTmux::no_session();
 
         // Before the release the CAS cannot pass: `revoked` satisfies neither
         // `IS NULL` nor `= 'finished'`. This is the permanent refusal.
@@ -6681,6 +6693,7 @@ mod tests {
         .await;
         let target = ChildRef::Task(session.id.clone());
         let revoked = session.latest_process.as_ref().expect("generation").clone();
+        let _tmux = crate::engine::process::FakeTmux::no_session();
 
         // A generation that is not the revoked one is refused.
         let mismatched = ChildProcessGeneration {
@@ -6738,6 +6751,11 @@ mod tests {
         .await;
         let revoked = session.latest_process.as_ref().expect("generation").clone();
 
+        // Without a deterministic tmux this passes for the WRONG reason on a host
+        // with no tmux: the probe reads Unprovable, the release returns None, and
+        // `is_none()` below holds while proving nothing about the live group.
+        let _tmux = crate::engine::process::FakeTmux::no_session();
+
         let released = crate::ops::child::release_dead_revoked_child_body(
             &store,
             &ChildRef::Task(session.id.clone()),
@@ -6788,6 +6806,9 @@ mod tests {
         )
         .await;
         let revoked = session.latest_process.as_ref().expect("generation").clone();
+
+        // tmux answers, so the Unprovable asserted below is the identity's.
+        let _tmux = crate::engine::process::FakeTmux::no_session();
 
         let released = crate::ops::child::release_dead_revoked_child_body(
             &store,

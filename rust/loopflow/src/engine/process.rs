@@ -213,6 +213,109 @@ pub(crate) fn tmux_installed() -> bool {
     which_on_path(Path::new("tmux")).is_some()
 }
 
+/// A fake `tmux` on `PATH`, so a probe's verdict is a fact about the fixture and
+/// not about the host running the suite.
+///
+/// The production rule it serves is total: a tmux we cannot run, or one that
+/// fails in a way we do not model, is [`Presence::Unprovable`] — never absence.
+/// That decides a probe before the signal identity is read, so a test about a
+/// process group must pin tmux or it is asserting a fact about the runner.
+///
+/// Shaped after `AmbientGuard`'s fake `gh` (`task/runner/ci_fix_lifecycle_tests.rs`),
+/// including its rule: model an outage by **replacing** the script, never by
+/// deleting it — a deleted fake falls through to the host's real tmux and lands in
+/// a different branch than the one under test. [`Self::unspawnable`] needs no tmux
+/// at all, so it replaces `PATH` rather than deleting out of a prepended dir.
+///
+/// Holds [`crate::journal::test_env_lock`] for the guard's life: a second lock
+/// would serialize only against other `FakeTmux` instances and still race every
+/// other `PATH` test in the crate.
+#[cfg(test)]
+pub(crate) struct FakeTmux {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _bin: tempfile::TempDir,
+    previous_path: Option<std::ffi::OsString>,
+}
+
+#[cfg(test)]
+impl FakeTmux {
+    /// The server answers and lists no sessions: authoritative absence, read off
+    /// the exit code and set membership without touching stderr prose.
+    pub(crate) fn no_session() -> Self {
+        Self::script("exit 0\n")
+    }
+
+    /// No server, reported the way tmux 3.6a actually reports it when the socket
+    /// is gone. The wording that used to read `Unprovable` and silently disable
+    /// every release on a host whose last body took the server with it.
+    pub(crate) fn no_server() -> Self {
+        Self::script(
+            "echo 'error connecting to /tmp/tmux-501/default (No such file or directory)' >&2\n\
+             exit 1\n",
+        )
+    }
+
+    /// A live session named `session`.
+    pub(crate) fn live_session(session: &str) -> Self {
+        Self::script(&format!("echo '{session}'\nexit 0\n"))
+    }
+
+    /// No tmux anywhere on `PATH`, so the probe cannot spawn it at all.
+    pub(crate) fn unspawnable() -> Self {
+        Self::new(None)
+    }
+
+    fn script(body: &str) -> Self {
+        Self::new(Some(body))
+    }
+
+    fn new(body: Option<&str>) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let lock = crate::journal::test_env_lock();
+        let bin = tempfile::TempDir::new().expect("temp bin dir");
+        let previous_path = std::env::var_os("PATH");
+
+        let path = match body {
+            Some(body) => {
+                let tmux = bin.path().join("tmux");
+                std::fs::write(&tmux, format!("#!/bin/sh\n{body}")).expect("write fake tmux");
+                let mut perms = std::fs::metadata(&tmux)
+                    .expect("stat fake tmux")
+                    .permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&tmux, perms).expect("chmod fake tmux");
+                // Prepend, like AmbientGuard: the rest of PATH stays usable.
+                match &previous_path {
+                    Some(previous) => std::ffi::OsString::from(format!(
+                        "{}:{}",
+                        bin.path().display(),
+                        previous.to_string_lossy()
+                    )),
+                    None => std::ffi::OsString::from(bin.path().display().to_string()),
+                }
+            }
+            // Nothing else on PATH, so `tmux` resolves nowhere on any host.
+            None => std::ffi::OsString::from(bin.path().display().to_string()),
+        };
+        std::env::set_var("PATH", path);
+        Self {
+            _lock: lock,
+            _bin: bin,
+            previous_path,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for FakeTmux {
+    fn drop(&mut self) {
+        match self.previous_path.take() {
+            Some(previous) => std::env::set_var("PATH", previous),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+}
+
 pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
     // A missing session is the answer, not an error: tmux's "can't find session"
     // on stderr would otherwise scribble over a caller's own output.
@@ -407,15 +510,39 @@ fn probe_signal_target(target: ProcessSignalTarget) -> Presence {
     classify_signal_probe(returned, errno)
 }
 
-/// tmux says "no server running" / "no sessions" on stderr with a non-zero exit.
-/// Anything else non-zero is a server we could not question, not an empty one.
+/// Classify a non-zero `tmux list-sessions`: did tmux say "there is nothing
+/// here", or did it fail to answer?
 ///
-/// Matching prose is the soft spot here, and it is soft in the safe direction: a
-/// reworded tmux message falls to `Unprovable`, the lease stays blocked, and the
-/// behavior is exactly today's. No wording change can produce a wrong release.
+/// tmux reports an absent server two ways, and **both must be recognized**:
+///
+/// ```text
+/// no server running on /tmp/tmux-501/default
+/// error connecting to /tmp/tmux-501/default (No such file or directory)
+/// ```
+///
+/// The second is what tmux 3.6a actually prints when the socket does not exist,
+/// and missing it is not a harmless conservatism: a host whose last body exited
+/// has no server, so every probe there would read `Unprovable` and no lease
+/// would ever release — the feature would be a no-op in exactly the situation it
+/// exists for. A body's tmux session dying *with* the server is W2-230's own
+/// shape.
+///
+/// The connect error is only absence when it is `ENOENT` — the socket is not
+/// there, so no server is. Any other connect failure (`Permission denied`, or
+/// tmux 3.6a's `Socket operation on non-socket`) means a socket we could not
+/// question, which is `Unprovable`.
+///
+/// Matching prose is the soft spot, and it is soft in the safe direction: an
+/// unrecognized wording falls to `Unprovable`, the lease stays blocked, and the
+/// behavior is today's. No rewording can produce a wrong release — it can only
+/// cost a release that should have happened, which is why the recognized set has
+/// to track what tmux really prints.
 fn classify_tmux_probe_failure(stderr: &str) -> Presence {
     let stderr = stderr.to_ascii_lowercase();
-    if stderr.contains("no server running") || stderr.contains("no sessions") {
+    let no_server = stderr.contains("no server running")
+        || stderr.contains("no sessions")
+        || (stderr.contains("error connecting to") && stderr.contains("no such file or directory"));
+    if no_server {
         Presence::Absent
     } else {
         Presence::Unprovable
@@ -703,7 +830,7 @@ mod tests {
         classify_signal_probe, classify_tmux_probe_failure, extend_session_control_context,
         lf_session_shell_command, probe_child_body_presence, reap_child_process,
         reject_detached_forwarded_profile, select_binary_override, select_current_home_binary,
-        signal_probe_id, tmux_installed, Presence, ProcessSignalTarget,
+        signal_probe_id, tmux_installed, FakeTmux, Presence, ProcessSignalTarget,
     };
     use crate::build_info::BuildProvenance;
     use crate::child_session::ChildExecutionContext;
@@ -783,6 +910,8 @@ mod tests {
     /// Session liveness to "unknowable" and let gone processes read as running.
     #[test]
     fn tmux_probe_agrees_with_running_tmux() {
+        // Both sides of this comparison resolve through `PATH`.
+        let _env_lock = crate::journal::test_env_lock();
         let runnable = std::process::Command::new("tmux")
             .arg("-V")
             .stdout(std::process::Stdio::null())
@@ -908,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_recognized_tmux_failure_reads_as_absence() {
+    fn both_tmux_wordings_for_an_absent_server_read_as_absence() {
         assert_eq!(
             classify_tmux_probe_failure("no server running on /tmp/tmux-501/default"),
             Presence::Absent
@@ -917,11 +1046,28 @@ mod tests {
             classify_tmux_probe_failure("no sessions\n"),
             Presence::Absent
         );
-        // A server we could not question is not an empty one. `tmux_session_exists`
-        // maps every one of these to `Ok(false)`.
+        // Verbatim from tmux 3.6a with an absent socket. Reading this as
+        // `Unprovable` silently disables every release on a host whose last body
+        // took the server with it -- W2-230's own shape. A test covering only
+        // `no server running` passes with that defect fully present.
+        assert_eq!(
+            classify_tmux_probe_failure(
+                "error connecting to /tmp/tmux-501/default (No such file or directory)"
+            ),
+            Presence::Absent
+        );
+        // A socket we could not question is not an absent one: something is there
+        // and it refused us. `tmux_session_exists` maps every line below to
+        // `Ok(false)` -- "no session" -- which is why a release cannot use it.
         assert_eq!(
             classify_tmux_probe_failure(
                 "error connecting to /tmp/tmux-501/default (Permission denied)"
+            ),
+            Presence::Unprovable
+        );
+        assert_eq!(
+            classify_tmux_probe_failure(
+                "error connecting to /tmp/lf.sock (Socket operation on non-socket)"
             ),
             Presence::Unprovable
         );
@@ -967,6 +1113,9 @@ mod tests {
             Some(absent_process_group()),
         );
 
+        // tmux answers `no sessions` so this test's subject is the signal
+        // identity, not whether the host has tmux.
+        let _tmux = FakeTmux::no_session();
         let presence = probe_child_body_presence(&process).await;
 
         stranger.kill().expect("kill the unrelated process");
@@ -986,6 +1135,7 @@ mod tests {
         let live_pid = body.id();
         let process = probe_fixture(&format!("lf-probe-pid-{live_pid}"), Some(live_pid), None);
 
+        let _tmux = FakeTmux::no_session();
         let presence = probe_child_body_presence(&process).await;
 
         body.kill().expect("kill the body");
@@ -1004,6 +1154,7 @@ mod tests {
         let group = child.id();
         let process = probe_fixture(&format!("lf-probe-live-{group}"), Some(group), Some(group));
 
+        let _tmux = FakeTmux::no_session();
         let presence = probe_child_body_presence(&process).await;
 
         child.kill().expect("kill the group leader");
@@ -1015,6 +1166,7 @@ mod tests {
     #[tokio::test]
     async fn an_unaddressable_identity_is_unprovable_not_absent() {
         let too_large = u32::try_from(i32::MAX).expect("i32::MAX fits u32") + 1;
+        let _tmux = FakeTmux::no_session();
         for group in [0, 1, too_large] {
             let process = probe_fixture(&format!("lf-probe-bad-{group}"), None, Some(group));
             assert_eq!(
@@ -1029,7 +1181,42 @@ mod tests {
     #[tokio::test]
     async fn a_generation_with_no_identity_is_absent_once_tmux_is_gone() {
         let process = probe_fixture("lf-probe-no-identity-at-all", None, None);
+        let _tmux = FakeTmux::no_session();
         assert_eq!(probe_child_body_presence(&process).await, Presence::Absent);
+    }
+
+    /// The tmux tri-state, end to end through a real spawn.
+    ///
+    /// Each arm is a case `tmux_session_exists` collapses into `Ok(false)` —
+    /// "no session" — so a release that reused it would read a server it could
+    /// not question as proof the body is gone.
+    #[tokio::test]
+    async fn the_tmux_probe_never_reads_an_unanswered_question_as_absence() {
+        // A recorded session the server positively lists: a live body.
+        let process = probe_fixture("lf-tmux-live", None, None);
+        {
+            let _tmux = FakeTmux::live_session("lf-tmux-live");
+            assert_eq!(probe_child_body_presence(&process).await, Presence::Present);
+        }
+        // The server answers and does not list it: authoritative absence.
+        {
+            let _tmux = FakeTmux::no_session();
+            assert_eq!(probe_child_body_presence(&process).await, Presence::Absent);
+        }
+        // No server running, reported the way tmux reports it.
+        {
+            let _tmux = FakeTmux::no_server();
+            assert_eq!(probe_child_body_presence(&process).await, Presence::Absent);
+        }
+        // And tmux we cannot run at all is a fact about this process's PATH,
+        // never about the body. This is the exact shape CI hits.
+        {
+            let _tmux = FakeTmux::unspawnable();
+            assert_eq!(
+                probe_child_body_presence(&process).await,
+                Presence::Unprovable
+            );
+        }
     }
 
     /// A process group that has certainly exited: spawn one, reap it, and reuse
@@ -1048,8 +1235,13 @@ mod tests {
         group
     }
 
+    /// Resolves `tmux` through `PATH` (`confirm_tmux_reaped`), so it holds the
+    /// crate-wide env lock: without it a concurrent [`FakeTmux`] answers
+    /// `has-session` for this test's body and the reap reads as survived.
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     #[tokio::test]
     async fn bounded_reap_kills_the_runner_process_group_and_its_grandchild() {
+        let _env_lock = crate::journal::test_env_lock();
         let mut child = std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg("sleep 60 & echo $!; wait")

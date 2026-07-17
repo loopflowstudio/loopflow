@@ -183,12 +183,29 @@ invariant with two truthful layers:
    read the PR at different instants, so a PR can be `Working` at the fast bar
    and `Open` by the time `launch` reads it. Persist as today (create →
    `Persisted` event → `launch`); if `launch` then bars, **terminalize the
-   just-created `Resume` as `Failed`** via
-   `fail_child_command(id, effect, bar_text)` (`store/child_sessions.rs:741`)
-   before returning the bar error. `launch` bars *before* reserving a
-   generation, so the generation is unchanged, and the command ends terminal
-   `Failed` — outside the `{Persisted, Claimed, Uncertain}` orphan set
-   (`is_terminal` includes `Failed`; the reviewer's forbidden set does not).
+   just-created `Resume` from `Persisted` to `Failed`**, recording the bar text
+   as its error, then append a `Failed` `CommandChanged` event, before returning
+   the bar error. `launch` bars *before* reserving a generation, so the
+   generation is unchanged, and the command ends terminal `Failed` — outside the
+   `{Persisted, Claimed, Uncertain}` orphan set (`is_terminal` includes `Failed`;
+   the reviewer's forbidden set does not).
+
+   **The existing `fail_child_command` cannot do this.** Its SQLite UPDATE
+   (`store/sqlite/child_sessions.rs:1884`) is
+   `SET state='failed' … WHERE id=?3 AND state IN ('claimed','delivering')`, and
+   returns `InvalidData("child command … is already resolved")` when `changed ==
+   0`. A just-created `Resume` is `Persisted`, not `claimed`/`delivering`, so
+   that call would leave the exact orphan it is meant to clear. This is a
+   *pre-delivery* rejection (nothing was ever delivered), a distinct lifecycle
+   transition from the post-delivery failure `fail_child_command` owns. So add a
+   narrowly named primitive — `reject_persisted_child_command(id, error)` on
+   `SharedStore`/`SqliteStore` — whose UPDATE is
+   `SET state='failed', error=?2 WHERE id=?1 AND state='persisted'`, returning
+   `InvalidData` on `changed == 0` so it can *only* transition a still-`Persisted`
+   command it just created and never races a body that has since claimed it.
+   Keeping it separate from `fail_child_command` preserves the
+   pre-delivery/post-delivery split (the same reason `accept`/`supersede`/`fail`
+   are distinct verbs), rather than widening one predicate to blur two stages.
 
 This is deliberately **not** an atomicity claim. The atomic alternative would
 need one SQLite transaction that reads the active PR, reserves the generation,
@@ -205,10 +222,12 @@ that already exist.
   target_id=<ts>` is unchanged — the fast bar wrote nothing before creation.
 - *Post-creation flip:* a fixture seam presents the PR as `Working` to the fast
   bar and `Open` to `launch`'s read (inject the flip between the two reads);
-  assert the refusal, the latest generation **unchanged**, and **no** command
-  left in `Persisted`/`Claimed`/`Uncertain` (the just-created `Resume` is
-  terminal `Failed`). Sabotage: delete the `fail_child_command` step → the
-  command is left `Persisted` → the orphan assertion fails.
+  assert the refusal, the receipt is `Failed` carrying the bar text as its
+  error, the latest generation **unchanged**, and **no** command left in
+  `Persisted`/`Claimed`/`Uncertain`. Sabotage: restore the current
+  `state IN ('claimed','delivering')` predicate (i.e. call `fail_child_command`
+  instead of the new pre-delivery primitive) → the `Persisted` `Resume` is not
+  transitioned → the receipt stays `Persisted` and the orphan assertion fails.
 
 Scope: **Resume only.** `CiFix` deliberately persists-then-bars for incident
 attribution (`ensure_child_ci_fix_command` dedups by incident identity, and
@@ -255,7 +274,8 @@ owner, and never emit self-loop text.
 | Existing test `command_source_classifies_every_ambient_context` (`ops/util.rs:134`) — does it move? | It is the classification matrix and already covers owning/foreign/stale/absent. | Extend it into the `CallerAuthority` funnel test: add "stray marker, no wave → refuse" and "all markers absent → Operator"; keep the six existing cases. |
 | Does `LF_PROJECT_SESSION_ID` validate against the historical or the live Project Session? | `resolve_task_project_route` (`ops/project.rs:1254`) returns `historical` (provenance) and `current` (live routing target). A terminal historical routes to the latest live successor for the same Linear project (W2-243); the healthy live case is `current == historical`, `succeeded == false`. | Arm 1 validates the incoming `LF_PROJECT_SESSION_ID` against `route.current`, not `session.project_session_id`. Add a regression: (a) historical live → its command controls, successor id would be rejected as foreign; (b) historical terminal + live successor → the successor's command controls and the terminal predecessor's is rejected; (c) terminal + no successor → `resolve_task_project_route` already fails actionably. |
 | Is `launch` a single authoritative cut that persist-after-launch could ride? | No — `ChildSession::launch` reads `active_task_pr` in one store call, then `relaunch_inactive_process` reserves the generation and starts tmux in later calls. There is no reservation critical section that also reads the PR and mints the command. | Do **not** claim atomicity. Keep persist-before-launch; add a fast bar before creation (steady refusal writes nothing) and terminalize the just-created `Resume` as `Failed` if a post-creation phase flip makes `launch` bar (generation unchanged, no orphan). See Move 2. |
-| What terminal state avoids the orphan set? | `ChildCommandState::Failed` is terminal (`is_terminal` includes it) and is **not** in the reviewer's forbidden `{Persisted, Claimed, Uncertain}` set; `fail_child_command` (`store/child_sessions.rs:741`) writes it. `Uncertain` is terminal but *is* an orphan (post-delivery crash), so it is not the target. | Terminalize the raced `Resume` as `Failed`, not `Uncertain`. |
+| What terminal state avoids the orphan set? | `ChildCommandState::Failed` is terminal (`is_terminal` includes it) and is **not** in the reviewer's forbidden `{Persisted, Claimed, Uncertain}` set. `Uncertain` is terminal but *is* an orphan (post-delivery crash), so it is not the target. | Terminalize the raced `Resume` as `Failed`, not `Uncertain`. |
+| Can the existing `fail_child_command` transition the raced `Resume`? | **No.** `store/sqlite/child_sessions.rs:1884` updates only `WHERE … state IN ('claimed','delivering')` and returns `InvalidData("already resolved")` otherwise. The raced `Resume` is `Persisted`, so it would be left orphaned. | Add a distinct pre-delivery primitive `reject_persisted_child_command(id, error)` gated on `state='persisted'`; do not widen `fail_child_command`. |
 
 ## Alternatives considered
 
@@ -280,9 +300,11 @@ owner, and never emit self-loop text.
 - **Fast bar + terminalize-on-race, for Resume only.** `launch` is not one
   atomic cut, so rather than fake atomicity: a fast bar before creation makes the
   steady refusal write nothing, and a post-creation phase flip that bars `launch`
-  terminalizes the just-created `Resume` as `Failed` (generation unchanged, no
-  `Persisted`/`Claimed`/`Uncertain` orphan). ci-fix's persist-first incident
-  attribution is deliberately preserved.
+  terminalizes the just-created `Resume` from `Persisted` to `Failed` via a new
+  pre-delivery primitive `reject_persisted_child_command` (the existing
+  `fail_child_command` accepts only `claimed`/`delivering`, so it cannot),
+  leaving the generation unchanged and no `Persisted`/`Claimed`/`Uncertain`
+  orphan. ci-fix's persist-first incident attribution is deliberately preserved.
 - **Project authority follows the live route.** Validate against
   `resolve_task_project_route(...).current`, honouring W2-243's terminal→
   successor routing; the historical `project_session_id` is provenance only.
@@ -302,7 +324,8 @@ owner, and never emit self-loop text.
   (explicit `--wave` vs inherited context) + `from_ambient` funnel
   (fail-closed, Project validated against `route.current`); rewire
   `command_source`/`project_command_source` onto it; a fast bar before `Resume`
-  creation plus `Failed`-terminalize on a post-creation phase flip in
+  creation plus a new `reject_persisted_child_command` primitive to
+  `Failed`-terminalize the just-created `Resume` on a post-creation phase flip in
   `queue_command`; audience-correct `open_pr_bar` text; regressions for
   Wave/Project/operator resume against an open-PR Task, the `env -u LF_WAVE_ID`
   strip case, the ENG-19 stranded-body shape, the post-creation phase-flip case,
@@ -335,10 +358,11 @@ owner, and never emit self-loop text.
 - Tests cover Wave, Project, and operator resume against an open-PR Task,
   including the ENG-19 stranded-body shape, the post-creation phase-flip case,
   and the terminal-historical / live-successor Project routing case, each
-  sabotaging the production branch it names (delete the `fail_child_command`
-  terminalize → the raced `Resume` is left `Persisted`; revert the fail-closed
-  arm → the strip case classifies Operator and launches; compare against
-  `project_session_id` → the successor's command is wrongly rejected).
+  sabotaging the production branch it names (swap `reject_persisted_child_command`
+  back to the `claimed`/`delivering`-only `fail_child_command` → the raced
+  `Resume` stays `Persisted`; revert the fail-closed arm → the strip case
+  classifies Operator and launches; compare against `project_session_id` → the
+  successor's command is wrongly rejected).
 - `cargo test -p loopflow` green; `cargo clippy --all-targets -- -D warnings`
   clean.
 

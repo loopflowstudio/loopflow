@@ -32,12 +32,20 @@
   `Resume` insert later fails. v3 uses the truthful shape: keep persist-before-
   launch; a **fast bar before creation** makes the steady refusal write nothing;
   a **post-creation phase flip** that bars `launch` terminalizes the just-created
-  `Resume` as `Failed` (`fail_child_command`, `store/child_sessions.rs:741`), so
-  the generation is unchanged and no `Persisted`/`Claimed`/`Uncertain` orphan
-  remains. Two deterministic regressions: steady-`Open` (count unchanged) and
-  injected phase-flip (generation unchanged, no orphan); sabotage deletes the
-  terminalize. Not an atomicity claim — no single-transaction primitive exists,
-  and inventing one is out of proportion to the incident.
+  `Resume` from `Persisted` to `Failed`, so the generation is unchanged and no
+  `Persisted`/`Claimed`/`Uncertain` orphan remains. **The existing
+  `fail_child_command` cannot do this** — its UPDATE
+  (`store/sqlite/child_sessions.rs:1884`) matches only
+  `state IN ('claimed','delivering')` and returns `InvalidData("already
+  resolved")` on a `Persisted` row, so v3's claim it was capable was wrong. v4
+  adds a distinct pre-delivery primitive `reject_persisted_child_command(id,
+  error)` gated on `state='persisted'`, records the bar text as the error, and
+  appends a `Failed` `CommandChanged` event before the CLI returns the bar. Two
+  deterministic regressions: steady-`Open` (count unchanged) and injected
+  phase-flip (receipt `Failed` with bar error, generation unchanged, no orphan);
+  sabotage swaps the new primitive back to `fail_child_command` so the raced
+  `Resume` stays `Persisted`. Not an atomicity claim — no single-transaction
+  primitive exists, and inventing one is out of proportion to the incident.
 - **Environment's role is documented, not denied.** Authority resolves at the
   invocation boundary; env is transport of a body's stamped identity +
   consistency evidence. Explicit `--wave` is a distinct deliberate assertion.

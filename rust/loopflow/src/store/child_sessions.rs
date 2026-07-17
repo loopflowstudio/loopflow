@@ -64,6 +64,23 @@ impl Store {
         .await
     }
 
+    /// Recover an abandoned Task by atomically adopting its worktree and PR
+    /// history onto one linked successor.
+    pub async fn recover_task_session_successor(
+        &self,
+        predecessor: &TaskSession,
+        successor: &TaskSession,
+        directive: &ChildDirective,
+    ) -> StoreResult<TaskSessionSuccession> {
+        let predecessor = predecessor.clone();
+        let successor = successor.clone();
+        let directive = directive.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.recover_task_session_successor(&predecessor, &successor, &directive)
+        })
+        .await
+    }
+
     pub async fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
@@ -232,6 +249,17 @@ impl Store {
     ) -> StoreResult<Option<TaskSession>> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_session(&session_id)).await
+    }
+
+    pub async fn task_session_chain_neighbors(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<(Option<String>, Option<String>)> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_session_chain_neighbors(&session_id)
+        })
+        .await
     }
 
     pub async fn get_task_session_by_issue(&self, issue: &str) -> StoreResult<Option<TaskSession>> {

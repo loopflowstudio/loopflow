@@ -3287,6 +3287,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn abandoned_task_recovery_atomically_adopts_its_pr_and_direction() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        let mut predecessor = make_task_session(&wave, &project);
+        predecessor.current_directive_version = 1;
+        let pr = make_task_pr(&predecessor);
+        let initial = ChildDirective::initial(
+            ChildRef::Task(predecessor.id.clone()),
+            "preserve the existing work and PR".to_string(),
+            ChildCommandSource::Human,
+        );
+        store
+            .reserve_task_session_with_directive(&predecessor, &pr, &initial)
+            .await
+            .unwrap();
+        predecessor.set_status(TaskSessionStatus::Abandoned, "stopped explicitly");
+        store.update_task_session(&predecessor).await.unwrap();
+
+        let mut successor = predecessor.clone();
+        successor.id = TaskSessionId::new();
+        successor.status = TaskSessionStatus::Waiting;
+        successor.status_reason = "recovered; resume to continue".to_string();
+        successor.status_at = OffsetDateTime::now_utc();
+        successor.incorporated_directive_version = 0;
+        successor.latest_process = None;
+        successor.created_at = OffsetDateTime::now_utc();
+        successor.updated_at = successor.created_at;
+        let carried = ChildDirective::initial(
+            ChildRef::Task(successor.id.clone()),
+            initial.text.clone(),
+            initial.source.clone(),
+        );
+
+        let created = store
+            .recover_task_session_successor(&predecessor, &successor, &carried)
+            .await
+            .unwrap();
+        assert!(created.created);
+        assert_eq!(created.session.id, successor.id);
+        assert_eq!(
+            store
+                .get_task_session_by_issue("INF-123")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            successor.id
+        );
+        assert!(store.task_prs(&predecessor.id).await.unwrap().is_empty());
+        let adopted = store.task_prs(&successor.id).await.unwrap();
+        assert_eq!(adopted.len(), 1);
+        assert_eq!(adopted[0].id, pr.id);
+        assert_eq!(
+            store
+                .child_directives(&ChildRef::Task(successor.id.clone()))
+                .await
+                .unwrap()[0]
+                .text,
+            initial.text
+        );
+        assert_eq!(
+            store
+                .task_session_chain_neighbors(&successor.id)
+                .await
+                .unwrap(),
+            (Some(predecessor.id.to_string()), None)
+        );
+
+        let repeated = store
+            .recover_task_session_successor(&predecessor, &successor, &carried)
+            .await
+            .unwrap();
+        assert!(!repeated.created);
+        assert_eq!(repeated.session.id, successor.id);
+    }
+
+    #[tokio::test]
     async fn task_session_resolution_fails_actionably_on_multiple_live_successors() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))

@@ -1155,6 +1155,14 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Recover an abandoned Task as a linked successor on the same worktree
+    Recover {
+        issue: String,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Attach read-write to the Task Session control terminal
     Attach { issue: String },
     /// Explicitly end a Task Session without merging
@@ -2702,6 +2710,30 @@ mod tests {
             "quota exhausted",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn task_recover_accepts_an_optional_audited_reason() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "recover",
+            "PRD-9",
+            "--reason",
+            "the abandoned work is still valid",
+            "--json",
+        ])
+        .expect("parse Task recovery");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Recover {
+                    issue,
+                    reason: Some(reason),
+                    json: true,
+                }
+            }) if issue == "PRD-9" && reason == "the abandoned work is still valid"
+        ));
     }
 
     #[test]

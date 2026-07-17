@@ -159,59 +159,62 @@ way to assume Wave authority — it resolves to a registered wave row, so it is 
 deliberate typed assertion, not ambient inheritance. That is the intended
 "explicit typed input from the invocation surface" for a human acting as a wave.
 
-### Move 2 — a barred supervisor resume leaves no live command (structurally, not by timing)
+### Move 2 — a barred supervisor resume leaves no live command
 
 The invariant: **a supervisor `Resume` that ends up barred leaves zero
-`Persisted`/`Claimed`/`Uncertain` command rows — even if the PR phase changes
-between the legality check and the launch.**
+`Persisted`/`Claimed`/`Uncertain` orphan and does not change the generation —
+even if the PR phase flips between the legality check and the launch.**
 
-A naive "precheck the bar, then persist, then launch" is a TOCTOU and does not
-hold the invariant. `queue_command` today creates the row (`ops/child.rs:734`),
-appends `Persisted` (`795`), then `launch()` (`839`) re-reads
-`active_task_pr` inside `supervisor_restart_bar`. A precheck that reads
-`Working` can be followed by a launch that re-reads `Open` (the body just
-finished publishing) and refuses — recreating the very inert command. Moving the
-check earlier only *narrows* the window; it does not close it.
+Launch is **not** one atomic cut, and the design must not pretend it is:
+`ChildSession::launch` reads `active_task_pr` in one store call, then
+`relaunch_inactive_process` reserves the generation and starts tmux in *later*
+calls. So "persist after a single authoritative launch" is a fiction — there is
+no single reservation critical section that also reads the PR and mints the
+command. Keep the honest ordering (persist-before-launch, as today) and hold the
+invariant with two truthful layers:
 
-Close it structurally: **for a launch-driving `Resume`, no durable command is
-committed unless the generation reservation succeeds.** Persistence becomes
-*contingent on* the authoritative launch, not prior to it:
+1. **Fast bar before creation.** When the body is not active, evaluate the
+   restart bar (already-`Open` / `Publishing` / terminal) **before**
+   `create_child_command`. If it refuses, return the bar error having created
+   nothing. This makes the steady-state refusal — the PR is already `Open`, the
+   common W2-319 case — write zero rows.
 
-1. If the body is already active, behaviour is unchanged (the command persists
-   for the live body to consume; no restart, no bar).
-2. If the body is not active, the launch (`relaunch_inactive_process`, which
-   evaluates the restart bar against a *single authoritative read* and reserves
-   the generation) runs **first**. Only on a successful reservation is the
-   `Resume` command created and linked to that live generation. A barred or lost
-   reservation returns the bar error having written nothing.
+2. **Terminalize on a post-creation race.** The fast bar and `launch`'s own bar
+   read the PR at different instants, so a PR can be `Working` at the fast bar
+   and `Open` by the time `launch` reads it. Persist as today (create →
+   `Persisted` event → `launch`); if `launch` then bars, **terminalize the
+   just-created `Resume` as `Failed`** via
+   `fail_child_command(id, effect, bar_text)` (`store/child_sessions.rs:741`)
+   before returning the bar error. `launch` bars *before* reserving a
+   generation, so the generation is unchanged, and the command ends terminal
+   `Failed` — outside the `{Persisted, Claimed, Uncertain}` orphan set
+   (`is_terminal` includes `Failed`; the reviewer's forbidden set does not).
 
-Because persistence follows the one authoritative bar read, there is no window
-in which a command exists without a live generation to own it — the raced
-`Working→Open` case and the steady-state already-`Open` case exercise the *same*
-path (launch bars ⇒ nothing persisted). The optional pre-`Open` fast refusal
-(check the phase up front and return early) is a courtesy that also writes
-nothing; correctness does not depend on it, so no wall-clock race needs
-injecting.
+This is deliberately **not** an atomicity claim. The atomic alternative would
+need one SQLite transaction that reads the active PR, reserves the generation,
+and inserts the command together, with the tmux spawn strictly after commit — no
+such primitive exists today (`launch` is three separate store calls plus a
+process spawn), and minting one is more surface than this incident warrants. The
+fast-bar + terminalize-on-race shape holds the invariant with the primitives
+that already exist.
 
-A resumed generation that boots and finds its command not yet linked is not an
-orphan: `Resume { message: None }` is "run the next turn," and a `message` lands
-on the body's command poll immediately after reservation. The receipt still
-resolves — the command id is minted with the reservation, in the same critical
-section.
+**Deterministic regressions (no wall-clock timing):**
 
-**Deterministic regression (no timing):** stand up an open-PR Task with a
-finished body; issue a Wave (then Project) `Resume`; assert the refusal *and*
-`SELECT count(*) FROM child_commands WHERE target_id=<ts>` is unchanged.
-Sabotage proof that the contingency is load-bearing: restore the old
-persist-then-launch order and the same test goes red with a stranded `Persisted`
-row. This one regression covers the race because the fix collapses the raced and
-steady-state paths into the same authoritative gate.
+- *Steady-`Open`:* open-PR Task, finished body; issue a Wave (then Project)
+  `Resume`; assert the refusal *and* `SELECT count(*) FROM child_commands WHERE
+  target_id=<ts>` is unchanged — the fast bar wrote nothing before creation.
+- *Post-creation flip:* a fixture seam presents the PR as `Working` to the fast
+  bar and `Open` to `launch`'s read (inject the flip between the two reads);
+  assert the refusal, the latest generation **unchanged**, and **no** command
+  left in `Persisted`/`Claimed`/`Uncertain` (the just-created `Resume` is
+  terminal `Failed`). Sabotage: delete the `fail_child_command` step → the
+  command is left `Persisted` → the orphan assertion fails.
 
 Scope: **Resume only.** `CiFix` deliberately persists-then-bars for incident
 attribution (`ensure_child_ci_fix_command` dedups by incident identity, and
 `relaunch_on_duplicate` keys on `Persisted`); leave that path untouched. Steer,
 follow-up, and interrupt against a *live* body still persist a directive for the
-body to consume — this contingency only guards the *restart* of a non-live body.
+body to consume — these two layers only guard the *restart* of a non-live body.
 Operator resume (`ExplicitResume`) is unaffected: its bar is abandon-only, so an
 open PR still reserves a generation and answers review.
 
@@ -251,7 +254,8 @@ owner, and never emit self-loop text.
 | Does the persisted review directive (`cc_03a…`) need a supervisor to deliver it headlessly? | No supported supervisor delivery exists that respects W2-129; delivery past an open PR is operator-only. The directive's own words permit "refuse before persisting a duplicate inert command" as the supervisor outcome. | No new headless-delivery verb in scope. Supervisor refuses clean; operator resume delivers. A fully headless review-handoff (no operator present) is a separate boundary, noted in `questions.md`. |
 | Existing test `command_source_classifies_every_ambient_context` (`ops/util.rs:134`) — does it move? | It is the classification matrix and already covers owning/foreign/stale/absent. | Extend it into the `CallerAuthority` funnel test: add "stray marker, no wave → refuse" and "all markers absent → Operator"; keep the six existing cases. |
 | Does `LF_PROJECT_SESSION_ID` validate against the historical or the live Project Session? | `resolve_task_project_route` (`ops/project.rs:1254`) returns `historical` (provenance) and `current` (live routing target). A terminal historical routes to the latest live successor for the same Linear project (W2-243); the healthy live case is `current == historical`, `succeeded == false`. | Arm 1 validates the incoming `LF_PROJECT_SESSION_ID` against `route.current`, not `session.project_session_id`. Add a regression: (a) historical live → its command controls, successor id would be rejected as foreign; (b) historical terminal + live successor → the successor's command controls and the terminal predecessor's is rejected; (c) terminal + no successor → `resolve_task_project_route` already fails actionably. |
-| Is the pre-persist bar a TOCTOU? | Yes — `queue_command` persists (`ops/child.rs:734/795`) before `launch()` re-reads the PR phase (`839`), so a `Working` precheck can precede an `Open` launch. | Make persistence **contingent on** a successful reservation (persist-after-launch) rather than prior to it. The raced and steady-state cases then share one authoritative gate; a single `count(*)`-unchanged regression + persist-then-launch sabotage covers both. See Move 2. |
+| Is `launch` a single authoritative cut that persist-after-launch could ride? | No — `ChildSession::launch` reads `active_task_pr` in one store call, then `relaunch_inactive_process` reserves the generation and starts tmux in later calls. There is no reservation critical section that also reads the PR and mints the command. | Do **not** claim atomicity. Keep persist-before-launch; add a fast bar before creation (steady refusal writes nothing) and terminalize the just-created `Resume` as `Failed` if a post-creation phase flip makes `launch` bar (generation unchanged, no orphan). See Move 2. |
+| What terminal state avoids the orphan set? | `ChildCommandState::Failed` is terminal (`is_terminal` includes it) and is **not** in the reviewer's forbidden `{Persisted, Claimed, Uncertain}` set; `fail_child_command` (`store/child_sessions.rs:741`) writes it. `Uncertain` is terminal but *is* an orphan (post-delivery crash), so it is not the target. | Terminalize the raced `Resume` as `Failed`, not `Uncertain`. |
 
 ## Alternatives considered
 
@@ -273,10 +277,11 @@ owner, and never emit self-loop text.
   existing `resolve_child_command_source` already unified Task and Project on the
   wave arm; this extends that unification to include the operator arm and the
   fail-closed rule.
-- **Persistence contingent on reservation, for Resume only.** Not a reorder but
-  a dependency: no durable `Resume` command exists unless a generation was
-  reserved, so a barred/raced launch leaves zero orphan regardless of a PR
-  phase change between check and launch. ci-fix's persist-first incident
+- **Fast bar + terminalize-on-race, for Resume only.** `launch` is not one
+  atomic cut, so rather than fake atomicity: a fast bar before creation makes the
+  steady refusal write nothing, and a post-creation phase flip that bars `launch`
+  terminalizes the just-created `Resume` as `Failed` (generation unchanged, no
+  `Persisted`/`Claimed`/`Uncertain` orphan). ci-fix's persist-first incident
   attribution is deliberately preserved.
 - **Project authority follows the live route.** Validate against
   `resolve_task_project_route(...).current`, honouring W2-243's terminal→
@@ -296,11 +301,12 @@ owner, and never emit self-loop text.
 - In scope: `CallerAuthority` type resolved at the invocation boundary
   (explicit `--wave` vs inherited context) + `from_ambient` funnel
   (fail-closed, Project validated against `route.current`); rewire
-  `command_source`/`project_command_source` onto it; reservation-contingent
-  `Resume` persistence in `queue_command` (TOCTOU-free); audience-correct
-  `open_pr_bar` text; regressions for Wave/Project/operator resume against an
-  open-PR Task, the `env -u LF_WAVE_ID` strip case, the ENG-19 stranded-body
-  shape, and the terminal-historical / live-successor Project routing case.
+  `command_source`/`project_command_source` onto it; a fast bar before `Resume`
+  creation plus `Failed`-terminalize on a post-creation phase flip in
+  `queue_command`; audience-correct `open_pr_bar` text; regressions for
+  Wave/Project/operator resume against an open-PR Task, the `env -u LF_WAVE_ID`
+  strip case, the ENG-19 stranded-body shape, the post-creation phase-flip case,
+  and the terminal-historical / live-successor Project routing case.
 - Out of scope: a new headless review-delivery verb; changing ci-fix's
   persist-then-bar ordering; the open-PR bar policy itself (W2-129 stands);
   W2-319 mutation, scratch deletion, global-binary promotion, reteam apply, or
@@ -319,19 +325,20 @@ owner, and never emit self-loop text.
   `resolve_task_project_route(...).current`, not the historical
   `project_session_id`.
 - A supervisor barred by the open-PR bar is told the reviewer/operator is the
-  next owner; the message recommends no self-resume, and the refusal persists no
-  command (verified: `child_commands` count unchanged after a barred Wave
-  resume, **even under a PR phase change between legality check and launch** —
-  persistence is contingent on a successful reservation).
+  next owner; the message recommends no self-resume. The steady refusal persists
+  no command (fast bar before creation → `child_commands` count unchanged), and a
+  post-creation phase flip that bars `launch` leaves the generation unchanged and
+  the just-created `Resume` terminal `Failed` — no `Persisted`/`Claimed`/
+  `Uncertain` orphan.
 - `env -u LF_WAVE_ID lf task resume <open-pr-task>` from inside a managed body
   refuses loudly and is **not** reclassified Operator.
 - Tests cover Wave, Project, and operator resume against an open-PR Task,
-  including the ENG-19 stranded-body shape and the terminal-historical /
-  live-successor Project routing case, each sabotaging the production branch it
-  names (restore persist-then-launch → a stranded `Persisted` command appears;
-  revert the fail-closed arm → the strip case classifies Operator and launches;
-  compare against `project_session_id` → the successor's command is wrongly
-  rejected).
+  including the ENG-19 stranded-body shape, the post-creation phase-flip case,
+  and the terminal-historical / live-successor Project routing case, each
+  sabotaging the production branch it names (delete the `fail_child_command`
+  terminalize → the raced `Resume` is left `Persisted`; revert the fail-closed
+  arm → the strip case classifies Operator and launches; compare against
+  `project_session_id` → the successor's command is wrongly rejected).
 - `cargo test -p loopflow` green; `cargo clippy --all-targets -- -D warnings`
   clean.
 

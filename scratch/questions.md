@@ -25,11 +25,19 @@
   (`ops/project.rs:1254`), so a live successor Project Session (W2-243) can
   supervise and a terminal predecessor cannot. Regression added: historical-live,
   terminal-historical-with-successor, and terminal-no-successor.
-- **The pre-persist bar was a TOCTOU; the fix is structural.** Persistence of a
-  launch-driving `Resume` is now *contingent on* a successful generation
-  reservation, so the raced (`Working→Open`) and steady-state (`Open`) cases
-  share one authoritative gate and neither leaves an orphan. No wall-clock race
-  test; a `count(*)`-unchanged regression plus persist-then-launch sabotage.
+- **Move 2 fixed twice.** v1's pre-persist bar was a TOCTOU. The v2 revision
+  ("persist-after-launch, contingent on reservation") was itself wrong: `launch`
+  is not one atomic cut (it reads `active_task_pr`, then reserves and starts tmux
+  in separate calls), so persist-after-launch could start a generation whose
+  `Resume` insert later fails. v3 uses the truthful shape: keep persist-before-
+  launch; a **fast bar before creation** makes the steady refusal write nothing;
+  a **post-creation phase flip** that bars `launch` terminalizes the just-created
+  `Resume` as `Failed` (`fail_child_command`, `store/child_sessions.rs:741`), so
+  the generation is unchanged and no `Persisted`/`Claimed`/`Uncertain` orphan
+  remains. Two deterministic regressions: steady-`Open` (count unchanged) and
+  injected phase-flip (generation unchanged, no orphan); sabotage deletes the
+  terminalize. Not an atomicity claim — no single-transaction primitive exists,
+  and inventing one is out of proportion to the incident.
 - **Environment's role is documented, not denied.** Authority resolves at the
   invocation boundary; env is transport of a body's stamped identity +
   consistency evidence. Explicit `--wave` is a distinct deliberate assertion.

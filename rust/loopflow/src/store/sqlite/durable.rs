@@ -3,9 +3,13 @@ use time::OffsetDateTime;
 
 use crate::child_session::{ChildRef, ChildWriteLease};
 use crate::durable::{
-    Author, Basis, BoundarySeed, Epoch, EpochId, EpochState, ProjectId, RunId, RunTrigger, Send,
-    SendId, SendState, SendVia, Steer, SteerId, SteerReceipt, TaskId, ToolResponseId,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef,
+    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, Containment,
+    ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState,
+    FlowPosition, Home, HomeId, InterruptReceipt, Launch, LaunchId, LaunchRoute, LaunchState,
+    ProjectId, Review, Run, RunAdvance, RunId, RunLease, RunLeaseToken, RunState, RunTrigger, Send,
+    SendId, SendState, SendVia, Steer, SteerId, SteerReceipt, StopCause, StopReceipt, TaskId,
+    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn,
+    WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSession;
@@ -17,6 +21,647 @@ use super::child_sessions::require_child_write_lease;
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub fn home(&self, route: &str) -> StoreResult<Home> {
+        let route = route.trim();
+        if route.is_empty() {
+            return Err(StoreError::InvalidData(
+                "Home route cannot be empty".to_string(),
+            ));
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let now = now_unix();
+        conn.execute(
+            "INSERT INTO homes (id, route, created_at, observed_at)
+             VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT(route) DO UPDATE SET observed_at=excluded.observed_at",
+            params![HomeId::new().as_str(), route, now],
+        )?;
+        map_home(&conn, route)
+    }
+
+    pub fn reserve_run(
+        &self,
+        work: &WorkRef,
+        home_id: &HomeId,
+        trigger: &RunTrigger,
+    ) -> StoreResult<(Run, RunLease)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let epoch = current_epoch_in(&tx, work)?;
+        tx.query_row(
+            "SELECT 1 FROM homes WHERE id=?1",
+            [home_id.as_str()],
+            |_| Ok(()),
+        )?;
+        resolve_wait_for_trigger(&tx, &epoch, trigger)?;
+        let token = RunLeaseToken::new();
+        let run = Run {
+            id: RunId::new(),
+            work: work.clone(),
+            epoch_id: epoch.id.clone(),
+            home_id: home_id.clone(),
+            state: RunState::Reserved,
+            trigger: trigger.clone(),
+            retry_of: match trigger {
+                RunTrigger::Recovery { prior_run_id } => Some(prior_run_id.clone()),
+                _ => None,
+            },
+            created_at: OffsetDateTime::now_utc(),
+            ended_at: None,
+        };
+        tx.execute(
+            "INSERT INTO runs (
+                id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
+                lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
+             ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
+            params![
+                run.id.as_str(),
+                run.epoch_id.as_str(),
+                run.home_id.as_str(),
+                serde_json::to_string(trigger).expect("Run trigger must serialize"),
+                run.retry_of.as_ref().map(RunId::as_str),
+                token.hash(),
+                work.kind(),
+                work.id(),
+                run.created_at.unix_timestamp(),
+            ],
+        )?;
+        let lease = RunLease::new(
+            run.id.clone(),
+            work.clone(),
+            epoch.current_basis,
+            token,
+        );
+        tx.commit()?;
+        Ok((run, lease))
+    }
+
+    pub fn current_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Ok(epoch) = current_epoch_in(&conn, work) else {
+            return Ok(None);
+        };
+        run_for_epoch_in(&conn, &epoch.id)
+    }
+
+    pub fn advance_run(
+        &self,
+        lease: &RunLease,
+        advance: &RunAdvance,
+    ) -> StoreResult<AdvanceReceipt> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut run = validate_run_lease(&tx, lease)?;
+        let receipt = match advance {
+            RunAdvance::LaunchStarting {
+                route,
+                containment,
+                cwd,
+                surface,
+                opaque,
+                resume_token,
+            } => {
+                if !matches!(run.state, RunState::Reserved | RunState::Active) {
+                    return Err(StoreError::InvalidData(format!(
+                        "Run {} cannot start a Launch while {:?}",
+                        run.id, run.state
+                    )));
+                }
+                if !cwd.is_absolute() {
+                    return Err(StoreError::InvalidData(
+                        "Launch cwd must be absolute".to_string(),
+                    ));
+                }
+                if route.provider.trim().is_empty() || surface.trim().is_empty() {
+                    return Err(StoreError::InvalidData(
+                        "Launch provider and surface cannot be empty".to_string(),
+                    ));
+                }
+                let basis = current_epoch_in(&tx, &run.work)?.current_basis;
+                let launch = Launch {
+                    id: LaunchId::new(),
+                    run_id: run.id.clone(),
+                    home_id: run.home_id.clone(),
+                    route: route.clone(),
+                    cwd: cwd.clone(),
+                    surface: surface.clone(),
+                    state: LaunchState::Starting,
+                    containment: containment.clone(),
+                    opaque_basis: opaque.then_some(basis),
+                    resume_token: resume_token.clone(),
+                    started_at: OffsetDateTime::now_utc(),
+                    ended_at: None,
+                };
+                insert_control_launch(&tx, &run, &launch)?;
+                tx.execute(
+                    "UPDATE runs SET state='active' WHERE id=?1 AND state='reserved'",
+                    [run.id.as_str()],
+                )?;
+                AdvanceReceipt::Launch(launch)
+            }
+            RunAdvance::LaunchLive { launch_id } => {
+                require_launch_for_run(&tx, launch_id, &run.id)?;
+                if tx.execute(
+                    "UPDATE agent_launches SET launch_state='live'
+                     WHERE id=?1 AND launch_state='starting'",
+                    [launch_id.as_str()],
+                )? == 0
+                {
+                    return Err(StoreError::InvalidData(format!(
+                        "Launch {launch_id} is not starting"
+                    )));
+                }
+                AdvanceReceipt::Launch(control_launch_in(&tx, launch_id)?)
+            }
+            RunAdvance::LaunchEnded { launch_id, outcome } => {
+                if !outcome.is_terminal() {
+                    return Err(StoreError::InvalidData(
+                        "Launch handback must be terminal".to_string(),
+                    ));
+                }
+                require_launch_for_run(&tx, launch_id, &run.id)?;
+                let now = now_unix();
+                tx.execute(
+                    "UPDATE agent_launches
+                     SET launch_state='ended', ended_at=COALESCE(ended_at, ?2),
+                         outcome=?3, handback_state=?4,
+                         attention_kind=NULL, attention_work_kind=NULL,
+                         attention_work_id=NULL, attention_at=NULL
+                     WHERE id=?1 AND launch_state != 'ended'",
+                    params![
+                        launch_id.as_str(),
+                        now,
+                        outcome.as_launch_outcome(),
+                        handback_state(*outcome),
+                    ],
+                )?;
+                AdvanceReceipt::Launch(control_launch_in(&tx, launch_id)?)
+            }
+            RunAdvance::TurnStarting { launch_id } => {
+                require_live_launch_for_run(&tx, launch_id, &run.id)?;
+                let basis = current_epoch_in(&tx, &run.work)?.current_basis;
+                let ordinal: i64 = tx.query_row(
+                    "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM agent_turns WHERE launch_id=?1",
+                    [launch_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                let turn = Turn {
+                    id: TurnId::new(),
+                    launch_id: launch_id.clone(),
+                    basis: basis.clone(),
+                    state: BoundaryState::Starting,
+                    provider_turn_id: None,
+                    started_at: OffsetDateTime::now_utc(),
+                    ended_at: None,
+                };
+                tx.execute(
+                    "INSERT INTO agent_turns (
+                        id, launch_id, ordinal, provider_turn_id, started_at, ended_at,
+                        status, input_op, context_coverage, tokenizer, system_prompt_path,
+                        task_prompt_path, system_tokens, task_tokens, supplied_context_tokens,
+                        provider_input_tokens, provider_output_tokens, reasoning_tokens,
+                        cache_read_tokens, cache_write_tokens, cost_usd, context_gather_ms,
+                        context_render_ms, context_persist_ms, first_event_seq, last_event_seq,
+                        provider_total_input_tokens, peak_input_tokens, context_window_tokens,
+                        epoch_id, basis_rev
+                     ) VALUES (
+                        ?1, ?2, ?3, NULL, ?4, NULL, 'running', 'initial', 'unknown',
+                        'cl100k_base', NULL, '', 0, 0, 0, NULL, NULL, NULL, NULL, NULL,
+                        NULL, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, ?5, ?6
+                     )",
+                    params![
+                        turn.id.as_str(),
+                        turn.launch_id.as_str(),
+                        ordinal,
+                        turn.started_at.unix_timestamp(),
+                        basis.epoch_id.as_str(),
+                        basis.revision as i64,
+                    ],
+                )?;
+                insert_seed_sends_for_turn(&tx, turn.id.as_str(), &basis)?;
+                AdvanceReceipt::Turn(turn)
+            }
+            RunAdvance::TurnActive {
+                turn_id,
+                provider_turn_id,
+            } => {
+                require_turn_for_run(&tx, turn_id, &run.id)?;
+                tx.execute(
+                    "UPDATE agent_turns SET provider_turn_id=?2
+                     WHERE id=?1 AND status='running'",
+                    params![turn_id.as_str(), provider_turn_id],
+                )?;
+                AdvanceReceipt::Turn(control_turn_in(&tx, turn_id)?)
+            }
+            RunAdvance::TurnEnded { turn_id, outcome } => {
+                if !outcome.is_terminal() {
+                    return Err(StoreError::InvalidData(
+                        "Turn outcome must be terminal".to_string(),
+                    ));
+                }
+                require_turn_for_run(&tx, turn_id, &run.id)?;
+                tx.execute(
+                    "UPDATE agent_turns SET status=?2, ended_at=COALESCE(ended_at, ?3)
+                     WHERE id=?1 AND status='running'",
+                    params![turn_id.as_str(), outcome.as_turn_status(), now_unix()],
+                )?;
+                AdvanceReceipt::Turn(control_turn_in(&tx, turn_id)?)
+            }
+            RunAdvance::Wait { on } => {
+                let live: bool = tx.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM agent_launches
+                        WHERE product_run_id=?1 AND launch_state != 'ended'
+                     )",
+                    [run.id.as_str()],
+                    |row| row.get(0),
+                )?;
+                if live {
+                    return Err(StoreError::InvalidData(
+                        "Run cannot wait while owned containment is live".to_string(),
+                    ));
+                }
+                let wait = Wait {
+                    id: WaitId::new(),
+                    work: run.work.clone(),
+                    epoch_id: run.epoch_id.clone(),
+                    on: on.clone(),
+                    created_at: OffsetDateTime::now_utc(),
+                    resolved_at: None,
+                };
+                tx.execute(
+                    "INSERT INTO waits (id, epoch_id, on_json, created_at, resolved_at)
+                     VALUES (?1, ?2, ?3, ?4, NULL)",
+                    params![
+                        wait.id.as_str(),
+                        wait.epoch_id.as_str(),
+                        serde_json::to_string(on).expect("Wait must serialize"),
+                        wait.created_at.unix_timestamp(),
+                    ],
+                )?;
+                tx.execute(
+                    "UPDATE runs SET state='ended', ended_at=?2 WHERE id=?1",
+                    params![run.id.as_str(), now_unix()],
+                )?;
+                AdvanceReceipt::Wait(wait)
+            }
+        };
+        run = run_by_id_in(&tx, &run.id)?;
+        let _ = run;
+        tx.commit()?;
+        Ok(receipt)
+    }
+
+    pub fn stop_run(
+        &self,
+        lease: &RunLease,
+        cause: &StopCause,
+        containment: ContainmentObservation,
+    ) -> StoreResult<StopReceipt> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_stop_lease(&tx, lease)?;
+        let cause_json = serde_json::to_string(cause).expect("Stop cause must serialize");
+        match containment {
+            ContainmentObservation::Absent => {
+                let now = now_unix();
+                tx.execute(
+                    "UPDATE agent_launches
+                     SET launch_state='ended', ended_at=COALESCE(ended_at, ?2),
+                         outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
+                         handback_state=COALESCE(handback_state, 'unknown'),
+                         attention_kind=NULL, attention_work_kind=NULL,
+                         attention_work_id=NULL, attention_at=NULL
+                     WHERE product_run_id=?1 AND launch_state != 'ended'",
+                    params![run.id.as_str(), now],
+                )?;
+                tx.execute(
+                    "UPDATE runs SET state='ended', ended_at=?2, stop_reason=?3 WHERE id=?1",
+                    params![run.id.as_str(), now, cause_json],
+                )?;
+            }
+            ContainmentObservation::Present | ContainmentObservation::Unprovable => {
+                tx.execute(
+                    "UPDATE runs SET state='stopping', stop_reason=?2 WHERE id=?1",
+                    params![run.id.as_str(), cause_json],
+                )?;
+                tx.execute(
+                    "UPDATE agent_launches SET launch_state='stopping'
+                     WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')",
+                    [run.id.as_str()],
+                )?;
+            }
+        }
+        let run = run_by_id_in(&tx, &run.id)?;
+        tx.commit()?;
+        Ok(StopReceipt { run, containment })
+    }
+
+    pub fn set_flow_position(
+        &self,
+        lease: &RunLease,
+        position: &FlowPosition,
+    ) -> StoreResult<FlowPosition> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_run_lease(&tx, lease)?;
+        if position.work != run.work || position.epoch_id != run.epoch_id {
+            return Err(StoreError::InvalidAuthority(
+                "flow position does not belong to the active Run".to_string(),
+            ));
+        }
+        if position.flow.trim().is_empty() || position.step.trim().is_empty() {
+            return Err(StoreError::InvalidData(
+                "flow and step cannot be empty".to_string(),
+            ));
+        }
+        tx.execute(
+            "INSERT INTO work_flow_positions (
+                epoch_id, flow, step, step_index, iteration, interactive, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(epoch_id) DO UPDATE SET
+                flow=excluded.flow, step=excluded.step, step_index=excluded.step_index,
+                iteration=excluded.iteration, interactive=excluded.interactive,
+                updated_at=excluded.updated_at",
+            params![
+                position.epoch_id.as_str(),
+                position.flow,
+                position.step,
+                i64::from(position.step_index),
+                i64::from(position.iteration),
+                position.interactive,
+                position.updated_at.unix_timestamp(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(position.clone())
+    }
+
+    pub fn route_review(
+        &self,
+        lease: &RunLease,
+        launch_id: &LaunchId,
+        attention: &AttentionRoute,
+    ) -> StoreResult<Review> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_run_lease(&tx, lease)?;
+        require_live_launch_for_run(&tx, launch_id, &run.id)?;
+        let position = flow_position_in(&tx, &run.work, &run.epoch_id)?;
+        if !position.interactive {
+            return Err(StoreError::InvalidData(
+                "current flow step is not interactive".to_string(),
+            ));
+        }
+        validate_attention_route(&tx, &run.work, attention)?;
+        let (attention_kind, attention_work_kind, attention_work_id) = match attention {
+            AttentionRoute::User => ("user", None, None),
+            AttentionRoute::Parent(work) => {
+                ("parent", Some(work.kind()), Some(work.id()))
+            }
+        };
+        tx.execute(
+            "UPDATE agent_launches SET
+                attention_kind=?2, attention_work_kind=?3,
+                attention_work_id=?4, attention_at=COALESCE(attention_at, ?5)
+             WHERE id=?1 AND launch_state='live'",
+            params![
+                launch_id.as_str(),
+                attention_kind,
+                attention_work_kind,
+                attention_work_id,
+                now_unix(),
+            ],
+        )?;
+        let review = review_in(&tx, &run.work)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(review)
+    }
+
+    pub fn review(&self, work: &WorkRef) -> StoreResult<Option<Review>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        review_in(&conn, work)
+    }
+
+    pub fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<Review>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT e.wave_id, e.project_id, e.task_id
+             FROM agent_launches l
+             JOIN runs r ON r.id=l.product_run_id
+             JOIN epochs e ON e.id=r.epoch_id
+             WHERE l.launch_state='live' AND l.attention_kind='parent'
+               AND l.attention_work_kind=?1 AND l.attention_work_id=?2
+             ORDER BY l.attention_at, l.id",
+        )?;
+        let rows = statement.query_map(params![parent.kind(), parent.id()], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        let mut reviews = Vec::new();
+        for row in rows {
+            let work = work_from_parts(row?)?;
+            if let Some(review) = review_in(&conn, &work)? {
+                reviews.push(review);
+            }
+        }
+        Ok(reviews)
+    }
+
+    pub fn close_review(
+        &self,
+        caller: Option<&RunLease>,
+        work: &WorkRef,
+        if_basis: &Basis,
+    ) -> StoreResult<WorkStatus> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let review = review_in(&tx, work)?.ok_or(StoreError::NotFound)?;
+        validate_basis(&review.basis, if_basis)?;
+        validate_review_caller(&tx, caller, &review)?;
+        tx.execute(
+            "UPDATE work_flow_positions
+             SET step_index=step_index+1, interactive=0, updated_at=?2
+             WHERE epoch_id=?1 AND flow=?3 AND step=?4 AND step_index=?5 AND interactive=1",
+            params![
+                review.position.epoch_id.as_str(),
+                now_unix(),
+                review.position.flow,
+                review.position.step,
+                i64::from(review.position.step_index),
+            ],
+        )?;
+        tx.execute(
+            "UPDATE agent_launches SET attention_kind=NULL, attention_work_kind=NULL,
+                attention_work_id=NULL, attention_at=NULL
+             WHERE id=?1 AND attention_at=?2",
+            params![review.launch_id.as_str(), review.opened_at.unix_timestamp()],
+        )?;
+        let status = work_status_in(&tx, work)?;
+        tx.commit()?;
+        Ok(status)
+    }
+
+    pub fn interrupt(
+        &self,
+        caller: Option<&RunLease>,
+        work: &WorkRef,
+        if_run: &RunId,
+    ) -> StoreResult<InterruptReceipt> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_control_caller(&tx, caller, work)?;
+        let run = current_run_for_work_in(&tx, work)?.ok_or(StoreError::NotFound)?;
+        if &run.id != if_run {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {if_run} is not current for {}",
+                work.id()
+            )));
+        }
+        let launch_id: String = tx.query_row(
+            "SELECT id FROM agent_launches
+             WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')
+             ORDER BY started_at DESC LIMIT 1",
+            [run.id.as_str()],
+            |row| row.get(0),
+        )?;
+        let turn_id = tx
+            .query_row(
+                "SELECT t.id FROM agent_turns t
+                 WHERE t.launch_id=?1 AND t.status='running'
+                 ORDER BY t.started_at DESC, t.ordinal DESC LIMIT 1",
+                [&launch_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(turn_id) = &turn_id {
+            tx.execute(
+                "UPDATE agent_turns SET status='interrupted', ended_at=?2
+                 WHERE id=?1 AND status='running'",
+                params![turn_id, now_unix()],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE agent_launches SET launch_state='stopping', outcome='interrupted',
+                    handback_state='interrupted'
+                 WHERE id=?1 AND launch_state IN ('starting', 'live')",
+                [&launch_id],
+            )?;
+        }
+        let receipt = InterruptReceipt {
+            run_id: run.id,
+            launch_id: LaunchId::parse(&launch_id).map_err(invalid_durable)?,
+            turn_id: turn_id
+                .map(|id| TurnId::parse(&id).map_err(invalid_durable))
+                .transpose()?,
+        };
+        tx.commit()?;
+        Ok(receipt)
+    }
+
+    pub fn done(&self, lease: &RunLease, basis: &Basis) -> StoreResult<DoneProposal> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_run_lease(&tx, lease)?;
+        let epoch = current_epoch_in(&tx, &run.work)?;
+        validate_basis(&epoch.current_basis, basis)?;
+        let applied = applied_basis_in(&tx, &epoch.id)?.ok_or_else(|| {
+            StoreError::InvalidData("no successful boundary can complete Work".to_string())
+        })?;
+        validate_basis(&applied, basis)?;
+        let live: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM agent_launches
+                WHERE product_run_id=?1 AND launch_state != 'ended'
+             )",
+            [run.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if live {
+            return Err(StoreError::InvalidData(
+                "Run containment is not absent".to_string(),
+            ));
+        }
+        let proposal = DoneProposal {
+            id: DoneProposalId::new(),
+            run_id: run.id.clone(),
+            basis: basis.clone(),
+            proposed_at: OffsetDateTime::now_utc(),
+        };
+        tx.execute(
+            "INSERT INTO done_proposals (id, run_id, epoch_id, basis_rev, proposed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                proposal.id.as_str(),
+                proposal.run_id.as_str(),
+                proposal.basis.epoch_id.as_str(),
+                proposal.basis.revision as i64,
+                proposal.proposed_at.unix_timestamp(),
+            ],
+        )?;
+        let now = now_unix();
+        tx.execute(
+            "UPDATE epochs SET state='done', terminal_at=?2
+             WHERE id=?1 AND state='open' AND current_rev=?3",
+            params![epoch.id.as_str(), now, basis.revision as i64],
+        )?;
+        tx.execute(
+            "UPDATE runs SET state='ended', ended_at=?2 WHERE id=?1",
+            params![run.id.as_str(), now],
+        )?;
+        tx.commit()?;
+        Ok(proposal)
+    }
+
+    pub fn abandon(
+        &self,
+        work: &WorkRef,
+        reason: &str,
+        if_basis: &Basis,
+    ) -> StoreResult<EpochReceipt> {
+        let reason = reason.trim();
+        if reason.is_empty() {
+            return Err(StoreError::InvalidData(
+                "abandon reason cannot be empty".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut epoch = current_epoch_in(&tx, work)?;
+        validate_basis(&epoch.current_basis, if_basis)?;
+        let now = now_unix();
+        tx.execute(
+            "UPDATE runs SET state='stopping', stop_reason=?2
+             WHERE epoch_id=?1 AND state != 'ended'",
+            params![epoch.id.as_str(), reason],
+        )?;
+        tx.execute(
+            "UPDATE epochs SET state='abandoned', terminal_at=?2 WHERE id=?1 AND state='open'",
+            params![epoch.id.as_str(), now],
+        )?;
+        tx.execute(
+            "UPDATE agent_launches SET attention_kind=NULL, attention_work_kind=NULL,
+                attention_work_id=NULL, attention_at=NULL
+             WHERE product_run_id IN (SELECT id FROM runs WHERE epoch_id=?1)",
+            [epoch.id.as_str()],
+        )?;
+        epoch.state = EpochState::Abandoned;
+        epoch.terminal_at = Some(
+            OffsetDateTime::from_unix_timestamp(now)
+                .expect("current Unix timestamp must be valid"),
+        );
+        tx.commit()?;
+        Ok(EpochReceipt { epoch })
+    }
+
+    pub fn work_status(&self, work: &WorkRef) -> StoreResult<WorkStatus> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        work_status_in(&conn, work)
+    }
+
     pub fn work_for_child(&self, target: &ChildRef) -> StoreResult<WorkRef> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         work_for_child_in(&conn, target)
@@ -360,6 +1005,765 @@ impl SqliteStore {
             crate::durable::RunLeaseToken::from_child(lease.token.as_str()),
         ))
     }
+}
+
+fn map_home(conn: &Connection, route: &str) -> StoreResult<Home> {
+    conn.query_row(
+        "SELECT id, route, created_at, observed_at FROM homes WHERE route=?1",
+        [route],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
+    )
+    .map_err(StoreError::from)
+    .and_then(|(id, route, created_at, observed_at)| {
+        Ok(Home {
+            id: HomeId::parse(&id).map_err(invalid_durable)?,
+            route,
+            created_at: OffsetDateTime::from_unix_timestamp(created_at)
+                .map_err(invalid_durable)?,
+            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
+                .map_err(invalid_durable)?,
+        })
+    })
+}
+
+fn resolve_wait_for_trigger(
+    tx: &Transaction<'_>,
+    epoch: &Epoch,
+    trigger: &RunTrigger,
+) -> StoreResult<()> {
+    let row = tx
+        .query_row(
+            "SELECT id, on_json FROM waits WHERE epoch_id=?1 AND resolved_at IS NULL",
+            [epoch.id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((wait_id, on_json)) = row else {
+        return Ok(());
+    };
+    let wait_on: WaitOn = serde_json::from_str(&on_json)?;
+    let resolves = match (&wait_on, trigger) {
+        (WaitOn::Input { after }, RunTrigger::Input { basis }) => {
+            basis.epoch_id == after.epoch_id && basis.revision > after.revision
+        }
+        (WaitOn::Input { .. }, RunTrigger::User) => true,
+        (WaitOn::Time { not_before }, RunTrigger::Time { scheduled_at }) => {
+            scheduled_at >= not_before
+        }
+        (WaitOn::Event { event }, RunTrigger::Event { event: observed }) => event == observed,
+        (WaitOn::Child { work }, RunTrigger::Child { work: observed }) => work == observed,
+        (WaitOn::Capability { .. }, RunTrigger::Recovery { .. })
+        | (WaitOn::Effect { .. }, RunTrigger::Recovery { .. }) => true,
+        _ => false,
+    };
+    if !resolves {
+        return Err(StoreError::InvalidData(format!(
+            "Run trigger does not resolve Wait {wait_id}"
+        )));
+    }
+    tx.execute(
+        "UPDATE waits SET resolved_at=?2 WHERE id=?1 AND resolved_at IS NULL",
+        params![wait_id, now_unix()],
+    )?;
+    Ok(())
+}
+
+fn validate_run_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
+    let run = run_by_id_in(conn, &lease.run_id)?;
+    if run.work != lease.work || !matches!(run.state, RunState::Reserved | RunState::Active) {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Run {} no longer holds execution authority",
+            lease.run_id
+        )));
+    }
+    let stored_hash: String = conn.query_row(
+        "SELECT lease_hash FROM runs WHERE id=?1",
+        [lease.run_id.as_str()],
+        |row| row.get(0),
+    )?;
+    if stored_hash != lease.token_hash() {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Run {} lease token does not match",
+            lease.run_id
+        )));
+    }
+    Ok(run)
+}
+
+fn validate_stop_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
+    let run = run_by_id_in(conn, &lease.run_id)?;
+    if run.work != lease.work
+        || !matches!(
+            run.state,
+            RunState::Reserved | RunState::Active | RunState::Stopping
+        )
+    {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Run {} no longer owns cleanup authority",
+            lease.run_id
+        )));
+    }
+    let stored_hash: String = conn.query_row(
+        "SELECT lease_hash FROM runs WHERE id=?1",
+        [lease.run_id.as_str()],
+        |row| row.get(0),
+    )?;
+    if stored_hash != lease.token_hash() {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Run {} lease token does not match",
+            lease.run_id
+        )));
+    }
+    Ok(run)
+}
+
+fn run_for_epoch_in(conn: &Connection, epoch_id: &EpochId) -> StoreResult<Option<Run>> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM runs WHERE epoch_id=?1 AND state != 'ended'",
+            [epoch_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    id.map(|id| {
+        RunId::parse(&id)
+            .map_err(invalid_durable)
+            .and_then(|id| run_by_id_in(conn, &id))
+    })
+    .transpose()
+}
+
+fn current_run_for_work_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Run>> {
+    let epoch = current_epoch_in(conn, work)?;
+    run_for_epoch_in(conn, &epoch.id)
+}
+
+fn run_by_id_in(conn: &Connection, run_id: &RunId) -> StoreResult<Run> {
+    let row = conn.query_row(
+        "SELECT r.epoch_id, r.home_id, r.state, r.trigger_json, r.retry_of,
+                r.created_at, r.ended_at, e.wave_id, e.project_id, e.task_id
+         FROM runs r JOIN epochs e ON e.id=r.epoch_id WHERE r.id=?1",
+        [run_id.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+            ))
+        },
+    )?;
+    let work = work_from_parts((row.7, row.8, row.9))?;
+    Ok(Run {
+        id: run_id.clone(),
+        work,
+        epoch_id: EpochId::parse(&row.0).map_err(invalid_durable)?,
+        home_id: HomeId::parse(&row.1).map_err(invalid_durable)?,
+        state: RunState::parse(&row.2).map_err(invalid_durable)?,
+        trigger: serde_json::from_str(&row.3)?,
+        retry_of: row
+            .4
+            .map(|id| RunId::parse(&id).map_err(invalid_durable))
+            .transpose()?,
+        created_at: OffsetDateTime::from_unix_timestamp(row.5).map_err(invalid_durable)?,
+        ended_at: row
+            .6
+            .map(OffsetDateTime::from_unix_timestamp)
+            .transpose()
+            .map_err(invalid_durable)?,
+    })
+}
+
+fn insert_control_launch(
+    tx: &Transaction<'_>,
+    run: &Run,
+    launch: &Launch,
+) -> StoreResult<()> {
+    let (wave, project, task, repo) = work_labels(tx, &run.work)?;
+    let cwd = launch.cwd.display().to_string();
+    let (containment_kind, containment_id) = launch.containment.parts();
+    let (opaque_epoch_id, opaque_basis_rev) = launch
+        .opaque_basis
+        .as_ref()
+        .map(|basis| (Some(basis.epoch_id.as_str()), Some(basis.revision as i64)))
+        .unwrap_or((None, None));
+    tx.execute(
+        "INSERT INTO agent_launches (
+            id, run_id, process_id, started_at, ended_at, repo, worktree, wave,
+            flow, skill, project, task, provider, model, surface, capture_status,
+            incomplete_reason, outcome, artifact_dir, conversation_path,
+            provider_events_path, provider_session_id, provider_session_path,
+            conversation_event_count, conversation_bytes, product_run_id, home_id,
+            account_id, launch_state, containment_kind, containment_id, resume_token,
+            opaque_epoch_id, opaque_basis_rev
+         ) VALUES (
+            ?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, NULL, NULL, ?8, ?9, ?10, ?11,
+            ?12, 'prompt_only', NULL, 'running', '', '', NULL, NULL, NULL, 0, 0,
+            ?2, ?13, ?14, 'starting', ?15, ?16, ?17, ?18, ?19
+         )",
+        params![
+            launch.id.as_str(),
+            run.id.as_str(),
+            containment_id,
+            launch.started_at.unix_timestamp(),
+            repo,
+            cwd,
+            wave,
+            project,
+            task,
+            launch.route.provider,
+            launch.route.model,
+            launch.surface,
+            launch.home_id.as_str(),
+            launch.route.account_id,
+            containment_kind,
+            containment_id,
+            launch.resume_token,
+            opaque_epoch_id,
+            opaque_basis_rev,
+        ],
+    )?;
+    Ok(())
+}
+
+fn work_labels(
+    conn: &Connection,
+    work: &WorkRef,
+) -> StoreResult<(Option<String>, Option<String>, Option<String>, String)> {
+    match work {
+        WorkRef::Wave(id) => conn
+            .query_row(
+                "SELECT name, repo FROM waves WHERE id=?1",
+                [id.as_str()],
+                |row| {
+                    Ok((
+                        Some(row.get::<_, String>(0)?),
+                        None,
+                        None,
+                        row.get(1)?,
+                    ))
+                },
+            )
+            .map_err(StoreError::from),
+        WorkRef::Project(id) => conn
+            .query_row(
+                "SELECT w.name, p.external_project_id, w.repo
+                 FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
+                [id.as_str()],
+                |row| {
+                    Ok((
+                        Some(row.get::<_, String>(0)?),
+                        Some(row.get::<_, String>(1)?),
+                        None,
+                        row.get(2)?,
+                    ))
+                },
+            )
+            .map_err(StoreError::from),
+        WorkRef::Task(id) => conn
+            .query_row(
+                "SELECT w.name, p.external_project_id, t.issue_identifier, w.repo
+                 FROM tasks t
+                 JOIN projects p ON p.id=t.project_id
+                 JOIN waves w ON w.id=p.wave_id
+                 WHERE t.id=?1",
+                [id.as_str()],
+                |row| {
+                    Ok((
+                        Some(row.get::<_, String>(0)?),
+                        Some(row.get::<_, String>(1)?),
+                        Some(row.get::<_, String>(2)?),
+                        row.get(3)?,
+                    ))
+                },
+            )
+            .map_err(StoreError::from),
+    }
+}
+
+fn require_launch_for_run(
+    conn: &Connection,
+    launch_id: &LaunchId,
+    run_id: &RunId,
+) -> StoreResult<()> {
+    conn.query_row(
+        "SELECT 1 FROM agent_launches WHERE id=?1 AND product_run_id=?2",
+        params![launch_id.as_str(), run_id.as_str()],
+        |_| Ok(()),
+    )
+    .map_err(StoreError::from)
+}
+
+fn require_live_launch_for_run(
+    conn: &Connection,
+    launch_id: &LaunchId,
+    run_id: &RunId,
+) -> StoreResult<()> {
+    conn.query_row(
+        "SELECT 1 FROM agent_launches
+         WHERE id=?1 AND product_run_id=?2 AND launch_state='live'",
+        params![launch_id.as_str(), run_id.as_str()],
+        |_| Ok(()),
+    )
+    .map_err(StoreError::from)
+}
+
+fn control_launch_in(conn: &Connection, launch_id: &LaunchId) -> StoreResult<Launch> {
+    let row = conn.query_row(
+        "SELECT product_run_id, home_id, provider, model, account_id, worktree,
+                surface, launch_state, containment_kind, containment_id,
+                opaque_epoch_id, opaque_basis_rev, resume_token, started_at, ended_at
+         FROM agent_launches WHERE id=?1 AND product_run_id IS NOT NULL",
+        [launch_id.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<i64>>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, i64>(13)?,
+                row.get::<_, Option<i64>>(14)?,
+            ))
+        },
+    )?;
+    let opaque_basis = match (row.10, row.11) {
+        (Some(epoch_id), Some(revision)) => Some(Basis {
+            epoch_id: EpochId::parse(&epoch_id).map_err(invalid_durable)?,
+            revision: revision as u64,
+        }),
+        (None, None) => None,
+        _ => {
+            return Err(StoreError::InvalidData(
+                "opaque Launch Basis is incomplete".to_string(),
+            ))
+        }
+    };
+    Ok(Launch {
+        id: launch_id.clone(),
+        run_id: RunId::parse(&row.0).map_err(invalid_durable)?,
+        home_id: HomeId::parse(&row.1).map_err(invalid_durable)?,
+        route: LaunchRoute {
+            provider: row.2,
+            model: row.3,
+            account_id: row.4,
+        },
+        cwd: row.5.into(),
+        surface: row.6,
+        state: LaunchState::parse(&row.7).map_err(invalid_durable)?,
+        containment: Containment::parse(&row.8, row.9).map_err(invalid_durable)?,
+        opaque_basis,
+        resume_token: row.12,
+        started_at: OffsetDateTime::from_unix_timestamp(row.13).map_err(invalid_durable)?,
+        ended_at: row
+            .14
+            .map(OffsetDateTime::from_unix_timestamp)
+            .transpose()
+            .map_err(invalid_durable)?,
+    })
+}
+
+fn require_turn_for_run(
+    conn: &Connection,
+    turn_id: &TurnId,
+    run_id: &RunId,
+) -> StoreResult<()> {
+    conn.query_row(
+        "SELECT 1 FROM agent_turns t
+         JOIN agent_launches l ON l.id=t.launch_id
+         WHERE t.id=?1 AND l.product_run_id=?2",
+        params![turn_id.as_str(), run_id.as_str()],
+        |_| Ok(()),
+    )
+    .map_err(StoreError::from)
+}
+
+fn control_turn_in(conn: &Connection, turn_id: &TurnId) -> StoreResult<Turn> {
+    let row = conn.query_row(
+        "SELECT launch_id, epoch_id, basis_rev, status, provider_turn_id,
+                started_at, ended_at FROM agent_turns WHERE id=?1",
+        [turn_id.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+            ))
+        },
+    )?;
+    Ok(Turn {
+        id: turn_id.clone(),
+        launch_id: LaunchId::parse(&row.0).map_err(invalid_durable)?,
+        basis: Basis {
+            epoch_id: EpochId::parse(&row.1).map_err(invalid_durable)?,
+            revision: row.2 as u64,
+        },
+        state: BoundaryState::parse_turn(&row.3).map_err(invalid_durable)?,
+        provider_turn_id: row.4,
+        started_at: OffsetDateTime::from_unix_timestamp(row.5).map_err(invalid_durable)?,
+        ended_at: row
+            .6
+            .map(OffsetDateTime::from_unix_timestamp)
+            .transpose()
+            .map_err(invalid_durable)?,
+    })
+}
+
+fn handback_state(state: BoundaryState) -> &'static str {
+    match state {
+        BoundaryState::Succeeded => "succeeded",
+        BoundaryState::Failed => "failed",
+        BoundaryState::Interrupted => "interrupted",
+        BoundaryState::Unknown => "unknown",
+        BoundaryState::Starting | BoundaryState::Active => {
+            unreachable!("terminal outcome validated before handback mapping")
+        }
+    }
+}
+
+fn flow_position_in(
+    conn: &Connection,
+    work: &WorkRef,
+    epoch_id: &EpochId,
+) -> StoreResult<FlowPosition> {
+    conn.query_row(
+        "SELECT flow, step, step_index, iteration, interactive, updated_at
+         FROM work_flow_positions WHERE epoch_id=?1",
+        [epoch_id.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, bool>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        },
+    )
+    .map_err(StoreError::from)
+    .and_then(|row| {
+        Ok(FlowPosition {
+            work: work.clone(),
+            epoch_id: epoch_id.clone(),
+            flow: row.0,
+            step: row.1,
+            step_index: row.2 as u32,
+            iteration: row.3 as u32,
+            interactive: row.4,
+            updated_at: OffsetDateTime::from_unix_timestamp(row.5)
+                .map_err(invalid_durable)?,
+        })
+    })
+}
+
+fn validate_attention_route(
+    conn: &Connection,
+    work: &WorkRef,
+    attention: &AttentionRoute,
+) -> StoreResult<()> {
+    match attention {
+        AttentionRoute::User => Ok(()),
+        AttentionRoute::Parent(parent) if parent_work(conn, work)?.as_ref() == Some(parent) => {
+            Ok(())
+        }
+        AttentionRoute::Parent(_) => Err(StoreError::InvalidAuthority(
+            "attention may route only to immediate parent Work".to_string(),
+        )),
+    }
+}
+
+fn parent_work(conn: &Connection, work: &WorkRef) -> StoreResult<Option<WorkRef>> {
+    match work {
+        WorkRef::Wave(_) => Ok(None),
+        WorkRef::Project(id) => {
+            let wave_id: String = conn.query_row(
+                "SELECT wave_id FROM projects WHERE id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )?;
+            Ok(Some(WorkRef::Wave(
+                WaveId::parse(&wave_id).map_err(invalid_durable)?,
+            )))
+        }
+        WorkRef::Task(id) => {
+            let project_id: String = conn.query_row(
+                "SELECT project_id FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )?;
+            Ok(Some(WorkRef::Project(
+                ProjectId::parse(&project_id).map_err(invalid_durable)?,
+            )))
+        }
+    }
+}
+
+fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
+    let Ok(epoch) = current_epoch_in(conn, work) else {
+        return Ok(None);
+    };
+    let row = conn
+        .query_row(
+            "SELECT l.id, l.attention_kind, l.attention_work_kind,
+                    l.attention_work_id, l.attention_at
+             FROM runs r JOIN agent_launches l ON l.product_run_id=r.id
+             WHERE r.epoch_id=?1 AND r.state='active' AND l.launch_state='live'
+               AND l.attention_kind IS NOT NULL
+             ORDER BY l.attention_at LIMIT 1",
+            [epoch.id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((launch_id, kind, parent_kind, parent_id, opened_at)) = row else {
+        return Ok(None);
+    };
+    let position = flow_position_in(conn, work, &epoch.id)?;
+    if !position.interactive {
+        return Ok(None);
+    }
+    let attention = match (kind.as_str(), parent_kind, parent_id) {
+        ("user", None, None) => AttentionRoute::User,
+        ("parent", Some(kind), Some(id)) => {
+            AttentionRoute::Parent(parse_work_ref(&kind, &id)?)
+        }
+        _ => {
+            return Err(StoreError::InvalidData(
+                "stored attention route is inconsistent".to_string(),
+            ))
+        }
+    };
+    Ok(Some(Review {
+        work: work.clone(),
+        launch_id: LaunchId::parse(&launch_id).map_err(invalid_durable)?,
+        basis: epoch.current_basis,
+        position,
+        attention,
+        opened_at: OffsetDateTime::from_unix_timestamp(opened_at)
+            .map_err(invalid_durable)?,
+    }))
+}
+
+fn validate_review_caller(
+    conn: &Connection,
+    caller: Option<&RunLease>,
+    review: &Review,
+) -> StoreResult<()> {
+    match (&review.attention, caller) {
+        (AttentionRoute::User, None) => Ok(()),
+        (AttentionRoute::Parent(parent), Some(lease)) => {
+            let run = validate_run_lease(conn, lease)?;
+            if &run.work == parent {
+                Ok(())
+            } else {
+                Err(StoreError::InvalidAuthority(
+                    "Run does not own this child attention route".to_string(),
+                ))
+            }
+        }
+        _ => Err(StoreError::InvalidAuthority(
+            "caller does not own this attention route".to_string(),
+        )),
+    }
+}
+
+fn validate_control_caller(
+    conn: &Connection,
+    caller: Option<&RunLease>,
+    target: &WorkRef,
+) -> StoreResult<()> {
+    let Some(lease) = caller else {
+        return Ok(());
+    };
+    let run = validate_run_lease(conn, lease)?;
+    if parent_work(conn, target)?.as_ref() == Some(&run.work) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidAuthority(
+            "Run may control only immediate child Work".to_string(),
+        ))
+    }
+}
+
+fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
+    let epoch = latest_epoch_in(conn, work)?;
+    match epoch.state {
+        EpochState::Done => return Ok(WorkStatus::Done),
+        EpochState::Abandoned => return Ok(WorkStatus::Abandoned),
+        EpochState::Open => {}
+    }
+    if let Some(run) = run_for_epoch_in(conn, &epoch.id)? {
+        return Ok(WorkStatus::Running { run_id: run.id });
+    }
+    let wait = conn
+        .query_row(
+            "SELECT id, on_json, created_at, resolved_at FROM waits
+             WHERE epoch_id=?1 AND resolved_at IS NULL",
+            [epoch.id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    if let Some((id, on_json, created_at, resolved_at)) = wait {
+        return Ok(WorkStatus::Waiting {
+            wait: Wait {
+                id: WaitId::parse(&id).map_err(invalid_durable)?,
+                work: work.clone(),
+                epoch_id: epoch.id,
+                on: serde_json::from_str(&on_json)?,
+                created_at: OffsetDateTime::from_unix_timestamp(created_at)
+                    .map_err(invalid_durable)?,
+                resolved_at: resolved_at
+                    .map(OffsetDateTime::from_unix_timestamp)
+                    .transpose()
+                    .map_err(invalid_durable)?,
+            },
+        });
+    }
+    Ok(WorkStatus::Ready)
+}
+
+fn latest_epoch_in(conn: &Connection, work: &WorkRef) -> StoreResult<Epoch> {
+    let (column, id) = match work {
+        WorkRef::Wave(id) => ("wave_id", id.as_str()),
+        WorkRef::Project(id) => ("project_id", id.as_str()),
+        WorkRef::Task(id) => ("task_id", id.as_str()),
+    };
+    let sql = format!(
+        "SELECT id, number, state, current_rev, created_at, terminal_at
+         FROM epochs WHERE {column}=?1 ORDER BY number DESC LIMIT 1"
+    );
+    let row = conn.query_row(&sql, [id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, Option<i64>>(5)?,
+        ))
+    })?;
+    let epoch_id = EpochId::parse(&row.0).map_err(invalid_durable)?;
+    Ok(Epoch {
+        id: epoch_id.clone(),
+        work: work.clone(),
+        number: row.1 as u32,
+        state: EpochState::parse(&row.2).map_err(invalid_durable)?,
+        current_basis: Basis {
+            epoch_id,
+            revision: row.3 as u64,
+        },
+        created_at: OffsetDateTime::from_unix_timestamp(row.4).map_err(invalid_durable)?,
+        terminal_at: row
+            .5
+            .map(OffsetDateTime::from_unix_timestamp)
+            .transpose()
+            .map_err(invalid_durable)?,
+    })
+}
+
+fn parse_work_ref(kind: &str, id: &str) -> StoreResult<WorkRef> {
+    match kind {
+        "wave" => WaveId::parse(id)
+            .map(WorkRef::Wave)
+            .map_err(invalid_durable),
+        "project" => ProjectId::parse(id)
+            .map(WorkRef::Project)
+            .map_err(invalid_durable),
+        "task" => TaskId::parse(id)
+            .map(WorkRef::Task)
+            .map_err(invalid_durable),
+        value => Err(StoreError::InvalidData(format!(
+            "invalid Work kind: {value}"
+        ))),
+    }
+}
+
+fn work_from_parts(
+    parts: (Option<String>, Option<String>, Option<String>),
+) -> StoreResult<WorkRef> {
+    match parts {
+        (Some(id), None, None) => parse_work_ref("wave", &id),
+        (None, Some(id), None) => parse_work_ref("project", &id),
+        (None, None, Some(id)) => parse_work_ref("task", &id),
+        _ => Err(StoreError::InvalidData(
+            "stored Epoch owns an invalid Work reference".to_string(),
+        )),
+    }
+}
+
+fn invalid_durable(error: impl std::fmt::Display) -> StoreError {
+    StoreError::InvalidData(error.to_string())
+}
+
+pub(crate) fn create_wave_spine(
+    tx: &Transaction<'_>,
+    wave_id: &WaveId,
+    name: &str,
+    repo: &str,
+    created_at: i64,
+) -> StoreResult<()> {
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM epochs WHERE wave_id=?1)",
+        [wave_id.as_str()],
+        |row| row.get(0),
+    )?;
+    if exists {
+        return Ok(());
+    }
+    let epoch_id = EpochId::new();
+    tx.execute(
+        "INSERT INTO epochs (
+            id, number, wave_id, project_id, task_id, state, current_rev,
+            created_at, terminal_at
+         ) VALUES (?1, 1, ?2, NULL, NULL, 'open', 0, ?3, NULL)",
+        params![epoch_id.as_str(), wave_id.as_str(), created_at],
+    )?;
+    insert_truth(
+        tx,
+        &epoch_id,
+        serde_json::json!({"name": name, "repo": repo}),
+        OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
+    )
 }
 
 pub(crate) fn create_project_spine(
@@ -915,8 +2319,13 @@ fn current_epoch_in(conn: &Connection, work: &WorkRef) -> StoreResult<Epoch> {
 
 fn applied_basis_in(conn: &Connection, epoch_id: &EpochId) -> StoreResult<Option<Basis>> {
     let revision = conn.query_row(
-        "SELECT MAX(basis_rev) FROM agent_turns
-         WHERE epoch_id=?1 AND status='completed'",
+        "SELECT MAX(revision) FROM (
+            SELECT basis_rev AS revision FROM agent_turns
+            WHERE epoch_id=?1 AND status='completed'
+            UNION ALL
+            SELECT opaque_basis_rev AS revision FROM agent_launches
+            WHERE opaque_epoch_id=?1 AND handback_state='succeeded'
+         )",
         [epoch_id.as_str()],
         |row| row.get::<_, Option<i64>>(0),
     )?;

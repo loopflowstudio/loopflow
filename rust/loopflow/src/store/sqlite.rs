@@ -486,13 +486,14 @@ impl SqliteStore {
     }
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let created_at = wave
             .created_at()
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET
@@ -508,6 +509,14 @@ impl SqliteStore {
                 wave.parent_wave_id(),
             ],
         )?;
+        durable::create_wave_spine(
+            &tx,
+            wave.id(),
+            wave.name(),
+            wave.repo(),
+            created_at,
+        )?;
+        tx.commit()?;
         Ok(())
     }
 }

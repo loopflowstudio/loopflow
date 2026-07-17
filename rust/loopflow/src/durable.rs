@@ -1,5 +1,7 @@
 //! Durable input and execution identity shared by Wave, Project, and Task Work.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -60,6 +62,12 @@ pub enum DurableDataError {
     InvalidEpochState(String),
     #[error("invalid send state: {0}")]
     InvalidSendState(String),
+    #[error("invalid run state: {0}")]
+    InvalidRunState(String),
+    #[error("invalid launch state: {0}")]
+    InvalidLaunchState(String),
+    #[error("invalid boundary state: {0}")]
+    InvalidBoundaryState(String),
 }
 
 durable_id!(ProjectId, "proj_");
@@ -154,6 +162,27 @@ pub enum RunState {
     Ended,
 }
 
+impl RunState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Reserved => "reserved",
+            Self::Active => "active",
+            Self::Stopping => "stopping",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "reserved" => Ok(Self::Reserved),
+            "active" => Ok(Self::Active),
+            "stopping" => Ok(Self::Stopping),
+            "ended" => Ok(Self::Ended),
+            value => Err(DurableDataError::InvalidRunState(value.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunTrigger {
@@ -240,6 +269,32 @@ pub enum Containment {
     Tmux { name: String },
 }
 
+impl Containment {
+    pub(crate) fn parts(&self) -> (&'static str, String) {
+        match self {
+            Self::ProcessGroup { id } => ("process_group", id.to_string()),
+            Self::Tmux { name } => ("tmux", name.clone()),
+        }
+    }
+
+    pub(crate) fn parse(kind: &str, id: String) -> Result<Self, DurableDataError> {
+        match kind {
+            "process_group" => id
+                .parse()
+                .map(|id| Self::ProcessGroup { id })
+                .map_err(|error| {
+                    DurableDataError::InvalidLaunchState(format!(
+                        "invalid process group {id:?}: {error}"
+                    ))
+                }),
+            "tmux" => Ok(Self::Tmux { name: id }),
+            value => Err(DurableDataError::InvalidLaunchState(format!(
+                "invalid containment kind: {value}"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchState {
@@ -249,12 +304,35 @@ pub enum LaunchState {
     Ended,
 }
 
+impl LaunchState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Live => "live",
+            Self::Stopping => "stopping",
+            Self::Ended => "ended",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "starting" => Ok(Self::Starting),
+            "live" => Ok(Self::Live),
+            "stopping" => Ok(Self::Stopping),
+            "ended" => Ok(Self::Ended),
+            value => Err(DurableDataError::InvalidLaunchState(value.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Launch {
     pub id: LaunchId,
     pub run_id: RunId,
     pub home_id: HomeId,
     pub route: LaunchRoute,
+    pub cwd: PathBuf,
+    pub surface: String,
     pub state: LaunchState,
     pub containment: Containment,
     pub opaque_basis: Option<Basis>,
@@ -281,6 +359,37 @@ impl BoundaryState {
             Self::Succeeded | Self::Failed | Self::Interrupted | Self::Unknown
         )
     }
+
+
+    pub(crate) fn as_launch_outcome(self) -> &'static str {
+        match self {
+            Self::Starting | Self::Active => "running",
+            Self::Succeeded => "completed",
+            Self::Failed | Self::Unknown => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+
+    pub(crate) fn as_turn_status(self) -> &'static str {
+        match self {
+            Self::Starting | Self::Active => "running",
+            Self::Succeeded => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+            Self::Unknown => "partial",
+        }
+    }
+
+    pub(crate) fn parse_turn(value: &str) -> Result<Self, DurableDataError> {
+        match value {
+            "running" => Ok(Self::Active),
+            "completed" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
+            "partial" => Ok(Self::Unknown),
+            value => Err(DurableDataError::InvalidBoundaryState(value.to_string())),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,6 +408,8 @@ pub enum RunAdvance {
     LaunchStarting {
         route: LaunchRoute,
         containment: Containment,
+        cwd: PathBuf,
+        surface: String,
         opaque: bool,
         resume_token: Option<String>,
     },
@@ -486,6 +597,11 @@ impl RunLease {
             _token: token,
         }
     }
+
+
+    pub(crate) fn token_hash(&self) -> String {
+        self._token.hash()
+    }
 }
 
 /// Opaque capability for the one active Run. It is never serialized or shown.
@@ -495,6 +611,11 @@ pub(crate) struct RunLeaseToken(String);
 impl RunLeaseToken {
     pub(crate) fn from_child(value: &str) -> Self {
         Self(format!("rl_child_{value}"))
+    }
+
+
+    pub(crate) fn new() -> Self {
+        Self(format!("rl_{}", uuid::Uuid::new_v4().simple()))
     }
 
     pub(crate) fn hash(&self) -> String {
@@ -526,6 +647,71 @@ pub enum WorkStatus {
     Waiting { wait: Wait },
     Done,
     Abandoned,
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowPosition {
+    pub work: WorkRef,
+    pub epoch_id: EpochId,
+    pub flow: String,
+    pub step: String,
+    pub step_index: u32,
+    pub iteration: u32,
+    pub interactive: bool,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "work", rename_all = "snake_case")]
+pub enum AttentionRoute {
+    User,
+    Parent(WorkRef),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Review {
+    pub work: WorkRef,
+    pub launch_id: LaunchId,
+    pub basis: Basis,
+    pub position: FlowPosition,
+    pub attention: AttentionRoute,
+    pub opened_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContainmentObservation {
+    Absent,
+    Present,
+    Unprovable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StopCause {
+    Requested,
+    Interrupted,
+    Failed { reason: String },
+    Recovery,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopReceipt {
+    pub run: Run,
+    pub containment: ContainmentObservation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterruptReceipt {
+    pub run_id: RunId,
+    pub launch_id: LaunchId,
+    pub turn_id: Option<TurnId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpochReceipt {
+    pub epoch: Epoch,
 }
 
 #[derive(Debug)]

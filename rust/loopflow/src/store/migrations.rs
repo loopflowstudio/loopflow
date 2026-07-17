@@ -360,6 +360,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "durable_input_spine",
         sql: include_str!("migrations/0.11.031_durable_input_spine.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 32,
+        },
+        name: "run_launch_attention",
+        sql: include_str!("migrations/0.11.032_run_launch_attention.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

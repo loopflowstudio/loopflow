@@ -9256,7 +9256,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().expect("test runtime");
         let (home, expected_complete_refusal, review_id, session) = runtime.block_on(async {
             let (home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-            let review_id = open_gate_review(&store, &mut session, &pr).await;
+            let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
             let gate = task_completion_gate(&store, &session)
                 .await
                 .expect("completion gate");

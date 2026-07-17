@@ -483,8 +483,13 @@ pub(crate) fn apply_sqlite_with_backup(
         .map_err(|error| StoreError::InvalidData(format!("open migration lock: {error}")))?;
     lock.lock_exclusive()
         .map_err(|error| StoreError::InvalidData(format!("acquire migration lock: {error}")))?;
-    let result =
-        apply_sqlite_transaction(conn, |conn| backup_before_migration(conn, path).map(|_| ()));
+    let result = match requires_migration_sqlite(conn) {
+        Ok(false) => Ok(()),
+        Ok(true) => {
+            apply_sqlite_transaction(conn, |conn| backup_before_migration(conn, path).map(|_| ()))
+        }
+        Err(error) => Err(error),
+    };
     let unlock = lock
         .unlock()
         .map_err(|error| StoreError::InvalidData(format!("release migration lock: {error}")));
@@ -2341,6 +2346,23 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn current_schema_does_not_take_the_database_write_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let current = rusqlite::Connection::open(&path).unwrap();
+        apply_sqlite(&current).unwrap();
+        current.execute_batch("PRAGMA journal_mode = WAL").unwrap();
+
+        let writer = rusqlite::Connection::open(&path).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        current.busy_timeout(Duration::ZERO).unwrap();
+
+        apply_sqlite_with_backup(&current, &path).unwrap();
+
+        writer.execute_batch("ROLLBACK").unwrap();
     }
 
     #[test]

@@ -5,7 +5,6 @@ Website development CLI.
 Usage:
     python dev.py serve                    # Start dev server
     python dev.py serve -k                 # Kill existing and start
-    python dev.py db                       # Open psql against Neon
     python dev.py test                     # Run all tests
     python dev.py test -a                  # Run accessibility tests only
     python dev.py sync-docs                # Sync docs from loopflow repo
@@ -18,7 +17,6 @@ Figma commands require FIGMA_TOKEN env var (Settings > Personal access tokens)
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -58,24 +56,6 @@ def serve(args: argparse.Namespace) -> None:
         kill_port(5001)
     sync_docs(args)
     run(["uv", "run", "python", "main.py"], cwd=ROOT)
-
-
-def db(args: argparse.Namespace) -> None:
-    """Open psql against the Neon website database."""
-    url = args.database_url or os.environ.get("WEBSITE_DB_URL", "").strip()
-    if not url:
-        result = subprocess.run(
-            ["neonctl", "connection-string", "--database-name", "website"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            url = result.stdout.strip()
-        else:
-            print("Set WEBSITE_DB_URL, pass --database-url, or log in with: neonctl auth")
-            sys.exit(1)
-    subprocess.run(["psql", url], check=False)
 
 
 def test(args: argparse.Namespace) -> None:
@@ -195,11 +175,6 @@ def main() -> None:
     test_parser.add_argument("-k", help="Filter tests by keyword")
     test_parser.add_argument("--headed", action="store_true", help="Run in headed mode")
     test_parser.set_defaults(func=test)
-
-    # db
-    db_parser = subparsers.add_parser("db", help="Open psql against Neon website DB")
-    db_parser.add_argument("--database-url", help="Database URL (or set WEBSITE_DB_URL)")
-    db_parser.set_defaults(func=db)
 
     # sync-docs
     sync_parser = subparsers.add_parser("sync-docs", help="Sync docs from loopflow repo")

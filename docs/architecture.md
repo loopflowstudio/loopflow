@@ -1,8 +1,3 @@
----
-layout: default
-title: Architecture
----
-
 # Architecture
 
 ```text
@@ -22,6 +17,31 @@ Wave ─ ─ ─ ─ root inspection and override ─ ─ ─ ─ ─ ┘
 `lf` is the machine-wide command and JSON interface. `lf wave <name>` is the
 resident process for one Wave: it owns that Wave's chat listener, journal,
 cadence, memory, and project selection. There is no global service.
+
+## No server
+
+Loopflow used to be a distributed system — an HTTP daemon, remote-exec routes,
+a queue reconciler. v0.11 deleted all of it. What replaced the server is not a
+protocol; it is a division of labor between substrates that already exist:
+
+| Substrate | Owns |
+|---|---|
+| Local SQLite (`~/.lf/loopflow.db`) | This machine's runtime truth: sessions, ledgers, the agent bus, credentials |
+| Append-only journals (`.lf/journal/`) | Each wave's durable conversation and run record |
+| Linear | The shared plan: Initiatives, Projects, Issues |
+| GitHub | The shared code truth: branches, PRs, merges |
+| SSH | Reach to other machines, carrying leased credentials |
+
+Two machines never talk to each other's loopflow. They both read and write
+Linear and GitHub, and each keeps a local snapshot (`lf pm sync`). The agent
+bus is a table: `lf radio pub` is an INSERT, so agents hear each other with no
+broker and no loopflow process required in the path.
+
+This is what makes the design deployable inside a large company without
+becoming infrastructure: every user and machine is its own trust boundary, and
+shared coordination reuses the Linear workspace, GitHub org, and secret
+manager the company already runs. There is nothing central to stand up,
+secure, or scale.
 
 ## Product model
 
@@ -122,9 +142,11 @@ Important path:
 lf wave infrastructure
 ```
 
-One Wave process serves replay, live turns, and health for that Wave. The Mac
-app connects directly to the selected Wave while reading current registry,
-Project, and Task state through its bundled `lf`.
+One Wave process serves replay, live turns, and health for that Wave: a
+listener that owns the journal and local HTTP endpoint, and a resident body it
+supervises. The Mac app reads registry, Project, and Task state through its
+bundled `lf --json` and subscribes to the selected Wave's local event stream;
+it keeps no state of its own.
 
 Selecting a Task opens its worktree inspector. `lf task changes/diff/file`
 owns Git and path semantics; Swift renders those typed snapshots and keeps
@@ -133,6 +155,37 @@ multiplexer never owns Task lifecycle or worktree identity.
 
 Project and Task Sessions are explicit child processes. They share the local
 store and durable control channel; they do not call a global HTTP API.
+
+## Homes and remote execution
+
+A Wave's **Home** is where its work executes — an owner plus a location,
+authored in `GOAL.md` frontmatter:
+
+```yaml
+home: jack@local              # the default
+home: ssh://jack@mini.local   # a remote machine
+```
+
+Project and Task launches inherit the Home; repo, PR, release, and PM commands
+in a remote-home Wave forward there over `lf ssh`. Reachability is
+operational evidence, not part of the address — `lf home probe <wave>` answers
+whether it responds, `lf home start <wave>` idempotently starts the Wave
+there.
+
+`lf ssh <host> -- <cmd>` resolves credentials **locally** and forwards them
+into the remote process environment for the life of that process: nothing
+lands on the remote disk, and the Doppler master token never leaves the
+originating machine. The remote host stays a stateless compute surface —
+which is the whole trust model for running work on a spare machine, a
+teammate's box, or a datacenter host.
+
+## lfd
+
+`lfd` is the one long-lived machine daemon, and it is deliberately small:
+signed webhook ingress (a durable delivery inbox for Linear events) and
+liveness probes. It hosts no sessions and serves no API. `lfd install` renders
+a launchd/systemd service whose file carries paths only — secrets resolve at
+runtime from the environment or Doppler.
 
 ## PR truth
 

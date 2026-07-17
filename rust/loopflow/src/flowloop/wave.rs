@@ -1312,6 +1312,13 @@ mod tests {
     struct TestLoop {
         runtime: Arc<WaveRuntime>,
         seeds: Arc<Mutex<Vec<String>>>,
+        /// Every pass's seed in spawn order, awaited rather than sampled.
+        /// A pass records its seed only after its `TurnStarted` is journaled,
+        /// so receiving one is a happens-before edge into the pass. Sampling
+        /// `pass_count()` instead races the flow: consecutive steps spawn
+        /// milliseconds apart, so a loaded scheduler steps over the window
+        /// where the count equals any one value and never sees it.
+        passes: mpsc::UnboundedReceiver<String>,
         loop_task: tokio::task::JoinHandle<Result<()>>,
         /// The listener half runs on its OWN tokio runtime so a test can
         /// kill it for real: shutting the runtime down drops the accept loop
@@ -1344,6 +1351,11 @@ mod tests {
 
         fn seed(&self, index: usize) -> String {
             self.seeds.lock().unwrap()[index].clone()
+        }
+
+        /// The seed of the next pass to spawn, waiting for it to start.
+        async fn next_seed(&mut self) -> String {
+            self.passes.recv().await.expect("the loop spawns a pass")
         }
     }
 
@@ -1380,8 +1392,10 @@ mod tests {
     ) -> TestLoop {
         let seeds = Arc::new(Mutex::new(Vec::new()));
         let spawn_seeds = seeds.clone();
+        let (pass_tx, pass_rx) = mpsc::unbounded_channel();
         let spawn_pass: SpawnPass = Box::new(move |cwd, _step, seed, _max_turns| {
             spawn_seeds.lock().unwrap().push(seed.to_string());
+            let _ = pass_tx.send(seed.to_string());
             let mut command = tokio::process::Command::new("sh");
             command
                 .arg("-c")
@@ -1392,7 +1406,14 @@ mod tests {
                 .kill_on_drop(true);
             command.spawn()
         });
-        boot_backend(tmp, config, BodyBackend::Process(spawn_pass), seeds).await
+        boot_backend(
+            tmp,
+            config,
+            BodyBackend::Process(spawn_pass),
+            seeds,
+            pass_rx,
+        )
+        .await
     }
 
     /// Both halves of a live loop over whichever body the test wants: the
@@ -1404,6 +1425,7 @@ mod tests {
         config: LoopConfig,
         backend: BodyBackend,
         seeds: Arc<Mutex<Vec<String>>>,
+        passes: mpsc::UnboundedReceiver<String>,
     ) -> TestLoop {
         let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
@@ -1449,6 +1471,7 @@ mod tests {
         TestLoop {
             runtime,
             seeds,
+            passes,
             loop_task,
             listener: Some(listener),
             _tmp: tmp,
@@ -1597,6 +1620,8 @@ mod tests {
             test_config(Duration::from_secs(600)),
             backend,
             Arc::new(Mutex::new(Vec::new())),
+            // A harness body runs in-process; it spawns no pass to await.
+            mpsc::unbounded_channel().1,
         )
         .await;
         let runtime = loop_.runtime.clone();
@@ -1680,6 +1705,8 @@ mod tests {
             test_config(Duration::from_secs(600)),
             backend,
             Arc::new(Mutex::new(Vec::new())),
+            // A harness body runs in-process; it spawns no pass to await.
+            mpsc::unbounded_channel().1,
         )
         .await;
         let runtime = loop_.runtime.clone();
@@ -1780,22 +1807,26 @@ mod tests {
 
     #[tokio::test]
     async fn message_while_idle_starts_a_pass_answering_it() {
-        let loop_ = boot(Duration::from_secs(600), "echo hi!").await;
+        let mut loop_ = boot(Duration::from_secs(600), "echo hi!").await;
         let user_turn = loop_
             .runtime
             .deliver(MessageOp::Message, "hello wave".into())
             .expect("user turn");
-        wait_for("pass spawned", || loop_.pass_count() == 1).await;
-        assert_eq!(wake_of(&loop_.seed(0)), "hello wave");
+        // The message queued while idle starts the flow's first pass, and the
+        // wake it carries is the message.
+        assert_eq!(wake_of(&loop_.next_seed().await), "hello wave");
+        // The flow's second step spawns only once the first pass's output is
+        // committed, so its start is the edge that publishes the answer.
+        loop_.next_seed().await;
 
-        wait_for("assistant turn", || {
+        assert!(
             loop_.runtime.thread_snapshot().iter().any(|t| {
                 t.role == ChatRole::Assistant
                     && t.status == Lifecycle::Completed
                     && t.text.contains("hi!")
-            })
-        })
-        .await;
+            }),
+            "the pass answers into a completed assistant turn"
+        );
 
         let answers = started_answers(&loop_.journal_events());
         assert_eq!(answers[0], vec![message_id(&user_turn)]);
@@ -1806,22 +1837,18 @@ mod tests {
     /// wake carries the byline and its `TurnStarted.answers` consumes the id.
     #[tokio::test]
     async fn say_wakes_the_loop_and_is_consumed_by_the_next_pass() {
-        let loop_ = boot(Duration::from_secs(600), "echo noted").await;
+        let mut loop_ = boot(Duration::from_secs(600), "echo noted").await;
         let turn = loop_.runtime.deliver_say(
             "implement run-1 finished: PR #7, one surprise".into(),
             "worker".into(),
         );
-        wait_for("pass spawned", || loop_.pass_count() == 1).await;
+        // A pass records its seed only after its `TurnStarted` is journaled,
+        // so the wake and the answers it consumed are both readable here.
         assert_eq!(
-            wake_of(&loop_.seed(0)),
+            wake_of(&loop_.next_seed().await),
             "[worker] implement run-1 finished: PR #7, one surprise",
             "the pass wake carries the byline"
         );
-
-        wait_for("turn journaled", || {
-            !started_answers(&loop_.journal_events()).is_empty()
-        })
-        .await;
         assert_eq!(
             started_answers(&loop_.journal_events())[0],
             vec![message_id(&turn)],

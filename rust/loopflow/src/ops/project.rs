@@ -7,6 +7,7 @@ use crate::child_session::{
     ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective,
     ChildProcessGeneration, ChildRef,
 };
+use crate::durable::Author;
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{
@@ -291,7 +292,7 @@ pub(crate) fn reserve_project_session(
             validate_project_caller_authority(&store, &session, authority).await?,
         );
         if let Err(error) = store
-            .create_project_session_with_directive(&session, &initial)
+            .create_project_session_with_steer(&session, Author::User, &initial.text)
             .await
         {
             if let Some(existing) = store

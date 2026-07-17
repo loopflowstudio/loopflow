@@ -2694,7 +2694,11 @@ mod tests {
             ChildCommandSource::Wave(wave.id().clone()),
         );
         store
-            .create_project_session_with_directive(&project, &project_initial)
+            .create_project_session_with_steer(
+                &project,
+                crate::durable::Author::User,
+                &project_initial.text,
+            )
             .await
             .unwrap();
         let stale_project = project.clone();
@@ -2708,7 +2712,12 @@ mod tests {
             ChildCommandSource::Wave(wave.id().clone()),
         );
         store
-            .reserve_task_session_with_directive(&task, &make_task_pr(&task), &task_initial)
+            .create_task_session_with_steer(
+                &task,
+                &make_task_pr(&task),
+                crate::durable::Author::User,
+                &task_initial.text,
+            )
             .await
             .unwrap();
         assert_eq!(store.child_directives(&task_target).await.unwrap().len(), 1);
@@ -3376,7 +3385,12 @@ mod tests {
             ChildCommandSource::Human,
         );
         store
-            .reserve_task_session_with_directive(&predecessor, &pr, &initial)
+            .create_task_session_with_steer(
+                &predecessor,
+                &pr,
+                crate::durable::Author::User,
+                &initial.text,
+            )
             .await
             .unwrap();
         predecessor.set_status(TaskSessionStatus::Abandoned, "stopped explicitly");
@@ -3398,7 +3412,12 @@ mod tests {
         );
 
         let created = store
-            .recover_task_session_successor(&predecessor, &successor, &carried)
+            .recover_task_session_successor(
+                &predecessor,
+                &successor,
+                crate::durable::Author::User,
+                &carried.text,
+            )
             .await
             .unwrap();
         assert!(created.created);
@@ -3433,7 +3452,12 @@ mod tests {
         );
 
         let repeated = store
-            .recover_task_session_successor(&predecessor, &successor, &carried)
+            .recover_task_session_successor(
+                &predecessor,
+                &successor,
+                crate::durable::Author::User,
+                &carried.text,
+            )
             .await
             .unwrap();
         assert!(!repeated.created);

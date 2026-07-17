@@ -161,7 +161,8 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
             &predecessor,
             &successor,
             &successor_pr,
-            &initial,
+            loopflow::durable::Author::User,
+            &initial.text,
         ))
         .expect("succession");
     assert!(succession.created, "first succession creates the successor");
@@ -292,7 +293,8 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
             &predecessor,
             &successor,
             &successor_pr,
-            &initial,
+            loopflow::durable::Author::User,
+            &initial.text,
         ))
         .expect("retry succession");
     assert!(!retry.created, "second succession is a no-op");
@@ -392,7 +394,8 @@ fn webhooks_resolve_to_the_successor_across_the_boundary() {
             &predecessor,
             &successor,
             &successor_pr,
-            &initial,
+            loopflow::durable::Author::User,
+            &initial.text,
         ))
         .expect("succession");
     assert!(succession.created);

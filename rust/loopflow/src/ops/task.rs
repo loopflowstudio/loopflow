@@ -777,12 +777,23 @@ pub fn task_run(
         );
         let succession = if let Some(predecessor) = &predecessor {
             store
-                .reserve_task_session_successor(predecessor, &session, &pr, &initial)
+                .reserve_task_session_successor(
+                    predecessor,
+                    &session,
+                    &pr,
+                    crate::durable::Author::User,
+                    &initial.text,
+                )
                 .await
                 .map_err(|error| task_error(format!("failed to reserve task successor: {error}")))?
         } else {
             match store
-                .reserve_task_session_with_directive(&session, &pr, &initial)
+                .create_task_session_with_steer(
+                    &session,
+                    &pr,
+                    crate::durable::Author::User,
+                    &initial.text,
+                )
                 .await
             {
                 Ok(()) => TaskSessionSuccession {
@@ -5289,7 +5300,12 @@ async fn _recover_abandoned_task(
         carried.source,
     );
     let succession = store
-        .recover_task_session_successor(&predecessor, &successor, &directive)
+        .recover_task_session_successor(
+            &predecessor,
+            &successor,
+            crate::durable::Author::User,
+            &directive.text,
+        )
         .await
         .map_err(|error| task_error(format!("failed to recover Task: {error}")))?;
     Ok(succession.session)

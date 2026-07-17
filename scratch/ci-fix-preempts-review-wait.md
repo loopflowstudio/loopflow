@@ -1,10 +1,16 @@
 # A claimed CI wake preempts an interactive review wait
 
-> **Revision 2**, after Project review `ir_15802c67` requested changes. The
-> finding was correct and is incorporated: v1 would have fired exclusively on
-> `scratch-clear` and repaired it by deleting the design doc under review. The
-> mechanism diagnosis survives unchanged; the trigger is now sequenced behind
-> `232b91b5`. See "Review log" at the bottom for what moved.
+> **Revision 3**. R2 answered Project review `ir_15802c67` by sequencing behind
+> `232b91b5` (= **W2-309**) and enforcing the order with a test that fails until
+> it lands. Clarify found that gate is *itself* the harm it guards against — a
+> deliberately-red `rust-test` is an actionable failure, so it mints exactly the
+> wake it forbids and a ci-fix body would "repair" it by deleting my test. The
+> gate is removed; the ordering is the Project's to sequence. R3 also maps the
+> defect's real reachable surface, which `review_ready()` narrows and W2-310
+> widens. See "Review log" for what moved.
+>
+> **R2 kept:** the mechanism diagnosis, the census, option (a), and the
+> inheritance argument. All unchanged.
 
 ## Problem
 
@@ -159,13 +165,85 @@ in a new place. The residue (c) genuinely targets — the already-stranded
 is real, but it is `232b91b5`'s to settle: they exist because they were minted, and
 that is the defect being fixed. I am not widening to take them.
 
-### The dependency is hard
+### The dependency is real, filed, and unstarted
 
-**This PR must not merge before `232b91b5`.** Landing first makes every preemption
-a `scratch-clear` preemption — the exact harm above. Stated as a merge-order
-constraint, not a hope: the negative regression below *fails* until `232b91b5`
-lands, so the suite enforces the ordering rather than trusting me to remember it.
-That is deliberate — a red test is a better gate than a note.
+`232b91b5` is **W2-309**, "A ci-fix wake arms on scratch-clear, a check no Task
+action can ever green". Verified in Linear: open, unassigned, no branch, no PR.
+Its Done-When already owns the regression I proposed to write —
+"a head whose ONLY failing check is scratch-clear arms NO ci-fix wake, and a head
+where a real leaf (e.g. rust-test) fails still arms one" — and its candidate fix
+is the `ops/pr.rs` `failing_leaves` category, i.e. inside the
+`current_ci_incident` chain. That confirms R2's inheritance argument against the
+real task rather than against my reading of a hash.
+
+**This PR must not merge before W2-309.** Landing first makes every preemption a
+`scratch-clear` preemption — the exact harm the review found.
+
+### Why the merge-order gate is not a test (R2's error)
+
+R2 proposed enforcing that order with a regression that *fails until W2-309
+lands*, on the reasoning that "a red test is a better gate than a note." That is
+wrong, and wrong in this Task's own subject matter.
+
+A deliberately-failing `rust-test` **is an actionable failure**. W2-309 does not
+suppress it — it is precisely the kind W2-309 keeps arming. So the red test would
+mint a `["rust-test"]` incident, arm a real ci-fix wake, and burn a body on a
+"repair" whose only route to green is deleting the test or implementing W2-309
+inside my PR. I would have shipped a wake that asks a body to destroy the artifact
+that encodes the constraint — the same shape as v1 deleting the design doc under
+review, one level up.
+
+This is the third time this class has bitten across the wave (ENG-4's probe,
+W2-304's pre-gate discard, now this), and it bit *while I was writing the section
+explaining it*. The tell is identical: every sentence true in isolation, the harm
+only visible when two are composed. Knowing the rule did not apply it.
+
+So: no red test. The negative direction I own and can prove today is *staleness*;
+the `scratch-clear` direction is W2-309's regression, in W2-309's PR, where it
+passes on the code that makes it pass. Merge order is a Project sequencing
+decision, stated here and in the PR body — which is what the review asked for
+("state the dependency and keep your scope"), and I over-engineered past it.
+
+### Where the defect is actually reachable
+
+R2 said the fix is prophylactic and left it there. The reachable surface is
+narrower than the directive implies, and worth stating because it decides whether
+this Task is worth landing at all.
+
+`review_ready()` (`task/mod.rs:538`) demands `fresh_ci() == Passing`, and
+`runner.rs:992-1031` **parks** an Iterate Task (`finish_parked`) whenever its PR
+is Open and not review-ready — *before* `start_resumed_task_phase` at 1041, the
+call that opens the Gate review. The guard is `lifecycle_phase == Iterate`, so:
+
+| Phase | Red head | Review opens? | My preempt |
+|---|---|---|---|
+| Iterate | any failure | **No — body parks** | unreachable |
+| Kickoff | any failure | Yes (ungated) | reachable |
+
+That explains the census with no appeal to the mechanism's age: the two measured
+incidents (W2-290/#1041, W2-306/#1059) are both **kickoff** PRs, and a kickoff PR
+is scratch-only, so its failure is `scratch-clear` essentially by construction. An
+actionable failure on a scratch-only design commit needs main to be broken
+already. That is why zero actionable-during-review instances exist — not merely
+because minting is young.
+
+So after W2-309, the reachable shape is exactly one: **a review is open, and the
+head goes red with an actionable failure afterward.** Concretely — a Gate review
+opens, the agent pushes a fix answering the reviewer, `rust-test` breaks. The wake
+mints, the review turn is parked on the reviewer's next message, and nothing
+services it.
+
+**W2-310 widens this rather than closing it.** W2-310 makes `review_ready()` judge
+on actionable leaves, so reviews will open routinely on design-carrying PRs
+instead of parking. Reviews-with-live-CI become the norm, and an agent iterating
+under review is exactly how a real leaf breaks mid-review. My defect gets *more*
+reachable the moment W2-310 lands, not less.
+
+One honest bound: for a **Project** review the wake is delayed, not stranded — the
+reviewer answers, the turn ends, and the existing arm at `runner.rs:487` services
+it. The unbounded case is a **human** review in a headless fleet, where nobody
+answers and `Claimed` means forever. That is a narrower claim than the directive's
+"repair never begins", and it is the true one.
 
 ### The change
 
@@ -319,14 +397,19 @@ New in `task/runner/ci_fix_lifecycle_tests.rs`, pinning **both** directions:
   `interrupts == 1` (once, across ticks), `sends == 2` (the ci-fix seed follows),
   the settled command is the same id claimed by the same generation,
   `responded_at` is stamped, and the durable review row is still `Active`.
-- **`a_scratch_clear_only_wake_never_preempts_a_review_wait`** — the same parked
-  review, with the head failing `scratch-clear` only. Asserts `interrupts == 0`,
-  `sends == 1` (no repair turn), and `scratch/` is untouched. **This test fails
-  until `232b91b5` lands** — that is the merge-order gate, enforced by the suite.
 - **`a_stale_wake_never_preempts_a_review_wait`** — parked review, PR moved to a
   head whose current identity differs from the claimed wake. Asserts
-  `interrupts == 0`. Passes today; guards the currency check independently of the
-  classification.
+  `interrupts == 0` and `sends == 1` (no repair turn). This is the negative
+  direction this Task owns, and it is the sabotage guard on
+  `holds_current_ci_fix_wake`.
+
+The `scratch-clear` negative belongs to **W2-309**, whose Done-When already
+specifies it ("a head whose ONLY failing check is scratch-clear arms NO ci-fix
+wake"). It is tested there, at the classifier, where it passes on the code that
+makes it pass — rather than here, red, minting the actionable wake it forbids.
+Once W2-309 lands, a `scratch-clear`-only head yields no current incident and my
+currency check returns false with no change to this PR; that inheritance is the
+design's central claim and W2-309's regression is its proof.
 
 Existing, must stay green:
 
@@ -344,12 +427,12 @@ pins the fixture, per MEMORY's "sabotage the code the test names"):
 | the whole preempt block | `a_parked_review_wait_is_preempted_once_by_an_actionable_wake` (hangs to timeout) |
 | `interaction_review.is_some()` | `a_live_generation_holds_ci_fix_until_its_provider_turn_is_idle` |
 | `!review_preempted` | `a_parked_review_wait_...` on `interrupts == 1` |
-| `holds_current_ci_fix_wake(..)` | `a_scratch_clear_only_wake_never_preempts_a_review_wait` **and** `a_stale_wake_never_preempts_a_review_wait` |
+| `holds_current_ci_fix_wake(..)` | `a_stale_wake_never_preempts_a_review_wait` |
 
-The last row is the point the review made: with only an actionable-wake test, the
-destructive interaction is fully present and nothing turns red. Both negative
-tests exist so the currency check cannot be deleted quietly — one guards it
-against the classification, the other against staleness.
+The last row is the point the review made, kept: with only an actionable-wake
+test, deleting the currency check turns nothing red and the destructive
+interaction is fully present. The stale test is what makes that check
+undeletable here; W2-309's own regression covers the classification half.
 
 ## Measure
 
@@ -376,6 +459,7 @@ Companion signal owned by `232b91b5`, worth watching together: wakes minted for
 | Every cited incident is `scratch-clear`-only; servicing it sooner is the wrong direction | Confirmed and widened: censused all 34 incidents — 9 of 10 wakes ever minted are `scratch-clear`-only. v1's composition failure named explicitly in "The composition failure in v1". |
 | Choose a shape: (a) sequence, (b) carry the exclusion, (c) settle | **(a)**, for a routing reason: mint and preempt share `current_ci_incident`, so the classification is inherited. (b) declined — second classifier, drift hazard. (c) declined with the paragraph asked for — fail-open for actionable wakes, redundant for the rest. |
 | Do not name `scratch-clear` as a literal | No name list anywhere. The only mention is in a comment explaining *why* the currency check carries the weight. |
-| Regression must pin both directions and fail on today's code | Three tests; `a_scratch_clear_only_wake_never_preempts_a_review_wait` fails until `232b91b5` lands, which makes the suite the merge-order gate. Sabotage table's last row is the trap the review identified. |
+| Regression must pin both directions and fail on today's code | **R3 correction.** R2's "fails until W2-309 lands" gate is itself harmful: a red `rust-test` is an actionable failure, so it mints the wake it forbids and a ci-fix body would repair it by deleting the test. Dropped. This PR proves the actionable-preempt and stale-no-preempt directions (both fail on today's code, both pass after); W2-309's own Done-When already owns the scratch-clear direction. |
+| — (R3, self-found) | The defect's reachable surface: `review_ready()` parks Iterate on any red head, so only **Kickoff** reviews open red — which is why both measured incidents are kickoff PRs failing `scratch-clear` by construction. After W2-309 the live shape is "head goes red *during* an open review", and **W2-310 widens it** by letting reviews open on design-carrying PRs. Also bounded honestly: a Project review delays the wake; only a **human** review strands it. |
 | Find one real actionable-during-review instance, or say plainly there is none | **There is none.** Stated in "What the evidence actually says", with the ~07:04Z cutover that explains why, and both honest readings of what "zero" means. |
 | Do not widen scope to `scratch-clear` or `scratch/` handling | Both listed under out-of-scope, including the two already-stranded commands. |

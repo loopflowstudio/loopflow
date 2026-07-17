@@ -1,14 +1,34 @@
 # Open questions — W2-308
 
-## Blocking
+## Blocking — needs a Project sequencing decision
 
-**`232b91b5` must merge before this PR.** Not a preference — landing first makes
-every preemption a `scratch-clear` preemption, and 9 of 10 wakes ever minted are
-`scratch-clear`-only. The negative regression
-(`a_scratch_clear_only_wake_never_preempts_a_review_wait`) fails until it lands,
-so the suite enforces the order rather than trusting a note. If `232b91b5` is
-rejected or lands somewhere other than the `current_ci_incident` chain, this
-design needs revisiting: the inheritance argument is the whole defense.
+**This PR must not merge before W2-309** (`232b91b5`, "A ci-fix wake arms on
+scratch-clear"). Landing first makes every preemption a `scratch-clear`
+preemption: 9 of 10 wakes ever minted are `scratch-clear`-only.
+
+**W2-309 is open, unassigned, with no branch and no PR.** So this Task can build
+and publish but cannot land, and nothing inside my PR can enforce that — see
+below. This is the one decision I cannot take myself:
+
+- I cannot implement W2-309 here. It is a separate Linear Task, and `task_clarify`
+  forbids selecting backlog work or starting another Session. Its Done-When names
+  a classifier change in `ops/pr.rs` plus its own regression — a real slice, not a
+  line I can borrow.
+- So the merge order is the Project's to sequence. My PR states the dependency and
+  I will not land it. If W2-309 is dispatched and lands, this needs no change: the
+  currency check inherits its classification through `current_ci_incident`.
+
+**R2's enforcement idea was removed because it was harmful, not merely clumsy.** A
+regression that "fails until W2-309 lands" fails via `rust-test` — an *actionable*
+failure, which W2-309 deliberately keeps arming. It would mint a real wake and
+burn a body whose only route to green is deleting my test. I would have shipped
+the exact defect class this Task exists to prevent, inside the section arguing
+against it. No red test.
+
+**If W2-309 is rejected**, or lands at the enqueue site (`ci_fix_wake_kind`) rather
+than in the `current_ci_incident` chain, the inheritance argument fails and this
+design needs revisiting — most likely by adopting the review's option (b) and
+reusing W2-309's predicate at the preempt.
 
 ## Assumptions, proceeding
 

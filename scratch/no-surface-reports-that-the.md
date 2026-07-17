@@ -294,6 +294,41 @@ The pairing that matters is rows 1+2: a classifier hardcoded to either verdict
 kills exactly one of them. A fixture asserting only "some verdict was returned"
 would pass both, which is pinning the fixture.
 
+## Verification status
+
+**Local proof is unavailable on this host, and hosted CI is the verifier.** Said
+plainly rather than narrated as an expected result.
+
+Measured, not assumed: `cargo check -p loopflow --all-targets` progressed through
+~40 dependencies and then wedged, with three build-script executables
+(`quote`, `proc-macro2`, `libc`) sitting in state `S` for 12 minutes with no
+target-directory growth. Running one directly confirms the cause:
+
+```
+$ target/debug/build/libc-*/build-script-build
+STILL RUNNING after 10s -> stalled before main
+```
+
+That is filed issue 47880291 — `syspolicyd` stalls newly linked binaries before
+`main`; it is pegged at 100% CPU with 488 minutes accumulated. `cargo check`
+cannot proceed because it must *execute* build scripts, so this blocks type
+checking, not merely test execution.
+
+Two corroborations from the same measurement, both worth acting on separately:
+
+- **The fleet rebuild is wedged by the same defect.** `scripts/install.py refresh`
+  (pid 75307) has been running 48 minutes holding a cargo that cannot finish. So
+  the operator action this Task's signal points to is *currently impossible on
+  this host*, which raises 47880291's priority: the staleness cannot be closed
+  until it is fixed. This check would at least make the resulting gap legible.
+- **A killed producer's exit code is not evidence.** The backgrounded
+  `cargo check ... | tail -40` reported exit 0 after I killed cargo — that is
+  `tail`'s status. Same family as the `grep -c` traps already in MEMORY: the
+  consumer succeeded, the producer never did.
+
+Neither sibling cargo was touched (pids 42954 and 76155 both had live parents in
+other worktrees); only this worktree's own process tree was killed.
+
 ## Measure
 
 Baseline, measured today and reproducible from the seed's query:

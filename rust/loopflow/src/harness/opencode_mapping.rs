@@ -70,16 +70,12 @@ impl ReaderState {
             .unwrap_or_else(|| "unknown".to_string());
         self.tools.clear();
         self.turn_substantive = false;
-        vec![
-            ConversationEvent::TurnCompleted {
-                turn_id: turn_id.clone(),
-                status: Lifecycle::Failed,
-            },
-            ConversationEvent::TurnUsage {
-                turn_id,
-                usage: TurnUsage::default(),
-            },
-        ]
+        // A disconnect reports no usage. Closing the turn must not invent a
+        // zeroed reading; the stream's accumulated totals are what stand.
+        vec![ConversationEvent::TurnCompleted {
+            turn_id,
+            status: Lifecycle::Failed,
+        }]
     }
 
     fn accepts(&self, properties: &Value) -> bool {
@@ -197,10 +193,16 @@ fn complete_turn(
         turn_id: turn_id.clone(),
         status,
     });
-    mapped.events.push(ConversationEvent::TurnUsage {
-        turn_id,
-        usage: usage.unwrap_or_default(),
-    });
+    // Only report usage the provider actually reported. A defaulted TurnUsage
+    // claims "the provider measured zero", and the trace capture takes a
+    // reported usage as authoritative — it replaces the totals accumulated from
+    // the stream rather than merging them. Emitting one here on every turn
+    // therefore erased real token counts.
+    if let Some(usage) = usage {
+        mapped
+            .events
+            .push(ConversationEvent::TurnUsage { turn_id, usage });
+    }
 }
 
 /// Close a turn that opencode reported `idle` but that produced no usable work.
@@ -607,7 +609,8 @@ mod tests {
             }),
             &mut state,
         );
-        assert_eq!(completed.events.len(), 2);
+        // This idle carries no usage, so the turn closes without a usage report.
+        assert_eq!(completed.events.len(), 1);
         match &completed.events[0] {
             ConversationEvent::TurnCompleted { turn_id, status } => {
                 assert_eq!(turn_id, &started_turn_id);
@@ -615,10 +618,6 @@ mod tests {
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
         }
-        assert!(matches!(
-            completed.events[1],
-            ConversationEvent::TurnUsage { .. }
-        ));
     }
 
     #[test]
@@ -857,7 +856,8 @@ mod tests {
             &mut state,
         );
 
-        assert_eq!(mapped.events.len(), 3);
+        // A session error reports no usage, so no usage event is invented.
+        assert_eq!(mapped.events.len(), 2);
         assert!(matches!(
             mapped.events[0],
             ConversationEvent::TurnCompleted {
@@ -865,11 +865,7 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(
-            mapped.events[1],
-            ConversationEvent::TurnUsage { .. }
-        ));
-        assert!(matches!(mapped.events[2], ConversationEvent::Error { .. }));
+        assert!(matches!(mapped.events[1], ConversationEvent::Error { .. }));
     }
 
     fn activate(state: &mut ReaderState) {
@@ -902,7 +898,7 @@ mod tests {
 
         let closed = go_idle(&mut state, None);
 
-        assert_eq!(closed.events.len(), 3, "TurnCompleted + TurnUsage + Error");
+        assert_eq!(closed.events.len(), 2, "TurnCompleted + Error");
         assert!(matches!(
             closed.events[0],
             ConversationEvent::TurnCompleted {
@@ -910,11 +906,7 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(
-            closed.events[1],
-            ConversationEvent::TurnUsage { .. }
-        ));
-        match &closed.events[2] {
+        match &closed.events[1] {
             ConversationEvent::Error { code, .. } => assert_eq!(code, HOLLOW_BODY_CODE),
             other => panic!("expected hollow-body Error, got {other:?}"),
         }
@@ -1027,7 +1019,7 @@ mod tests {
 
         let events = state.close_orphaned_turn();
 
-        assert_eq!(events.len(), 2, "TurnCompleted + TurnUsage");
+        assert_eq!(events.len(), 1, "TurnCompleted");
         assert!(matches!(
             events[0],
             ConversationEvent::TurnCompleted {
@@ -1035,7 +1027,6 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(events[1], ConversationEvent::TurnUsage { .. }));
         // The turn is no longer open after closing.
         assert!(!state.turn_is_open());
     }

@@ -24,9 +24,7 @@ def test_docs_page_loads(page: Page, base_url: str):
 def test_docs_sidebar_links_resolve(page: Page, base_url: str):
     page.goto(f"{base_url}/docs")
     nav = page.locator(".docs-nav")
-    hrefs = [
-        nav.locator("a").nth(i).get_attribute("href") for i in range(nav.locator("a").count())
-    ]
+    hrefs = [nav.locator("a").nth(i).get_attribute("href") for i in range(nav.locator("a").count())]
     for slug in NAV_SLUGS:
         assert f"/docs/{slug}" in hrefs, f"sidebar missing /docs/{slug}"
 

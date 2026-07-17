@@ -19,9 +19,7 @@ def test_doc_md_endpoint(page: Page, base_url: str):
 
 
 def test_content_negotiation(page: Page, base_url: str):
-    response = page.request.get(
-        f"{base_url}/docs/waves", headers={"Accept": "text/markdown"}
-    )
+    response = page.request.get(f"{base_url}/docs/waves", headers={"Accept": "text/markdown"})
     assert response.status == 200
     assert "text/markdown" in response.headers["content-type"]
     assert response.headers.get("vary") == "Accept"

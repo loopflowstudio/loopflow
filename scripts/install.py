@@ -3,6 +3,7 @@
 
     install.py local            # build this worktree into local-bin/
     install.py local --use      # promote this worktree onto PATH and /Applications
+    install.py local --use --no-screens  # promote without refreshing website captures
     install.py local --skip swift
     install.py local -n         # dry run
     install.py refresh          # pull default branch, rebuild lf, install to PATH
@@ -14,8 +15,10 @@ from __future__ import annotations
 
 import os
 import platform
+import plistlib
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -45,6 +48,7 @@ BUILD_STAGES = ("cargo", "swift")
 class BundleSpec:
     """Paths that define the Loopflow.app bundle."""
 
+    repo_root: Path
     app_path: Path
     executables: tuple[Path, ...]
     info_plist: Path
@@ -80,6 +84,7 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
     swift = root / "swift"
     cargo_release = root / "target" / "release"
     return BundleSpec(
+        repo_root=root,
         app_path=root / "local-bin" / f"{APP_NAME}.app",
         executables=(
             swift / ".build" / "release" / "LoopflowMac",
@@ -380,10 +385,46 @@ def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLIC
     shutil.copytree(local_bin / f"{APP_NAME}.app", app_dst, symlinks=True)
 
 
+def _refresh_website_screens(lf_binary: Path) -> None:
+    """Run the post-promote capture hook without making install depend on it."""
+    command = [
+        sys.executable,
+        str(ROOT / "scripts/refresh_website_screens.py"),
+        "--executable",
+        str(APPLICATIONS_DIR / f"{APP_NAME}.app/Contents/MacOS/{APP_NAME}"),
+        "--lf-binary",
+        str(lf_binary),
+        "--publish",
+        "--skip-unavailable",
+    ]
+    result = subprocess.run(command, cwd=ROOT)
+    if result.returncode != 0:
+        typer.echo(
+            "website-screens: refresh failed; the promoted build is still installed",
+            err=True,
+        )
+
+
 # --- Loopflow bundle ---
 
 
+def _source_provenance(repo_root: Path) -> tuple[str, bool]:
+    commit = _git_stdout(["rev-parse", "HEAD"], repo=repo_root, check=False)
+    if not commit:
+        raise StageError(f"cannot identify source commit in {repo_root}")
+    dirty = bool(_git_stdout(["status", "--porcelain"], repo=repo_root, check=False))
+    return commit, dirty
+
+
+def _stamp_source_provenance(info_plist: Path, commit: str, dirty: bool) -> None:
+    data = plistlib.loads(info_plist.read_bytes())
+    data["LoopflowSourceCommit"] = commit
+    data["LoopflowSourceDirty"] = dirty
+    info_plist.write_bytes(plistlib.dumps(data))
+
+
 def _install_loopflow(spec: BundleSpec, version: str) -> None:
+    source_commit, source_dirty = _source_provenance(spec.repo_root)
     if spec.app_path.exists():
         shutil.rmtree(spec.app_path)
 
@@ -396,6 +437,7 @@ def _install_loopflow(spec: BundleSpec, version: str) -> None:
     installed_plist = spec.contents_dir / spec.info_plist.name
     shutil.copy(spec.info_plist, installed_plist)
     stamp_bundle_version(installed_plist, version)
+    _stamp_source_provenance(installed_plist, source_commit, source_dirty)
     for resource in spec.resources:
         shutil.copy(resource, spec.resources_dir / resource.name)
     (spec.contents_dir / "PkgInfo").write_text("APPL????")
@@ -576,6 +618,9 @@ def local(
     skip: list[str] = typer.Option(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
+    no_screens: bool = typer.Option(
+        False, "--no-screens", help="Do not refresh live website captures after promotion"
+    ),
 ) -> None:
     """Build this worktree into local-bin/; --use makes it the active build."""
     skip_set = set(skip)
@@ -597,6 +642,8 @@ def local(
             typer.echo(f"Would promote: symlink lf into {install_dir}")
             typer.echo(f"Would install {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
             typer.echo("Would sync skills into ~/.claude/skills and ~/.agents/skills")
+            if not no_screens:
+                typer.echo("Would refresh live website captures (skips if live state is absent)")
         else:
             typer.echo("Would not promote (pass --use to symlink onto PATH and install the app)")
         return
@@ -616,6 +663,8 @@ def local(
             typer.echo(f"Installed {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
             _report_path_collisions(install_dir)
             _sync_skills(install_dir / "lf")
+            if not no_screens:
+                _refresh_website_screens(install_dir / "lf")
 
         else:
             typer.echo(f"\nBuilt into {LOCAL_BIN}. Run with --use to make it the active build.")

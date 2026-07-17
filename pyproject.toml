@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Software Development",
 ]
-dependencies = ["typer>=0.9", "pyyaml>=6.0"]
+dependencies = ["pillow>=10.4", "typer>=0.9", "pyyaml>=6.0"]
 
 [dependency-groups]
 dev = ["boto3", "pytest>=8.0", "ruff>=0.8"]

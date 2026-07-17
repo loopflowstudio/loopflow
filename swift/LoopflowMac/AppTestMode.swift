@@ -42,6 +42,15 @@ enum AppTestMode: String {
         return CGFloat(value)
     }
 
+    /// A fixed window height for a screenshot run. Website captures set both
+    /// dimensions so every image has the same frame regardless of the host's
+    /// saved window state.
+    static var windowHeight: CGFloat? {
+        guard let raw = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_HEIGHT"],
+              let value = Double(raw), value > 0 else { return nil }
+        return CGFloat(value)
+    }
+
     /// Seconds the surface settles before the snapshot fires, from
     /// `LOOPFLOW_UI_TEST_DELAY`. The fixture legs render fast; the `live` leg
     /// shells out to `lf ls`/`lf status`, so a real-data capture gives it more
@@ -60,5 +69,22 @@ enum AppTestMode: String {
     static var selectBranch: String? {
         let env = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SELECT_BRANCH"]
         return (env?.isEmpty == false ? env : nil)
+    }
+
+    /// The product surface a live capture opens. Older Wave-surface proofs do
+    /// not set the knob, so a run with only a snapshot path still targets the
+    /// Wave window.
+    static var captureView: String? {
+        let env = ProcessInfo.processInfo.environment
+        if let raw = env["LOOPFLOW_UI_TEST_VIEW"], !raw.isEmpty {
+            return raw
+        }
+        return env["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] == nil ? nil : "wave"
+    }
+
+    /// Website captures are deliberately light even when the laptop is dark.
+    /// Ordinary UI tests and production keep the user's appearance setting.
+    static var forcesLightAppearance: Bool {
+        ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_APPEARANCE"] == "light"
     }
 }

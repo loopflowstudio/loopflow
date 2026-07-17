@@ -1,4 +1,5 @@
 import difflib
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -9,9 +10,10 @@ from fasthtml.common import *
 from starlette.responses import PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
-BASE_URL = "https://loopflow.studio"
-
 from internal_pages import colors_page, design_page, fonts_page
+
+BASE_URL = "https://loopflow.studio"
+REPO_URL = "https://github.com/loopflowstudio/loopflow"
 
 app, rt = fast_app(
     htmlkw={"lang": "en"},
@@ -138,7 +140,7 @@ def _require_content_path(path: str) -> object:
 
 # Homepage
 HERO_CONTENT = _require_content_path("homepage.hero")
-SCREENSHOT_CONTENT = _require_content_path("homepage.screenshot")
+SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
 PILLARS_CONTENT = _require_content_path("homepage.pillars")
 BUILDING_BLOCKS_CONTENT = _require_content_path("homepage.building_blocks")
 INSTALL_CONTENT = _require_content_path("homepage.install")
@@ -147,7 +149,8 @@ for required_key in (
     "homepage.hero.tagline",
     "homepage.hero.subline",
     "homepage.hero.loopflow_download_url",
-    "homepage.screenshot.image",
+    "homepage.showcase.heading",
+    "homepage.showcase.items",
     "homepage.pillars.items",
     "homepage.building_blocks.items",
     "homepage.install.command_display",
@@ -527,20 +530,61 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
+def _capture_figure(item):
+    """Render only complete image + provenance pairs."""
+    image = item["image"]
+    image_path = STATIC_DIR / image.removeprefix("/static/")
+    sidecar_path = image_path.with_suffix(".json")
+    if not image_path.is_file() or not sidecar_path.is_file():
+        return None
+    try:
+        provenance = json.loads(sidecar_path.read_text())
+        captured_at = provenance["captured_at"][:10]
+        wave = provenance["wave"]
+        app_version = provenance["app_version"]
+        app_commit = provenance["app_commit"]
+        status_snapshot = provenance["status_snapshot"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return None
+    capture_label = f"Captured {captured_at} from the {wave} wave"
+    build_label = f"Loopflow {app_version} @ {app_commit[:7]}"
+    return Figure(
+        Img(
+            src=image,
+            alt=item["image_alt"],
+            cls="loopflow-showcase-img",
+        ),
+        Figcaption(
+            P(item["caption"]),
+            P(
+                A(
+                    capture_label,
+                    href=status_snapshot,
+                    **{"aria-label": f"{capture_label}; inspect the live status snapshot"},
+                ),
+                " · ",
+                A(
+                    build_label,
+                    href=f"{REPO_URL}/commit/{app_commit}",
+                    **{"aria-label": f"{build_label}; inspect the source commit"},
+                ),
+                cls="loopflow-showcase-provenance",
+            ),
+            cls="loopflow-showcase-caption",
+        ),
+        cls="loopflow-showcase-figure",
+    )
+
+
 def _screenshot_section():
-    """Rendered only when the capture exists — a missing image never ships."""
-    image = SCREENSHOT_CONTENT["image"]
-    if not (STATIC_DIR / image.removeprefix("/static/")).exists():
+    """A missing or unproven capture never renders."""
+    figures = [figure for item in SHOWCASE_CONTENT["items"] if (figure := _capture_figure(item))]
+    if not figures:
         return None
     return Section(
         Div(
-            H2(SCREENSHOT_CONTENT["heading"]),
-            Img(
-                src=image,
-                alt=SCREENSHOT_CONTENT["image_alt"],
-                cls="loopflow-showcase-img",
-            ),
-            P(SCREENSHOT_CONTENT["caption"], cls="loopflow-showcase-caption"),
+            H2(SHOWCASE_CONTENT["heading"]),
+            Div(*figures, cls="loopflow-showcase-grid"),
             cls="container",
         ),
         cls="loopflow-showcase-section",

@@ -56,6 +56,24 @@ def _stage_build_artifacts(root: Path) -> None:
     cargo_rel.mkdir(parents=True)
     _write_fake_macho(cargo_rel / "lf")
 
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Loopflow Tests",
+            "-c",
+            "user.email=tests@loopflow.local",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        check=True,
+    )
+
 
 def _make_spec(root: Path) -> install.BundleSpec:
     return install.default_bundle_spec(root=root)
@@ -117,6 +135,8 @@ def test_install_loopflow_bundles_only_the_lf_helper(
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"
     assert stamped["CFBundleVersion"] == "9.9.9"
+    assert len(stamped["LoopflowSourceCommit"]) == 40
+    assert stamped["LoopflowSourceDirty"] is False
 
 
 def test_verify_bundle_rejects_missing_aux_executable(
@@ -247,3 +267,18 @@ def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) 
     assert (applications / "Loopflow.app" / "Contents" / "marker").read_text() == "new app"
     assert not (applications / "Loopflow.app" / "old").exists()
     assert not (applications / "Concerto.app").exists()
+
+
+def test_website_capture_failure_does_not_fail_a_promoted_install(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        install.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1),
+    )
+
+    install._refresh_website_screens(Path("/tmp/lf"))
+
+    assert "promoted build is still installed" in capsys.readouterr().err

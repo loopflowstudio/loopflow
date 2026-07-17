@@ -40,13 +40,20 @@ def test_building_blocks(homepage: Page):
 
 
 def test_screenshot_section_only_when_capture_exists(homepage: Page, base_url: str):
-    """The demo section renders only when the capture file is present —
-    a missing image never ships as a 404."""
+    """Only image + provenance pairs render; every caption drills to evidence."""
     section = homepage.locator(".loopflow-showcase-section")
     if section.count():
-        src = section.locator("img").get_attribute("src")
-        response = homepage.request.get(f"{base_url}{src}")
-        assert response.ok, f"screenshot {src} rendered but does not resolve"
+        figures = section.locator("figure")
+        assert figures.count() >= 1
+        for i in range(figures.count()):
+            figure = figures.nth(i)
+            src = figure.locator("img").get_attribute("src")
+            response = homepage.request.get(f"{base_url}{src}")
+            assert response.ok, f"screenshot {src} rendered but does not resolve"
+            provenance = figure.locator(".loopflow-showcase-provenance a").first
+            assert "Captured " in provenance.text_content()
+            status = homepage.request.get(f"{base_url}{provenance.get_attribute('href')}")
+            assert status.ok, "rendered capture must link to its live status snapshot"
 
 
 def test_no_legacy_homepage_sections(homepage: Page):

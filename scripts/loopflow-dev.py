@@ -487,7 +487,7 @@ def cmd_screenshots() -> int:
     """Generate app screenshots."""
     script = REPO_ROOT / "scripts" / "generate_screenshots.py"
     result = subprocess.run(
-        [sys.executable, str(script)],
+        [sys.executable, str(script), "--set", "wave-proof"],
         cwd=REPO_ROOT,
     )
     return result.returncode

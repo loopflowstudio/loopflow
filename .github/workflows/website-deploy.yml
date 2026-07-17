@@ -22,6 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Reject stale or unproven product captures
+        working-directory: ${{ github.workspace }}
+        run: uv run python scripts/check_website_screens.py
+
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Fetch secrets

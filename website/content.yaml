@@ -11,11 +11,18 @@ homepage:
       sits at the center.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
-  screenshot:
-    heading: "The Context Lab"
-    image: "/static/context-lab.png"
-    image_alt: "Context Lab showing what one agent received: contributing assets, prompt-ordered lanes, and trace addresses"
-    caption: "Exactly what each agent was told — every run's context, drillable to evidence."
+  showcase:
+    heading: "Loopflow, building Loopflow"
+    items:
+      - image: "/static/context-lab.png"
+        image_alt: "Context Lab showing what one agent received: contributing assets, prompt-ordered lanes, and trace addresses"
+        caption: "Exactly what each agent was told — every run's context, drillable to evidence."
+      - image: "/static/wave-surface.png"
+        image_alt: "The product Wave with its objective, projects, tasks, and live conversation"
+        caption: "The product Wave conducting the same repository that publishes this page."
+      - image: "/static/roadmap.png"
+        image_alt: "The machine-wide Loopflow roadmap grouped by what needs attention"
+        caption: "Every open task across the machine, joined to live evidence."
 
   pillars:
     heading: "What makes it alive"

@@ -32,6 +32,7 @@ struct LoopflowApp: App {
     @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
+    @State private var didOpenCaptureView = false
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
@@ -45,7 +46,13 @@ struct LoopflowApp: App {
     }
 
     var body: some Scene {
-        let theme = AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
+        let resolvedAppearance = AppTestMode.forcesLightAppearance
+            ? AppearanceMode.light.rawValue
+            : appearanceMode
+        let theme = AppearanceMode.resolvedTheme(
+            rawValue: resolvedAppearance,
+            systemScheme: systemScheme
+        )
         let launchRepoURL = LaunchArguments.repoURL()
 
         WindowGroup {
@@ -57,8 +64,10 @@ struct LoopflowApp: App {
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
             .onOpenURL { handleDeepLink($0) }
-            .uiTestWindowWidth()
             .uiTestSnapshot()
+            .task {
+                openCaptureViewIfNeeded(repoURL: launchRepoURL)
+            }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -172,6 +181,27 @@ struct LoopflowApp: App {
     }
 
     @MainActor
+    private func openCaptureViewIfNeeded(repoURL: URL?) {
+        guard !didOpenCaptureView,
+              let captureView = AppTestMode.captureView,
+              captureView != "wave",
+              captureView != "roadmap"
+        else { return }
+        didOpenCaptureView = true
+        if captureView == "context-lab" {
+            guard let repoURL, let wave = AppTestMode.selectBranch else { return }
+            openWindow(
+                id: captureView,
+                value: ContextLabRoute.wave(repoPath: repoURL.path, wave: wave)
+            )
+        } else {
+            // Untyped app windows are capturable without adding view-specific
+            // Swift: their manifest value is their Window scene id.
+            openWindow(id: captureView)
+        }
+    }
+
+    @MainActor
     private func snapshotCurrentWindow() {
         let snapshotService = SnapshotService()
 
@@ -217,19 +247,6 @@ struct LoopflowApp: App {
 }
 
 private extension View {
-    /// Pin the window to `LOOPFLOW_UI_TEST_WIDTH` when a screenshot/UI-test run
-    /// asks for a specific size; otherwise render unchanged. This is how the
-    /// narrow and wide legs of the selectable-without-clipping proof get a
-    /// deterministic width instead of the host's default.
-    @ViewBuilder
-    func uiTestWindowWidth() -> some View {
-        if let width = AppTestMode.windowWidth {
-            frame(width: width)
-        } else {
-            self
-        }
-    }
-
     /// In a UI-test run, once the surface has settled, render the key window to
     /// a PNG at `LOOPFLOW_UI_TEST_SNAPSHOT_PATH` and exit. `SnapshotService`
     /// renders the view (`cacheDisplay`) rather than the screen, so this needs
@@ -239,14 +256,44 @@ private extension View {
     @ViewBuilder
     func uiTestSnapshot() -> some View {
         if AppTestMode.current() != nil,
+           let captureView = AppTestMode.captureView,
            let path = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] {
             let delay = AppTestMode.snapshotDelay
             task {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                // A background-launched app has no key window, so snapshot the
-                // first realized window directly rather than `keyWindow`.
-                if let window = NSApp.windows.first(where: { $0.contentView != nil }) {
-                    _ = try? SnapshotService().snapshotWindow(window, to: path)
+                // A background-launched app has no key window. Match the
+                // requested surface by title so opening Context Lab cannot race
+                // the always-present Wave window and capture the wrong pixels.
+                let window = NSApp.windows.first { window in
+                    guard window.isVisible, window.contentView != nil else { return false }
+                    switch captureView {
+                    case "context-lab":
+                        return window.title == "Context Lab"
+                    case "wave", "roadmap":
+                        let secondaryTitles = [
+                            "Context Lab", "Portfolio", "Telemetry", "Task workspace",
+                        ]
+                        return !secondaryTitles.contains(window.title)
+                    default:
+                        let expectedTitle = captureView
+                            .split(separator: "-")
+                            .map { $0.capitalized }
+                            .joined(separator: " ")
+                        return window.title == expectedTitle
+                    }
+                }
+                if let window {
+                    do {
+                        if let width = AppTestMode.windowWidth {
+                            let height = AppTestMode.windowHeight
+                                ?? window.contentView?.frame.height
+                                ?? window.frame.height
+                            window.setContentSize(NSSize(width: width, height: height))
+                        }
+                        _ = try SnapshotService().snapshotWindow(window, to: path)
+                    } catch {
+                        fputs("website capture failed: \(error)\n", stderr)
+                    }
                 }
                 NSApp.terminate(nil)
             }

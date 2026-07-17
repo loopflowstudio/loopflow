@@ -86,6 +86,10 @@ lf usage               # subscription state and spend, per account and repo
 | **Task** | Concrete work; its Session owns the only delivery worktree | Linear, via `lf pm` |
 | **Home** | Where a wave's work executes — owner plus location, local or `ssh://` | `GOAL.md` frontmatter |
 
+| Built-in | What it does |
+|----------|--------------|
+| `token-compress` | Fits a complete artifact to an explicit token budget without truncating it |
+
 ## Docs
 
 Rendered at [loopflow.studio/docs](https://loopflow.studio/docs), served from

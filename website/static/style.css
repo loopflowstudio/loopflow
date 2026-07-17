@@ -1144,6 +1144,13 @@ h3:hover .anchor-link,
 .loopflow-showcase-section {
     padding: 48px 0 0;
 }
+.loopflow-showcase-grid {
+    display: grid;
+    gap: 40px;
+}
+.loopflow-showcase-figure {
+    margin: 0;
+}
 .loopflow-showcase-img {
     max-width: 100%;
     border-radius: 12px;
@@ -1157,6 +1164,13 @@ h3:hover .anchor-link,
     color: var(--text-secondary);
     font-size: 14px;
     margin-top: 12px;
+}
+.loopflow-showcase-caption p {
+    margin: 4px 0 0;
+}
+.loopflow-showcase-provenance {
+    font-family: var(--font-mono);
+    font-size: 12px;
 }
 .loopflow-showcase-caption a {
     color: var(--burgundy);

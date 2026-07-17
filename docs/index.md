@@ -116,7 +116,11 @@ lf gate --docs VISUAL_DESIGN.md      # one doc
 lf gate --docs 'docs/*.md'           # a glob
 lf gate --diff-files                 # bodies of files changed on the branch
 lf debug -c                          # the clipboard
+lf token-compress --docs RELEASE_NOTES.md: fit this history into 2,000 tokens
 ```
+
+Compression preserves decisions and evidence from the whole source.
+Do not take the first N commits and call that the history.
 
 ## Where files live
 

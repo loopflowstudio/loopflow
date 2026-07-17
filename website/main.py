@@ -148,7 +148,6 @@ for required_key in (
     "homepage.hero.tagline",
     "homepage.hero.subline",
     "homepage.hero.loopflow_download_url",
-    "homepage.showcase.heading",
     "homepage.showcase.items",
     "homepage.pillars.items",
     "homepage.building_blocks.items",
@@ -573,18 +572,12 @@ def _capture_figure(item):
 
 
 def _screenshot_section():
-    """A missing capture never renders."""
-    figures = [figure for item in SHOWCASE_CONTENT["items"] if (figure := _capture_figure(item))]
-    if not figures:
-        return None
-    return Section(
-        Div(
-            H2(SHOWCASE_CONTENT["heading"]),
-            Div(*figures, cls="loopflow-showcase-grid"),
-            cls="container",
-        ),
-        cls="loopflow-showcase-section",
-    )
+    """One product shot under the hero; a missing capture never renders."""
+    for item in SHOWCASE_CONTENT["items"]:
+        figure = _capture_figure(item)
+        if figure is not None:
+            return Section(Div(figure, cls="container"), cls="loopflow-showcase-section")
+    return None
 
 
 def build_homepage():
@@ -615,7 +608,7 @@ def build_homepage():
                 ),
                 cls="hero",
             ),
-            # Demo — the Context Lab capture, when present
+            # Demo — one product capture, when present
             _screenshot_section(),
             # Pillars
             Section(

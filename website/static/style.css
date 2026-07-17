@@ -1144,10 +1144,6 @@ h3:hover .anchor-link,
 .loopflow-showcase-section {
     padding: 48px 0 0;
 }
-.loopflow-showcase-grid {
-    display: grid;
-    gap: 40px;
-}
 .loopflow-showcase-figure {
     margin: 0;
 }

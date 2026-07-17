@@ -45,6 +45,12 @@ Make the durable input spine authoritative end to end:
 This cut may leave typed lifecycle commands temporarily while the shared Run
 controller replaces them, but no command may represent direction.
 
+Do not synthesize a `ChildDirective`-shaped compatibility view from Steers.
+Command linkage, source enums, directive kind, version, and incorporation are
+the old model, not missing Steer fields. Change consumers to `BoundarySeed`,
+ordered `Steer`, and Basis, or delete the behavior and its legacy assertion.
+No store method may return `ChildDirective` after this cut.
+
 ## Done when
 
 - `rg 'ChildDirective|DirectiveKind|current_directive_version|incorporated_directive_version' rust/loopflow/src rust/loopflow/tests` has zero production references;

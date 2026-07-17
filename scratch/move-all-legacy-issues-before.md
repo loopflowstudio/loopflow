@@ -127,37 +127,48 @@ no Task Session (most plain `W2` issues) have no cached identifier to recover fr
 Fix: **record the prior identifier before the irreversible move, and make every
 step idempotent.** Per moving issue:
 
-1. **Traceability comment (before the move), existence-checked.** The comment's
-   critical payload — the old id — is known *before* the move. Post
-   `Reteamed by loopflow: was {old_id}; moving onto team {target}. The issue id
+Only a **Move**-class issue runs this sequence (an issue on the legacy team that
+this code is about to move). Per such issue:
+
+1. **Traceability comment (before the move), existence-checked *against this exact
+   migration*.** The comment's critical payload — the old id — is known *before* the
+   move, because the issue is still `W2-N`. Post
+   `Reteamed by loopflow: was {W2-N}; moving onto team {target_key}. The issue id
    (UUID) is unchanged; Linear reassigns the number on the move.` **only if** the
-   issue does not already carry a `Reteamed by loopflow` comment. Idempotency reads
-   the issue's existing comments via the client's existing
-   `observe_issue(id).comments` — no new query. (The live number after the move is
-   the issue's own current number, so the comment need not be updated with `ENG-M`;
-   the only irreplaceable datum, `W2-N`, is now durable.)
-2. **`move_item_to_team`** → returns `ENG-M`. Naturally idempotent under
-   classification: on a rerun the issue is `Already`, so the move is skipped.
+   issue does not already carry a comment matching *this* migration — a body
+   containing `was {W2-N}` onto team `{target_key}`, not any generic
+   "Reteamed by loopflow" text. The specificity matters: an issue reteamed in a
+   prior migration carries a `was {A-5}` comment; matching a generic marker would
+   false-skip *this* migration's record. The check reads existing comments via the
+   client's existing `observe_issue(id).comments` — no new query. (`W2-N` is stable
+   across Move-class reruns because the issue stays `W2-N` until it moves, so the
+   match key is stable.)
+2. **`move_item_to_team`** → returns `ENG-M`.
 3. **`rebind_task_issue_identifier`** (only when a Session exists), keyed on the
    stable issue **UUID**. Idempotent: its `WHERE issue_identifier = {old}` matches
    nothing once already rebound.
 
 **Ordering invariant:** step 1 must succeed before step 2 runs, and any per-issue
-error aborts that issue (the loop stops, apply returns the error). So a durable
-`ENG-M` (move done) *implies* the traceability comment already exists.
+error aborts the apply (the loop stops, apply returns the error). So a durable
+`ENG-M` (move done) *implies* this migration's traceability comment already exists.
+
+**`Already` never comments and never moves.** An `Already`-class issue (target-team
+prefix) is *not* evidence this code moved it — the 22 existing `ENG-*` issues
+include directly-created items with no migration comment and no prior `W2-N`. So
+`Already` does exactly one thing: reconcile a **stale Session** by stable UUID
+(`rebind` when `session.identifier != item.identifier`), and nothing when the
+Session is absent or already current. It posts no comment — comment-before-move
+already guarantees that any move *this code* performed recorded the old id, so
+there is nothing to recover here.
 
 **Recovery across every crash boundary** (rerun re-derives, never hand-waves at a
 clean dry-run):
 
 | Crash point | State left behind | Next run |
 |-------------|-------------------|----------|
-| after comment, before move | issue still `W2-N`; marker present | `Move`; comment existence-check skips re-post; move; rebind. No duplicate. |
-| after move, before rebind | issue `ENG-M`; marker present; Session cache still `W2-N` | `Already`; recovery re-runs the *idempotent comment* (marker present → skip) and rebinds `W2-N → ENG-M`. Old id was preserved in the comment written pre-move. |
-| after rebind | issue `ENG-M`; marker present; cache `ENG-M` | `Already`, nothing to do. By the ordering invariant, `ENG-M` present ⇒ comment present, so skipping is safe. |
-
-The `Already` branch therefore runs the **same** recovery as `Move` minus the move
-itself: idempotent comment + rebind. A no-Session `Already` issue needs no rebind,
-and its comment is guaranteed present by the invariant (move done ⇒ comment done).
+| after comment, before move | issue still `W2-N`; this-migration marker present | `Move`; existence-check matches `was {W2-N}` → skips re-post; move; rebind. No duplicate. |
+| after move, before rebind | issue `ENG-M`; marker present (posted pre-move); Session cache still `W2-N` | `Already`; rebinds `W2-N → ENG-M` by UUID. No comment (the old id already lives in the pre-move comment). |
+| after rebind | issue `ENG-M`; cache `ENG-M` | `Already`; Session already current → no-op. |
 
 Cached Session identifiers reconcile via `rebind_task_issue_identifier` keyed on
 the stable UUID (`get_task_session_by_issue` matches `issue_id OR issue_identifier`),
@@ -179,7 +190,7 @@ Delete `PmReteamResult.historical`, the `historical` counter, and the
 | Can a partial run lose the prior identifier `W2-N`? | Yes on `move → comment → rebind`: a crash after the irreversible move leaves an `Already`-classified issue whose comment was never written; no-Session issues have no store fallback. | Post the traceability comment **before** the move (old id is known then), existence-checked so reruns don't duplicate. Move done ⇒ comment present. |
 | Can a *completed* issue move teams, preserving completion? | Linear remaps an issue's workflow state to the same *type* in the destination team on a team move; standard teams (`ENG`/`SCI`/`PRD`) have completed states, so a completed issue maps to the destination completed state. Medium confidence — not tested live. | The task's own rollout de-risks it: Intelligence applies first (16 completed) as the canary before Infrastructure (64 completed). If a completed move errors, it surfaces on the small batch. |
 | Does Session reconciliation find the right row after renumber? | `get_task_session_by_issue` queries `WHERE issue_id = ?1 OR issue_identifier = ?1` and reteam passes the stable issue **UUID** (`item.id`). `rebind_task_issue_identifier` also keys on the UUID. So reconciliation is immune to the number change. | Reconciliation for both moved and already-moved issues is sound; kept. |
-| Does a rerun double-comment or re-move? | The move is skipped by `Already` classification; the comment is existence-checked against `observe_issue(id).comments`, so it posts at most once. | Reruns neither duplicate a comment nor re-move; a partially-migrated issue is completed idempotently. |
+| Does a rerun double-comment or re-move? | The move is skipped by `Already` classification; the pre-move comment is existence-checked against *this migration's* `was {W2-N}`/target marker (not a generic one), so it posts at most once. `Already` posts no comment at all. | Reruns neither duplicate a comment nor re-move; a partially-migrated issue completes idempotently, and directly-created `ENG-*` issues never get a spurious migration comment. |
 | Rate limits at Infrastructure scale (64 completed + 20 open)? | ~170 sequential provider calls (move + comment per issue, plus reconciliation reads). Well inside Linear's per-hour budget. | No batching or backoff needed; note it and keep the loop sequential. |
 | Does narrowing a Project drop it from its Initiative? | Initiative association is independent of team association in Linear. | Projects stay under the wave Initiative after the narrow. |
 
@@ -212,11 +223,13 @@ Delete `PmReteamResult.historical`, the `historical` counter, and the
 
 ## Scope
 
-- **In scope:** `classify_reteam_item` (drop `Historical`), the `pm_reteam_async`
-  apply block (invert order, comment-before-move + existence check,
-  gate-before-mutation, per-moving-Project target-team assertion), a comment
-  existence check reusing `observe_issue`, `PmReteamResult` (drop `historical`),
-  `print_pm_reteam_result` (drop the historical line), and the reteam tests.
+- **In scope:** `classify_reteam_item` (drop `Historical`), splitting
+  `pm_reteam_async` into `resolve_reteam_context` + `apply_or_plan_reteam` (invert
+  order, comment-before-move with this-migration existence check, `Already` =
+  rebind-only, gate-before-mutation, per-moving-Project target-team assertion), a
+  comment existence check reusing `observe_issue`, `PmReteamResult` (drop
+  `historical`), `print_pm_reteam_result` (drop the historical line), and the reteam
+  tests.
 - **Out of scope:** active Task worktrees and live provider state (the
   implementation body must not run `reteam --apply` itself — the orchestrator does
   that after merge). No schema change. No `pm init` / binding changes. No other
@@ -227,16 +240,20 @@ Delete `PmReteamResult.historical`, the `historical` counter, and the
 - `classify_reteam_item` returns `Move` (not `Historical`) for a completed issue
   with no live writing body, and `Defer` for a completed issue whose Session still
   holds a lease.
-- A behavioral test drives the apply against a mock Linear (`test_server`,
-  recorded request order) and asserts every issue team-move precedes every Project
-  `teamIds` replacement, and that a completed issue in the plan produces a move
-  mutation.
-- Failure-injection tests cover the two partial-success boundaries: (a) comment
-  succeeds then move fails → the rerun re-moves and posts **no** second comment;
-  (b) move succeeds then rebind fails → the rerun rebinds and posts **no** second
-  comment, and the traceability comment written pre-move still names `W2-N`. Each
-  asserts exactly one `Reteamed by loopflow` comment survives and the store ends on
-  the new identifier.
+- A behavioral test drives the **real** apply path (`apply_or_plan_reteam` with a
+  `test_server`-backed client + temp store) and asserts every issue team-move
+  precedes every Project `teamIds` replacement, and that a completed issue produces
+  a move mutation. Restoring Projects-first or deleting the issue-move loop turns it
+  red (sabotage-proof).
+- Failure-injection tests drive that same real path across both partial-success
+  boundaries: (a) comment ok then `issueUpdate` errors → rerun posts **no** second
+  comment, then moves and rebinds; (b) store seeded moved-but-not-rebound → the
+  `Already` path rebinds by UUID and posts **no** comment. Exactly one
+  `Reteamed by loopflow` comment survives per issue and the store ends on the new
+  identifier.
+- A test proves `Already` is not treated as migration: a directly-created `ENG-*`
+  issue records no `commentCreate` and no `issueUpdate`; only a stale-Session
+  `ENG-*` triggers a rebind.
 - `ensure_move_projects_carry_target_team` refuses apply (before any mutation) when
   any Project holding a planned move has `team_ids == None` or a set lacking the
   target team.
@@ -262,34 +279,53 @@ disappears — those 64 become part of `will move` until applied.
 
 ## Testing notes for the implementer
 
-- **Mutation-order test.** Extract the provider execution into a small helper —
-  `run_reteam_provider_apply(client, team_id, target_key, &mut moves, &project_moves)`
-  — that performs *only* the provider work in order (per move: comment
-  existence-check → conditional `comment` → `move_item_to_team` filling
-  `new_identifier`; then per Project: `move_project_to_team`). `pm_reteam_async`
-  calls it, then does store reconciliation. This separation is a genuine production
-  clarity win (compute plan / execute provider / reconcile store), not a test-only
-  seam, and it lets the order test run against a `test_server`-backed `LinearClient`
-  with **no store or env**. Queue responses positionally (per move: an
-  `observe_issue` read, a `commentCreate`, an `issueUpdate`; then `projectUpdate`
-  per Project) and assert every recorded `projectUpdate`/`teamIds` index is greater
-  than every `issueUpdate`/`teamId` index.
-- **Failure-injection tests** live at this helper too: queue an error `QueuedResponse`
-  at the `issueUpdate` (boundary a) or have the store rebind fail (boundary b),
-  then re-drive the helper with fresh responses whose `observe_issue` now returns
-  the marker comment, and assert the second run issues **no** `commentCreate` and
-  completes the move/rebind. `test_server` records every request, so "exactly one
-  `commentCreate` for this issue across both runs" is a direct assertion. Boundary
-  (b) is drivable by pointing rebind at a temp store made to error, or by asserting
-  at the `pm_reteam_async` level that an `Already`+stale-Session issue re-posts no
-  comment and reconciles.
-- **Completed-migration test.** At the classification level: a completed issue
-  with no session, and a completed issue with a terminal session, both classify
-  `Move`; a completed issue with an active-lease session classifies `Defer`.
-  Update `reteam_classifies_move_defer_leave_and_skip` (it currently asserts
-  `Historical` for a completed issue).
-- **Preflight test.** `ensure_move_projects_carry_target_team` refuses (with a
-  Project-naming message) when a moving issue's Project has `team_ids == None` or a
-  set lacking the target team, and passes when the target team is present.
-- Store reconciliation itself is already covered by
+**Tests drive the real apply path, never a provider-only slice.** A test of a
+provider-only helper stays green if `pm_reteam_async` omits or misorders the call,
+and cannot exercise the store rebind — so it proves nothing about production. The
+seam is instead *dependency* extraction: split `pm_reteam_async` into
+`resolve_reteam_context` (wave/provider/token/client/store — thin wiring shared with
+every other `lf pm` verb) and `apply_or_plan_reteam(&ctx, &store, repo, wave,
+team_id, team_key, apply)` which holds the **entire** decision surface —
+classification, both safety gates, the ordered provider mutations, *and* store
+reconciliation — and returns `PmReteamResult`. `build_client` today hardcodes the
+real Linear URL, so this is what makes an end-to-end test possible at all: the test
+builds a `PmContext` from a `test_server`-backed `LinearClient` (`with_base_url`,
+per `linear_test_ctx`) plus a temp `Store`, and drives `apply_or_plan_reteam`
+directly. Everything a sabotage could break lives inside the tested unit.
+
+- **Order test (sabotage-proof).** Drive `apply_or_plan_reteam` with `apply=true`
+  against a mock serving the full sequence (list items already provided via `ctx`
+  path, `observe_issue` reads, `commentCreate`, `issueUpdate` per move,
+  `projectUpdate` per Project, snapshot refresh) and a temp store holding a stale
+  Session. Assert from `test_server`'s recorded requests that every
+  `issueUpdate`(`teamId`) precedes every `projectUpdate`(`teamIds`), and that the
+  temp store's Session ends on the new identifier. **Sabotage:** restoring
+  Projects-first flips the recorded order → red; deleting the issue-move loop leaves
+  the Session unreconciled and no `issueUpdate` recorded → red.
+- **Completed-migration test (end-to-end).** A completed `W2` issue in the mock
+  produces an `issueUpdate` (it moves), proving `Historical` is gone. Plus the
+  classification-level cases: completed + no session and completed + terminal session
+  → `Move`; completed + active lease → `Defer` (update
+  `reteam_classifies_move_defer_leave_and_skip`, which currently asserts
+  `Historical`).
+- **Failure-injection, both boundaries, on the real path.**
+  (a) *comment ok, move fails*: queue an error at the `issueUpdate`; the first
+  `apply_or_plan_reteam` returns `Err` with the comment already recorded. Re-drive
+  against a mock whose `observe_issue` now returns the `was {W2-N}` comment and whose
+  issue is still `W2-N`; assert the second run issues **no** second `commentCreate`,
+  then moves and rebinds.
+  (b) *move ok, rebind not done*: seed the temp store directly in the moved-but-not-
+  rebound state (mock issue on `ENG-M` carrying the pre-move comment; Session cache
+  still `W2-N`), drive `apply_or_plan_reteam`; assert the `Already` path rebinds the
+  Session `W2-N → ENG-M` by UUID and issues **zero** `commentCreate`. Across both
+  runs of (a), exactly one `Reteamed by loopflow` comment exists.
+- **Preflight test (end-to-end).** With a moving issue whose Project resolves to
+  `team_ids == None` or a set lacking the target team, `apply_or_plan_reteam` with
+  `apply=true` returns `Err` naming the Project **before** any `issueUpdate` is
+  recorded by `test_server`; with the target team present it proceeds.
+- **`Already`-is-not-migration test.** A directly-created `ENG-*` issue with a
+  current Session (or none) drives `apply_or_plan_reteam` and records **no**
+  `commentCreate` and no `issueUpdate` — only a stale-Session `ENG-*` triggers a
+  rebind, never a comment.
+- Store reconciliation internals are already covered by
   `rebind_task_issue_identifier` tests in `store/mod.rs`; don't duplicate them.

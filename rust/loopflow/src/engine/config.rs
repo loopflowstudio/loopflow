@@ -35,16 +35,29 @@ fn default_summary_agent() -> String {
 }
 
 /// Autoprune configuration.
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AutopruneConfig {
-    #[serde(default)]
+    #[serde(default = "default_autoprune_enabled")]
     pub enabled: bool,
     #[serde(default = "default_poll_interval")]
     pub poll_interval_seconds: u64,
 }
 
+fn default_autoprune_enabled() -> bool {
+    true
+}
+
 fn default_poll_interval() -> u64 {
-    60
+    900
+}
+
+impl Default for AutopruneConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_autoprune_enabled(),
+            poll_interval_seconds: default_poll_interval(),
+        }
+    }
 }
 
 /// Intermediate representation for deserializing `autoprune: true` or `autoprune: { ... }`.
@@ -53,7 +66,7 @@ fn default_poll_interval() -> u64 {
 enum AutopruneRaw {
     Bool(bool),
     Config {
-        #[serde(default)]
+        #[serde(default = "default_autoprune_enabled")]
         enabled: bool,
         #[serde(default = "default_poll_interval")]
         poll_interval_seconds: u64,
@@ -486,11 +499,9 @@ linear:
 
     #[test]
     fn default_autoprune_config() {
-        // Note: Default trait gives zeros, serde deserialize gives proper defaults
         let autoprune = AutopruneConfig::default();
-        assert!(!autoprune.enabled);
-        // Default trait uses 0, serde uses default_poll_interval (60)
-        assert_eq!(autoprune.poll_interval_seconds, 0);
+        assert!(autoprune.enabled);
+        assert_eq!(autoprune.poll_interval_seconds, 900);
     }
 
     #[test]
@@ -498,8 +509,8 @@ linear:
         // When deserialized from YAML, gets proper defaults
         let yaml = "autoprune: {}\n";
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
-        assert!(!config.autoprune.enabled);
-        assert_eq!(config.autoprune.poll_interval_seconds, 60);
+        assert!(config.autoprune.enabled);
+        assert_eq!(config.autoprune.poll_interval_seconds, 900);
     }
 
     // ==========================================================================
@@ -614,7 +625,7 @@ session:
         let yaml = "autoprune: true\n";
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.autoprune.enabled);
-        assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
+        assert_eq!(config.autoprune.poll_interval_seconds, 900);
     }
 
     #[test]
@@ -644,7 +655,7 @@ autoprune:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.autoprune.enabled);
-        assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
+        assert_eq!(config.autoprune.poll_interval_seconds, 900);
     }
 
     #[test]

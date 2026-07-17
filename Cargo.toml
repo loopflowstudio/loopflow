@@ -10,6 +10,17 @@ version = "0.11.3"
 edition = "2021"
 license = "MIT"
 
+# Agent worktrees are short-lived and usually build once. Full debug metadata
+# plus incremental state was costing 11–17 GiB per checkout while the binaries
+# themselves stayed below 200 MiB.
+[profile.dev]
+debug = 1
+incremental = false
+
+[profile.test]
+debug = 1
+incremental = false
+
 [workspace.metadata.dist]
 cargo-dist-version = "0.27.0"
 ci = "github"

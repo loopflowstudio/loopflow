@@ -20,25 +20,37 @@
 //!   │ /health          → liveness probe              │
 //!   │ /status          → wave count + delivery count │
 //!   │ /linear/webhook  → verify → inbox → ingest     │
+//!   │ /github/webhook  → verify → prune worktree     │
 //!   └────────────────────────────────────────────────┘
 //! ```
 
 pub mod service;
 
+use std::collections::HashSet;
 use std::ffi::OsStr;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
+use crate::engine::config::load_config_or_default;
+use crate::engine::worktrees::{
+    main_repo_root, prune_abandoned_prompt_logs, prune_branch_worktree, prune_terminal_worktree,
+    prune_worktrees, TargetedPruneOutcome, WorktreePrunePolicy, WorktreePruneReason,
+};
+use crate::repository::RepoId;
 use crate::store::provider_deliveries::{DeliveryCompletion, DeliveryEventKind, DeliveryStatus};
 use crate::store::Store;
 use crate::webhook::{self, WebhookEvent, WebhookOutcome, SIGNATURE_HEADER};
@@ -46,6 +58,9 @@ use crate::webhook::{self, WebhookEvent, WebhookOutcome, SIGNATURE_HEADER};
 /// Body limit on webhook routes. Linear deliveries are small; a hard cap keeps
 /// a malformed or hostile request from buffering unbounded bytes.
 const WEBHOOK_BODY_LIMIT: usize = 256 * 1024;
+const GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
+const GITHUB_EVENT_HEADER: &str = "x-github-event";
+const ABANDONED_LOG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Everything the `lfd` receiver needs, shared across requests.
 #[derive(Clone)]
@@ -57,6 +72,8 @@ pub struct LfdState {
     store: Arc<Store>,
     /// Linear webhook config. When absent, `/linear/webhook` returns 503.
     linear: Option<LinearConfig>,
+    /// GitHub webhook config. When absent, `/github/webhook` returns 503.
+    github: Option<GithubConfig>,
 }
 
 /// Linear webhook verification + ingestion config, sourced from env.
@@ -64,6 +81,12 @@ pub struct LfdState {
 pub struct LinearConfig {
     pub secret: Arc<Vec<u8>>,
     pub viewer_id: Arc<String>,
+}
+
+#[derive(Clone)]
+struct GithubConfig {
+    secret: Arc<Vec<u8>>,
+    webhook_url: Option<Arc<String>>,
 }
 
 /// Build the `lfd` router.
@@ -74,6 +97,10 @@ pub fn router(state: LfdState) -> Router {
         .route(
             "/linear/webhook",
             post(webhook_handler).layer(DefaultBodyLimit::max(WEBHOOK_BODY_LIMIT)),
+        )
+        .route(
+            "/github/webhook",
+            post(github_webhook_handler).layer(DefaultBodyLimit::max(WEBHOOK_BODY_LIMIT)),
         )
         .with_state(state)
 }
@@ -178,6 +205,121 @@ async fn webhook_handler(
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
     StatusCode::OK
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRepositoryPayload {
+    full_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubHeadPayload {
+    r#ref: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubPullRequestPayload {
+    merged: bool,
+    head: GithubHeadPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubPullRequestEvent {
+    action: String,
+    repository: GithubRepositoryPayload,
+    pull_request: GithubPullRequestPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubDeleteEvent {
+    r#ref: String,
+    ref_type: String,
+    repository: GithubRepositoryPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GithubPruneEvent {
+    repo: String,
+    branch: String,
+    reason: WorktreePruneReason,
+}
+
+fn parse_github_prune_event(event: &str, body: &[u8]) -> Result<Option<GithubPruneEvent>, ()> {
+    match event {
+        "pull_request" => {
+            let payload: GithubPullRequestEvent = serde_json::from_slice(body).map_err(|_| ())?;
+            if payload.action != "closed" || !payload.pull_request.merged {
+                return Ok(None);
+            }
+            Ok(Some(GithubPruneEvent {
+                repo: payload.repository.full_name,
+                branch: payload.pull_request.head.r#ref,
+                reason: WorktreePruneReason::Merged,
+            }))
+        }
+        "delete" => {
+            let payload: GithubDeleteEvent = serde_json::from_slice(body).map_err(|_| ())?;
+            if payload.ref_type != "branch" {
+                return Ok(None);
+            }
+            Ok(Some(GithubPruneEvent {
+                repo: payload.repository.full_name,
+                branch: payload.r#ref,
+                reason: WorktreePruneReason::RemoteGone,
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn verify_github_signature(secret: &[u8], body: &[u8], signature: &str) -> bool {
+    let Some(signature) = signature.strip_prefix("sha256=") else {
+        return false;
+    };
+    let Ok(signature) = hex::decode(signature) else {
+        return false;
+    };
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret) else {
+        return false;
+    };
+    mac.update(body);
+    mac.verify_slice(&signature).is_ok()
+}
+
+async fn github_webhook_handler(
+    State(state): State<LfdState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
+    let Some(ref github) = state.github else {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    };
+    let Some(signature) = headers
+        .get(GITHUB_SIGNATURE_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    if !verify_github_signature(&github.secret, &body, signature) {
+        return StatusCode::UNAUTHORIZED;
+    }
+    let Some(event_name) = headers
+        .get(GITHUB_EVENT_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return StatusCode::BAD_REQUEST;
+    };
+    let event = match parse_github_prune_event(event_name, &body) {
+        Ok(Some(event)) => event,
+        Ok(None) => return StatusCode::OK,
+        Err(()) => return StatusCode::BAD_REQUEST,
+    };
+    tokio::spawn(async move {
+        if let Err(error) = prune_github_event(&state, event).await {
+            tracing::warn!(error = %error, "github worktree prune failed");
+        }
+    });
+    StatusCode::ACCEPTED
 }
 
 /// Map a processing outcome onto the delivery row's terminal status and the
@@ -289,11 +431,316 @@ fn scan_wave_endpoints(repo_root: &Path) -> Vec<String> {
     endpoints
 }
 
+async fn managed_repo_roots(state: &LfdState) -> Vec<PathBuf> {
+    let mut candidates = vec![state.repo_root.clone()];
+    if let Ok(sessions) = state.store.list_task_sessions(None).await {
+        candidates.extend(
+            sessions
+                .into_iter()
+                .map(|session| session.worktree)
+                .filter(|path| path.exists()),
+        );
+    }
+    let mut roots = HashSet::new();
+    for candidate in candidates {
+        if let Ok(root) = main_repo_root(&candidate) {
+            roots.insert(root);
+        }
+    }
+    let mut roots = roots.into_iter().collect::<Vec<_>>();
+    roots.sort();
+    roots
+}
+
+async fn protected_worktree_paths(state: &LfdState) -> anyhow::Result<HashSet<PathBuf>> {
+    let mut protected = crate::lf::commands::top::running_workspace_paths();
+    protected.extend(
+        state
+            .store
+            .list_task_sessions(None)
+            .await?
+            .into_iter()
+            .filter(|session| !session.status.is_terminal())
+            .map(|session| session.worktree),
+    );
+    let production = crate::store::production_database_path();
+    if production.exists() {
+        protected.extend(crate::store::read_nonterminal_task_worktrees(&production)?);
+    }
+    Ok(protected)
+}
+
+async fn prune_github_event(state: &LfdState, event: GithubPruneEvent) -> anyhow::Result<()> {
+    let protected_paths = protected_worktree_paths(state).await?;
+    let roots = managed_repo_roots(state)
+        .await
+        .into_iter()
+        .filter(|root| RepoId::discover(root).is_ok_and(|repo| repo.as_str() == event.repo))
+        .collect::<Vec<_>>();
+    for root in roots {
+        let current_path = state.repo_root.clone();
+        let branch = event.branch.clone();
+        let reason = event.reason;
+        let protected_paths = protected_paths.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            prune_branch_worktree(&root, &current_path, &branch, reason, &protected_paths)
+        })
+        .await??;
+        match outcome {
+            TargetedPruneOutcome::Removed(target) => tracing::info!(
+                path = %target.path.display(),
+                branch = target.branch.as_deref().unwrap_or("detached"),
+                reason = target.reason.as_str(),
+                "github event pruned worktree"
+            ),
+            TargetedPruneOutcome::RetainedDirty(path) => tracing::warn!(
+                path = %path.display(),
+                "github event retained dirty worktree"
+            ),
+            TargetedPruneOutcome::Protected | TargetedPruneOutcome::NotFound => {}
+        }
+    }
+    Ok(())
+}
+
+async fn maintenance_sweep(state: &LfdState) {
+    let protected_paths = match protected_worktree_paths(state).await {
+        Ok(paths) => paths,
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "cannot verify Task ownership; skipping automatic worktree pruning"
+            );
+            return;
+        }
+    };
+    for root in managed_repo_roots(state).await {
+        let current_path = state.repo_root.clone();
+        let root_for_log = root.clone();
+        let protected_paths = protected_paths.clone();
+        match tokio::task::spawn_blocking(move || {
+            prune_worktrees(
+                &root,
+                &current_path,
+                &protected_paths,
+                WorktreePrunePolicy::automatic(),
+                false,
+            )
+        })
+        .await
+        {
+            Ok(Ok(report)) => {
+                if !report.removed.is_empty() || !report.retained_dirty.is_empty() {
+                    tracing::info!(
+                        repo = %root_for_log.display(),
+                        removed = report.removed.len(),
+                        retained_dirty = report.retained_dirty.len(),
+                        "automatic worktree prune complete"
+                    );
+                }
+                for failure in report.failed {
+                    tracing::warn!(
+                        path = %failure.target.path.display(),
+                        error = %failure.error,
+                        "automatic worktree prune failed"
+                    );
+                }
+            }
+            Ok(Err(error)) => tracing::warn!(
+                repo = %root_for_log.display(),
+                error = %error,
+                "automatic worktree scan failed"
+            ),
+            Err(error) => tracing::warn!(
+                repo = %root_for_log.display(),
+                error = %error,
+                "automatic worktree scan task failed"
+            ),
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+    if let Ok(sessions) = state.store.list_task_sessions(None).await {
+        let active = sessions
+            .iter()
+            .filter(|session| !session.status.is_terminal())
+            .map(|session| session.worktree.clone())
+            .collect::<HashSet<_>>();
+        let terminal = sessions
+            .into_iter()
+            .filter(|session| session.status.is_terminal())
+            .filter(|session| session.updated_at <= now - time::Duration::hours(1))
+            .map(|session| session.worktree)
+            .filter(|path| path.exists() && !active.contains(path))
+            .collect::<HashSet<_>>();
+        for path in terminal {
+            let Ok(root) = main_repo_root(&path) else {
+                continue;
+            };
+            let current_path = state.repo_root.clone();
+            let protected_paths = protected_paths.clone();
+            match tokio::task::spawn_blocking(move || {
+                prune_terminal_worktree(&root, &current_path, &path, &protected_paths)
+            })
+            .await
+            {
+                Ok(Ok(TargetedPruneOutcome::Removed(target))) => tracing::info!(
+                    path = %target.path.display(),
+                    "pruned terminal Task worktree"
+                ),
+                Ok(Ok(TargetedPruneOutcome::RetainedDirty(path))) => tracing::warn!(
+                    path = %path.display(),
+                    "retained dirty terminal Task worktree"
+                ),
+                Ok(Ok(TargetedPruneOutcome::Protected | TargetedPruneOutcome::NotFound)) => {}
+                Ok(Err(error)) => tracing::warn!(error = %error, "terminal worktree prune failed"),
+                Err(error) => tracing::warn!(error = %error, "terminal worktree prune task failed"),
+            }
+        }
+    }
+
+    let lf_home = crate::store::lf_home_dir();
+    match tokio::task::spawn_blocking(move || {
+        prune_abandoned_prompt_logs(&lf_home, ABANDONED_LOG_AGE)
+    })
+    .await
+    {
+        Ok(Ok(removed)) if !removed.is_empty() => {
+            tracing::info!(removed = removed.len(), "pruned abandoned prompt logs")
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => tracing::warn!(error = %error, "abandoned prompt log prune failed"),
+        Err(error) => tracing::warn!(error = %error, "prompt log prune task failed"),
+    }
+}
+
+async fn maintenance_loop(state: LfdState, interval: Duration) {
+    loop {
+        maintenance_sweep(&state).await;
+        tokio::time::sleep(interval).await;
+    }
+}
+
+fn config_value(repo: &Path, name: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(name) {
+        if !value.trim().is_empty() {
+            return Some(value);
+        }
+    }
+    let output = Command::new("doppler")
+        .current_dir(repo)
+        .args(["secrets", "get", name, "--plain"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim_end_matches(['\r', '\n']);
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn github_config(repo: &Path) -> Option<GithubConfig> {
+    let secret = config_value(repo, "LF_GITHUB_WEBHOOK_SECRET")?;
+    if secret.is_empty() {
+        return None;
+    }
+    let webhook_url = config_value(repo, "LF_GITHUB_WEBHOOK_URL").map(Arc::new);
+    Some(GithubConfig {
+        secret: Arc::new(secret.into_bytes()),
+        webhook_url,
+    })
+}
+
+fn ensure_github_subscription(repo: &Path, github: &GithubConfig) -> anyhow::Result<()> {
+    let Some(url) = github.webhook_url.as_deref() else {
+        return Ok(());
+    };
+    let repo_id = RepoId::discover(repo)?;
+    let hooks_endpoint = format!("repos/{}/hooks", repo_id.as_str());
+    let hooks = Command::new("gh")
+        .current_dir(repo)
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["api", &hooks_endpoint])
+        .output()?;
+    if !hooks.status.success() {
+        anyhow::bail!("GitHub hook lookup failed for {repo_id}");
+    }
+    let hooks: serde_json::Value = serde_json::from_slice(&hooks.stdout)?;
+    let existing_id = hooks.as_array().and_then(|hooks| {
+        hooks.iter().find_map(|hook| {
+            (hook.pointer("/config/url").and_then(|value| value.as_str()) == Some(url.as_str()))
+                .then(|| hook.get("id").and_then(|value| value.as_u64()))
+                .flatten()
+        })
+    });
+    let (method, endpoint) = match existing_id {
+        Some(id) => ("PATCH", format!("{hooks_endpoint}/{id}")),
+        None => ("POST", hooks_endpoint),
+    };
+    let secret = std::str::from_utf8(&github.secret)?;
+    let body = serde_json::to_vec(&serde_json::json!({
+        "name": "web",
+        "active": true,
+        "events": ["pull_request", "delete"],
+        "config": {
+            "url": url.as_str(),
+            "content_type": "json",
+            "secret": secret,
+            "insecure_ssl": "0"
+        }
+    }))?;
+    let mut child = Command::new("gh")
+        .current_dir(repo)
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["api", "--method", method, &endpoint, "--input", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("GitHub hook request stdin unavailable"))?
+        .write_all(&body)?;
+    if !child.wait()?.success() {
+        anyhow::bail!("GitHub hook registration failed for {repo_id}");
+    }
+    Ok(())
+}
+
+async fn ensure_github_subscriptions(state: &LfdState) {
+    let Some(github) = state.github.clone() else {
+        return;
+    };
+    if github.webhook_url.is_none() {
+        return;
+    }
+    for root in managed_repo_roots(state).await {
+        let root_for_log = root.clone();
+        let github = github.clone();
+        match tokio::task::spawn_blocking(move || ensure_github_subscription(&root, &github)).await
+        {
+            Ok(Ok(())) => {
+                tracing::info!(repo = %root_for_log.display(), "github worktree webhook subscribed")
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(repo = %root_for_log.display(), error = %error, "github webhook subscription failed")
+            }
+            Err(error) => {
+                tracing::warn!(repo = %root_for_log.display(), error = %error, "github webhook subscription task failed")
+            }
+        }
+    }
+}
+
 // -- Serve -------------------------------------------------------------------
 
 /// Bind and serve `lfd` until the process ends. The store is always open (the
-/// inbox lives there); Linear config is optional — when absent the daemon runs
-/// but `/linear/webhook` returns 503.
+/// inbox lives there); Linear and GitHub config are optional — absent webhook
+/// credentials leave their corresponding route at 503.
 ///
 /// A non-loopback bind is refused unless `LF_LFD_AUTH_TOKEN` is set, matching
 /// the Home-only posture: the daemon is meant to receive external HTTP on a
@@ -313,10 +760,19 @@ pub async fn serve(
         );
     }
     let state = LfdState {
-        repo_root,
+        github: github_config(&repo_root),
+        repo_root: repo_root.clone(),
         store,
         linear,
     };
+    let autoprune = load_config_or_default(Some(&repo_root)).autoprune;
+    if autoprune.enabled {
+        let maintenance_state = state.clone();
+        let interval = Duration::from_secs(autoprune.poll_interval_seconds.max(60));
+        tokio::spawn(async move { maintenance_loop(maintenance_state, interval).await });
+    }
+    let subscription_state = state.clone();
+    tokio::spawn(async move { ensure_github_subscriptions(&subscription_state).await });
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(addr = %listener.local_addr()?, "lfd serving");
     axum::serve(listener, router(state).into_make_service()).await?;
@@ -343,8 +799,6 @@ mod tests {
     use super::*;
     use crate::store::StorageConfig;
     use crate::webhook::WebhookEvent;
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
     use std::ffi::OsString;
     use std::path::Path;
 
@@ -359,6 +813,7 @@ mod tests {
             repo_root: repo.to_path_buf(),
             store,
             linear,
+            github: None,
         }
     }
 
@@ -583,6 +1038,102 @@ mod tests {
         assert_eq!(event, WebhookEvent::Ignored);
         let id = derive_delivery_id(&event, ts, body);
         assert!(id.starts_with("linear:ignored:1:"));
+    }
+
+    #[test]
+    fn github_signature_requires_the_sha256_prefix_and_matching_body() {
+        let secret = b"github-secret";
+        let body = br#"{"action":"closed"}"#;
+        let signature = format!("sha256={}", sign(secret, body));
+
+        assert!(verify_github_signature(secret, body, &signature));
+        assert!(!verify_github_signature(secret, b"changed", &signature));
+        assert!(!verify_github_signature(secret, body, &sign(secret, body)));
+    }
+
+    #[test]
+    fn github_events_select_merged_prs_and_deleted_branches() {
+        let merged = br#"{
+            "action":"closed",
+            "repository":{"full_name":"acme/widgets"},
+            "pull_request":{"merged":true,"head":{"ref":"user/landed"}}
+        }"#;
+        assert_eq!(
+            parse_github_prune_event("pull_request", merged).unwrap(),
+            Some(GithubPruneEvent {
+                repo: "acme/widgets".to_string(),
+                branch: "user/landed".to_string(),
+                reason: WorktreePruneReason::Merged,
+            })
+        );
+
+        let deleted = br#"{
+            "ref":"user/abandoned",
+            "ref_type":"branch",
+            "repository":{"full_name":"acme/widgets"}
+        }"#;
+        assert_eq!(
+            parse_github_prune_event("delete", deleted).unwrap(),
+            Some(GithubPruneEvent {
+                repo: "acme/widgets".to_string(),
+                branch: "user/abandoned".to_string(),
+                reason: WorktreePruneReason::RemoteGone,
+            })
+        );
+    }
+
+    #[test]
+    fn github_events_ignore_unmerged_closures_and_tag_deletions() {
+        let closed = br#"{
+            "action":"closed",
+            "repository":{"full_name":"acme/widgets"},
+            "pull_request":{"merged":false,"head":{"ref":"user/open"}}
+        }"#;
+        assert_eq!(
+            parse_github_prune_event("pull_request", closed).unwrap(),
+            None
+        );
+
+        let tag = br#"{
+            "ref":"v1.0.0",
+            "ref_type":"tag",
+            "repository":{"full_name":"acme/widgets"}
+        }"#;
+        assert_eq!(parse_github_prune_event("delete", tag).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn signed_github_merge_is_accepted_for_background_cleanup() {
+        let repo = tempfile::tempdir().unwrap();
+        let secret = b"github-secret";
+        let body = br#"{
+            "action":"closed",
+            "repository":{"full_name":"acme/widgets"},
+            "pull_request":{"merged":true,"head":{"ref":"user/landed"}}
+        }"#;
+        let mut state = make_state(repo.path(), open_store(repo.path()).await, None);
+        state.github = Some(GithubConfig {
+            secret: Arc::new(secret.to_vec()),
+            webhook_url: None,
+        });
+        let app = router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/github/webhook"))
+            .header(GITHUB_EVENT_HEADER, "pull_request")
+            .header(
+                GITHUB_SIGNATURE_HEADER,
+                format!("sha256={}", sign(secret, body)),
+            )
+            .body(body.as_slice().to_vec())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
     }
 
     #[test]

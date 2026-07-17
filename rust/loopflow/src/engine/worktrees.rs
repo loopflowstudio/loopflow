@@ -1,17 +1,19 @@
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
-    is_squash_merged, rev_parse, sync_main, worktree_add, WorktreeBranch,
+    delete_local_branch, get_default_branch, has_commits_beyond, is_ancestor,
+    is_clean_ignoring_scratch, is_squash_merged, rev_parse, sync_main, worktree_add,
+    worktree_remove, WorktreeBranch,
 };
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +73,78 @@ pub struct WorktreeState {
     pub fresh: bool,
     pub dirty: bool,
     pub remote_gone: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorktreePruneReason {
+    Merged,
+    SquashMerged,
+    RemoteGone,
+    Fresh,
+    Unprotected,
+    Terminal,
+}
+
+impl WorktreePruneReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Merged => "merged",
+            Self::SquashMerged => "squash-merged",
+            Self::RemoteGone => "remote-gone",
+            Self::Fresh => "fresh",
+            Self::Unprotected => "unprotected",
+            Self::Terminal => "terminal",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreePruneTarget {
+    pub branch: Option<String>,
+    pub path: PathBuf,
+    pub reason: WorktreePruneReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreePruneFailure {
+    pub target: WorktreePruneTarget,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorktreePruneReport {
+    pub candidates: Vec<WorktreePruneTarget>,
+    pub removed: Vec<WorktreePruneTarget>,
+    pub retained_dirty: Vec<PathBuf>,
+    pub failed: Vec<WorktreePruneFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorktreePrunePolicy {
+    pub remove_unprotected: bool,
+}
+
+impl WorktreePrunePolicy {
+    pub fn manual() -> Self {
+        Self {
+            remove_unprotected: true,
+        }
+    }
+
+    pub fn automatic() -> Self {
+        Self {
+            remove_unprotected: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetedPruneOutcome {
+    Removed(WorktreePruneTarget),
+    RetainedDirty(PathBuf),
+    Protected,
+    NotFound,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -521,6 +595,239 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     Ok(states)
 }
 
+fn worktree_prune_reason(
+    state: &WorktreeState,
+    policy: WorktreePrunePolicy,
+) -> Option<WorktreePruneReason> {
+    if policy.remove_unprotected {
+        return Some(if state.merged {
+            WorktreePruneReason::Merged
+        } else if state.squash_merged {
+            WorktreePruneReason::SquashMerged
+        } else if state.remote_gone {
+            WorktreePruneReason::RemoteGone
+        } else if state.fresh {
+            WorktreePruneReason::Fresh
+        } else {
+            WorktreePruneReason::Unprotected
+        });
+    }
+    if state.fresh {
+        return None;
+    }
+    if !state.prunable || state.dirty {
+        return None;
+    }
+    if state.merged {
+        Some(WorktreePruneReason::Merged)
+    } else if state.squash_merged {
+        Some(WorktreePruneReason::SquashMerged)
+    } else if state.remote_gone {
+        Some(WorktreePruneReason::RemoteGone)
+    } else {
+        None
+    }
+}
+
+fn prune_stale_worktree_metadata(repo: &Path) -> Result<(), GitError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "prune"])
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(GitError::CommandFailed {
+        command: "git worktree prune".to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn remove_worktree_target(
+    repo: &Path,
+    default_branch: &str,
+    target: &WorktreePruneTarget,
+) -> Result<(), GitError> {
+    worktree_remove(repo, &target.path)?;
+    if let Some(branch) = target.branch.as_deref() {
+        if branch != default_branch {
+            let _ = delete_local_branch(repo, branch);
+        }
+    }
+    Ok(())
+}
+
+fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    protected_paths
+        .iter()
+        .map(|protected| {
+            protected
+                .canonicalize()
+                .unwrap_or_else(|_| protected.clone())
+        })
+        .any(|protected| protected == path || protected.starts_with(&path))
+}
+
+/// Remove worktrees selected from local Git state plus GitHub/remote evidence.
+///
+/// Automatic callers retain dirty worktrees. The manual CLI may explicitly use
+/// the more aggressive policy it historically exposed.
+pub fn prune_worktrees(
+    repo: &Path,
+    current_path: &Path,
+    protected_paths: &HashSet<PathBuf>,
+    policy: WorktreePrunePolicy,
+    dry_run: bool,
+) -> Result<WorktreePruneReport, GitError> {
+    prune_stale_worktree_metadata(repo)?;
+    let default_branch = get_default_branch(repo)?;
+    let states = if policy.remove_unprotected {
+        list_worktrees_local(repo)?.1
+    } else {
+        list_worktrees(repo)?
+    };
+    let mut report = WorktreePruneReport::default();
+
+    for state in states {
+        if state.path == current_path
+            || state.branch.as_deref() == Some(&default_branch)
+            || path_is_protected(&state.path, protected_paths)
+        {
+            continue;
+        }
+        if state.dirty && state.prunable && !policy.remove_unprotected {
+            report.retained_dirty.push(state.path.clone());
+            continue;
+        }
+        let Some(reason) = worktree_prune_reason(&state, policy) else {
+            continue;
+        };
+        report.candidates.push(WorktreePruneTarget {
+            branch: state.branch,
+            path: state.path,
+            reason,
+        });
+    }
+
+    if dry_run {
+        return Ok(report);
+    }
+
+    for target in report.candidates.clone() {
+        match remove_worktree_target(repo, &default_branch, &target) {
+            Ok(()) => report.removed.push(target),
+            Err(error) => report.failed.push(WorktreePruneFailure {
+                target,
+                error: error.to_string(),
+            }),
+        }
+    }
+    Ok(report)
+}
+
+fn targeted_prune(
+    repo: &Path,
+    current_path: &Path,
+    path: &Path,
+    branch: Option<String>,
+    reason: WorktreePruneReason,
+    protected_paths: &HashSet<PathBuf>,
+) -> Result<TargetedPruneOutcome, GitError> {
+    let default_branch = get_default_branch(repo)?;
+    if path == current_path
+        || branch.as_deref() == Some(&default_branch)
+        || path_is_protected(path, protected_paths)
+    {
+        return Ok(TargetedPruneOutcome::Protected);
+    }
+    if !is_clean_ignoring_scratch(path)? {
+        return Ok(TargetedPruneOutcome::RetainedDirty(path.to_path_buf()));
+    }
+    let target = WorktreePruneTarget {
+        branch,
+        path: path.to_path_buf(),
+        reason,
+    };
+    remove_worktree_target(repo, &default_branch, &target)?;
+    Ok(TargetedPruneOutcome::Removed(target))
+}
+
+/// Remove one clean worktree named by a trusted remote branch event.
+pub fn prune_branch_worktree(
+    repo: &Path,
+    current_path: &Path,
+    branch: &str,
+    reason: WorktreePruneReason,
+    protected_paths: &HashSet<PathBuf>,
+) -> Result<TargetedPruneOutcome, GitError> {
+    let Some((path, branch)) = list_porcelain(repo)?
+        .into_iter()
+        .find(|(_, candidate)| candidate.as_deref() == Some(branch))
+    else {
+        return Ok(TargetedPruneOutcome::NotFound);
+    };
+    targeted_prune(repo, current_path, &path, branch, reason, protected_paths)
+}
+
+/// Remove one clean worktree whose durable owner is terminal.
+pub fn prune_terminal_worktree(
+    repo: &Path,
+    current_path: &Path,
+    path: &Path,
+    protected_paths: &HashSet<PathBuf>,
+) -> Result<TargetedPruneOutcome, GitError> {
+    let Some((path, branch)) = list_porcelain(repo)?
+        .into_iter()
+        .find(|(candidate, _)| candidate == path)
+    else {
+        return Ok(TargetedPruneOutcome::NotFound);
+    };
+    targeted_prune(
+        repo,
+        current_path,
+        &path,
+        branch,
+        WorktreePruneReason::Terminal,
+        protected_paths,
+    )
+}
+
+/// Delete abandoned atomic-write directories without touching durable logs.
+pub fn prune_abandoned_prompt_logs(
+    lf_home: &Path,
+    older_than: Duration,
+) -> std::io::Result<Vec<PathBuf>> {
+    let logs = lf_home.join("logs");
+    if !logs.exists() {
+        return Ok(Vec::new());
+    }
+    let cutoff = SystemTime::now()
+        .checked_sub(older_than)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let mut removed = Vec::new();
+    for entry in fs::read_dir(logs)? {
+        let entry = entry?;
+        let path = entry.path();
+        let is_abandoned_temp = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(".tmp"));
+        if !is_abandoned_temp || !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let modified = entry.metadata()?.modified()?;
+        if modified > cutoff {
+            continue;
+        }
+        fs::remove_dir_all(&path)?;
+        removed.push(path);
+    }
+    removed.sort();
+    Ok(removed)
+}
+
 /// Create a named sibling worktree on an author-scoped branch.
 ///
 /// This is a low-level compatibility helper for release and diagnostic
@@ -756,12 +1063,16 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_network_enrichment, plan_placement, worktree_path, PlacementError, PlacementStrategy,
+        apply_network_enrichment, plan_placement, prune_abandoned_prompt_logs,
+        prune_branch_worktree, worktree_path, worktree_prune_reason, PlacementError,
+        PlacementStrategy, TargetedPruneOutcome, WorktreePrunePolicy, WorktreePruneReason,
         WorktreeSegment, WorktreeState,
     };
     use std::collections::HashSet;
+    use std::fs;
     use std::path::Path;
     use std::process::Command;
+    use std::time::Duration;
 
     fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -844,6 +1155,140 @@ mod tests {
             "new squashed-equivalent branch should stay unprunable while fresh"
         );
         assert!(new.fresh, "new branch should remain fresh");
+    }
+
+    #[test]
+    fn automatic_prune_retains_dirty_landed_worktrees() {
+        let state = WorktreeState {
+            branch: Some("landed".to_string()),
+            path: Path::new("/tmp/repo.landed").to_path_buf(),
+            base_branch: None,
+            merged: true,
+            squash_merged: false,
+            prunable: true,
+            fresh: false,
+            dirty: true,
+            remote_gone: true,
+        };
+
+        assert_eq!(
+            worktree_prune_reason(&state, WorktreePrunePolicy::automatic()),
+            None
+        );
+        assert_eq!(
+            worktree_prune_reason(&state, WorktreePrunePolicy::manual()),
+            Some(WorktreePruneReason::Merged)
+        );
+    }
+
+    #[test]
+    fn manual_prune_selects_unmerged_dirty_worktrees() {
+        let state = WorktreeState {
+            branch: Some("abandoned".to_string()),
+            path: Path::new("/tmp/repo.abandoned").to_path_buf(),
+            base_branch: None,
+            merged: false,
+            squash_merged: false,
+            prunable: false,
+            fresh: false,
+            dirty: true,
+            remote_gone: false,
+        };
+
+        assert_eq!(
+            worktree_prune_reason(&state, WorktreePrunePolicy::automatic()),
+            None
+        );
+        assert_eq!(
+            worktree_prune_reason(&state, WorktreePrunePolicy::manual()),
+            Some(WorktreePruneReason::Unprotected)
+        );
+    }
+
+    #[test]
+    fn prompt_log_prune_only_removes_abandoned_directories() {
+        let home = tempfile::tempdir().expect("create home");
+        let logs = home.path().join("logs");
+        fs::create_dir_all(logs.join(".tmp-abandoned")).unwrap();
+        fs::write(logs.join(".tmp-abandoned/prompt.md"), "partial").unwrap();
+        fs::create_dir_all(logs.join("durable")).unwrap();
+        fs::write(logs.join(".tmp-file"), "not a directory").unwrap();
+
+        let removed = prune_abandoned_prompt_logs(home.path(), Duration::ZERO).expect("prune logs");
+
+        assert_eq!(removed, vec![logs.join(".tmp-abandoned")]);
+        assert!(!logs.join(".tmp-abandoned").exists());
+        assert!(logs.join("durable").exists());
+        assert!(logs.join(".tmp-file").exists());
+    }
+
+    #[test]
+    fn targeted_prune_retains_dirty_work_and_removes_clean_worktree() {
+        let repo = init_repo();
+        fs::write(repo.path().join("README.md"), "base").unwrap();
+        for args in [
+            ["add", "README.md"].as_slice(),
+            ["commit", "-m", "base"].as_slice(),
+        ] {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(args)
+                .output()
+                .expect("prepare repository");
+            assert!(output.status.success());
+        }
+        let worktrees = tempfile::tempdir().expect("worktree parent");
+        let path = worktrees.path().join("landed");
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["worktree", "add", "-b", "landed", path.to_str().unwrap()])
+            .output()
+            .expect("add worktree");
+        assert!(output.status.success());
+        fs::write(path.join("notes.txt"), "unsaved").unwrap();
+
+        let dirty = prune_branch_worktree(
+            repo.path(),
+            repo.path(),
+            "landed",
+            WorktreePruneReason::Merged,
+            &HashSet::new(),
+        )
+        .expect("inspect dirty worktree");
+        let TargetedPruneOutcome::RetainedDirty(retained) = dirty else {
+            panic!("dirty worktree was not retained: {dirty:?}");
+        };
+        assert_eq!(
+            retained.canonicalize().unwrap(),
+            path.canonicalize().unwrap()
+        );
+        assert!(path.exists());
+
+        fs::remove_file(path.join("notes.txt")).unwrap();
+        let protected = HashSet::from([path.clone()]);
+        let owned = prune_branch_worktree(
+            repo.path(),
+            repo.path(),
+            "landed",
+            WorktreePruneReason::Merged,
+            &protected,
+        )
+        .expect("inspect owned worktree");
+        assert_eq!(owned, TargetedPruneOutcome::Protected);
+        assert!(path.exists());
+
+        let clean = prune_branch_worktree(
+            repo.path(),
+            repo.path(),
+            "landed",
+            WorktreePruneReason::Merged,
+            &HashSet::new(),
+        )
+        .expect("prune clean worktree");
+        assert!(matches!(clean, TargetedPruneOutcome::Removed(_)));
+        assert!(!path.exists());
     }
 
     #[test]

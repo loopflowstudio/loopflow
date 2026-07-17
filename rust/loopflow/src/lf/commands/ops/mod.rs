@@ -4,8 +4,9 @@ use crate::engine::git::{current_branch, delete_local_branch, get_default_branch
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
-    create_from_placement_plan, list_worktrees, main_repo_root, plan_placement,
-    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, WorktreeSegment,
+    create_from_placement_plan, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
+    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, WorktreePrunePolicy,
+    WorktreeSegment,
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
@@ -25,9 +26,11 @@ use crate::ops::{
     release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
     LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
+use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
+use std::collections::HashSet;
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -1248,10 +1251,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
-        WtCommand::Prune {
-            dry_run,
-            include_fresh,
-        } => wt_prune(*dry_run, *include_fresh),
+        WtCommand::Prune { dry_run } => wt_prune(*dry_run),
         WtCommand::Ci { watch, logs } => wt_ci(*watch, *logs),
     }
 }
@@ -1604,79 +1604,102 @@ fn parse_shortstat(raw: &str) -> String {
     format!("+{ins} -{del} ({files} files)")
 }
 
-fn wt_prune(dry_run: bool, include_fresh: bool) -> Result<()> {
+fn wt_prune(dry_run: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let current_path = repo_root;
     let default_branch = get_default_branch(&main_repo)?;
     let _ = sync_main(&main_repo, &default_branch);
-    let prune_output = Command::new("git")
-        .arg("-C")
-        .arg(&main_repo)
-        .args(["worktree", "prune"])
-        .output()?;
-    if !prune_output.status.success() {
-        return Err(anyhow!(
-            "git worktree prune failed: {}",
-            String::from_utf8_lossy(&prune_output.stderr).trim()
-        ));
-    }
+    let protected_paths = protected_worktree_paths()?;
+    let report = prune_worktrees(
+        &main_repo,
+        &repo_root,
+        &protected_paths,
+        WorktreePrunePolicy::manual(),
+        dry_run,
+    )?;
 
-    let worktrees = list_worktrees(&main_repo)?;
-    let targets: Vec<_> = worktrees
-        .into_iter()
-        .filter(|wt| wt.path != current_path)
-        .filter(|wt| {
-            if wt.fresh {
-                // Fresh worktrees: only with --include-fresh, never if dirty
-                return include_fresh && !wt.dirty;
-            }
-            if !wt.prunable {
-                return false;
-            }
-            // Merged/squash-merged/remote-gone: prune even if dirty
-            // (landed-dirty or abandoned branch)
-            true
-        })
-        .collect();
-
-    if targets.is_empty() {
+    if report.candidates.is_empty() {
         println!("No prunable worktrees.");
         return Ok(());
     }
 
     if dry_run {
-        for wt in &targets {
-            let reason = if wt.merged {
-                "merged"
-            } else if wt.fresh {
-                "fresh"
-            } else if wt.squash_merged {
-                "squash-merged"
-            } else if wt.remote_gone {
-                "remote-gone"
-            } else {
-                "prunable"
-            };
+        for target in &report.candidates {
             println!(
                 "  {} ({reason})  {}",
-                wt.branch.as_deref().unwrap_or("detached"),
-                wt.path.display()
+                target.branch.as_deref().unwrap_or("detached"),
+                target.path.display(),
+                reason = target.reason.as_str(),
             );
         }
         return Ok(());
     }
 
-    for wt in targets {
-        crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
-        if let Some(branch) = wt.branch {
-            if branch != default_branch {
-                let _ = delete_local_branch(&main_repo, &branch);
-            }
-        }
-        println!("Removed {}", wt.path.display());
+    for target in &report.removed {
+        println!("Removed {}", target.path.display());
+    }
+    for failure in &report.failed {
+        eprintln!(
+            "Failed to remove {}: {}",
+            failure.target.path.display(),
+            failure.error
+        );
+    }
+    if !report.failed.is_empty() {
+        return Err(anyhow!(
+            "failed to remove {} prunable worktree(s)",
+            report.failed.len()
+        ));
     }
     Ok(())
+}
+
+fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
+    let mut protected = crate::lf::commands::top::running_workspace_paths();
+    let runtime = tokio::runtime::Runtime::new()?;
+    match runtime.block_on(crate::store::open_registry_for_authority()) {
+        Ok(store) => {
+            let sessions = runtime
+                .block_on(store.list_task_sessions(None))
+                .map_err(|error| {
+                    anyhow!("cannot verify Task worktree ownership before pruning: {error}")
+                })?;
+            protected.extend(
+                sessions
+                    .into_iter()
+                    .filter(|session| !session.status.is_terminal())
+                    .map(|session| session.worktree),
+            );
+        }
+        Err(RegistryUnavailable::MissingFile { .. }) => {}
+        Err(RegistryUnavailable::Unresolved { error }) => {
+            return Err(anyhow!(
+                "cannot verify Task worktree ownership before pruning: {error}"
+            ));
+        }
+        Err(RegistryUnavailable::Incompatible { path, error }) => {
+            return Err(anyhow!(
+                "cannot verify Task worktree ownership from {} before pruning: {error}",
+                path.display()
+            ));
+        }
+    }
+
+    // A development binary owns an isolated `.lf-dev` registry, but pruning is
+    // machine-wide filesystem mutation. Read the release registry without
+    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
+    let production = crate::store::production_database_path();
+    if production.exists() {
+        protected.extend(
+            crate::store::read_nonterminal_task_worktrees(&production).map_err(|error| {
+                anyhow!(
+                    "cannot verify Task worktree ownership from {} before pruning: {error}",
+                    production.display()
+                )
+            })?,
+        );
+    }
+    Ok(protected)
 }
 
 fn wt_ci(watch: bool, logs: bool) -> Result<()> {

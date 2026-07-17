@@ -1839,6 +1839,34 @@ pub(crate) async fn relaunch_inactive_process(
     launch_task_process(store, session).await
 }
 
+/// Clear a `revoked` lease whose body is provably gone, in place.
+///
+/// A no-op for every other lease state, and for a body that is present or whose
+/// absence cannot be proven — there the lease keeps doing its actual job.
+async fn release_dead_revoked_task_lease(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<()> {
+    let Some(revoked) = session
+        .latest_process
+        .as_ref()
+        .filter(|process| process.state == ChildLeaseState::Revoked)
+        .cloned()
+    else {
+        return Ok(());
+    };
+    if let Some(finished) = super::child::release_dead_revoked_child_body(
+        store,
+        &ChildRef::Task(session.id.clone()),
+        &revoked,
+    )
+    .await?
+    {
+        session.latest_process = Some(finished);
+    }
+    Ok(())
+}
+
 async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
     // Resolve the current Home lf before reserving anything, ignoring any
     // LF_CONTROL_* pin a legacy body carries: we always launch through the
@@ -1851,6 +1879,13 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         tmux_session_slug(&session.launch.issue.identifier),
         &session.id.as_str()[3..11]
     );
+    // A lease stuck at `revoked` bars every future generation — the reserve CAS
+    // accepts only NULL or `finished` — and nothing else in the system ever
+    // revisits it. Release it here when the body is provably gone, so a resume
+    // is not permanently refused by a corpse. A body still present, or one we
+    // cannot prove gone, keeps its lease and fails the reservation below with
+    // the real cause.
+    release_dead_revoked_task_lease(store, session).await?;
     let from = session.status;
     let mut launch = session.clone();
     // The reserved generation records no provenance: nothing has run yet. The
@@ -1877,6 +1912,21 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
                 current.launch.issue.identifier,
                 current.status.as_str()
             )));
+        }
+        // The reserve CAS pins the lease state as well as the status. Without
+        // this arm a lease miss is reported as "changed from waiting to
+        // waiting; retry the command" — which names the wrong thing and tells a
+        // machine to retry a command that cannot ever pass.
+        if let Some(process) = current.latest_process.as_ref() {
+            if process.state != ChildLeaseState::Finished {
+                return Err(task_error(format!(
+                    "task {} holds a `{}` lease on body generation {}; a new generation \
+                     cannot be reserved until that lease is released",
+                    current.launch.issue.identifier,
+                    process.state.as_str(),
+                    process.generation
+                )));
+            }
         }
         return Err(task_error(format!(
             "task {} changed from {} to {} during process reservation; retry the command",
@@ -2297,6 +2347,13 @@ async fn recover_stranded_task_body(
         .await
         .map_err(|error| task_error(format!("failed to read Task recovery history: {error}")))?;
     let attempts = count_recovery_attempts(&events);
+    // A lease stuck at `revoked` is not a strand recovery can plan around — the
+    // reserve CAS can never accept it, so redispatch would burn the whole
+    // attempt budget on a CAS that cannot pass. Release it first when the body
+    // is provably gone: the verdict table then reads the finished lease and its
+    // own outcome, and reaches `Redispatch` with no new plan variant. A lease
+    // that cannot be released still surfaces its true cause below.
+    release_dead_revoked_task_lease(store, task).await?;
     let plan = plan_stranded_recovery(
         task.status.body_intent(),
         true,
@@ -2480,8 +2537,15 @@ async fn recover_stalled_task_body(
             .await
             .map_err(|store_error| task_error(store_error.to_string()))?
             .ok_or_else(|| task_error("Task Session disappeared during recovery"))?;
+        // Reaching here means the reap failed *and* the body could not be proven
+        // gone, since a provable absence would have released the lease. Say that,
+        // rather than instructing a human who is not reading this field: the
+        // lease releases itself on the next reservation once the body is
+        // verifiably absent.
         let failure = format!(
-            "body generation {generation} lease was revoked after a stall but its process group could not be reaped: {error}; manual cleanup is required"
+            "body generation {generation} lease was revoked after a stall but its body could not \
+             be reaped or proven gone: {error}; the lease stays blocked and releases itself once \
+             the body is verifiably absent"
         );
         record_task_failure(store, &mut current, failure.clone(), failure).await?;
         return Err(error);
@@ -6243,6 +6307,8 @@ mod tests {
     /// resume must reconcile before it can reserve a fresh body.
     /// `outcome` is seeded at row creation because the lease outcome belongs to
     /// the revoke/finish CAS path — `update_task_session` does not persist it.
+    /// `identity` is the recorded `(pid, process_group_id)`. Both `None` leaves
+    /// the tmux name as the only evidence.
     async fn dead_lease_task(
         repo: &TestRepo,
         branch: &str,
@@ -6250,7 +6316,9 @@ mod tests {
         status: TaskSessionStatus,
         lease_state: crate::child_session::ChildLeaseState,
         outcome: Option<ChildBodyOutcome>,
+        identity: (Option<u32>, Option<u32>),
     ) -> (tempfile::TempDir, SharedStore, TaskSession) {
+        let (pid, process_group_id) = identity;
         let (home, store, base_session, _pr) = rotation_task(repo, branch, base).await;
         let now = OffsetDateTime::now_utc();
         let mut session = base_session.clone();
@@ -6265,8 +6333,8 @@ mod tests {
         session.set_status(status, "recovered from a vanished body");
         session.latest_process = Some(ChildProcessGeneration {
             generation: 1,
-            pid: None,
-            process_group_id: None,
+            pid,
+            process_group_id,
             // A name no tmux server knows, so the liveness probe reads it as dead.
             tmux_name: format!("dead-lease-{}", session.id),
             agent: session.agent.clone(),
@@ -6489,6 +6557,254 @@ mod tests {
         );
     }
 
+    /// A process group that has certainly exited: spawn one, reap it, reuse its
+    /// id. Racy only if the kernel recycles this exact pgid mid-test, which reads
+    /// as `Present` — a false failure, never a false pass.
+    fn exited_process_group() -> u32 {
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("exit 0")
+            .process_group(0)
+            .spawn()
+            .expect("spawn a short-lived process group");
+        let group = child.id();
+        child.wait().expect("reap the short-lived group");
+        group
+    }
+
+    /// ENG-4, end to end over a real kernel: a lease pinned at `revoked` by a
+    /// corpse releases itself, and the reservation path is executable **only
+    /// after** it does.
+    ///
+    /// The live unrelated pid is the load-bearing part. It models the recycled
+    /// pid a stuck lease accumulates by construction, and under an
+    /// all-identities conjunction this test cannot pass — the stranger's
+    /// `Present` would pin the lease forever, which is the very defect being
+    /// removed, rebuilt inside its own fix.
+    #[tokio::test]
+    async fn a_revoked_lease_over_a_dead_group_releases_and_only_then_reserves() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let mut stranger = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 60")
+            .spawn()
+            .expect("spawn an unrelated live process");
+        let recycled_pid = stranger.id();
+        let (_home, store, session) = dead_lease_task(
+            &repo,
+            "jack/eng-4-released",
+            &base,
+            TaskSessionStatus::Waiting,
+            crate::child_session::ChildLeaseState::Revoked,
+            Some(ChildBodyOutcome::Superseded {
+                reason: "body generation 1 stalled; recovering the same Task Session".to_string(),
+            }),
+            // The corpse that pins the lease, plus a pid that is emphatically alive.
+            (Some(recycled_pid), Some(exited_process_group())),
+        )
+        .await;
+        let target = ChildRef::Task(session.id.clone());
+        let revoked = session
+            .latest_process
+            .as_ref()
+            .expect("seeded generation")
+            .clone();
+
+        // Before the release the CAS cannot pass: `revoked` satisfies neither
+        // `IS NULL` nor `= 'finished'`. This is the permanent refusal.
+        let mut blocked = session.clone();
+        let generation = blocked.begin_generation("lf-task-eng4-blocked".to_string());
+        assert_eq!(generation, 2);
+        assert!(store
+            .reserve_task_process(&blocked, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve against a revoked lease")
+            .is_none());
+
+        let finished =
+            crate::ops::child::release_dead_revoked_child_body(&store, &target, &revoked)
+                .await
+                .expect("probe and release a lease over a dead group")
+                .expect("a provably absent body releases its lease");
+
+        stranger.kill().expect("kill the unrelated process");
+        stranger.wait().expect("reap the unrelated process");
+        assert_eq!(
+            finished.state,
+            crate::child_session::ChildLeaseState::Finished
+        );
+        assert_eq!(finished.generation, revoked.generation);
+
+        // The release is durable, and the outcome that says *why* the body
+        // stopped survives it — that tag is what the recovery verdict reads next.
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let persisted_process = persisted.latest_process.as_ref().expect("generation");
+        assert_eq!(
+            persisted_process.state,
+            crate::child_session::ChildLeaseState::Finished
+        );
+        assert!(matches!(
+            persisted_process.outcome,
+            Some(ChildBodyOutcome::Superseded { .. })
+        ));
+        // Status is untouched: releasing a lease is not a decision about work.
+        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+
+        // ...and only now can a successor reserve.
+        let mut launch = persisted.clone();
+        launch.begin_generation("lf-task-eng4-successor".to_string());
+        assert!(store
+            .reserve_task_process(&launch, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve after the release")
+            .is_some());
+    }
+
+    /// The CAS pins the generation as well as the state, so a release can only
+    /// ever settle the exact generation still awaiting reap.
+    #[tokio::test]
+    async fn only_the_matching_revoked_generation_can_finish() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, session) = dead_lease_task(
+            &repo,
+            "jack/eng-4-cas",
+            &base,
+            TaskSessionStatus::Waiting,
+            crate::child_session::ChildLeaseState::Revoked,
+            Some(ChildBodyOutcome::Superseded {
+                reason: "stalled".to_string(),
+            }),
+            (None, Some(exited_process_group())),
+        )
+        .await;
+        let target = ChildRef::Task(session.id.clone());
+        let revoked = session.latest_process.as_ref().expect("generation").clone();
+
+        // A generation that is not the revoked one is refused.
+        let mismatched = ChildProcessGeneration {
+            generation: revoked.generation + 1,
+            ..revoked.clone()
+        };
+        assert!(
+            crate::ops::child::release_dead_revoked_child_body(&store, &target, &mismatched)
+                .await
+                .is_err(),
+            "a release must not settle a generation the store is not holding"
+        );
+
+        // The real one settles once.
+        crate::ops::child::release_dead_revoked_child_body(&store, &target, &revoked)
+            .await
+            .expect("release the matching generation")
+            .expect("a provably absent body releases");
+
+        // A lease no longer at `revoked` is not releasable again — no double settle.
+        let settled = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let finished = settled.latest_process.as_ref().expect("generation").clone();
+        assert!(
+            crate::ops::child::release_dead_revoked_child_body(&store, &target, &finished)
+                .await
+                .expect("a finished lease is a no-op, not an error")
+                .is_none()
+        );
+    }
+
+    /// The other half of the boundary: a body that is still there keeps its
+    /// lease, and the refusal names the lease rather than blaming the status.
+    #[tokio::test]
+    async fn a_live_group_keeps_its_lease_and_the_refusal_names_it() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 60")
+            .process_group(0)
+            .spawn()
+            .expect("spawn a live process group");
+        let live_group = child.id();
+        let (_home, store, mut session) = dead_lease_task(
+            &repo,
+            "jack/eng-4-live",
+            &base,
+            TaskSessionStatus::Waiting,
+            crate::child_session::ChildLeaseState::Revoked,
+            Some(ChildBodyOutcome::Superseded {
+                reason: "stalled".to_string(),
+            }),
+            (Some(live_group), Some(live_group)),
+        )
+        .await;
+        let revoked = session.latest_process.as_ref().expect("generation").clone();
+
+        let released = crate::ops::child::release_dead_revoked_child_body(
+            &store,
+            &ChildRef::Task(session.id.clone()),
+            &revoked,
+        )
+        .await
+        .expect("probe a live group");
+
+        // The in-place helper the reservation boundary uses leaves it alone too.
+        super::release_dead_revoked_task_lease(&store, &mut session)
+            .await
+            .expect("a live body is not an error, it is a reason to hold");
+        child.kill().expect("kill the live group");
+        child.wait().expect("reap the live group");
+
+        assert!(released.is_none(), "a live body must keep its lease");
+        assert_eq!(
+            session.latest_process.as_ref().map(|process| process.state),
+            Some(crate::child_session::ChildLeaseState::Revoked)
+        );
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted.latest_process.map(|process| process.state),
+            Some(crate::child_session::ChildLeaseState::Revoked),
+            "the lease must still be doing its job in the store"
+        );
+    }
+
+    /// An unprovable identity is not absence. `process_target_exists` answers
+    /// `false` — "absent" — to an id that does not fit `i32`; a release that
+    /// reused it would unbar a second body over a generation nobody could ask
+    /// about.
+    #[tokio::test]
+    async fn an_unprovable_identity_does_not_release_the_lease() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let unaddressable = u32::try_from(i32::MAX).expect("i32::MAX fits u32") + 1;
+        let (_home, store, session) = dead_lease_task(
+            &repo,
+            "jack/eng-4-unprovable",
+            &base,
+            TaskSessionStatus::Waiting,
+            crate::child_session::ChildLeaseState::Revoked,
+            Some(ChildBodyOutcome::Superseded {
+                reason: "stalled".to_string(),
+            }),
+            (None, Some(unaddressable)),
+        )
+        .await;
+        let revoked = session.latest_process.as_ref().expect("generation").clone();
+
+        let released = crate::ops::child::release_dead_revoked_child_body(
+            &store,
+            &ChildRef::Task(session.id.clone()),
+            &revoked,
+        )
+        .await
+        .expect("an unprovable probe is not an error");
+
+        assert!(released.is_none());
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted.latest_process.map(|process| process.state),
+            Some(crate::child_session::ChildLeaseState::Revoked)
+        );
+    }
+
     #[tokio::test]
     async fn resume_revokes_a_dead_legacy_lease_on_a_waiting_task() {
         // W2-135: a Waiting Task still pinned by a Legacy lease whose body vanished.
@@ -6501,6 +6817,7 @@ mod tests {
             TaskSessionStatus::Waiting,
             crate::child_session::ChildLeaseState::Legacy,
             None,
+            (None, None),
         )
         .await;
 
@@ -6536,6 +6853,7 @@ mod tests {
             TaskSessionStatus::Failed,
             crate::child_session::ChildLeaseState::Active,
             None,
+            (None, None),
         )
         .await;
 

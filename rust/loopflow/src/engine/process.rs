@@ -332,9 +332,162 @@ async fn confirm_tmux_reaped(process: &crate::child_session::ChildProcessGenerat
 }
 
 #[derive(Debug, Clone, Copy)]
-enum ProcessSignalTarget {
+pub(crate) enum ProcessSignalTarget {
     Group(u32),
     Process(u32),
+}
+
+/// What a liveness question was actually answered with.
+///
+/// The third arm is the point. A reaper may fail open — concluding "nothing to
+/// kill" costs it nothing, because evidence releases the lease later anyway. A
+/// *release* must fail closed: concluding "nothing is there" when the question
+/// went unanswered unbars a second body for the Session. So an unanswered
+/// question is never a "no"; it is [`Presence::Unprovable`], and the lease holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Presence {
+    /// Positively answered: nothing is there.
+    Absent,
+    /// Positively answered: something is there.
+    Present,
+    /// The host could not be asked. Never read this as absence.
+    Unprovable,
+}
+
+/// The addressable form of a recorded identity, or `None` when it is not one.
+///
+/// Two ids are rejected because the kernel *would* answer them, for a different
+/// question than the one being asked: `kill(0, …)` signals the caller's own
+/// process group, and `kill(-1, …)` is a POSIX broadcast over every process the
+/// caller may signal — which is what `Group(1)` negates to. Reading either as
+/// absence is the worst available answer.
+fn signal_probe_id(target: ProcessSignalTarget) -> Option<i32> {
+    let raw = match target {
+        ProcessSignalTarget::Group(group) => -i32::try_from(group).ok()?,
+        ProcessSignalTarget::Process(pid) => i32::try_from(pid).ok()?,
+    };
+    if raw == 0 || raw == -1 {
+        return None;
+    }
+    Some(raw)
+}
+
+/// Classify one `kill(id, 0)` outcome: the syscall's two facts in, a verdict out.
+///
+/// Deliberately *not* [`process_target_exists`], whose `bool` folds `ESRCH` and
+/// every errno it does not model into the same `false`. That collapse is
+/// harmless for a bounded waiter, where `false` means "stop waiting", and
+/// fail-open for a release.
+fn classify_signal_probe(returned: i32, errno: Option<i32>) -> Presence {
+    if returned == 0 {
+        return Presence::Present;
+    }
+    match errno {
+        // No process answers. The one authoritative absence a signal can report.
+        Some(libc::ESRCH) => Presence::Absent,
+        // POSIX only returns EPERM for `kill(-pgid, …)` when the group had at
+        // least one member the caller lacked permission for. Something is there;
+        // that we cannot tell our body from a stranger is exactly why we block.
+        Some(libc::EPERM) => Presence::Present,
+        _ => Presence::Unprovable,
+    }
+}
+
+fn probe_signal_target(target: ProcessSignalTarget) -> Presence {
+    let Some(raw) = signal_probe_id(target) else {
+        return Presence::Unprovable;
+    };
+    // SAFETY: signal 0 performs an existence/permission probe and uses no pointers.
+    let returned = unsafe { libc::kill(raw, 0) };
+    let errno = if returned == 0 {
+        None
+    } else {
+        std::io::Error::last_os_error().raw_os_error()
+    };
+    classify_signal_probe(returned, errno)
+}
+
+/// tmux says "no server running" / "no sessions" on stderr with a non-zero exit.
+/// Anything else non-zero is a server we could not question, not an empty one.
+///
+/// Matching prose is the soft spot here, and it is soft in the safe direction: a
+/// reworded tmux message falls to `Unprovable`, the lease stays blocked, and the
+/// behavior is exactly today's. No wording change can produce a wrong release.
+fn classify_tmux_probe_failure(stderr: &str) -> Presence {
+    let stderr = stderr.to_ascii_lowercase();
+    if stderr.contains("no server running") || stderr.contains("no sessions") {
+        Presence::Absent
+    } else {
+        Presence::Unprovable
+    }
+}
+
+/// Whether the recorded tmux session is live.
+///
+/// Deliberately not [`tmux_session_exists`], which maps *any* non-zero exit to
+/// `Ok(false)` — a server that errored and a server reporting no such session
+/// are the same value there. An unspawnable tmux (including tmux absent from
+/// this process's `PATH`, which is a fact about this process, not about the
+/// body) is `Unprovable`, never absence.
+async fn probe_tmux_session(session_name: &str) -> Presence {
+    let Ok(output) = tokio::process::Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}"])
+        .output()
+        .await
+    else {
+        return Presence::Unprovable;
+    };
+    if output.status.success() {
+        // The server answered authoritatively; membership decides. The common
+        // case never reads the stderr prose at all.
+        let live = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .any(|name| name == session_name);
+        return if live {
+            Presence::Present
+        } else {
+            Presence::Absent
+        };
+    }
+    classify_tmux_probe_failure(&String::from_utf8_lossy(&output.stderr))
+}
+
+/// Whether a recorded body generation is still running on this host.
+///
+/// `Absent` requires *positive* answers: the tmux session is positively gone
+/// **and** one signal identity is positively gone. Any unanswered question
+/// anywhere demotes the verdict to `Unprovable`.
+///
+/// It reads **one** signal identity — the process group, falling back to the pid
+/// only when no group was recorded — and never both. A pid is a recycled
+/// resource, so on an old generation the recorded pid may name an unrelated
+/// stranger; vetoing on it would pin the lease forever against any future
+/// evidence, which is the very defect this probe exists to clear. Past the
+/// authoritative identity, extra vetoes add ways to be permanently wrong, not
+/// safety.
+///
+/// tmux carries the `Present` veto rather than the pid because the group is not
+/// reliably the lf body's: `observe_provider` overwrites it with the harness's
+/// own child group for opencode and codex bodies, while the lf body always runs
+/// inside its recorded tmux session. So a live session proves a live body
+/// whatever the group names, and the group still covers the reverse — tmux gone,
+/// provider group orphaned.
+pub(crate) async fn probe_child_body_presence(
+    process: &crate::child_session::ChildProcessGeneration,
+) -> Presence {
+    match probe_tmux_session(&process.tmux_name).await {
+        Presence::Present => return Presence::Present,
+        Presence::Unprovable => return Presence::Unprovable,
+        Presence::Absent => {}
+    }
+    let target = match (process.process_group_id, process.pid) {
+        (Some(group), _) => ProcessSignalTarget::Group(group),
+        (None, Some(pid)) => ProcessSignalTarget::Process(pid),
+        // Nothing to ask, and tmux already answered that the body is gone.
+        (None, None) => return Presence::Absent,
+    };
+    probe_signal_target(target)
 }
 
 fn signal_process_target(target: ProcessSignalTarget, signal: libc::c_int) -> Result<()> {
@@ -547,9 +700,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, lf_session_shell_command, reap_child_process,
+        classify_signal_probe, classify_tmux_probe_failure, extend_session_control_context,
+        lf_session_shell_command, probe_child_body_presence, reap_child_process,
         reject_detached_forwarded_profile, select_binary_override, select_current_home_binary,
-        tmux_installed,
+        signal_probe_id, tmux_installed, Presence, ProcessSignalTarget,
     };
     use crate::build_info::BuildProvenance;
     use crate::child_session::ChildExecutionContext;
@@ -691,6 +845,207 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("cannot launch a detached session"));
+    }
+
+    /// The errno table, proven over plain values.
+    ///
+    /// Deliberately not manufactured from a real privileged process: the only
+    /// way to make a real `EPERM` is a process this user may not signal, which
+    /// is a fact about the CI user rather than about the code — as root no
+    /// `EPERM` arises at all. `Group(1)` is not a fixture for it either: that
+    /// negates to `kill(-1, 0)`, a POSIX broadcast over the whole machine.
+    #[test]
+    fn classify_signal_probe_reads_each_answer_for_what_it_is() {
+        assert_eq!(classify_signal_probe(0, None), Presence::Present);
+        assert_eq!(
+            classify_signal_probe(-1, Some(libc::ESRCH)),
+            Presence::Absent
+        );
+        assert_eq!(
+            classify_signal_probe(-1, Some(libc::EPERM)),
+            Presence::Present
+        );
+        // The arm `process_target_exists` folds into `false` — i.e. "absent".
+        // Reusing that bool here would release a lease over a body the kernel
+        // refused to answer about.
+        assert_eq!(
+            classify_signal_probe(-1, Some(libc::EINVAL)),
+            Presence::Unprovable
+        );
+        assert_eq!(classify_signal_probe(-1, None), Presence::Unprovable);
+    }
+
+    /// Both ids the kernel *would* answer, for the wrong question.
+    #[test]
+    fn signal_probe_id_rejects_the_self_group_and_broadcast_ids() {
+        // kill(0, …) signals the caller's own process group.
+        assert_eq!(signal_probe_id(ProcessSignalTarget::Group(0)), None);
+        assert_eq!(signal_probe_id(ProcessSignalTarget::Process(0)), None);
+        // Group(1) negates to kill(-1, …): a broadcast over every process the
+        // caller may signal, which answers `Present` on any host at all.
+        assert_eq!(signal_probe_id(ProcessSignalTarget::Group(1)), None);
+        // A real body identity still resolves, negated for the group form.
+        assert_eq!(
+            signal_probe_id(ProcessSignalTarget::Group(4242)),
+            Some(-4242)
+        );
+        assert_eq!(
+            signal_probe_id(ProcessSignalTarget::Process(4242)),
+            Some(4242)
+        );
+    }
+
+    /// `process_target_exists` answers `false` — "absent" — to an id that does
+    /// not fit `i32`, via `map_or(0, …)`. The release must not.
+    #[test]
+    fn signal_probe_id_rejects_an_unrepresentable_id() {
+        let too_large = u32::try_from(i32::MAX).expect("i32::MAX fits u32") + 1;
+        assert_eq!(signal_probe_id(ProcessSignalTarget::Group(too_large)), None);
+        assert_eq!(
+            signal_probe_id(ProcessSignalTarget::Process(too_large)),
+            None
+        );
+    }
+
+    #[test]
+    fn only_a_recognized_tmux_failure_reads_as_absence() {
+        assert_eq!(
+            classify_tmux_probe_failure("no server running on /tmp/tmux-501/default"),
+            Presence::Absent
+        );
+        assert_eq!(
+            classify_tmux_probe_failure("no sessions\n"),
+            Presence::Absent
+        );
+        // A server we could not question is not an empty one. `tmux_session_exists`
+        // maps every one of these to `Ok(false)`.
+        assert_eq!(
+            classify_tmux_probe_failure(
+                "error connecting to /tmp/tmux-501/default (Permission denied)"
+            ),
+            Presence::Unprovable
+        );
+        assert_eq!(classify_tmux_probe_failure(""), Presence::Unprovable);
+    }
+
+    fn probe_fixture(
+        tmux_name: &str,
+        pid: Option<u32>,
+        process_group_id: Option<u32>,
+    ) -> crate::child_session::ChildProcessGeneration {
+        crate::child_session::ChildProcessGeneration {
+            generation: 1,
+            pid,
+            process_group_id,
+            tmux_name: tmux_name.to_string(),
+            agent: "fake".to_string(),
+            provider: "fake".to_string(),
+            provider_session_id: None,
+            started_at: time::OffsetDateTime::now_utc(),
+            state: crate::child_session::ChildLeaseState::Revoked,
+            outcome: None,
+            provenance: None,
+        }
+    }
+
+    /// The pid-veto regression, at the probe. A recycled pid names a stranger,
+    /// and vetoing on it would pin the lease forever against any future
+    /// evidence — the very defect the release exists to clear. With a group
+    /// recorded, the pid is never consulted.
+    #[tokio::test]
+    async fn a_live_unrelated_pid_does_not_block_absence_when_a_group_is_recorded() {
+        let mut stranger = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 60")
+            .spawn()
+            .expect("spawn an unrelated live process");
+        let live_pid = stranger.id();
+        // An absent group, plus a pid that is emphatically alive.
+        let process = probe_fixture(
+            &format!("lf-probe-absent-{live_pid}"),
+            Some(live_pid),
+            Some(absent_process_group()),
+        );
+
+        let presence = probe_child_body_presence(&process).await;
+
+        stranger.kill().expect("kill the unrelated process");
+        stranger.wait().expect("reap the unrelated process");
+        assert_eq!(presence, Presence::Absent);
+    }
+
+    /// The reverse: with no group recorded, the pid is the only identity there
+    /// is, so it decides.
+    #[tokio::test]
+    async fn a_live_pid_is_present_when_no_group_was_recorded() {
+        let mut body = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 60")
+            .spawn()
+            .expect("spawn a live body");
+        let live_pid = body.id();
+        let process = probe_fixture(&format!("lf-probe-pid-{live_pid}"), Some(live_pid), None);
+
+        let presence = probe_child_body_presence(&process).await;
+
+        body.kill().expect("kill the body");
+        body.wait().expect("reap the body");
+        assert_eq!(presence, Presence::Present);
+    }
+
+    #[tokio::test]
+    async fn a_live_process_group_is_present() {
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 60")
+            .process_group(0)
+            .spawn()
+            .expect("spawn an isolated process group");
+        let group = child.id();
+        let process = probe_fixture(&format!("lf-probe-live-{group}"), Some(group), Some(group));
+
+        let presence = probe_child_body_presence(&process).await;
+
+        child.kill().expect("kill the group leader");
+        child.wait().expect("reap the group leader");
+        assert_eq!(presence, Presence::Present);
+    }
+
+    /// An unaddressable identity is never absence, however it got recorded.
+    #[tokio::test]
+    async fn an_unaddressable_identity_is_unprovable_not_absent() {
+        let too_large = u32::try_from(i32::MAX).expect("i32::MAX fits u32") + 1;
+        for group in [0, 1, too_large] {
+            let process = probe_fixture(&format!("lf-probe-bad-{group}"), None, Some(group));
+            assert_eq!(
+                probe_child_body_presence(&process).await,
+                Presence::Unprovable,
+                "group {group} must not read as absence"
+            );
+        }
+    }
+
+    /// A generation with no signal identity at all rests on tmux alone.
+    #[tokio::test]
+    async fn a_generation_with_no_identity_is_absent_once_tmux_is_gone() {
+        let process = probe_fixture("lf-probe-no-identity-at-all", None, None);
+        assert_eq!(probe_child_body_presence(&process).await, Presence::Absent);
+    }
+
+    /// A process group that has certainly exited: spawn one, reap it, and reuse
+    /// its id. Racy only if the kernel recycles this exact pgid within the test,
+    /// which would make the probe read `Present` — a false failure, never a
+    /// false pass.
+    fn absent_process_group() -> u32 {
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg("exit 0")
+            .process_group(0)
+            .spawn()
+            .expect("spawn a short-lived process group");
+        let group = child.id();
+        child.wait().expect("reap the short-lived group");
+        group
     }
 
     #[tokio::test]

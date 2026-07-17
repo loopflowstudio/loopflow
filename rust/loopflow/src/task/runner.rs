@@ -22,8 +22,8 @@ use crate::child_session::{
 use crate::engine::wave_config::read_wave_config;
 use crate::engine::InteractionPolicy;
 use crate::harness::{
-    classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
-    ApprovalPolicy, Harness, RecoveryDecision,
+    classify_disconnect_recovery, drain_turn_failure_reason, ApprovalPolicy, Harness,
+    RecoveryDecision,
 };
 use crate::interaction_review::{
     InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
@@ -61,7 +61,12 @@ pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Res
             lease.generation
         );
     }
-    let result = run_task_session_inner(session_id.clone(), &lease).await;
+    let result = run_task_session_inner(
+        session_id.clone(),
+        &lease,
+        Box::new(crate::harness::default_create_harness),
+    )
+    .await;
     if let Err(error) = &result {
         record_unhandled_failure(&session_id, &lease, error).await;
     }
@@ -75,7 +80,11 @@ async fn owning_wave(store: &SharedStore, session: &TaskSession) -> Result<Wave>
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
 }
 
-async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLease) -> Result<()> {
+async fn run_task_session_inner(
+    session_id: TaskSessionId,
+    lease: &ChildWriteLease,
+    create_harness: crate::harness::CreateHarness,
+) -> Result<()> {
     let generation = lease.generation;
     let store: SharedStore = Arc::new(
         open_existing_store()
@@ -145,7 +154,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
             let outcome = ChildBodyOutcome::Interrupted {
                 reason: session.status_reason.clone(),
             };
-            return finish_parked(&store, &mut session, lease, None, outcome).await;
+            return finish_parked(&store, &mut session, lease, None, outcome, None).await;
         }
         flow
     };
@@ -160,7 +169,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     .await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-    let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
+    let mut harness = create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(session.provider_session_id.clone());
     store
         .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
@@ -202,7 +211,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, lease: &ChildWriteLea
     )
     .await?
     {
-        return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
+        return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop, None)
+            .await;
     }
     let mut review_start = None;
     let mut review_recovery = None;
@@ -264,6 +274,39 @@ The durable reviewer outcome is:\n{}",
     if pending.is_empty() {
         pending.extend(review_recovery);
     }
+    // Record this body's turns the way `flowloop/wave.rs` does. Without it a
+    // Task Session's spend reaches no store at all: the provider runs in this
+    // process, so no child `lf` records on its behalf.
+    let capture = flow.current().and_then(|step| {
+        let context = crate::journal::trace_capture_context(
+            Path::new(&session.worktree),
+            Some(step.flow.clone()),
+            Some(step.step.clone()),
+        )?;
+        match crate::trace::CaptureHandle::begin(
+            context,
+            prepared.turn.context.clone(),
+            crate::trace::CaptureStart {
+                provider: prepared.turn.harness.clone(),
+                model: prepared.turn.model.clone(),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: prepared.turn.context_gather_ms,
+                render_ms: prepared.turn.context_render_ms,
+                raw_provider: true,
+            },
+        ) {
+            Ok(capture) => Some(capture),
+            Err(error) => {
+                // Spend telemetry must never take a Task body down.
+                tracing::warn!(%error, "failed to establish Task trace capture");
+                None
+            }
+        }
+    });
+    if let Some(capture) = &capture {
+        capture.set_provider_session_id(session.provider_session_id.clone());
+    }
     let mut flow_turn_active = false;
     let mut provider_turn_active =
         apply_next_pending(&store, &session, lease, harness.as_mut(), &mut pending).await?;
@@ -321,7 +364,7 @@ The durable reviewer outcome is:\n{}",
                     provider_turn_active,
                     &mut pending,
                 ).await? {
-                    return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
+                    return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop, capture.as_ref()).await;
                 }
                 if !provider_turn_active {
                     provider_turn_active = apply_next_pending(
@@ -341,8 +384,12 @@ The durable reviewer outcome is:\n{}",
                         lease,
                         harness.as_mut(),
                         "provider event stream closed",
+                        capture.as_ref(),
                     ).await;
                 };
+                if let Some(capture) = &capture {
+                    capture.record_conversation(event.clone());
+                }
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != session.provider_session_id {
                     session.provider_session_id = provider_session_id;
@@ -383,6 +430,7 @@ The durable reviewer outcome is:\n{}",
                                 &wave,
                                 &reason,
                                 turn_had_durable_side_effect,
+                                capture.as_ref(),
                             )
                             .await;
                         }
@@ -413,6 +461,7 @@ The durable reviewer outcome is:\n{}",
                                 lease,
                                 Some(harness.as_mut()),
                                 outcome,
+                                capture.as_ref(),
                             )
                             .await;
                         }
@@ -449,6 +498,7 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     harness.as_mut(),
                                     stop,
+                                    capture.as_ref(),
                                 ).await;
                             }
                             if apply_next_pending(
@@ -676,6 +726,7 @@ The durable reviewer outcome is:\n{}",
                                     observed_pr.as_ref(),
                                     head_before_turn.as_deref(),
                                     status,
+                                    capture.as_ref(),
                                 )
                                 .await;
                             }
@@ -935,6 +986,7 @@ The durable reviewer outcome is:\n{}",
                                     lease,
                                     harness.as_mut(),
                                     stop,
+                                    capture.as_ref(),
                                 )
                                 .await;
                             }
@@ -974,6 +1026,7 @@ The durable reviewer outcome is:\n{}",
                             &wave,
                             &reason,
                             turn_had_durable_side_effect,
+                            capture.as_ref(),
                         )
                         .await;
                     }
@@ -1461,13 +1514,25 @@ async fn parked_on_interactive_handoff(store: &SharedStore, session: &TaskSessio
 /// End a parked body: the session status is already `Waiting` or `Blocked`, so only
 /// the process is settled and the parent stays non-terminal. The caller supplies
 /// `outcome` — only it knows whether the turn finished or was cut short.
+/// Close the body's trace capture so its last turn's usage is persisted.
+/// A capture left open leaves a `running` turn with NULL usage -- the orphan
+/// row `lf doctor` reports -- so this runs on every terminal path.
+fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
+    let Some(capture) = capture else { return };
+    if let Err(error) = capture.finish(outcome, false) {
+        tracing::warn!(%error, "failed to finish Task trace capture");
+    }
+}
+
 async fn finish_parked(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: &ChildWriteLease,
     harness: Option<&mut dyn Harness>,
     outcome: ChildBodyOutcome,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
+    finish_capture(capture, "completed");
     if let Some(harness) = harness {
         let _ = harness.stop().await;
     }
@@ -1888,7 +1953,9 @@ async fn finish_failed(
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     error: &str,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
+    finish_capture(capture, "failed");
     let _ = harness.stop().await;
     set_and_record_status(store, session, lease, TaskSessionStatus::Failed, error).await?;
     store
@@ -1955,6 +2022,7 @@ async fn finish_infra_blocked(
 /// and if it's a disconnect/hollow-body with a configured backup agent, hand
 /// the next generation to the backup instead of leaving the body failed for
 /// the supervisor to respawn the same flaky provider.
+#[allow(clippy::too_many_arguments)] // capture is a terminal-path output, not a knob
 async fn handle_body_failure(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -1963,7 +2031,9 @@ async fn handle_body_failure(
     wave: &Wave,
     reason: &str,
     turn_had_durable_side_effect: bool,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
+    finish_capture(capture, "failed");
     let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
     let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
     let decision = classify_disconnect_recovery(
@@ -2010,9 +2080,11 @@ async fn handle_body_failure(
             let non_convergence = format!(
                 "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
             );
-            finish_failed(store, session, lease, harness, &non_convergence).await
+            finish_failed(store, session, lease, harness, &non_convergence, None).await
         }
-        RecoveryDecision::AllowRetry => finish_failed(store, session, lease, harness, reason).await,
+        RecoveryDecision::AllowRetry => {
+            finish_failed(store, session, lease, harness, reason, None).await
+        }
         RecoveryDecision::Normal => {
             // Not a disconnect-class failure — a provider outage during a
             // PR/ci-fix iteration is an infrastructure blocker: keep the PR
@@ -2023,7 +2095,7 @@ async fn handle_body_failure(
                 return finish_infra_blocked(store, session, lease, harness, "provider", reason)
                     .await;
             }
-            finish_failed(store, session, lease, harness, reason).await
+            finish_failed(store, session, lease, harness, reason, None).await
         }
     }
 }
@@ -2059,7 +2131,15 @@ async fn finish_command_stop(
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     stop: CommandStop,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
+    finish_capture(
+        capture,
+        match stop {
+            CommandStop::Interrupted => "interrupted",
+            _ => "completed",
+        },
+    );
     match stop {
         CommandStop::Interrupted => {
             let _ = harness.stop().await;
@@ -2272,6 +2352,7 @@ enum CiFixVerdict {
 /// The body parks: no gate, no successor step, no PR rotation. A repair pushes to
 /// an existing branch; advancing the Task on its behalf would credit a repair as
 /// progress the Task never made.
+#[allow(clippy::too_many_arguments)] // capture is a terminal-path output, not a knob
 async fn settle_ci_fix_turn(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -2280,6 +2361,7 @@ async fn settle_ci_fix_turn(
     observed_pr: Option<&crate::task::TaskPr>,
     head_before_turn: Option<&str>,
     status: Lifecycle,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
     let (verdict, settled_status, reason) = match observed_pr
         .filter(|pr| pr.phase() == PrPhase::Open)
@@ -2351,7 +2433,7 @@ async fn settle_ci_fix_turn(
     } else {
         ChildBodyOutcome::Completed
     };
-    finish_parked(store, session, lease, None, outcome).await
+    finish_parked(store, session, lease, None, outcome, capture).await
 }
 
 /// The seed for a `ci-fix` turn: the PR the skill must repair plus the failing
@@ -3712,7 +3794,7 @@ mod tests {
         let outcome = crate::child_session::ChildBodyOutcome::Interrupted {
             reason: session.status_reason.clone(),
         };
-        super::finish_parked(&store, &mut session, &lease, None, outcome)
+        super::finish_parked(&store, &mut session, &lease, None, outcome, None)
             .await
             .unwrap();
 
@@ -3871,6 +3953,7 @@ mod tests {
             &wave,
             "opencode_disconnected: stream died mid-turn",
             true, // durable side effect → backup is the preferred path
+            None,
         )
         .await;
 

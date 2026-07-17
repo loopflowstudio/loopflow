@@ -191,40 +191,50 @@ async fn connect_account(
         ));
     }
 
+    let selected = try_access_profiles(candidates, |profile| {
+        let store = store.clone();
+        let account = account.clone();
+        async move {
+            let chrome_profile = verified_chrome_profile(&profile)?;
+            connect_managed_account(&store, provider, &account, &profile, chrome_profile).await
+        }
+    })
+    .await
+    .map_err(|failures| exhausted_access_profiles_error(provider, &account, &failures))?;
+    if raw_chrome_profile.is_some() {
+        store.upsert_access_profile(&selected).await?;
+        let mut profile_ids = store
+            .list_account_access_profiles(Some(provider), Some(&account.account_id))
+            .await?
+            .into_iter()
+            .map(|mapping| mapping.profile_id)
+            .collect::<Vec<_>>();
+        if !profile_ids.contains(&selected.id) {
+            profile_ids.push(selected.id);
+        }
+        store
+            .set_account_access_profiles(provider, &account.account_id, &profile_ids)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn try_access_profiles<F, Fut>(
+    candidates: Vec<AccessProfile>,
+    mut attempt: F,
+) -> std::result::Result<AccessProfile, Vec<String>>
+where
+    F: FnMut(AccessProfile) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
     let mut failures = Vec::new();
     for profile in candidates {
-        let chrome_profile = match verified_chrome_profile(&profile) {
-            Ok(chrome_profile) => chrome_profile,
-            Err(error) => {
-                failures.push(format!("{}: {error}", profile.id));
-                continue;
-            }
-        };
-        match connect_managed_account(&store, provider, &account, &profile, chrome_profile).await {
-            Ok(()) => {
-                if raw_chrome_profile.is_some() {
-                    store.upsert_access_profile(&profile).await?;
-                    let mut profile_ids = store
-                        .list_account_access_profiles(Some(provider), Some(&account.account_id))
-                        .await?
-                        .into_iter()
-                        .map(|mapping| mapping.profile_id)
-                        .collect::<Vec<_>>();
-                    if !profile_ids.contains(&profile.id) {
-                        profile_ids.push(profile.id.clone());
-                    }
-                    store
-                        .set_account_access_profiles(provider, &account.account_id, &profile_ids)
-                        .await?;
-                }
-                return Ok(());
-            }
+        match attempt(profile.clone()).await {
+            Ok(()) => return Ok(profile),
             Err(error) => failures.push(format!("{}: {error}", profile.id)),
         }
     }
-    Err(exhausted_access_profiles_error(
-        provider, &account, &failures,
-    ))
+    Err(failures)
 }
 
 async fn connect_managed_account(
@@ -310,20 +320,16 @@ async fn connect_managed_account(
             ))
         }
     };
-    verify_provider_login(
-        provider,
-        &account.account_id,
-        account.login_email.as_ref(),
-        login.as_deref(),
-    )?;
-    let login = login.expect("provider login verification requires an email");
-    let account_home = ensure_account_home(provider, account_id)?;
-    match provider {
-        Provider::Claude => install_claude_login(login_home.path(), &account_home)?,
-        Provider::Codex => install_codex_login(login_home.path(), &account_home)?,
-        _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
-    }
-    register_managed_account(store, provider, account_id, account_home, Some(login)).await?;
+    install_verified_managed_login(store, provider, account, login_home, login, |login_home| {
+        let account_home = ensure_account_home(provider, account_id)?;
+        match provider {
+            Provider::Claude => install_claude_login(login_home, &account_home)?,
+            Provider::Codex => install_codex_login(login_home, &account_home)?,
+            _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
+        }
+        Ok(account_home)
+    })
+    .await?;
     println!(
         "Connected {} account '{}' through profile '{}'",
         provider.display_name(),
@@ -433,6 +439,35 @@ fn verify_provider_login(
         expected_login,
         account_id
     ))
+}
+
+async fn install_verified_managed_login<F>(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+    login_home: tempfile::TempDir,
+    reported_login: Option<String>,
+    install: F,
+) -> Result<()>
+where
+    F: FnOnce(&Path) -> Result<PathBuf>,
+{
+    verify_provider_login(
+        provider,
+        &account.account_id,
+        account.login_email.as_ref(),
+        reported_login.as_deref(),
+    )?;
+    let login = reported_login.expect("provider login verification requires an email");
+    let account_home = install(login_home.path())?;
+    register_managed_account(
+        store,
+        provider,
+        &account.account_id,
+        account_home,
+        Some(login),
+    )
+    .await
 }
 
 fn acquire_managed_login_lock(
@@ -1407,31 +1442,94 @@ mod tests {
 
 #[cfg(test)]
 mod account_first_tests {
+    use std::fs;
+    use std::sync::{Arc, Mutex};
+
     use super::{
-        exhausted_access_profiles_error, verify_chrome_profile_login, verify_provider_login,
+        exhausted_access_profiles_error, install_claude_login, install_verified_managed_login,
+        try_access_profiles, verify_chrome_profile_login, verify_provider_login,
     };
     use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
     use crate::provider_account::parse_account_id;
     use crate::provider_auth::Provider;
-    use crate::store::{CredentialState, ProviderAccount, RoutingState};
+    use crate::store::{open_store, CredentialState, ProviderAccount, RoutingState, StorageConfig};
+    use tempfile::tempdir;
 
-    #[test]
-    fn provider_identity_mismatch_names_the_discarded_login() {
+    #[tokio::test]
+    async fn provider_identity_mismatch_discards_the_staged_login_without_mutation() {
+        let temp = tempdir().unwrap();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
         let account_id = parse_account_id("primary").unwrap();
         let expected = EmailAddress::parse("jackstah@gmail.com").unwrap();
-
-        let error = verify_provider_login(
-            Provider::Claude,
-            &account_id,
-            Some(&expected),
-            Some("loopflow-eng@loopflow.studio"),
+        let account_home = temp.path().join("account");
+        fs::create_dir_all(&account_home).unwrap();
+        fs::write(
+            account_home.join(".credentials.json"),
+            b"durable-credential",
         )
+        .unwrap();
+        let account = ProviderAccount {
+            provider: "claude".to_string(),
+            account_id,
+            home: Some(account_home.clone()),
+            login_email: Some(expected),
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: Some("max".to_string()),
+            paid_through: None,
+            utilization_percent: Some(12),
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: Some(7),
+            created_at: 1,
+            updated_at: 2,
+        };
+        store.upsert_provider_account(&account).await.unwrap();
+        let login_home = tempfile::Builder::new()
+            .prefix(".login-")
+            .tempdir_in(temp.path())
+            .unwrap();
+        fs::write(
+            login_home.path().join(".credentials.json"),
+            b"staged-credential",
+        )
+        .unwrap();
+        let login_path = login_home.path().to_path_buf();
+
+        let error = install_verified_managed_login(
+            &store,
+            Provider::Claude,
+            &account,
+            login_home,
+            Some("loopflow-eng@loopflow.studio".to_string()),
+            |staged_home| {
+                install_claude_login(staged_home, &account_home)?;
+                Ok(account_home.clone())
+            },
+        )
+        .await
         .unwrap_err();
 
         assert_eq!(
             error.to_string(),
             "Claude reports loopflow-eng@loopflow.studio; account 'primary' is jackstah@gmail.com. Refused: the login was discarded, 'primary' is unchanged."
         );
+        assert_eq!(
+            store
+                .get_provider_account("claude", &account.account_id)
+                .await
+                .unwrap(),
+            Some(account)
+        );
+        assert_eq!(
+            fs::read(account_home.join(".credentials.json")).unwrap(),
+            b"durable-credential"
+        );
+        assert!(!login_path.exists());
     }
 
     #[test]
@@ -1446,8 +1544,8 @@ mod account_first_tests {
         );
     }
 
-    #[test]
-    fn a_drifted_venue_is_skipped_without_poisoning_the_next_venue() {
+    #[tokio::test]
+    async fn a_drifted_venue_is_skipped_without_poisoning_the_next_venue() {
         let first = AccessProfile {
             id: ProfileId::parse("Profile 3").unwrap(),
             chrome_directory: "Profile 3".to_string(),
@@ -1463,30 +1561,35 @@ mod account_first_tests {
             updated_at: 1,
         };
 
-        let first_error = verify_chrome_profile_login(
-            &first,
-            LocalChromeProfile {
-                directory: "Profile 3".to_string(),
-                name: "Primary".to_string(),
-                login: Some("someone.else@gmail.com".to_string()),
-            },
-        )
-        .unwrap_err();
-        let selected = verify_chrome_profile_login(
-            &second,
-            LocalChromeProfile {
-                directory: "Profile 8".to_string(),
-                name: "Engineering".to_string(),
-                login: Some("loopflow-eng@loopflow.studio".to_string()),
-            },
-        )
+        let attempted = Arc::new(Mutex::new(Vec::new()));
+        let selected = try_access_profiles(vec![first, second], |profile| {
+            let attempted = attempted.clone();
+            async move {
+                attempted.lock().unwrap().push(profile.id.to_string());
+                let chrome_profile = match profile.chrome_directory.as_str() {
+                    "Profile 3" => LocalChromeProfile {
+                        directory: "Profile 3".to_string(),
+                        name: "Primary".to_string(),
+                        login: Some("someone.else@gmail.com".to_string()),
+                    },
+                    "Profile 8" => LocalChromeProfile {
+                        directory: "Profile 8".to_string(),
+                        name: "Engineering".to_string(),
+                        login: Some("loopflow-eng@loopflow.studio".to_string()),
+                    },
+                    other => panic!("unexpected access profile {other}"),
+                };
+                verify_chrome_profile_login(&profile, chrome_profile).map(|_| ())
+            }
+        })
+        .await
         .unwrap();
 
         assert_eq!(
-            first_error.to_string(),
-            "signed in as 'someone.else@gmail.com', expected 'jackstah@gmail.com'"
+            *attempted.lock().unwrap(),
+            ["Profile 3".to_string(), "Profile 8".to_string()]
         );
-        assert_eq!(selected.directory, "Profile 8");
+        assert_eq!(selected.id.as_str(), "Profile 8");
     }
 
     #[test]

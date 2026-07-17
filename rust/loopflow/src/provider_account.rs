@@ -1397,6 +1397,68 @@ mod account_first_tests {
             .is_some());
     }
 
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn explicit_account_bypasses_route_health_but_verifies_live_auth() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let claude = bin.join("claude");
+        fs::write(
+            &claude,
+            "#!/bin/sh\n: > \"$AUTH_MARKER\"\nprintf '%s\\n' '{\"loggedIn\":true,\"email\":\"selected@example.com\"}'\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = fs::metadata(&claude).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&claude, permissions).unwrap();
+        }
+        let marker = temp.path().join("auth-checked");
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "PATH",
+            "AUTH_MARKER",
+            PROVIDER_ACCOUNT_ENV,
+            FORWARDED_ACCOUNT_BUNDLE_ENV,
+            FORWARDED_ACCOUNT_STORE_ENV,
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        std::env::set_var("AUTH_MARKER", &marker);
+        std::env::set_var(PROVIDER_ACCOUNT_ENV, "selected");
+        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
+        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let mut selected = account(Provider::Claude, "selected", temp.path());
+        selected.credential_state = CredentialState::Missing;
+        selected.routing_state = RoutingState::Disabled;
+        selected.cooldown_until = Some(now_unix() + 3600);
+        fs::create_dir_all(selected.home.as_ref().unwrap()).unwrap();
+        store.upsert_provider_account(&selected).await.unwrap();
+
+        let selection = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .into_route()
+            .expect("explicit account should bypass automatic route gating");
+
+        assert_eq!(selection.account_id(), &selected.account_id);
+        assert!(marker.exists(), "explicit selection must verify live auth");
+    }
+
     #[tokio::test]
     async fn session_resume_is_pinned_by_account_only() {
         let temp = tempdir().unwrap();

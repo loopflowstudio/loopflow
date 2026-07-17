@@ -8340,6 +8340,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn completion_is_withheld_over_work_committed_past_the_merged_tip() {
         let repo = TestRepo::new();
         let branch = "jack/gate-proof";

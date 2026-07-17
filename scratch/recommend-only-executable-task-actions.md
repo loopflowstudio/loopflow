@@ -1,326 +1,355 @@
 # Recommend only executable Task actions
 
-## Problem
+## Intent
 
-`lf task status` invents its own reasons. Four evaluators answer "what can this
-Task do next", and they disagree:
+Make the existing six-action projection tell the truth about the newest Task PR.
+This is not a new taxonomy for every historical gate or body failure. The bug is
+smaller: snapshot builders erase `Merged` and `Abandoned` before
+`derive_task_actions` sees them, then status recommends `resume` even though the
+runner requires an active PR.
 
-| # | Evaluator | Where | Reads |
-|---|-----------|-------|-------|
-| 1 | `derive_task_actions` | `task/actions.rs:121` | evidence bundle: **active** PR only, review at **current phase coordinates** |
-| 2 | `task_completion_gate` | `ops/task.rs:3868` | **all required** reviews + directive incorporation + active-PR settlement |
-| 3 | resume preconditions | `ops/task.rs:4643` (`task_recovery_adoption`) + `task/runner.rs:1043` | worktree/branch, then **active PR — after the body has spawned** |
-| 4 | liveness | `ops/task.rs:4089` | tmux, but only when `status.is_process_active()` |
+The repaired boundary has four parts:
 
-Nothing forces them to agree, and they don't.
+1. Build action evidence from the newest PR, while keeping `active_pr` as the
+   separate operational identity used by PR commands.
+2. A newest abandoned PR recommends `start_next_pr`, never `resume`.
+3. Status and `resume_task_async` evaluate one no-active-PR refusal before any
+   process generation is reserved.
+4. A newest merged PR receives the existing completion gate's refusal string;
+   no new blocker enums or parallel gate evaluator are introduced.
 
-**Mechanism, W2-285 (PR #1037 merged, worktree present).** A merged PR has
-`phase() == Merged`, and `PrPhase::is_active()` is `Working | Publishing | Open`
-(`task/mod.rs:393`). So `prs.iter().find(|pr| pr.is_active())` returns `None` and
-`active_pr_phase` is `None` (`ops/task.rs:4109`, `4131`). `derive_task_actions`
-falls to `body_model`, whose `process_alive: None` arm recommends **Resume**
-("resume the parked session") and blocks Complete with the hardcoded string
-**"implementation not finished"** (`actions.rs:372`). That string is a literal,
-not a predicate — it cannot be true or false, so it is printed three lines below
-`PR 1: merged`.
+## Computable contract
 
-The supervisor then follows the recommendation. `resume_task_async` checks
-worktree adoption and PR reconcile, neither of which mentions an active PR, so
-the command is accepted and generation 3 starts. Only inside the runner, after
-the body exists, does `launch` demand an active PR and `bail!` — events
-8773-8775, `"Task Session ... has no active PR"`. A recommended action, accepted
-by the runner, spawning a body whose only possible outcome is that error.
+### User-visible outcome
 
-**Why the review gate vanished.** Evaluator 1 reads
-`interaction_review_at(session, phase_epoch, phase_iteration, phase_cursor)` —
-the review *at the current step*. W2-285's real blocker, `ir_d191bfc6…`, sits at
-an older coordinate, so the lookup returns `None` and the gate disappears from
-status entirely. Evaluator 2 reads `required_reviews_for_task`, which is
-phase-independent, finds it, and refuses correctly. Same Task, same instant, two
-answers. (`review_gate_from` is itself copy-pasted into `ops/task.rs:4070` and
-`waves.rs:1544` — the duplication is literal.)
+A supervisor reading a settled Task sees a next action that matches the command
+the lifecycle can execute. For W2-285, both human and JSON status name the
+Project review gate instead of recommending Resume; an explicit Resume returns
+the displayed no-active-PR refusal without creating a process generation. For
+W2-286, the pending directive selects the existing serial `start_next_pr` path.
+For an authoritatively abandoned latest PR, status recommends `start_next_pr`,
+never Resume. W2-284's clear merged gate still recommends and completes the
+Task.
 
-**W2-286 (PR #1032 merged, worktree self-pruned)** takes the identical path to
-the identical false string, while its true blocker is directive v2 unincorporated
-(cur=2, inc=1). Worktree present in one, gone in the other, same output — the
-worktree is not the cause. **W2-284 is the control**: its PR merged and it
-completed from the same phase, because its body was alive and completed itself.
-The gates are correct. Only the projection lies.
+### Source of truth and derived views
 
-**Recover, same class.** `process_alive` is `Some(alive)` only when
-`status.is_process_active()` — `Starting | Running` (`task/mod.rs:218`). A
-generation with a recorded `Failed` outcome under a `Failed` session yields
-`None`, and `body_model`'s `None` arm prints "body is not dead; the session is
-parked" about a body the store records as dead.
+The authoritative lifecycle record is the Task Session's persisted `TaskPr`
+history ordered by sequence, plus the persisted reviews and directive versions
+read by `task_completion_gate`. The newest PR row decides the action phase.
+Separately, the active PR row is the mutable identity used by PR operations,
+fresh CI evidence, and stack-predecessor checks.
 
-**The cost.** Two supervisors escalated healthy waits as unrecoverable wedges,
-filed a Task on a false premise, and a Wave still waits for a "terminal-restart
-failure" trigger that cannot fire — retrying produces an honest refusal, not a
-crash. A machine reading status cannot distinguish a healthy wait from a wedge,
-so it escalates. That is Developer Efficiency's first KR ("avoidable
-human-in-the-loop repair steps fall to zero") failing through a text field, and
-its second ("no Task strands on a dead body") failing through a recommendation
-that spawns doomed generations.
+`TaskActionModel` remains a pure derived projection. `TaskSessionSnapshot` and
+`TaskAttentionSnapshot` serialize that same model; clients do not recompute
+legality. `CompletionGate` remains the completion authority, and
+`no_active_pr_resume_refusal` becomes the shared Resume authority for status and
+command execution.
 
-## The demo
+### Affected surfaces and compatibility
 
-```
-$ lf task status W2-285
-  PR 1: #1037 merged
-  next: review — required human review ir_d191bfc6… (project) is completed without approval
-  complete    blocked: Task W2-285 cannot complete until its gates close: required
-              project review ir_d191bfc6… is completed without approval
-  resume      blocked: Task W2-285 has no active PR to resume; PR #1037 merged
+- `lf task status` human output and `--json` consume
+  `TaskSessionSnapshot.actions`.
+- `lf status` and `lf roadmap` consume `TaskAttentionSnapshot.actions`; the Mac
+  `WaveWorkMap`/`RoadmapView` decodes and acts on that same server projection.
+- `lf task resume` consumes the shared Resume refusal before
+  `resume_session`; `lf task complete` consumes the existing completion-gate
+  refusal; `lf pr next` keeps the serial rotation authority.
+- The wire shape and six action names do not change. Swift models, schema,
+  migrations, and DTO fixtures remain compatible; only recommended values and
+  reason strings change for settled PR evidence. Swift fixtures need changes
+  only if they encode one of those corrected settled cases.
 
-$ lf task resume W2-285
-error: Task W2-285 has no active PR to resume; PR #1037 merged
-```
+### End-to-end proof
 
-The refusal is byte-identical to the status line, it arrives in milliseconds, and
-**no generation is created**. Today the same command starts a body and kills it.
+Materialize a store-backed W2-285-shaped Task: newest PR #1037 is Merged,
+`active_pr` is absent, and the required Project review blocks completion. Read
+it through both snapshot builders and assert their `TaskActionModel` values
+name Review, block Complete with the exact `task_complete` error, and block
+Resume with the exact `task_resume` error. Invoke Resume and assert the stored
+latest generation is byte-for-byte unchanged. Render `lf task status --json`
+from the same snapshot to prove the external surface carries the model rather
+than a test-only evidence value.
 
-## Approach
+The W2-286 and W2-284 fixtures then prove the two other merged branches:
+pending directive selects an executable serial successor, while an empty gate
+still completes. A small builder-backed abandoned case proves real ordered PR
+history reaches `PrPhase::Abandoned` and selects `start_next_pr`.
 
-Delete the parallel reason-generation. One predicate per action; every surface
-renders the *same string value*, not a same-looking string.
+### Absent and error states
 
-### 1. The completion gate moves into the action model as typed blockers
+- No PR history is an invalid live-Task state, not a parked body. The shared
+  helper returns `Task <id> has no active PR to resume; no PR history recorded`,
+  Resume is unavailable, and the projection recommends NoAction rather than
+  minting a doomed generation.
+- A latest Working, Publishing, or Open PR is also the operational active PR and
+  keeps the existing body/publication/CI behavior. Settled latest evidence may
+  have no active PR by definition; that absence is the state being modeled,
+  not missing evidence.
+- A completion-gate store read failure propagates from the snapshot or command;
+  neither surface guesses that completion is available. An empty blocker list
+  is the only satisfied gate.
+- Terminal Session and abandon-intent precedence remain unchanged: both select
+  NoAction before PR routing.
+- GitHub can degrade or change between status and a mutating command. The action
+  model guarantees the durable/local preconditions covered here; the existing
+  authoritative rotation check may still refuse a later `start_next_pr` on a
+  degraded PR read. This Task does not convert external dependency failures
+  into action-model state.
 
-`CompletionGate { satisfied: bool, blockers: Vec<String> }` (`ops/task.rs:3787`)
-becomes typed and lives in `task/actions.rs`:
+### Operational boundary
 
-```rust
-pub enum CompletionBlocker {
-    Review { id: String, kind: ReviewerKind, state: ReviewBlockerState },
-    Directive { version: u32 },
-    UnsettledPr { which: String, phase: PrPhase },
-}
+Refusing Resume performs no tmux launch, subprocess spawn, lease reservation,
+or `ChildProcessGeneration` write. Snapshot construction adds only local store
+reads already available to the two builders; it performs no new network call
+and no mutation. The W2-300 range calculation remains single-evaluation during
+an invoked rotation, and status never computes the git range. Publication stays
+manual through `lf pr publish`; this Task never arms auto-merge.
 
-pub struct CompletionEvidence { pub blockers: Vec<CompletionBlocker> }
+## Evidence
 
-impl CompletionEvidence {
-    pub fn satisfied(&self) -> bool { self.blockers.is_empty() }
-    /// The one sentence both `lf task status` and `lf task complete` print.
-    pub fn refusal(&self, identifier: &str) -> Option<String>;
-}
-```
-
-`ops/task.rs` builds the blockers from the store (impure, unchanged predicates:
-`required_reviews_for_task`, `has_pending_directive`, `active_task_pr`) and hands
-the value to the pure model. `task_complete` refuses with
-`evidence.refusal(id).unwrap()`. `derive_task_actions` blocks `Complete` with
-`evidence.refusal(id).unwrap()`. Byte-identity is structural — there is one
-`format!` — not a convention two call sites are asked to honour.
-
-`satisfied` stops being a stored field: it was a cached `blockers.is_empty()`,
-i.e. a second place for the same fact to be wrong.
-
-### 2. `Complete` availability *is* the gate. Lifecycle phase never decides it
-
-`body_model` loses "implementation not finished" entirely. `Complete` is blocked
-iff `CompletionEvidence` has blockers, with the gate's own words. When the gate is
-satisfied but the Task has no merged PR, the honest reason is
-`"no merged PR to complete from"` — a fact, checkable, and never printed for
-W2-285/W2-286.
-
-### 3. Evidence carries the settled PR, not just the active one
-
-`active_pr_phase: Option<PrPhase>` conflates "no PR exists" with "the PR merged
-and is therefore no longer active". Split it:
+`task_prs` is ordered by sequence. Both snapshot builders nevertheless select
+only:
 
 ```rust
-pub active_pr_phase: Option<PrPhase>,       // unchanged: Working|Publishing|Open
-pub latest_settled_pr: Option<SettledPr>,   // NEW: the newest Merged|Abandoned PR
+let active = prs.iter().find(|pr| pr.is_active());
 ```
 
-`derive_task_actions` routes a merged latest PR to `merged_pr_model` even with no
-active PR — which is exactly W2-285's and W2-286's shape and exactly what
-`merged_completing_pr` (`ops/task.rs:3914`) already does for the advance path. The
-model stops reasoning from lifecycle phase and starts reasoning from durable PR
-state, which is the directive's finding.
+`PrPhase::is_active()` is `Working | Publishing | Open`, so the evidence sent to
+`derive_task_actions` can never contain `Merged` or `Abandoned`. The model's
+existing settled-PR arms are reachable only from hand-built tests. Real merged
+and abandoned Tasks instead fall through `active_pr_phase: None` to
+`body_model`, which recommends `resume` and prints `"implementation not
+finished"`.
 
-### 4. `Resume` requires an active PR — checked before a body exists
+W2-285 proves the recommendation is operationally false. PR #1037 had merged,
+status recommended `resume`, the command was accepted, generation 3 was
+created, and the runner then failed with `Task Session ... has no active PR`.
+W2-286 had the same projection after merged PR #1032, while its real completion
+blocker was unincorporated directive v2. W2-284 is the successful control: its
+merged PR completed while the body was still live.
 
-The runner's precondition (`runner.rs:1043`) becomes a shared function:
+The completion gate itself is already correct. `task_completion_gate` checks
+required reviews, pending directives, and unsettled PRs, and `task_complete`
+renders `CompletionGate::reason()`. The action model needs that value; it does
+not need a second representation of the blockers.
+
+## Production shape
+
+### Newest PR drives the projection
+
+In both `ops/task.rs::task_snapshot` and
+`lf/commands/waves.rs::build_task_detail`, derive two independent values from
+the same ordered history:
 
 ```rust
-/// The runner's own start precondition, evaluated without starting anything.
-pub fn resume_refusal(ev: &TaskActionEvidence) -> Option<String>
+let latest = prs.last();
+let active = prs.iter().find(|pr| pr.is_active());
 ```
 
-- `derive_task_actions` blocks `Resume` with it.
-- `resume_task_async` returns it as an error, beside `task_recovery_adoption`,
-  **before** `resume_session` mints a generation.
-- `runner.rs:1043` keeps its `bail!` as a defensive invariant, now unreachable.
-
-W2-285's doomed generation 3 cannot be created: the predicate that killed it is
-the one that now refuses the command.
-
-### 5. Recover liveness reads the recorded outcome
+`active_pr` remains `active.map(|pr| pr.id.clone())` and continues to identify
+the PR that operational commands may mutate. Only `TaskActionEvidence` switches
+from `active` to `latest` for phase/disposition routing:
 
 ```rust
-process_alive = match session.latest_process {
-    None => None,
-    Some(p) if matches!(p.outcome, Some(Failed{..} | Lost{..} | LegacyStopped{..})) => Some(false),
-    Some(_) if session.status.is_process_active() => Some(tmux_session_exists(..)),
-    Some(_) => None,
+pub struct TaskActionEvidence<'a> {
+    pub status: TaskSessionStatus,
+    pub latest_pr_phase: Option<PrPhase>,
+    pub latest_pr_after_merge: Option<AfterMerge>,
+    pub latest_pr_next_slug: Option<&'a str>,
+    pub completion_refusal: Option<&'a str>,
+    pub resume_refusal: Option<&'a str>,
+    pub pending_directive: bool,
+    // existing CI, process, predecessor, review, abandon, and progress evidence
 }
 ```
 
-`Completed | Superseded | Interrupted` are settlements, not deaths, and stay
-`None` — a body that finished its turn is not a body to recover.
+The three current `active_pr_*` evidence fields become `latest_pr_*`; there is
+no `SettledPr` wrapper. CI still comes only from `active.and_then(fresh_ci)`.
+Predecessor evidence still comes from the active PR because stack blocking is an
+operational property of the branch currently being worked.
 
-### 6. `status --json` carries the review's identity
+This makes `Merged` and `Abandoned` reachable through the real builders and
+removes those phases from the exhaustive test's synthetic-only state space.
 
-The refusal knows `ir_d191bfc6…`; status does not, while still reporting
-`action: review`. A supervisor cannot tell *which* review, or whether a Human or
-a Project owes the disposition — the difference between wait and act. So:
+### One resume refusal, before generation reservation
+
+Add one helper beside Task operations:
 
 ```rust
-pub struct ActiveReview {
-    pub id: String,
-    pub reviewer_kind: ReviewerKind,
-    pub requesting_generation: u32,
+pub(crate) fn no_active_pr_resume_refusal(
+    identifier: &str,
+    active: Option<&TaskPr>,
+    latest: Option<&TaskPr>,
+) -> Option<String>;
+```
+
+It returns `None` when an active PR exists. With no active PR it returns one
+actionable sentence, enriched by the newest PR when present, for example:
+
+```text
+Task W2-285 has no active PR to resume; pull request #1037 merged
+```
+
+The snapshot builders place that exact `String` in
+`TaskActionEvidence::resume_refusal`; `derive_task_actions` uses it for the
+blocked Resume status. `resume_task_async` re-reads the PR history after
+`reconcile_task_pr`, calls the same helper, and returns the same string before
+`resume_session`. The runner's active-PR check remains as a defensive invariant.
+
+The command-side order is:
+
+1. reconcile authoritative PR state;
+2. calculate newest and active PR;
+3. return the shared refusal, if any;
+4. only then run liveness recovery and `resume_session`.
+
+No refused resume can reserve a `ChildProcessGeneration`.
+
+### Existing completion gate feeds the merged model
+
+Keep `CompletionGate { satisfied, blockers: Vec<String> }`. Add only a formatter
+that preserves the command's current wording:
+
+```rust
+impl CompletionGate {
+    fn refusal(&self, identifier: &str) -> Option<String> {
+        (!self.satisfied).then(|| format!(
+            "Task {identifier} cannot complete until its gates close: {}",
+            self.reason(),
+        ))
+    }
 }
 ```
 
-on `TaskActionModel`, populated whenever the model reports `review`.
-`TaskSessionSnapshot` has no Swift mirror and no `tests/fixtures/dto/` entry, so
-this is a Rust-only serde addition — no DTO drift surface (CLAUDE.md's wire-type
-rule: the field is required-or-`Option`, no `#[serde(default)]`).
+`task_complete` returns this value. Each snapshot builder evaluates
+`task_completion_gate` once and lends the same value to
+`TaskActionEvidence::completion_refusal`. The merged model therefore blocks
+Complete with the command's exact refusal rather than `"implementation not
+finished"`.
 
-### 7. Delete the duplicate `review_gate_from`
+No `CompletionBlocker`, `CompletionEvidence`, review identity DTO, or second
+gate query is added.
 
-Two byte-identical copies (`ops/task.rs:4070`, `waves.rs:1544`). One, in
-`task/actions.rs`, beside the model that consumes it.
+### Settled action selection
 
-## De-risking
+For a newest abandoned PR, `derive_task_actions` recommends `StartNextPr`.
+`ensure_working_pr_with_authority` already rotates from an authoritatively
+closed abandoned predecessor, so this recommendation names the command that can
+run. Resume is blocked by the shared refusal.
 
-| Question | Finding | Impact on design |
-|----------|---------|-----------------|
-| Is the merged PR really invisible to the action model? | Yes. `PrPhase::is_active()` = `Working\|Publishing\|Open` (`task/mod.rs:393`); `task_snapshot` selects `find(\|pr\| pr.is_active())` (`ops/task.rs:4109`) → `active_pr_phase: None` → `body_model` → `"implementation not finished"` (`actions.rs:372`). | Confirms the cause is evidence selection, not the model's logic. Fix #3 is the whole routing repair. |
-| Why did W2-285's review gate not show in status? | Two different review queries. Model: `interaction_review_at(epoch, iteration, cursor)` — current step only. Gate: `required_reviews_for_task` → `list_interaction_reviews(wave)` filtered to policy `Require` — phase-independent. `ir_d191…` is at an older coordinate. | The gate's blockers must reach the model (#1). Keeping *both* queries: phase-scoped drives "answer this review now" precedence; the required set drives Complete. Collapsing to required-only would regress `Defer`-policy in-flight gates. |
-| Would refusing resume up-front break the recovery path? | No. `resume_task_async` already refuses on worktree/branch/dirty preconditions before `resume_session` (`ops/task.rs:4643-4648`). The active-PR check joins that block. `task_recovery_adoption` itself reads `active_task_pr` (line 3102) only to compare branches, and no-ops when there is none. | #4 is additive at an existing refusal point. No new failure mode. |
-| Does `lf pr next` need an active PR? | No — `ensure_working_pr_with_authority` rotates *from a settled PR* (`ops/task.rs:3531`, "Task has no settled PR to rotate from"). | `StartNextPr` stays available after a merge; only `Resume` gets the new bar. The two must not share a predicate. |
-| Is a recorded `outcome` sufficient to call a body dead? | No. `ChildBodyOutcome` (`child_session.rs:224`) has six variants; `Completed`, `Superseded`, `Interrupted` are settlements. Only `Failed`, `Lost`, `LegacyStopped` mean died-without-settling. | #5 matches on the failure variants only. A blanket `outcome.is_some() → dead` would recommend Recover for every healthy parked Task. |
-| Does the DTO change ripple to Swift/fixtures? | No. `grep -rln TaskSessionSnapshot --include=*.swift` → nothing; `tests/fixtures/dto/` has no task-snapshot fixture. | #6 is a Rust-only serde addition. No mirror to keep in lockstep. |
-| Is this already fixed in an unmerged PR? (wave memory: this Project has twice nearly rebuilt open work) | Checked all five open PRs — #1040, #1036, #1035, #1034, #1018. Only #1034 touches `ops/task.rs`, and it scopes *review authority by session id*; nothing touches `task/actions.rs`, `task_completion_gate`, or `resume_task_async`. | Proceed. Rebase awareness for #1034's `ops/task.rs` hunks only. |
-| Will `assert_coherent`'s exhaustive matrix cover the new evidence? | `every_status_pr_predecessor_and_gate_combination_is_coherent` already sweeps 8×6×4×4×4×3×3 = 27,648 cases and asserts exactly-one-available + non-empty reasons. | Extend its axes with `latest_settled_pr` and blocker presence. The invariant "recommended is available" is what stops a fix from re-introducing an unexecutable recommendation. |
+For a newest merged PR:
 
-## Alternatives considered
+- no completion refusal: preserve the existing `AfterMerge` behavior;
+- required-review refusal: recommend `Review` and put the existing gate refusal
+  on Complete; Resume remains blocked by the shared no-active-PR refusal;
+- pending-directive refusal: recommend `StartNextPr`, carrying the accepted
+  direction into the existing serial PR path rather than inventing an
+  acknowledgement bypass.
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Fix the string: `body_model` prints "PR merged; awaiting gate" instead of "implementation not finished" | One-line diff | Treats the symptom. The recommendation would still be Resume, and resume would still spawn a doomed body. The directive's correction exists precisely because v1 assumed this was reason-text-only. |
-| Make `derive_task_actions` async and query the store itself | One evaluator by construction | Destroys the pure-function property the model exists for, and every surface (`lf status`, `lf roadmap`, Mac app) would need a store handle to render a row. The evidence-bundle boundary is right; it was underfed. |
-| Let `resume` on a merged Task rotate to the next PR automatically | The supervisor's intent "keep going" gets served | Silently converts a resume into a `pr next`. Rotation is a durable mutation; wave memory records what happens when rotation fires without authoritative reconciliation (ENG-20, W2-280 split-brain). Refuse and name the command. |
-| Make `complete` bypass the gate when the PR merged | The two parked Tasks unpark immediately | Explicitly forbidden, and correctly: W2-285's gate names a real unapproved review. The gates are the only part of this system that was telling the truth. |
-| Add `Acknowledge` as a seventh action for W2-286's directive blocker | The next move becomes a literal command | A new action is a new state to keep coherent across six surfaces, and `lf task acknowledge` is already reachable. The blocker's own sentence names it. Reject: the model has six actions because six is the closed set of lifecycle moves. |
+The last case composes with W2-300's committed-follow-up rotation fix. W2-286's
+PR #1032 records `after_merge: CompleteTask`; a pending directive must authorize
+the same serial successor that W2-300 authorizes when committed work exists
+after the merged head. After rebasing, preserve W2-300's single
+`committed_follow_up_range` calculation before the completing-PR bar and use its
+result both in the bar and in the later cherry-pick. Do not replace it or call
+the range function a second time.
 
-## Key decisions
+The exact combined refusal condition is:
 
-**The gate is the predicate; the model is a projection of it.** Not "the model
-agrees with the gate" — the model *renders the gate's value*. Two strings can
-drift; one value cannot. This is why `CompletionBlocker` is typed rather than
-`Vec<String>`: the model needs to pick an owner from a blocker, and a prose
-string cannot be asked which owner it names.
+```rust
+let committed_follow_up = committed_follow_up_range(&session.worktree, &settled)?;
 
-**`satisfied` is deleted, not kept in sync.** It was `blockers.is_empty()`
-cached into a struct field — the same class of defect as the one being fixed,
-one scope smaller.
+if settled_is_completing
+    && !has_pending_directive(session)
+    && committed_follow_up.is_none()
+{
+    return Ok(None);
+}
+```
 
-**Refusal strings name the Task identifier, not the session id.** The runner's
-current `"Task Session ts_e9ea4d… has no active PR"` is addressed to nobody: a
-supervisor holds `W2-285`. One string, and it is the one a reader can act on.
+Pending direction or committed follow-up independently authorizes the existing
+serial successor. Only a completing PR with neither may settle through the
+merge-to-completion path. The action model receives the existing
+`has_pending_directive(session)` boolean only to choose the owner; W2-300's
+committed-range evidence stays command-side, and the gate's reason remains the
+single refusal value.
 
-**Both review queries survive.** Tempting to collapse to the required-review set
-and call it deduplication. It would silently drop `Defer`-policy in-flight gates
-from the Review recommendation. They answer different questions: "what must be
-answered now" vs "what bars completion". Wave memory's design-review lesson —
-verify, then prune — cuts the other way here: this one earns its place.
+## Behavioral proof
 
-**No auto-merge** (`lf pr publish`, never `lf pr land`). Wave memory: auto-merge
-answers only to CI and sails past any review disposition — the exact failure this
-Task's evidence set is made of.
+Keep three incident fixtures plus one small abandoned-state unit case:
+
+1. **W2-285 — merged + required-review blocker.** The newest PR is Merged,
+   `active_pr` is absent, Complete shows the byte-identical
+   `task_complete` refusal naming the required Project review, Resume shows the
+   shared no-active-PR refusal, and no body generation is created.
+2. **W2-286 — merged + pending directive.** The newest PR is Merged,
+   `active_pr` is absent, Complete shows the byte-identical directive-v2 gate
+   refusal, and `StartNextPr` is recommended and passes the serial rotation
+   precondition because pending direction exists.
+3. **W2-284 — merged + clear gate.** Complete remains recommended and succeeds;
+   the successful path does not get parked.
+4. **Abandoned route.** Evidence built from a real ordered PR history reaches
+   the Abandoned arm, recommends `StartNextPr`, and never recommends Resume.
+
+For every command-bearing action exercised by these fixtures, the test invokes
+the corresponding command path: a recommendation succeeds, while a blocked
+command refuses with the exact status reason. The refused-resume test compares
+the latest generation before and after the call, not merely the returned error.
+
+Sabotage checks:
+
+- change the snapshot builder back to `find(is_active)`; the three merged
+  fixtures must fail;
+- make `no_active_pr_resume_refusal` return `None`; the no-generation test must
+  fail;
+- restore the unconditional `CompleteTask` rotation bar; the W2-286 executable
+  recommendation test must fail;
+- format Complete's status reason independently; the status/command equality
+  assertion must fail.
 
 ## Scope
 
-**In scope**
-- `task/actions.rs`: typed `CompletionBlocker`/`CompletionEvidence` + `refusal()`; `latest_settled_pr` evidence; `resume_refusal`; `ActiveReview` on the model; delete `"implementation not finished"`; own `review_gate_from`.
-- `ops/task.rs`: build blockers from the store; `task_complete` renders the shared refusal; `resume_task_async` refuses before spawning; `task_snapshot` liveness from recorded outcome; populate `ActiveReview`.
-- `lf/commands/waves.rs`: two evidence builders fed the new fields; delete the duplicate `review_gate_from`.
-- `task/runner.rs`: keep the `bail!` as a defensive invariant.
-- Tests: below.
+In scope:
 
-**Out of scope**
-- Weakening either gate. Both are correct.
-- Reopening/rotating PRs, or any durable PR mutation (W2-286/#1032's territory).
-- The `lf task status` human table layout beyond the reason strings it prints.
-- Swift/Mac surfaces — no mirror exists for this snapshot.
+- `task/actions.rs`: newest-PR evidence names, settled routing, borrowed
+  completion/resume refusals, and action-model tests;
+- `ops/task.rs`: newest/active snapshot selection, shared resume refusal,
+  existing-gate formatter, pre-generation resume bar, and the pending-directive
+  composition with W2-300's single committed-follow-up rotation check;
+- `lf/commands/waves.rs`: feed newest PR and the two shared refusals into the
+  second action-evidence builder;
+- behavioral fixtures proving W2-285, W2-286, W2-284, and the abandoned arm.
+
+### Exclusions
+
+- new completion-blocker enums or a second completion evaluator;
+- status DTO additions or review identity fields;
+- recover-liveness changes;
+- moving or deduplicating `review_gate_from`;
+- weakening either completion gate;
+- auto-merge (`lf pr publish` remains the publication boundary).
+
+## Estimate
+
+Three production files, roughly 70–100 modified lines net:
+
+- `task/actions.rs`: 25–35 lines across field renames and settled routing;
+- `ops/task.rs`: 35–50 lines for the shared refusals, newest-PR builder, resume
+  bar, and the pending-directive composition with W2-300's rotation condition;
+- `lf/commands/waves.rs`: 10–15 lines to feed the same evidence.
+
+Tests are the larger half: roughly 150–220 lines, mostly store-backed fixtures
+that prove command execution/refusal and generation-count stability. No schema,
+DTO fixture, Swift, runner, or migration changes.
 
 ## Done when
 
-1. **One predicate, one string.** For every barred action, the status reason and
-   the command's refusal are the same `String` value:
-   ```
-   cargo test -p loopflow --lib task::actions
-   ```
-   A test asserts, per barred action, `model.status(a).reason ==` the error text
-   `task_complete` / `resume_task_async` actually produces.
-
-2. **`"implementation not finished"` is unreachable for a merged PR.**
-   `grep -rn "implementation not finished" rust/` returns only the test that
-   asserts a merged Task never prints it.
-
-3. **No doomed generation.** `lf task resume` on a merged Task with no active PR
-   errors before any `ChildProcessGeneration` row is written. Test asserts the
-   generation count is unchanged across the refused command — the actual W2-285
-   failure (events 8773-8775), not a proxy for it.
-
-4. **The next move names the real gate and owner.**
-   - W2-285 fixture (merged PR, required review completed-without-approval, worktree present) → recommends `review`, reason names `ir_…` and its reviewer kind; `complete` blocked with the gate's sentence.
-   - W2-286 fixture (merged PR, directive cur=2/inc=1, worktree pruned) → `complete` blocked naming directive v2; `resume` blocked naming the absent active PR.
-   - W2-284 fixture (merged PR, gate satisfied, body alive) → completes, unchanged. **The control must stay green**; a fix that parks W2-284 has broken the thing that works.
-
-5. **Recover agrees with the record.** A generation with `Failed` outcome →
-   `recover` available; `Completed`/`Superseded` → not.
-
-6. **`status --json` carries review identity.**
-   `lf task status W2-285 --json | jq '.actions.active_review.id'` → `ir_…`.
-
-7. `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test -p loopflow` to
-   completion (wave memory: a failing lib target makes cargo skip later targets;
-   green-looking is not green).
-
-### Sabotage (the test that proves the tests)
-
-Two strings generated by code I just wrote match trivially. So, per the
-directive and wave memory's sabotage rule, each guard must be shown to go red:
-
-| Sabotage | Test that must fail |
-|----------|--------------------|
-| `CompletionEvidence::refusal` returns a second, different `format!` for the model | status/command agreement, per action |
-| `latest_settled_pr` forced to `None` | W2-285 + W2-286 fixtures (recommendation reverts to Resume) |
-| `resume_refusal` returns `None` always | no-doomed-generation test |
-| `process_alive` reverts to the `is_process_active()` gate | recover-liveness test |
-
-The wave-memory precedent is exact: a value-asserting test can pass against the
-defect it names when the fixture supplies the real value (W2-280's
-`unwrap_or_default`). The agreement test is the one most at risk of passing for
-free — it is asserting `x == x` unless the two renderers are genuinely separate
-call sites reading one value. If a sabotage does not go red, the test is pinning
-the fixture and gets rewritten, not accepted.
-
-## Measure
-
-- **Before:** `lf task status W2-285` recommends `resume`; `lf task resume W2-285`
-  is accepted and creates a generation that dies with
-  `"Task Session ts_e9ea4d… has no active PR"`. Doomed generations across
-  W2-285: 1 (generation 3, events 8773-8775).
-- **After:** recommendation is `review` naming `ir_d191bfc6…`; `resume` is refused
-  in-process; doomed generations: 0.
-- **KR line:** Developer Efficiency KR 2 — "zero Sessions sit in failed awaiting a
-  manual resume, and zero durable commands are left orphaned against a dead
-  generation". A recommendation that can only produce a dead generation is that
-  KR's generator. KR 1 — "avoidable human-in-the-loop repair steps fall to zero":
-  the escalations this defect caused were the repair steps.
+- Real snapshot builders can emit Merged and Abandoned action evidence.
+- A settled Task never recommends Resume, and `lf task resume` refuses before
+  creating a generation with the same reason status reports.
+- W2-285 names its Project review gate; W2-286 names directive v2 and can enter
+  the serial next-PR path; W2-284 still completes.
+- `"implementation not finished"` is never emitted for a merged PR.
+- The existing completion gate remains authoritative and unweakened.
+- `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test -p loopflow` pass
+  to completion.

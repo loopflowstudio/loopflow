@@ -3,9 +3,9 @@ use time::OffsetDateTime;
 
 use crate::child_session::{ChildRef, ChildWriteLease};
 use crate::durable::{
-    Author, Basis, BoundarySeed, Epoch, EpochId, EpochState, ProjectId, RunId, Send, SendId,
-    SendState, SendVia, Steer, SteerId, SteerReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef,
+    Author, Basis, BoundarySeed, Epoch, EpochId, EpochState, ProjectId, RunId, RunTrigger, Send,
+    SendId, SendState, SendVia, Steer, SteerId, SteerReceipt, TaskId, ToolResponseId,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSession;
@@ -465,18 +465,32 @@ pub(crate) fn reserve_run_for_child(
     tx: &Transaction<'_>,
     target: &ChildRef,
     generation: u32,
+    lease_token: &str,
 ) -> StoreResult<RunId> {
     let work = work_for_child_in(tx, target)?;
     let epoch = current_epoch_in(tx, &work)?;
+    let home_id: String = tx.query_row(
+        "SELECT id FROM homes ORDER BY created_at LIMIT 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let trigger_json = serde_json::to_string(&RunTrigger::Input {
+        basis: epoch.current_basis.clone(),
+    })
+    .expect("run trigger must serialize");
+    let lease_hash = crate::durable::RunLeaseToken::from_child(lease_token).hash();
     let run_id = RunId::new();
     tx.execute(
         "INSERT INTO runs (
-            id, epoch_id, state, lease_generation, source_kind, source_id,
-            created_at, ended_at
-         ) VALUES (?1, ?2, 'reserved', ?3, ?4, ?5, ?6, NULL)",
+            id, epoch_id, home_id, state, trigger_json, lease_hash,
+            lease_generation, source_kind, source_id, created_at, ended_at
+         ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
         params![
             run_id.as_str(),
             epoch.id.as_str(),
+            home_id,
+            trigger_json,
+            lease_hash,
             i64::from(generation),
             target.target_kind(),
             target.target_id(),

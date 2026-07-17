@@ -1424,9 +1424,8 @@ mod tests {
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
         apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
-        // The withheld tail's own effect is what proves it stayed withheld, so
-        // this row is bait for `0.11.026_lineage_boundary`: a parent no row
-        // records, which only the tail retires.
+        // Bait for the withheld tail (`0.11.026_lineage_boundary`): a parent no
+        // row records. Its survival is what proves the tail stayed withheld.
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_orphan', 'proc_ghost', 0, 100, 'run', 'started')",
@@ -1452,9 +1451,8 @@ mod tests {
         );
     }
 
-    /// The seven dangling parents `lf doctor` found were written before the
-    /// journal refused to point at a parent it never recorded. Retire the
-    /// pointer, keep the run: the rows are evidence, the pointer is a ghost.
+    /// Retire the pointer, keep the run: the rows are evidence of real work,
+    /// only the parent id names nothing.
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();

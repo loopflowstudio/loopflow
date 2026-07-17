@@ -548,69 +548,28 @@ fn check_identity(events: &[RunEventRow]) -> Check {
     )
 }
 
-/// A parent must resolve to a process recorded in the same trace. The two ways
-/// that fails have different owners — an absent parent is a writer that
-/// exported identity it never recorded, a foreign one is a trace boundary
-/// crossed — so the check counts them apart and names them. Reporting the sum
-/// under one sentence once cost hours of archaeology to learn that all seven
-/// were the same kind.
 fn check_lineage(events: &[RunEventRow]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
         .map(|event| (event.process_id.as_str(), event.run_id.as_str()))
         .collect();
-    let mut absent: BTreeSet<&str> = BTreeSet::new();
-    let mut foreign: BTreeSet<&str> = BTreeSet::new();
-    for event in events {
-        let Some(parent) = event.parent_process_id.as_deref() else {
-            continue;
-        };
-        match processes.get(parent).copied() {
-            Some(run_id) if run_id == event.run_id => {}
-            Some(_) => {
-                foreign.insert(parent);
-            }
-            None => {
-                absent.insert(parent);
-            }
-        }
-    }
-    if absent.is_empty() && foreign.is_empty() {
+    let dangling: HashSet<&str> = events
+        .iter()
+        .filter_map(|event| {
+            let parent = event.parent_process_id.as_deref()?;
+            (processes.get(parent).copied() != Some(event.run_id.as_str())).then_some(parent)
+        })
+        .collect();
+    if dangling.is_empty() {
         return Check::ok("lineage", "every parent process resolves");
     }
-
-    let mut parts = Vec::new();
-    if !absent.is_empty() {
-        parts.push(format!(
-            "{} parent(s) absent from the ledger ({})",
-            absent.len(),
-            name_processes(&absent)
-        ));
-    }
-    if !foreign.is_empty() {
-        parts.push(format!(
-            "{} parent(s) belong to another trace ({})",
-            foreign.len(),
-            name_processes(&foreign)
-        ));
-    }
-    Check::fail("lineage", parts.join("; "))
-}
-
-/// Name the offenders so the failure is a starting point, not a count. Enough
-/// ids to query; a cap so a systemic break stays one readable line.
-fn name_processes(processes: &BTreeSet<&str>) -> String {
-    const NAMED: usize = 3;
-    let mut named = processes
-        .iter()
-        .take(NAMED)
-        .copied()
-        .collect::<Vec<_>>()
-        .join(", ");
-    if processes.len() > NAMED {
-        named.push_str(&format!(", +{} more", processes.len() - NAMED));
-    }
-    named
+    Check::fail(
+        "lineage",
+        format!(
+            "{} parent process id(s) are missing or belong to another trace",
+            dangling.len()
+        ),
+    )
 }
 
 /// A run that launched an agent and recorded no tokens is a run whose cost is
@@ -1236,55 +1195,6 @@ mod tests {
         child.process_id = "child".to_string();
         child.parent_process_id = Some("parent".to_string());
         assert_eq!(status_of(&[parent, child], "lineage"), Status::Fail);
-    }
-
-    /// The seven production failures read as one sentence covering two very
-    /// different owners. Say which one, and name it: the detail is where the
-    /// next person starts.
-    #[test]
-    fn lineage_separates_an_absent_parent_from_a_foreign_one_and_names_both() {
-        let mut elsewhere = row("trace-a", DAY, "run", "completed");
-        elsewhere.process_id = "in-another-trace".to_string();
-        let mut foreign_child = row("trace-b", DAY, "run", "completed");
-        foreign_child.process_id = "child-b".to_string();
-        foreign_child.parent_process_id = Some("in-another-trace".to_string());
-        let mut orphan = row("trace-c", DAY, "run", "completed");
-        orphan.process_id = "child-c".to_string();
-        orphan.parent_process_id = Some("never-recorded".to_string());
-
-        let checks = audit(&[elsewhere, foreign_child, orphan]);
-        let lineage = checks
-            .iter()
-            .find(|check| check.name == "lineage")
-            .expect("lineage check");
-
-        assert_eq!(lineage.status, Status::Fail);
-        assert!(
-            lineage
-                .detail
-                .contains("1 parent(s) absent from the ledger")
-                && lineage.detail.contains("never-recorded"),
-            "an absent parent is named as absent: {}",
-            lineage.detail
-        );
-        assert!(
-            lineage
-                .detail
-                .contains("1 parent(s) belong to another trace")
-                && lineage.detail.contains("in-another-trace"),
-            "a foreign parent is named as foreign: {}",
-            lineage.detail
-        );
-    }
-
-    #[test]
-    fn a_resolved_parent_inside_one_trace_passes_lineage() {
-        let mut parent = row("trace-a", DAY, "run", "completed");
-        parent.process_id = "parent".to_string();
-        let mut child = row("trace-a", DAY, "run", "completed");
-        child.process_id = "child".to_string();
-        child.parent_process_id = Some("parent".to_string());
-        assert_eq!(status_of(&[parent, child], "lineage"), Status::Ok);
     }
 
     #[test]

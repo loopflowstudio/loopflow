@@ -584,21 +584,12 @@ fn ensure_run_context(
     };
 
     // A parent process id only means "my parent within this trace, recorded in
-    // this ledger." Two ways an inherited LF_PROCESS_ID fails that:
-    //
-    //   - We minted a fresh run id, so a lingering LF_PROCESS_ID belongs to the
-    //     old trace.
-    //   - The named parent never reached this ledger. `ledger_insert` is
-    //     best-effort and exports identity either way, so a parent whose write
-    //     was refused (a development build against the production store) or
-    //     whose store has since been replaced (a `lf wave` listener outliving
-    //     it) hands children a pointer to a process that recorded nothing.
-    //
-    // Either way the pointer names a ghost, and `lf doctor`'s lineage check
-    // (rightly) calls that corruption. Drop it so the violation is unspellable
-    // at write time; the run id stays, so the trace still groups. The parent
-    // writes its own start row before it can spawn anything, so a legitimate
-    // parent is always already recorded by the time this asks.
+    // this ledger." A fresh run id makes a lingering LF_PROCESS_ID belong to
+    // the old trace; and `ledger_insert` is best-effort, so a parent whose
+    // write never landed exported its identity anyway. Both spell a parent
+    // that resolves to nothing. Drop it so the violation is unspellable at
+    // write time; the run id stays, so the trace still groups. A legitimate
+    // parent records its own start row before it can spawn anything.
     let parent_process_id = (!minted_run_id)
         .then(|| {
             std::env::var(LF_PROCESS_ID_ENV)
@@ -667,15 +658,14 @@ fn ensure_run_context(
 
 /// Whether the ledger holds a row for an inherited parent.
 ///
-/// Read-only on purpose: asking who my parent was must never migrate, back up,
-/// or take the exclusive lock a full open does — this runs on the start of
-/// every nested `lf`.
+/// Read-only on purpose: this runs at the start of every nested `lf`, and
+/// asking who my parent was must not migrate, back up, or take the exclusive
+/// lock a full open does.
 ///
 /// A ledger that isn't there records nothing, so a missing file answers
-/// `false`. Any other read failure answers `true`: it is transient or the
-/// store is unusable, in which case this process's own row is about to fail
-/// the same way and there is no ghost to prevent. Never disown a real parent
-/// over a locked store.
+/// `false`. Any other read failure answers `true` — never disown a real parent
+/// over a locked store; this process's own row is about to fail the same way,
+/// so there is no ghost to prevent.
 fn parent_is_recorded(parent: &ProcessId) -> bool {
     let path = match ledger_db_path() {
         Ok(path) if path.exists() => path,
@@ -1330,10 +1320,9 @@ mod tests {
             "main",
         );
 
-        // A real run first, so the ledger exists and holds rows. Without it
-        // the drop would prove nothing: an absent database answers "not
-        // recorded" for every id, and this test would pass with the lookup
-        // hardwired to `true`.
+        // A real run first, so the ledger exists and holds rows. Without it the
+        // drop proves nothing: an absent database answers "not recorded" for
+        // every id, and this passes with the lookup hardwired to `true`.
         super::emit(
             repo.path(),
             LfNode::Run,
@@ -1343,11 +1332,7 @@ mod tests {
         let recorded = super::current_context().expect("recorded run");
         super::clear_context();
 
-        // The production shape behind `lf doctor`'s seven dangling parents: a
-        // parent exported its identity but its ledger write never landed — a
-        // development build the production-store guard refused, or a listener
-        // that outlived the store it minted against. The trace id survives in
-        // the environment; the parent's rows do not exist anywhere.
+        // A parent that exported its identity but never reached the ledger.
         let ghost = ProcessId::new();
         std::env::set_var(super::LF_RUN_ID_ENV, recorded.run_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
@@ -1358,8 +1343,8 @@ mod tests {
 
         assert!(
             super::parent_is_recorded(&recorded.process_id),
-            "the ledger this test queries must really hold a parent, or the \
-             assertion below passes for the wrong reason"
+            "the ledger must really hold a parent, or the assertion below \
+             passes for the wrong reason"
         );
 
         assert_eq!(
@@ -1382,9 +1367,9 @@ mod tests {
         let repo = TestRepo::new();
         let fields = started_fields(&["lf".to_string(), "task".to_string()], repo.path(), "main");
 
-        // `start_lf_session_with_env` copies LF_RUN_ID/LF_PROCESS_ID into a
-        // detached tmux body that starts after its launcher has exited. The
-        // launcher's row outlives it, so the handoff still resolves.
+        // A detached body inherits LF_RUN_ID/LF_PROCESS_ID from a launcher that
+        // has already exited. The launcher's row outlives it, so the parent
+        // still resolves and must survive the drop rule.
         super::emit(
             repo.path(),
             LfNode::Run,

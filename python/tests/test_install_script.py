@@ -298,9 +298,14 @@ def test_local_use_routes_cli_app_bundled_helper_and_skills_through_rust_promoti
     log = tmp_path / "promotion.log"
     immutable = tmp_path / "immutable-lf"
 
+    # Build the bundle spec from the tmp root before patching so local() stages
+    # the app under local_bin (its default arg would otherwise bind the real ROOT).
+    spec = install.default_bundle_spec(root=root)
+
     monkeypatch.setattr(install, "ROOT", root)
     monkeypatch.setattr(install, "LOCAL_BIN", local_bin)
     monkeypatch.setattr(install, "APPLICATIONS_DIR", applications)
+    monkeypatch.setattr(install, "default_bundle_spec", lambda: spec)
     monkeypatch.setattr(install, "_resolve_install_dir", lambda: install_dir)
     monkeypatch.setattr(install, "_run_parallel_builds", lambda _skip: None)
     monkeypatch.setattr(install, "read_release_version", lambda _root: "9.9.9")

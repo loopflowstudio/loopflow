@@ -336,9 +336,13 @@ def _promote_with_candidate(
     candidate: Path,
     install_dir: Path,
     app_source: Path | None = None,
-    applications_dir: Path = APPLICATIONS_DIR,
+    applications_dir: Path | None = None,
 ) -> None:
     """Delegate every machine-global mutation to the freshly built lf."""
+    # Resolve the /Applications target at call time so the module global stays
+    # authoritative (a def-time default would freeze the real /Applications).
+    if applications_dir is None:
+        applications_dir = APPLICATIONS_DIR
     command = [
         str(candidate),
         "install",

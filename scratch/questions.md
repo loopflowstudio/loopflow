@@ -1,22 +1,26 @@
 # Open implementation notes
 
-- This pass takes the first executable cutover slice: dynamic same-Turn Send
-  outcomes, portable Steer fallback, and trace vocabulary. The Work/Epoch/Run
-  persistence migration remains a later checkpoint; adding a second dormant
-  runtime beside Sessions would violate the no-dual-architecture rule.
-- Project and Task still persist live delivery through `ChildCommand` until the
-  Steer/Send migration. The controller now keeps every live, rejected, failed,
-  or unknown Steer in the next-boundary seed, but crash-proof incorporation
-  still depends on replacing that ledger with immutable Send plus Basis.
-- Gate found that `lf usage --json` had moved to Turn rows while the Mac still
-  decoded the removed process-boundary shape. The wire now names Turn, Launch,
-  trace, and exec and is pinned by one Rust/Swift fixture. `lf top`'s parallel
-  raw Codex reader was deleted, so every additive total reads the same Turn
-  query.
-- A timed-out Codex waiter was released, but a later error response could still
-  fall through as a fresh provider failure. Timed-out request ids are now
-  retired until the late response arrives or the Launch ends; no oneshot waiter
-  remains allocated.
+- Stored Review/Handoff and ChildCommand are gone. The remaining core cut is
+  exact Run credentialing, parent attention scheduling, durable root Turn
+  output, and deletion of the Project/Task Session-body controller.
+- `ambient_run_lease` still derives authority from Session id + generation +
+  body token, and a missing legacy bundle can become User. The next pass uses
+  one opaque `LF_RUN_LEASE` whose hash locates the exact active Run and fails
+  closed.
+- Main's account-lease broker confirms the capability semantics: resolve once,
+  inherit one fixed opaque grant, prevent nested widening, and fail closed.
+  Run lease validation stays local to SQLite; it does not need another SSH
+  broker.
+- Review attention currently contains no child utterance. Persist optional root
+  assistant text on Turn and project it with current child facts into the
+  parent control seed. This avoids both a Message aggregate and an unusable
+  content-free attention signal.
+- Main's draft scripts/docs refer to a Rust `DRAFTS` registry that was not
+  landed. The six unpublished architecture migrations must become drafts, but
+  fresh test databases still need one coherent way to apply them before the
+  release cut. Do not invent a second durable migration ledger.
+- The branch has already exceeded the normalized 12,000-line deletion target.
+  Restore focused CI/control behavior tests even if the physical count rises.
 
 ## Codex steer rejections: what the live app-server proved
 

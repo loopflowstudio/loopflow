@@ -44,144 +44,96 @@ Do not add compatibility shims. Migrate stored data once, cut every caller to th
 
 ## Current implementation review
 
-Review snapshot: PR #1073 rebased onto main `276830460` on 2026-07-17. Main's
-global-promotion preflight and PM reteam changes are integrated and reviewed
-below. Canonical architecture and the next executable cut are current.
+Review snapshot: PR #1073 is rebased through main `b609c036e` on 2026-07-17,
+including fixed account authority over SSH, draft migration authoring, and the
+complete Rust global-promotion boundary.
 
-Disposition: **the durable input spine is an achieved checkpoint. Execution and
-attention are still bridged through Session/body/Review machinery, so the
-branch is not the completed core cutover.**
+Disposition: **the data model and deletion objective have crossed the midpoint;
+the executable authority cut has not.** Stored Review/Handoff and ChildCommand
+are gone. Legacy Session/body runners still execute the product and parent
+attention still starves because no scheduler consumes it.
 
 Current evidence:
 
-- authored direction is only `Steer`; `ChildDirective`, directive kinds,
-  version/incorporation fields, and authored `ChildCommand` variants are gone;
-- Steer, truth, and ToolResponse allocate one ordered Epoch revision;
-- Project and Task boundaries capture immutable Basis on the existing
-  `agent_turns`, which remains the sole Turn and additive usage store;
-- live and seeded Send are receipts only; a successful later boundary Basis
-  derives application and completion rejects stale/unapplied Basis;
-- interrupt and resume author no prose;
-- stable Project/Task Work and Epoch rows survive Session succession, while
-  exact legacy process generations import into the Run active slot;
-- terminal recovery reads its exact historical Epoch rather than pretending a
-  terminal Work still has a current open Epoch;
-- actionable CI preemption remains typed, bounded, and separate from Steer;
-- `cargo clippy -p loopflow --all-targets -- -D warnings` passes; all 1,600
-  library tests pass, including the process-global environment cases after
-  joining the shared test environment lock.
+- `InteractionReview`, `InteractiveHandoff`, `ChildCommand`, `AwaitingHuman`,
+  and `Author::Human` have zero production Rust references;
+- Review is flow + live Launch + `attention: User | Parent`, and a stale parent
+  Run cannot steer or close it;
+- transport delivery no longer clears Review attention; only close advances
+  the flow;
+- `agent_launches` carries Run/Home/account/continuation/containment/attention/
+  handback facts and `agent_turns` remains the sole Turn/usage authority;
+- Work status, Wait, Run reserve/advance/stop, direct Work controls, and typed
+  CI Run claims exist;
+- promotion and reteam fence writers through active Run/containment evidence;
+- current source is 121,613 physical Rust lines, 118,921 normalized: 12,206
+  below the architecture checkpoint and 206 below the adjusted target;
+- post-rebase `cargo check -p loopflow --all-targets` passes after restoring
+  main's `PathBuf` import. The full post-cut suite has not yet been rerun.
 
 Current state against the phases below:
 
 | Phase | Status | Evidence still missing |
 | --- | --- | --- |
-| 0. Executable spec | Complete | `docs/architecture.md` fixes current versus target truth, stored nouns, constraints, transitions, side-effect order, races, migration, research, questions, and next vertical slice |
-| 1. Work/Epoch/Basis/Home | Input spine authoritative | Stable local Work, one-open-Epoch constraint, ordered revision, Home, and terminal succession rules are live; Session ids still mediate current runtime lookup |
-| 2. Run/Launch/containment | Coherent bridge | Exact Session generations reserve/activate/stop matching Runs and migration preserves active authority; Session/body stores, guessed Home/trigger, and duplicate controllers remain |
-| 3. Steer/typed control | Authored direction complete | Steer/Send/Basis/ToolResponse are authoritative and directive storage is deleted; lifecycle `ChildCommand` and source/effect/claim machinery remain |
-| 4. Provider reconstruction | Partial | Dynamic Send outcome, durable Send, fixed Basis, and provider conformance exist; fallback Launch routing and transcript-free reconstruction remain |
-| 5. Review/attention/status | Redesigned, not implemented | Review is now an interactive flow interval derived from Launch + attention; `InteractionReview`, Handoff, dispositions, and parent starvation remain in code |
-| 6. Turn usage | Store/query complete | Every additive reader uses Turn spend; OpenCode still needs one end-to-end usage producer/parser |
-| 7. Purge | 3,078 normalized code lines removed | Directive and authored-command surface is gone; 8,922 lines remain to reach 120,220 physical / 119,127 normalized by deleting Review/Handoff and duplicate Session controllers |
+| 0. Executable spec | Complete, refreshed | Current/target truth includes the deleted aggregates, exact Run lease, durable root Turn output, account-lease lesson, and migration frontier |
+| 1. Work/Epoch/Basis/Home | Durable bridge | Stable Work, one-open-Epoch, revision, and Home exist; Session ids still mediate executor lookup and guessed Home/trigger remain |
+| 2. Run/Launch/containment | Stored, not sole executor | Shared transitions and Launch facts exist; Project/Task Session runners still reserve/revoke/reap and reconstruct Run lease from body generation |
+| 3. Steer/typed control | Authoritative | Steer/Send/Basis/ToolResponse and typed CI remain; ChildCommand/directive storage is deleted; exact agent credential entrypoint remains |
+| 4. Provider reconstruction | Partial | Dynamic Send, fixed Basis, and conformance exist; root output, fallback Launch routing, and transcript-free recovery proof remain |
+| 5. Review/attention/status | Data shape complete, scheduling absent | Review/Handoff storage is deleted and attention query exists; parent control lane, durable child output, and playhead preemption/resume remain |
+| 6. Turn usage | Store/query complete | Every additive reader uses Turn spend; OpenCode still needs one producer/parser |
+| 7. Purge | Size target exceeded | 12,206 normalized lines removed; Session/body process authority and duplicate runners remain, and focused behavioral tests must replace deleted suites |
 
-### Findings that change the next implementation step
+### Findings that determine the next pass
 
-1. **Fixed: a confirmed live send remains crash-durable.** The immutable Steer
-   stays outstanding after `SendVia::Live`; only a later successful boundary
-   Basis derives application. Crash-after-Sent therefore reconstructs the same
-   seed instead of depending on an anonymous in-memory pending input.
-2. **Fixed: live Steer is completion-fenced.** Every observed root boundary
-   stores immutable starting Basis on `agent_turns`. Live delivery never
-   advances it, and completion validates both current and successfully applied
-   Basis.
-3. **Fixed: narrow typed tool response persists first.** Generic Decide and
-   Approval APIs are gone. `ToolResponse` allocates its Epoch revision and
-   persists before any optional provider notification.
-4. **The provider fixture was descriptive, not conformance.** Its test asserted literals in `control_contract.json` and never invoked an adapter or controller. **Done (2026-07-17):** the fixture is deleted and the four shapes drive `absorb_commands`/`apply_input`, asserting that each still seeds the next boundary and never interrupts.
-5. **Codex outcome cleanup is incomplete. Done (2026-07-17).** A `PendingReply` guard releases the waiter on every terminal path, and rejections are typed from probed live evidence (see `scratch/questions.md`): codex 0.144.5 answers *every* rejection with `-32600`, so only the message separates the expected Turn-boundary race from a Loopflow bug. Timeout, late response, disconnect, mismatched Turn, and explicit rejection are covered; each test was verified to fail against the pre-fix behavior. The `Sent` response shape remains assumed rather than observed.
-6. **The usage store/query cutover is done.** `agent_turns` is the only additive grain; Rust, Swift, CLI, Doctor, and monitoring use the shared Turn-spend wire. Cache-only, explicit zero, and absent usage remain distinct.
-7. **One table still has two parser/producer paths.** Legacy agent launches update Turn usage through `StreamEvent::Usage`; harness launches use `ConversationEvent::TurnUsage`. Both reach `agent_turns`, but W2-289 remains possible until one normalization function/event owns replacement-versus-accumulation semantics.
-8. **Fixed during gate:** `lf top` no longer reads raw Codex session logs or conditionally suppresses persisted Codex Turns. Its throughput chart reads the same `turn_spend_since` query as `lf usage`; live process inspection remains a separate non-spend signal.
-9. **Fixed during the usage cutover:** `lf doctor`'s “agent ran but no usage was captured” check moved from `run_events` to terminal Launch/Turn evidence. It reports absent provider usage without converting it to zero, which is how the remaining OpenCode parser gap stays visible.
-10. **Project-owned Review is the common dogfood bottleneck.** A deferred interactive Task step creates `InteractionReview`, leaves the Task harness alive but idle, and requires the current Project Session lease to exchange messages and record a disposition. The Project sees it through its normal observation queue, behind its own work, and cannot even start while canonical main is dirty. Authority is preserved by starving the child.
-11. **Review is conversation, not decision state.** A Review may be critique, questions, brainstorming, or direction. It is the interval where a flow's current step is interactive and its live Launch owes attention to `User | Parent(WorkRef)`. Steers and Turns occur inside it. Close advances the flow; it carries no approval or changes-requested disposition. There is no Review row or `ReviewId`.
-12. **Parent responsiveness is scheduler behavior.** Wave and Project must drain direct User interaction, awaiting child Reviews, and other unblocking child evidence before beginning their own background flow. Child attention may explicitly interrupt a non-steerable background Turn; this does not change plain Steer semantics.
-13. **`User` replaces `Human`.** User means an authenticated external Loopflow client, whether a person in Swift/CLI or another system's agent. Internal Loopflow authority remains `Run(RunId)`.
-14. **The first large deletion paid down 3,078 code lines.** Before the latest
-    main rebase, `tokei` reported 128,049 Rust code lines against the 131,127
-    architecture checkpoint. Main then added 1,093 orthogonal lines, making the
-    physical count 129,142 without changing the architecture delta. The next
-    pass must delete another 8,922 to reach 120,220 physical / 119,127
-    normalized by removing Review/Handoff and duplicate Session control, not by
-    compressing tests or charging unrelated upstream code to this design.
-15. **Work is the long-lived logical server; its process is not.** One generic
-    Home runtime serves stable Wave, Project, and Task Work. Each kind supplies
-    domain policy through an explicit `WorkRef` match, while Run reservation,
-    provider delivery, containment, recovery, and status are shared. A Work is
-    addressable with no active Run or OS process.
-16. **The flow agent is the reviewer.** The agent already running a Wave or
-    Project flow must receive child attention in its concurrent control input.
-    Live delivery or interrupt-and-seed preempts the durable background
-    playhead; no reviewer Launch, secondary agent, Review inbox, or end-of-flow
-    wait may stand between a child and its parent.
-17. **Turn and Launch already have authorities.** `agent_turns` is the sole
-    observed Turn and usage store and `agent_launches` is its Launch lineage.
-    Extend or replace those tables in place. A second `turns` or shadow Launch
-    ledger recreates the normalization debt this architecture exists to remove.
-18. **Main proved preemption, but only as a Task/CI special case.** PRs #1063
-    and #1064 settle a bounded `ci-fix` turn before the parent lifecycle loop
-    and interrupt a parked Review exactly once for a current actionable
-    incident. This is the executable seed for the generic control lane. Preserve
-    the behavior; delete the CI-only cursor/ordering hook after control input and
-    background playhead are separate facts.
-19. **New input does not always reserve a Run.** A CI incident or child Review
-    may arrive while its Work already has active execution authority. It joins
-    that Run's control lane and becomes the next boundary; only an idle Work may
-    resolve a Wait and reserve a Run. Otherwise the target would recreate the
-    overlapping-writer bug while claiming active-slot uniqueness.
-20. **`phase_epoch` is a legacy review fence, not product Epoch.** Main now
-    ignores superseded review dispositions by phase/gate epoch. The normalized
-    model makes that bug impossible with current flow position plus Basis; do
-    not migrate `phase_epoch` or old dispositions into product Epoch history.
-21. **Containment absence already has the right fail-closed evidence.** Main's
-    revoked-body recovery returns `Absent | Present | Unprovable` and releases
-    only on `Absent`, preferring tmux and process-group evidence over recyclable
-    pids. Move that evidence into generic Run stop/recovery instead of replacing
-    it with boolean liveness.
-22. **Accounts are Launch route identity.** Main routes directly by provider
-    account; access profiles are verified login venues owned by accounts.
-    Preserve migration 0.11.027 before spend/input migrations and never put a
-    profile id back on Work, Run, or Launch as the account identity.
-23. **Selection evidence and settlement evidence have different freshness.**
-    Main PR #1070 now records both `failed_head_sha` and first-write
-    `repaired_head_sha`, settling from a fresh GitHub read rather than the warm
-    snapshot that triggered ci-fix. Keep that distinction in typed evidence: a
-    cached observation may choose control work but cannot prove its effect.
-24. **The current Run reservation bridge still guesses facts.**
-    `reserve_run_for_child` selects the first Home row and labels every child
-    generation `RunTrigger::Input`. That is enough to satisfy new NOT NULL
-    columns, not enough to establish authority or provenance. The Home runtime
-    must supply its own stable Home identity and the caller must persist the
-    actual trigger; row order and a generic Input label cannot survive the cut.
-25. **Main's global-promotion preflight is a new Session-lease consumer.** PR
-    #1074 correctly refuses binary replacement while a writer is live and
-    fails closed on unreadable containment evidence. Its current query names
-    `task_sessions` and `project_sessions`. Preserve the operational fence, but
-    make live Run plus containment the evidence and delete `LiveBody`'s Session
-    id/generation shape during the controller cutover.
-26. **Main's PM reteam fence validates Run authority, not Session status.** PR
-    #1078 moves every Linear issue before narrowing its Project and refuses the
-    whole mutation while any Task process may still write the old identifier.
-    This does not change the domain design. It adds another exact migration
-    caller: classify an external identity change from current Work binding plus
-    active Run authority, then reconcile the stable Work after the move. Do not
-    carry `TaskSessionStatus` or `ChildLeaseState` into the target API.
+1. **Exact Run authority is still a Session projection.**
+   `ambient_run_lease` reads Project/Task Session id, generation, and token;
+   `RunLeaseToken::from_child` hashes the legacy token. Missing credentials can
+   fall through to User. One opaque `LF_RUN_LEASE` must locate the exact active
+   Run by hash and fail closed.
+2. **Main supplied the right capability pattern.** Account authority is
+   resolved once, inherited through one opaque handle, cannot be widened by a
+   nested `lf`, and fails closed when its broker expires. Run authority should
+   copy those semantics, not its 1,400-line SSH transport: the local store is
+   the Run capability verifier.
+3. **Attention without child content cannot support Review.** The new Review
+   projection identifies Work/Launch/Basis/route but not what the child said.
+   Persist optional observed root assistant text on Turn and render it with
+   current child domain facts into the parent seed. This is Turn output, not a
+   Message or Review prompt aggregate.
+4. **Parent responsiveness is still wholly unimplemented.**
+   `child_attention(parent)` has no caller outside tests. Wave/Project loops do
+   not check it before background work, do not interrupt seed-only Turns, and
+   do not preserve/resume background playhead around control.
+5. **Session/body remains the real controller.** Project and Task still have
+   separate statuses, generation leases, process reservation, revocation,
+   reaping, successor, and settlement paths. Run mirrors them. The next pass
+   must delete the bridge rather than add another adapter.
+6. **The LOC goal is no longer the forcing function.** It is already exceeded
+   by 206 lines after normalizing main additions. Do not delete tests for size.
+   The removed 2,767-line CI suite needs focused proofs for exact Run claim,
+   one-shot preemption, non-actionable evidence, and fresh repaired-head
+   settlement.
+7. **Main's migration model changes branch hygiene.** Six unpublished
+   canonical migrations on this branch must become dependency-ordered drafts
+   before landing. The landed docs/scripts refer to a Rust `DRAFTS` registry
+   that does not exist, so the cut must resolve how fresh test databases apply
+   drafts without inventing a second durable ledger.
+8. **The post-rebase install code reinforces the operational boundary.** All
+   global mutations now pass through Rust promotion and its active-Run fence.
+   Our semantic conflict resolution is correct: it keeps the complete promotion
+   flow and replaces only Session-shaped live-writer evidence with Run evidence.
+9. **Selection and settlement freshness remain distinct.** Cached CI evidence
+   may choose a repair boundary; only a fresh post-repair observation records
+   the immutable repaired head.
+10. **Provider portability still means one outcome, not one transport.** Codex
+    may live-send; Claude/OpenCode/TUI may seed or interrupt. Parent priority is
+    controller policy, while plain Steer never promises or implies interrupt.
 
-No more behavior should be adapted around `ChildCommand`, `InteractionReview`,
-or Handoff. Stable Epoch revision, Steer/Send, fixed Basis, and completion
-fencing are achieved. The next checkpoint cuts Review/attention, responsive
-parent scheduling, Run/Launch control, and legacy deletion together. No
-intermediate state counts as achieved merely because it compiles.
+No behavior should be adapted around deleted aggregates. The next checkpoint
+finishes exact Run credentialing, parent control scheduling, durable child
+output, Session/body controller deletion, and focused behavior proof together.
+Compilation alone is not acceptance.
 
 ## Target contract
 
@@ -339,7 +291,7 @@ Every Launch runs in a Run-owned process group or tmux containment unit. Run end
 
 These are contract changes, not migration accidents.
 
-| Area | Current behavior | New behavior |
+| Area | Legacy behavior | Target behavior |
 | --- | --- | --- |
 | Project/Task identity | Successor Sessions can become the new control target | Stable Work id remains the target; terminal restart creates an Epoch |
 | Direction | FollowUp, Steer, Interrupt replacement, Resume message, Decide, CI-fix, and directives share a command ledger | Only authored direction and Review conversation are Steer; narrow tool responses and evidence stay typed; lifecycle uses controls |
@@ -430,25 +382,25 @@ Some failures cannot be made impossible by data shape: a provider can lie, a mac
 ### Execution policy: one large authority cut
 
 The numbered phases below are proof groups and review aids, not separate
-`lf code` run boundaries. The next run owns Phases 1–3 and 5 plus the associated
-Phase 7 purge as one interconnected replacement. It may reuse the paused
-working-tree research, but it may not preserve a dormant target model beside
-Session/body/command authority.
+`lf code` run boundaries. The next run finishes Phases 2, 4, and 5 plus the
+remaining Phase 7 purge as one interconnected replacement. Work/Epoch/Basis,
+Steer/typed control, Review data shape, and the size reduction are achieved;
+do not reimplement them beside Session/body authority.
 
 The pass is accepted only when:
 
 - Wave, Project, and Task execute through the new controller;
 - Review and parent priority execute through the same Steer/Launch path;
-- the old writers, readers, DTOs, commands, and schemas in the deletion ledger
-  are removed;
-- Rust is at most 120,220 physical lines on current main / 119,127 normalized,
+- the remaining Session/body writers, readers, DTOs, env vars, and schemas in
+  the deletion ledger are removed;
+- Rust remains at most 121,819 physical lines on current main / 119,127 normalized,
   a 12,000-line architecture reduction from the additive checkpoint;
 - any retained legacy-looking code names a distinct truth and is recorded here
   before acceptance.
 
-Do not commit a types-only, tables-only, dual-write, or compatibility checkpoint
-as architectural progress. If the large pass stops, update the design with the
-precise blocker and resume the same cut.
+Do not commit another types-only, tables-only, dual-write, or compatibility
+checkpoint as architectural progress. If the large pass stops, update the
+design with the precise blocker and resume the same cut.
 
 ### A. Close the current foundation slices
 
@@ -546,6 +498,8 @@ Implement one controller shared by Wave, Project, and Task:
   requiring one resident OS process per Work;
 - `reserve`, `advance`, and `stop` transactions;
 - one active Run uniqueness constraint and opaque lease;
+- one inherited `LF_RUN_LEASE` capability whose hash locates the exact active
+  Run; no Session id, generation, Work id, or Author is supplied by the caller;
 - immutable triggers and Run lineage;
 - Launch route, state, optional resume token, and containment identity;
 - optional Turn and low-level Exec receipts;
@@ -558,6 +512,8 @@ Move Task/Project-specific closure rules and flow selection behind typed boundar
 Done when:
 
 - the same transition suite runs against Wave, Project, and Task Work;
+- malformed, missing, stale, and stopped in-Run credentials fail closed and
+  never become User context;
 - a Steer addressed while Work has no Run remains durable and causes the Home
   runtime to reserve one without changing Work identity;
 - a CI incident or child Review addressed while a Run is active becomes that
@@ -651,6 +607,8 @@ Replace interactive records with one Review projection:
 
 - current interactive flow + active Launch + `attention: User | Parent` means
   Review is open;
+- optional root assistant output is stored on Turn and projected with current
+  Work evidence into the parent seed; no Review prompt or Message row exists;
 - one Review contains any number of Steers and provider Turns;
 - Stable Work routes Steer/close; `LaunchId` opens a User surface; Basis fences
   stale close;
@@ -677,6 +635,8 @@ Done when:
 - closing Swift does not end the TUI Launch; reopening Swift can attach to it;
 - killing tmux removes attention and creates recovery evidence;
 - parent-routed Review never appears in the User attention queue;
+- the parent seed contains enough durable child output and current evidence to
+  conduct critique, questions, or brainstorming without a provider transcript;
 - Project and Wave never start a background Turn while child Review attention
   is queued;
 - one provider identity conducts the background flow and child interaction;
@@ -736,58 +696,31 @@ Done when:
 - provider smoke tests pass where credentials are available without exposing secrets;
 - a copied dogfood database survives migration and recovery drills;
 - no dual read/write, fallback parser, old enum case, or compatibility DTO remains;
-- Rust code is at most 120,220 physical lines on current main / 119,127
+- Rust code is at most 121,819 physical lines on current main / 119,127
   normalized: 12,000 below the additive architecture checkpoint;
 - no shortfall is accepted as a completed core cutover.
 
 ## Deletion ledger
 
-### Delete as complete concepts
+### Already deleted; do not recreate
 
-These files implement the Interaction/Handoff decision aggregate that Review
-projection and Launch replace. They total 4,803 physical lines today. Preserve
-useful tmux/app-opening mechanics only by moving the smaller remainder behind
-Launch; none of the old domain names, ids, dispositions, or DTOs survive.
-
-```text
-rust/loopflow/src/interactive_handoff.rs
-rust/loopflow/src/interaction_review.rs
-rust/loopflow/src/task/interactive_rendezvous.rs
-rust/loopflow/src/store/interactive_handoffs.rs
-rust/loopflow/src/store/sqlite/interactive_handoffs.rs
-rust/loopflow/src/store/interaction_reviews.rs
-rust/loopflow/src/store/sqlite/interaction_reviews.rs
-rust/loopflow/src/lf/commands/handoff.rs
-rust/loopflow/src/lf/commands/reviews.rs
-rust/loopflow/tests/handoff_tests.rs
-rust/loopflow/tests/task_review_authority_tests.rs
-swift/Loopflow/Models/InteractiveHandoff.swift
-swift/Loopflow/Models/HandoffSurface.swift
-swift/LoopflowMac/Services/HandoffSurfaceLauncher.swift
-swift/LoopflowTests/HandoffSurfaceLauncherTests.swift
-swift/LoopflowTests/HandoffSurfaceTests.swift
-tests/fixtures/dto/interactive_handoff_list.json
-tests/fixtures/dto/interactive_handoff_attach.json
-```
-
-Also remove Handoff/InteractionReview branches from `ActiveSessionsView`,
-`RegistryQuery`, command registration, generated help, DTO fixtures, and
-snapshots. A smaller `LaunchSurfaceLauncher` may retain generic Warp/terminal
-opening logic. Review itself is derived from flow + Launch + attention; it has
-no store module or id.
+InteractionReview, InteractiveHandoff, HandoffSurface, their stores/commands/
+DTOs/fixtures/tests, and the ChildCommand ledger are gone. Generic Launch
+surface mechanics remain under Launch. Review has no stored id, prompt,
+disposition, reviewer, or status.
 
 ### Replace and substantially shrink
 
 | Current area | Remove | Retain in the new shape |
 | --- | --- | --- |
-| `child_session.rs` | command/directive/source/effect/state, body generation, successor Session vocabulary | Work/Epoch references move to focused core modules |
-| `child_control.rs` | command-specific claim/delivery/interrupt/replacement branches | Steer/Send controller only |
+| `child_session.rs` | body generation, write lease, and successor Session vocabulary | distinct containment evidence may move to Run |
+| `child_control.rs` | Session-target and `ChildWriteLease` adapter branches | Steer/Send/Run control only |
 | `store/child_sessions.rs` | duplicated Project/Task lease and lifecycle API | shared Run repository |
 | `store/sqlite/child_sessions.rs` | parallel SQL, generation settlement, successor copying, provider fields | shared Run/Launch transactions |
 | `project_session/mod.rs` | ProjectSession identity/status/process fields | Project Work plus Epoch-specific domain state |
 | `task/mod.rs` | TaskSession identity/status/process, interaction policy, review disposition | Task Work, PR/CI/flow domain facts and derived Review attention |
 | `task/runner.rs`, `project_session/runner.rs` | duplicate reserve/activate/settle/reap/command loops | domain boundary selection over shared Run controller |
-| `ops/child.rs` | successor routing and copied provider-session state | Work lookup and typed route projection |
+| `ops/child.rs` | successor routing, ambient Session credential reconstruction, copied provider-session state | Work lookup and typed route projection |
 | `ops/task.rs`, `ops/project.rs` | Session-shaped control DTOs and lifecycle cross-products | Task/Project closure and external domain operations |
 | `task/actions.rs` | action matrix over stored Waiting/Blocked/revoked states | actions derived from one projection |
 | `flowloop/wave.rs` | provider-specific inbox/interrupt/session branches | orchestration through Steer and Run controls |
@@ -803,7 +736,9 @@ rust/loopflow/tests/task_successor_resolution_tests.rs
 
 ### Drop from the live schema
 
-Keep shipped migration files as history, but add one forward migration that copies required facts and drops the old live objects:
+Keep shipped migration files as history. Consolidate this branch's unpublished
+canonical files into dependency-ordered drafts, with one final control cut that
+copies required facts and drops the old live objects:
 
 ```text
 project_sessions lifecycle/process columns
@@ -829,31 +764,21 @@ account-first route and account-owned login venues created by 0.11.027. Do not
 drop audit history before its durable replacement has been verified on a copied
 database.
 
-### Symbols and cases that must reach zero production references
+### Remaining symbols and cases that must reach zero production references
 
 ```text
-ChildCommand
-ChildCommandKind
-ChildCommandState
-ChildCommandEffect
-ChildCommandSource
-ChildDirective
-DirectiveKind
 ProjectSessionStatus
 TaskSessionStatus
-InteractiveHandoff
-InteractionReview
-InteractionReviewId
-InteractionReviewStatus
-InteractionReviewDisposition
-InteractionId
-HandoffSurface
-AwaitingHuman
-Author::Human
-Replacement
-FollowUp
-command Resume
-command Decide
+ChildWriteLease
+ChildLeaseState
+run_lease_for_child
+RunLeaseToken::from_child
+LF_PROJECT_SESSION_ID
+LF_PROJECT_GENERATION
+LF_PROJECT_LEASE_TOKEN
+LF_TASK_SESSION_ID
+LF_TASK_GENERATION
+LF_TASK_LEASE_TOKEN
 Blocked
 Sleeping
 settle

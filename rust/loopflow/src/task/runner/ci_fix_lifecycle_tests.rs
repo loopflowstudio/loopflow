@@ -2546,6 +2546,7 @@ async fn a_parked_review_wait_is_preempted_once_by_an_actionable_wake() {
     // lifecycle review resumes.
     let review = store
         .interaction_review_at(&task_id, 4, 0, 0)
+        .await
         .expect("read the review at its waitpoint")
         .expect("the review the repair interrupted still exists");
     assert_eq!(
@@ -2653,6 +2654,7 @@ async fn a_scratch_clear_only_wake_never_preempts_a_review_wait() {
 
     let review = store
         .interaction_review_at(&task_id, 4, 0, 0)
+        .await
         .expect("read the review at its waitpoint")
         .expect("the untouched review still exists");
     assert_eq!(

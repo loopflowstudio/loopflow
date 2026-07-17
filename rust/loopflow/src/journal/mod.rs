@@ -583,18 +583,21 @@ fn ensure_run_context(
         }
     };
 
-    // A parent process id only means "my parent within this trace." When we
-    // mint a fresh run id we are starting a new trace, so a lingering
-    // LF_PROCESS_ID belongs to the old one — carrying it forward would stamp
-    // this row with a cross-trace parent that `lf doctor`'s lineage check
-    // (rightly) rejects. Drop it so the violation is unspellable at write time.
+    // A parent process id only means "my parent within this trace, recorded in
+    // this ledger." A fresh run id makes a lingering LF_PROCESS_ID belong to
+    // the old trace; and `ledger_insert` is best-effort, so a parent whose
+    // write never landed exported its identity anyway. Both spell a parent
+    // that resolves to nothing. Drop it so the violation is unspellable at
+    // write time; the run id stays, so the trace still groups. A legitimate
+    // parent records its own start row before it can spawn anything.
     let parent_process_id = (!minted_run_id)
         .then(|| {
             std::env::var(LF_PROCESS_ID_ENV)
                 .ok()
                 .and_then(|value| ProcessId::parse(&value).ok())
         })
-        .flatten();
+        .flatten()
+        .filter(parent_is_recorded);
     let process_id = ProcessId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
@@ -651,6 +654,40 @@ fn ensure_run_context(
     }
 
     Ok(Some(context))
+}
+
+/// Whether the ledger holds a row for an inherited parent.
+///
+/// Read-only on purpose: this runs at the start of every nested `lf`, and
+/// asking who my parent was must not migrate, back up, or take the exclusive
+/// lock a full open does.
+///
+/// A ledger that isn't there records nothing, so a missing file answers
+/// `false`. Any other read failure answers `true` — never disown a real parent
+/// over a locked store; this process's own row is about to fail the same way,
+/// so there is no ghost to prevent.
+fn parent_is_recorded(parent: &ProcessId) -> bool {
+    let path = match ledger_db_path() {
+        Ok(path) if path.exists() => path,
+        Ok(_) => return false,
+        Err(err) => {
+            debug!(error = %err, "no ledger path; keeping the inherited parent process id");
+            return true;
+        }
+    };
+    match SqliteStore::open_run_ledger_read_only(&path)
+        .and_then(|store| store.process_is_recorded(parent.as_str()))
+    {
+        Ok(recorded) => recorded,
+        Err(err) => {
+            debug!(
+                error = %err,
+                parent = parent.as_str(),
+                "ledger unreadable; keeping the inherited parent process id"
+            );
+            true
+        }
+    }
 }
 
 fn next_seq() -> i64 {
@@ -1247,16 +1284,119 @@ mod tests {
         let repo = TestRepo::new();
         let fields = started_fields(&["lf".to_string(), "wave".to_string()], repo.path(), "main");
 
-        let parent = super::ensure_run_context(repo.path(), &fields)
-            .expect("parent context")
-            .expect("parent");
+        // The parent emits, which is what puts its row in the ledger and its
+        // identity in the environment. A child only inherits a parent the
+        // ledger holds, so the write is the thing under test, not a fixture.
+        super::emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Started,
+            fields.clone(),
+        );
+        let parent = super::current_context().expect("parent");
         super::clear_context();
         let child = super::ensure_run_context(repo.path(), &fields)
             .expect("child context")
             .expect("child");
 
         assert_ne!(parent.process_id, child.process_id);
+        assert_eq!(
+            child.run_id, parent.run_id,
+            "a nested lf stays in the trace"
+        );
         assert_eq!(child.parent_process_id, Some(parent.process_id));
+        super::clear_context();
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
+        std::env::remove_var(super::LF_RUN_ID_ENV);
+    }
+
+    #[test]
+    fn an_inherited_parent_the_ledger_never_recorded_is_dropped() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let fields = started_fields(
+            &["lf".to_string(), "status".to_string()],
+            repo.path(),
+            "main",
+        );
+
+        // A real run first, so the ledger exists and holds rows. Without it the
+        // drop proves nothing: an absent database answers "not recorded" for
+        // every id, and this passes with the lookup hardwired to `true`.
+        super::emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Started,
+            fields.clone(),
+        );
+        let recorded = super::current_context().expect("recorded run");
+        super::clear_context();
+
+        // A parent that exported its identity but never reached the ledger.
+        let ghost = ProcessId::new();
+        std::env::set_var(super::LF_RUN_ID_ENV, recorded.run_id.as_str());
+        std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
+
+        let context = super::ensure_run_context(repo.path(), &fields)
+            .expect("run context")
+            .expect("context");
+
+        assert!(
+            super::parent_is_recorded(&recorded.process_id),
+            "the ledger must really hold a parent, or the assertion below \
+             passes for the wrong reason"
+        );
+
+        assert_eq!(
+            context.parent_process_id, None,
+            "a parent the ledger never recorded is a ghost, not lineage"
+        );
+        assert!(
+            !context.minted_run_id,
+            "the trace still groups; only the false pointer goes"
+        );
+
+        super::clear_context();
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
+        std::env::remove_var(super::LF_RUN_ID_ENV);
+    }
+
+    #[test]
+    fn a_detached_body_inherits_a_recorded_parent_across_its_launcher() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let fields = started_fields(&["lf".to_string(), "task".to_string()], repo.path(), "main");
+
+        // A detached body inherits LF_RUN_ID/LF_PROCESS_ID from a launcher that
+        // has already exited. The launcher's row outlives it, so the parent
+        // still resolves and must survive the drop rule.
+        super::emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Started,
+            fields.clone(),
+        );
+        let launcher = super::current_context().expect("launcher");
+        super::emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+
+        // The body carries what the launcher handed it, not what the launcher
+        // left behind: a terminal run clears LF_PROCESS_ID from the env.
+        std::env::set_var(super::LF_RUN_ID_ENV, launcher.run_id.as_str());
+        std::env::set_var(super::LF_PROCESS_ID_ENV, launcher.process_id.as_str());
+        super::clear_context();
+
+        let body = super::ensure_run_context(repo.path(), &fields)
+            .expect("body context")
+            .expect("body");
+
+        assert_eq!(body.parent_process_id, Some(launcher.process_id));
+        assert_eq!(body.run_id, launcher.run_id);
+
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         std::env::remove_var(super::LF_RUN_ID_ENV);

@@ -1404,6 +1404,15 @@ impl SqliteStore {
         )
     }
 
+    /// Whether this ledger holds any row for `process_id`. A run start asks
+    /// before honoring an inherited parent: a parent this ledger never
+    /// recorded cannot be pointed at, only inherited from.
+    pub fn process_is_recorded(&self, process_id: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare("SELECT 1 FROM run_events WHERE process_id = ?1 LIMIT 1")?;
+        Ok(stmt.exists(params![process_id])?)
+    }
+
     /// Events for one trace; the persisted `run_id` may be a unique prefix.
     pub fn run_events_matching(&self, run_id: &str) -> StoreResult<Vec<RunEventRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));

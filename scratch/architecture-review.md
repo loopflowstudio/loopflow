@@ -71,7 +71,7 @@ cutover.
 - OpenCode Task/Project launches still do not report usage. The one ledger now
   exposes that gap through `lf doctor`; normalizing the two parser/producer paths
   is separate W2-289 work.
-- Phase 0 is now reconciled in `scratch/architecture.md`: the workshop
+- Phase 0 is now reconciled in `docs/architecture.md`: the workshop
   alternatives are gone and the stored constraints, transactions, races, and
   next durable-input slice are explicit. None of that core persistence exists
   yet.

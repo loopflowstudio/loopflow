@@ -1,214 +1,704 @@
+---
+layout: default
+title: Architecture
+---
+
 # Architecture
 
-```text
-Human ── Wave Chat ──▶ Wave
-                       │ selects and directs
-                       ▼
-                 Project Session
-                       │ supervises
-                       ▼
-                   Task Session ──▶ stable worktree + serial PRs to main
-                       │
-                       └──────────▶ diff/file/terminal inspector
+> **Moment of transparency — July 17, 2026**
+>
+> Loopflow does not yet implement most of the target model on this page. Today
+> it runs Wave residents, Project Sessions, Task Sessions, body leases,
+> `ChildCommand`, directives, and separate interaction/handoff machinery. The
+> provider-control and Turn-spend foundations have moved, but the structural
+> cutover has not.
+>
+> This page is deliberately a working architecture ledger during that cutover.
+> It keeps the current reality, target decisions, research evidence, and open
+> questions together. Sections say **Current**, **Decision**, **Target**, or
+> **Open** so aspiration cannot masquerade as shipped behavior.
 
-Wave ─ ─ ─ ─ root inspection and override ─ ─ ─ ─ ─ ┘
+## Product direction
+
+Loopflow is a local API for agents to launch, observe, and steer other agents.
+Its first customer is its creator's own work. The product earns generality by
+surviving that dogfood, not by designing an enterprise distribution layer
+before the core is legible.
+
+Large-company deployment does not imply a central Loopflow server. Each Wave
+has a Home. The Home owns its local state and execution authority. Other Homes
+may discover and observe it, while mutations route to the owner. Monitoring and
+steering many agents are projections over these decentralized authorities.
+
+Three planning nouns remain distinct:
+
+- **Wave:** durable operating context; owns memory, cadence, budget, chat, and
+  judgment about which Projects matter;
+- **Project:** measured bet inside exactly one Wave; owns definition, KRs, and
+  closure criteria;
+- **Task:** concrete implementation, investigation, document, or shipped change
+  inside exactly one Project.
+
+## Current implementation
+
+**Current.** This is the system the code still runs:
+
+```text
+Human -> Wave Chat -> Wave resident
+                       |
+                       v
+                 Project Session
+                       |
+                       v
+                   Task Session -> worktree -> serial PRs
+
+ChildCommand + ChildDirective -> body generation -> provider process
+InteractionReview + InteractiveHandoff -> Swift/terminal attention
 ```
 
-`lf` is the machine-wide command and JSON interface. `lf wave <name>` is the
-resident process for one Wave: it owns that Wave's chat listener, journal,
-cadence, memory, and project selection. There is no global service.
+`lf` is the machine-wide CLI and JSON interface. `lf wave <name>` runs one
+resident process with that Wave's listener, journal, cadence, memory, and
+Project selection. Project and Task Sessions are local child processes sharing
+SQLite. There is no global service.
 
-## No server
+The current runtime contains several overlapping representations:
 
-Loopflow used to be a distributed system — an HTTP daemon, remote-exec routes,
-a queue reconciler. v0.11 deleted all of it. What replaced the server is not a
-protocol; it is a division of labor between substrates that already exist:
+- Project/Task Session identity mixes durable Work with one attempt;
+- body generation mixes execution ownership with provider-process lifetime;
+- `ChildCommand` mixes direction, lifecycle, decisions, CI, and delivery;
+- directives copy authoritative prompt text and carry incorporation versions;
+- Sleeping, Blocked, review, handoff, lease, and health states overlap;
+- provider session ids sit on Work-shaped records;
+- Wave, Project, and Task runners repeat reservation, settlement, and recovery;
+- ambient environment can participate in inferring caller authority.
 
-| Substrate | Owns |
-|---|---|
-| Local SQLite (`~/.lf/loopflow.db`) | This machine's runtime truth: sessions, ledgers, the agent bus, credentials |
-| Append-only journals (`.lf/journal/`) | Each wave's durable conversation and run record |
-| Linear | The shared plan: Initiatives, Projects, Issues |
-| GitHub | The shared code truth: branches, PRs, merges |
-| SSH | Reach to other machines, carrying leased credentials |
+These are the implementation being replaced, not compatibility contracts.
 
-Two machines never talk to each other's loopflow. They both read and write
-Linear and GitHub, and each keeps a local snapshot (`lf pm sync`). The agent
-bus is a table: `lf radio pub` is an INSERT, so agents hear each other with no
-broker and no loopflow process required in the path.
+### Foundations already changed
 
-This is what makes the design deployable inside a large company without
-becoming infrastructure: every user and machine is its own trust boundary, and
-shared coordination reuses the Linear workspace, GitHub org, and secret
-manager the company already runs. There is nothing central to stand up,
-secure, or scale.
+**Current.** Two prerequisites now match the target:
 
-## Product model
+1. Provider steering is attempted against the exact active Turn. The adapter
+   returns `Sent`, `NotSteerable`, `Failed`, or `Unknown`; there is no
+   provider-wide `supports_steer` flag. Codex can live-send. The one-shot Claude
+   CLI, OpenCode where incorporation is not proven, and opaque TUIs fall back
+   to a later seed. Plain Steer never implies interrupt.
+2. Observed Turn is the only additive spend grain. `lf usage`, `lf top`,
+   `lf runs`, Doctor coverage, JSON, and Mac telemetry read one Turn query.
+   Missing usage remains absent rather than becoming zero.
 
-| Concept | Durable truth | Runtime responsibility |
-|---|---|---|
-| Wave | `wave/<name>/GOAL.md`, `MEMORY.md`, registry row | Choose Projects, converse, remember, and stay resident |
-| Project | Linear Project + local Project Session | Pursue measurable KRs across Tasks |
-| Task | Linear issue + local Task Session | Advance concrete work through zero or more serial PRs |
-| Directive | local store | Preserve child direction and incorporation proof |
-| Trace | local store + `~/.lf/traces` | Record agent launch and conversation evidence |
+The first foundation still stores Project/Task direction through
+`ChildCommand`. A confirmed live send can therefore become only an anonymous
+in-memory future seed, and a crash can lose it. Current completion fencing also
+checks directives rather than the newer Steer. Those are the first structural
+bugs the target model removes.
 
-Every Project belongs to one Wave. Every Task belongs to one Project and one
-durable Project Session. Only a Task Session owns a worktree. Its ordered PRs
-own the serial branches and GitHub history that advance it.
+## Target contract
 
-There is one supervision path: Wave → Project Session → Task Session. The Wave
-retains root authority to inspect or override any descendant, but that command
-source does not bypass or replace the Task's Project Session. Loopflow creates
-no default Project. Free-text `lf task start` requires `--project`, creates the
-Linear issue, ensures the Project Session, then creates the Task Session and
-worktree. `lf task run` does the same for an existing Linear issue. A newly
-reserved Project Session does not block Task launch on another provider turn;
-the Task's first consequential event wakes it through the observation outbox.
+**Decision.** One model conducts Wave, Project, and Task Work:
 
-Task worktrees are flat siblings even when work is dependent. `lf task run
-CHILD --stack-on PARENT` forks CHILD from PARENT's active published PR and
-records the parent PR id plus exact fork commit. CHILD's PR targets PARENT's
-branch until merge, then deterministically replays only CHILD-authored commits
-onto `main`. Same-Task PRs remain serial; concurrent stack nodes are Tasks.
-The Task argument is an ergonomic lookup: placement persists the active PR id,
-so a later serial PR on PARENT does not move CHILD's dependency.
+```text
+Work -> Epoch -> Run -> Launch -> optional Turn
+                    \-> Wait
 
-Free-text Project and Task starts verify the owning Wave before mutating
-Linear. They refresh the PM snapshot before creating local runtime state; a
-post-commit refresh failure reports the committed id and leaves no Session or
-worktree created by that attempt to reconcile.
+Steer advances the Work Basis.
+Run owns execution authority.
+Launch owns provider/process continuity.
+Turn records an observed provider exchange when one exists.
+```
 
-Wave and Project turns run from the clean canonical main checkout as a control
-plane. They read, decide, and create or steer children there; repository edits
-belong to Task worktrees. Commands fail before provider launch when that main
-checkout is dirty or the caller is in another checkout.
+The provider may change how input arrives. It may not change whether input is
+durable, whether stale execution may complete Work, or whether a dead executor
+retains write authority.
 
-## CLI and engine
+| Noun | Durable truth | Deliberately absent |
+| --- | --- | --- |
+| Work | stable Wave, Project, or Task identity and parentage | Session identity and provider state |
+| Epoch | one pursuit of Work: `Open`, `Done`, or `Abandoned` | retry count and provider generation |
+| Basis | `(epoch, rev)` for every prompt-relevant durable input | separate truth/directive/decision cursors |
+| Steer | ordered authored direction from Human or active parent Run | replacement, lifecycle, and decision variants |
+| Run | one wake-to-wait authority period and lease | provider transcript and process generation |
+| Wait | exact durable fact required before another useful Run | Blocked and Sleeping lifecycle states |
+| Launch | one provider or TUI process lifetime, route, containment, and optional resume token | Work-level provider session |
+| Turn | observed provider boundary, immutable Basis, outcome, and usage | required boundary for opaque TUIs |
+| Send | one delivery attempt for one Steer and exact Turn | incorporation state |
+| Home | stable local execution authority identified by `HomeId` | hostname as identity |
 
-`lf` resolves skills and flows, assembles context, starts provider CLIs, and
-exposes local domain commands. The engine owns reusable prompt execution and
-Git primitives; Wave, Project, and Task controllers own lifecycle decisions.
+`Exec` remains a low-level process receipt beneath Launch. It is evidence, not
+a public lifecycle target.
 
-Each controller runs one bounded `clarify → pursue → mutate` flow. The three
-skills remain separate because they have separate jobs; no skill owns a loop
-bit. After the pass, the domain controller inspects durable truth. A Task
-continues, rotates after a merged or abandoned PR, waits for review, or ends on
-explicit Task completion. A Project repeats,
-waits on Tasks, blocks on no progress, or completes when every current KR
-holds. A Wave returns to its resident idle state and wakes on human input,
-cadence, or child observations.
+There is no first-class `Actor`, writable `Ack`, `Handle`, `Body`, `Session`,
+`Block`, `Sleep`, `Interaction`, or `InteractionId` in the target.
 
-Important paths:
+## Identity and containment
 
-- `rust/loopflow/src/lf/`
-- `rust/loopflow/src/engine/`
-- `rust/loopflow/src/wave/`
+**Decision.** Wave, Project, and Task are the only durable Work identities.
+Their ids do not change when execution stops, an external title changes, Work
+recovers, or a provider changes.
+
+```rust
+enum WorkRef {
+    Wave(WaveId),
+    Project(ProjectId),
+    Task(TaskId),
+}
+
+struct EpochRef {
+    work: WorkRef,
+    n: u32,
+}
+
+struct Basis {
+    epoch: EpochRef,
+    rev: u64,
+}
+```
+
+`WorkRef` is a typed union over the domain stores, not a generic Work table that
+duplicates identity or parentage. Project and Task ids are local Loopflow ids;
+Linear ids are external bindings. A Project advancing Epoch does not reparent
+its Tasks. An explicit quiescent move changes parentage and records history.
+
+Use newtypes for every id. Public DTO fields are required or explicitly
+optional and have no wire defaults.
+
+## One input revision
+
+**Decision.** Every Epoch owns one monotonically increasing `rev`. Every durable
+fact that changes what the executor must honor allocates the next revision in
+the same transaction:
+
+- authored Work truth;
+- Steer;
+- typed decision or approval;
+- selected external evidence.
+
+```text
+lock current Open Epoch
+validate caller, optional if_basis, and active lease where required
+next = current_rev + 1
+insert epoch_revisions(epoch, next, kind, source)
+write the typed source fact at Basis(epoch, next)
+set Epoch.current_rev = next
+resolve a matching Wait and reserve a Run if the fact wakes Work
+commit
+only then attempt provider or process side effects
+```
+
+`epoch_revisions` contains exactly one row for every allocated revision and
+names its typed source. Each source row owns exactly one revision. There is no
+second directive version, steer sequence, or incorporation flag.
+
+An authored truth event is an immutable normalized snapshot or a reference to
+an immutable ingestion event. It is not a copied rendered prompt.
+
+### Fixed boundary Basis
+
+**Decision.** A structured Turn records one immutable starting Basis before
+provider input begins. An opaque TUI records the Basis on its Launch because
+Loopflow cannot see inner Turns. Live delivery never advances that boundary.
+
+The applied Basis is derived from the greatest successful root boundary Basis
+in the Epoch. Failed, interrupted, and unknown boundaries apply nothing. There
+is no Ack call or Ack table.
+
+If Turn 8 begins at revision 12 and receives revision 13 live, it may react
+immediately but can apply only revision 12. Revision 13 remains outstanding. A
+later boundary begins at 13 or later, receives it in the seed, and may apply it
+by succeeding.
+
+## Steer
+
+**Decision.** `steer(work, text, if_basis)` is the only authored-direction
+operation. Human-to-Wave and parent-Run-to-child call the same API. “Do this
+instead” appends another Steer. Preemptive redirect composes `interrupt` and
+`steer`; replacement is not a message kind.
+
+```rust
+enum Author {
+    Human,
+    Run(RunId),
+}
+
+struct Steer {
+    id: SteerId,
+    basis: Basis,
+    author: Author,
+    text: String,
+    issued_at: Timestamp,
+}
+
+enum SendVia { Live, Seed }
+enum SendState { Sending, Sent, Failed, Unknown }
+```
+
+`Author` is provenance after authorization succeeds. It is not a privilege
+model and is not caller-authored wire input.
+
+### Durable-first delivery
+
+**Decision.** `steer` returns after the Steer and revision commit. Delivery is
+an optimization recorded afterward:
+
+```text
+persist Steer
+-> if an exact structured Turn is active, insert Sending Send
+-> call send_current(turn, steer)
+-> record Sent | Failed | Unknown or typed NotSteerable reason
+-> keep Steer outstanding until a later successful Basis covers it
+```
+
+The adapter boundary is:
+
+```text
+send_current(turn, steer) -> Sent | NotSteerable | Failed | Unknown
+interrupt(boundary)       -> Ended | Fenced | Unknown
+launch(seed, route)       -> Launch
+observe(boundary)         -> Progress | Succeeded | Failed | Unknown
+```
+
+`NotSteerable` is a terminal failed Send with a typed reason, not another stored
+state. `Unknown` is immutable and never retries against the same Turn.
+
+At the next boundary, the controller reads outstanding Steers through the new
+boundary Basis, renders one ordered seed, and writes individual Seed Send
+receipts in the transaction that fixes the Basis. A confirmed live Send can
+never leave its only future copy in memory.
+
+### Decisions, approvals, and CI
+
+**Decision.** Machine-semantic input stays typed. A decision or approval writes
+its answer, allocates its revision, and resolves its Wait before optional
+provider notification. This prevents a seed-only provider from deadlocking:
+the waiting tool no longer depends on prose that waits for the Turn to end.
+
+A CI failure is evidence, not direction:
+
+```text
+observe failed checks
+-> ensure one CiIncident for repository, PR head, and failure set
+-> select it as execution input
+-> allocate its revision and reserve one bounded repair Run atomically
+```
+
+Duplicate observations cannot reserve a second Run. A human saying “fix CI
+now” is a separate Steer.
+
+## Authority
+
+**Decision.** Authorization is non-serializable request context:
+
+```rust
+enum ControlCtx<'a> {
+    Human(&'a AuthenticatedLocalRequest),
+    Run(&'a RunLease),
+}
+```
+
+- trusted Home-local Swift or CLI transport constructs Human context;
+- an active Run lease may mutate only immediate child Work;
+- a target still must match the caller's observed Epoch/Basis;
+- Linear and GitHub ingestion credentials append only their typed events;
+- the Home keeper performs only recovery transitions;
+- environment variables may transport opaque credentials but never choose
+  caller identity.
+
+A Wave Run can control its Projects; a Project Run can control its Tasks. A
+Task Run has no durable child Work. The same structural check applies to every
+legal child control rather than a second agent-specific operation matrix.
+
+## Epoch
+
+**Decision.** Epoch state is only `Open | Done | Abandoned`. Wait and execution
+health do not add lifecycle states.
+
+| From | Operation | Preconditions and transaction | To |
+| --- | --- | --- | --- |
+| none | start | Work has no Epoch; capture current truth at revision 0 | Open |
+| Done/Abandoned | restart Fresh | prior Epoch terminal; no active/unreaped Run | new Open Epoch |
+| Abandoned Task | recover from Basis | workspace/PR safety checks; prior Basis exists | new Open Epoch |
+| Open | commit done | successful boundary Basis current; closure passes; containment absent; no newer input wins | Done |
+| Open | abandon | authenticated request; Run stopped; containment absent | Abandoned |
+
+Sleep, wake, retry, provider handoff, phase change, and PR rotation stay inside
+the same Open Epoch.
+
+Fresh restart carries Work identity, parentage, external binding, and history.
+It does not carry Steers, Runs, Waits, continuation tokens, cursors, or applied
+Basis. Task recovery may retain a checked workspace and PR lineage and refer to
+selected prior evidence, but its new Epoch still begins at revision 0. Old
+revisions never grant current authority.
+
+## Run
+
+**Decision.** A Run is one wake-to-wait execution authority. It may contain
+several provider Turns and several sequential Launches.
+
+```rust
+enum RunState { Reserved, Active, Stopping, Ended }
+```
+
+| From | Operation | Durable step before side effects | Result |
+| --- | --- | --- | --- |
+| none | `reserve` | insert Run with trigger and lease hash; take Epoch active slot | Reserved |
+| Reserved | launch receipt | record executor/containment intent, then start outside transaction | Active after lease proof |
+| Reserved/Active | `stop` | set Stopping and revoke lease | Ended only after containment absence |
+| Active | `advance` to Wait | record boundary outcome and Wait; clear slot atomically | Ended |
+| Active | `advance` to boundary | record next fixed Basis before provider side effect | Active |
+| Active | commit done | stop containment, then completion transaction | Run Ended + Epoch Done |
+| Stopping | reap observation | record containment absence | Ended and slot clear |
+
+`reserve`, `advance`, and `stop` are the internal domain operations. Boot,
+activate, continue, settle, finish, revoke, reap, and retry are not separate
+public lifecycle APIs. Started, progress, interruption, and reap are receipts
+or phases.
+
+Recovery reserves a new Run linked by `retry_of`; it never mutates a failed Run
+or impersonates its lease. Automatic recovery requires durable evidence that
+replay is safe. Unsafe or unknown effects produce a typed Wait.
+
+### Races
+
+**Decision.** Waking input and Run end serialize on the Epoch row:
+
+- if input commits first, `advance` sees the newer revision;
+- if `advance` commits first, it records Wait and clears the slot; input resolves
+  that Wait and reserves the next Run;
+- input is never durable while invisible to both a Run and a Wait.
+
+Revoking a Run fences writes immediately but retains the active slot until
+containment absence is proved. Recovery cannot overlap a stale writer.
+
+## Launch and Turn
+
+**Decision.** Launch owns provider, model, account, Home, containment identity,
+and optional opaque continuation token. Provider/account/model fallback creates
+another Launch in the same Run.
+
+```rust
+enum LaunchState { Starting, Live, Stopping, Ended }
+enum TurnState { Starting, Active, Succeeded, Failed, Interrupted, Unknown }
+```
+
+Persist Launch route, boundary Basis for a TUI, and containment intent before
+spawn. Record Live only after containment and provider readiness exist. Fence
+new input before shutdown. Record Ended only after containment absence.
+
+For structured providers, create the Loopflow Turn with its Basis before
+sending the initial prompt. Correlate a vendor Turn id when observed; never use
+it as Loopflow identity. Only Succeeded applies Basis or supports completion.
+Partial usage survives every terminal outcome when reported.
+
+Opaque TUIs have no synthetic Turns. Their Launch is the boundary. Process exit
+alone is not success; explicit `done`, handback, or failure supplies the
+Loopflow outcome.
+
+The live schema enforces:
+
+- one nonterminal Epoch per Work;
+- unique `(work, epoch_number)` and `(epoch, rev)`;
+- every typed input owns exactly one revision;
+- one non-ended Run per Epoch;
+- one non-ended writable root Launch per Run;
+- one nonterminal root Turn per Launch;
+- unique `(steer, turn, via)` Send attempt;
+- one unresolved Wait for an Open Epoch with no active Run.
+
+Use SQLite constraints where expressible. Do not substitute application checks
+for partial unique indexes and foreign keys.
+
+## Completion
+
+**Decision.** `done(run, basis)` records a proposal tied to the current root
+boundary. It does not directly mutate Epoch.
+
+Commit Done only after:
+
+1. the boundary succeeded normally;
+2. proposal Basis equals that boundary's immutable Basis;
+3. proposal Basis equals current Epoch Basis;
+4. domain closure checks pass;
+5. every Run-owned process group, tmux unit, background task, and observable
+   native descendant is absent or fenced from writes;
+6. the final transaction still sees the same revision and active Run.
+
+Any newer truth, Steer, decision, approval, or selected evidence makes the
+proposal stale. A live Steer cannot be blessed by the older Turn that received
+it. There is no `try_complete` state and no explicit Ack.
+
+## Wait, status, and human attention
+
+**Decision.** An Open Epoch with no useful immediate execution records one
+typed Wait:
+
+```rust
+enum WaitOn {
+    Input { after: Basis },
+    Time { not_before: Timestamp },
+    Event(EventRef),
+    Child(WorkRef),
+    Capability(CapabilityRef),
+    Effect(EffectRef),
+}
+```
+
+The satisfying or invalidating fact resolves the Wait and reserves a Run in
+one transaction when execution is useful. There is no generic unblock and Wait
+history is not deleted.
+
+Status is derived:
+
+| Facts | Status |
+| --- | --- |
+| Epoch Done | Done |
+| Epoch Abandoned | Abandoned |
+| Open plus active Run | Running, with independent health |
+| Open plus unresolved Wait | Waiting on its exact fact |
+| Open plus neither | Ready; keeper must reserve or explain |
+
+Run health (`Starting`, `Working`, `Stalled`, `Recovering`, `Dead`, or
+`Unobservable`) is fresh evidence, not Work lifecycle. An unreachable Home is
+not proof that its Run is dead.
+
+An attended human step is an opaque TUI Launch behind tmux. Swift derives
+`AwaitingHuman` only from a live human-routed TUI and opens it by `LaunchId`,
+including after Swift was closed. A non-blocking request routed to the parent
+becomes child Steer and never enters human attention. Interaction and Handoff
+ids disappear.
+
+## Decentralized Home
+
+**Decision.** `HomeId` is durable execution authority. Hostname, socket, SSH
+route, and reachability are mutable observations. Only the owner mutates Work,
+Runs, Launches, and Turns. Remote Homes may observe but cannot seize authority
+because a probe timed out.
+
+One Home-local keeper:
+
+- detects Reserved Runs that missed boot;
+- probes locally owned Runs;
+- invokes the shared stop path;
+- proves containment absence;
+- reserves safe recovery or writes a typed Wait;
+- publishes status evidence.
+
+Moving Work to another Home is explicit and requires no active Run. The keeper
+owns recovery mechanics, not Wave/Product judgment.
+
+## Provider portability
+
+**Research.** The harnesses expose different mechanisms:
+
+| Surface | Input while active | Interrupt | Continuation |
+| --- | --- | --- | --- |
+| Codex app-server | `turn/steer` against exact regular Turn; review/compaction reject it | `turn/interrupt` | persisted thread resume |
+| Claude one-shot CLI used with Max | no second input to `claude -p`; seed later process | kill/fence process | `--resume` captured session id |
+| Claude persistent `stream-json` | informative future route; may accept or queue input | streaming interrupt | session resume/fork |
+| OpenCode server | async prompt exists but incorporation into already-running model request is not promised | session abort | server-scoped session |
+| opaque tmux TUI | no observable inner Turn | process/tmux fence | Launch remains attachable |
+
+Claude's Agent SDK still launches a Claude executable, but supported third-party
+use normally requires API-key or cloud-provider authentication. Loopflow's Max
+dogfood route therefore treats the sanctioned one-shot CLI as its portability
+floor. `stream-json` may improve latency later without changing the contract.
+
+Codex 0.144.5 returns JSON-RPC `-32600` for an idle Turn, stale expected Turn,
+missing thread, and malformed request. The adapter recognizes observed policy
+messages and treats unknown wording as loud `Failed`. A successful live steer
+response shape remains assumed from official app-server documentation rather
+than captured in dogfood evidence.
+
+The portability promise is durable outcome, not identical wire behavior:
+
+1. sleeping Work persists Steer, reserves Run, and seeds its first boundary;
+2. active direction may arrive live or later, but cannot complete until a later
+   successful boundary covers its Basis;
+3. `interrupt` + `steer` provides portable preemption;
+4. a Turn-boundary race preserves exactly one durable Steer;
+5. ambiguous acceptance records Unknown and never blindly repeats to that Turn;
+6. ordered bursts preserve sequence and may render as one seed;
+7. losing a continuation token reconstructs rather than losing Work.
+
+## Provider-native subagents
+
+**Decision.** Native subagents are not Loopflow Work. They inherit the root
+Run's lease, workspace, tools, and completion obligation. Provider child ids
+are trace evidence when available, not stable public control targets.
+
+Run stop must fence every owned writer. Process-group or tmux containment is
+the portable proof. A provider mode whose native child can mutate after root
+containment dies is unsupported until it exposes a reliable fence. Dormant
+provider conversations do not block completion.
+
+Use Loopflow child Work when delegation needs durable direction, monitoring,
+sleep/wake, recovery, or human steering. Use native subagents for temporary
+context isolation and parallel reasoning inside one Run.
+
+## Reconstruction
+
+**Decision.** Provider transcript and continuation tokens are optional hints.
+A new Launch renders from:
+
+- current authored Work truth selected by Epoch revisions;
+- outstanding Steers in revision order;
+- typed decisions and approvals;
+- selected external evidence and unresolved Wait;
+- flow position and domain closure state;
+- workspace, git HEAD, PR/CI/review lineage;
+- known Loopflow-mediated effects and unknown-effect receipts.
+
+Losing a token, provider, account, or transcript starts another Launch in the
+same Run when replay is safe. The renderer either produces a sufficient seed or
+names an exact Wait. It never silently starts from an empty prompt.
+
+## Workspace, PR, and CI boundaries
+
+**Current and retained.** Only Task Work owns a writable worktree. Wave and
+Project control runs operate from a clean canonical main checkout. Provider
+launch fails before execution if it receives another writable repository root.
+
+Task PR rows store evidence rather than a mutable phase label: publication
+request, nested GitHub receipt, merge, abandonment, and `after_merge`. Serial
+PRs remain inside one Task; concurrent dependency nodes are separate Tasks.
+
+**Target.** Workspace identity belongs to stable Task Work. Pursuit-specific
+authority belongs to Epoch. Historical PRs remain attributed; recovering an
+abandoned Task grants the new Epoch checked authority over the same workspace
+instead of re-keying every PR to a successor Session.
+
+## Usage and trace
+
+**Current and retained.** Additive usage lives only on observed Turns. Exec and
+trace lineage never form another spend total. Missing, zero, partial, failed,
+interrupted, and cache-only reports remain distinct.
+
+The dogfood ledger proved why: the old exec ledger was a strict subset of Turn
+capture and could attribute tokens to whichever provider launched last in the
+process. Moving totals to Turn raised measured output because it removed loss,
+not because it double-counted.
+
+Trace `TraceId` and `ExecId` are diagnostic lineage. Product `RunId`,
+`LaunchId`, and `TurnId` name the target execution spine.
+
+## Migration
+
+**Target.** The cutover is one-way with no dual-write compatibility mode:
+
+1. stop Wave residents and quiesce/reap every Project and Task writer; refuse
+   with an actionable list if any remains;
+2. mint stable local Project and Task ids and preserve external bindings;
+3. group Session successor chains into Epochs only at terminal restart
+   boundaries; map process generations, retries, and provider handoffs to Runs
+   and Launches inside the Epoch;
+4. convert directives to canonical truth events; convert follow-up,
+   replacement, and resume prose to ordered Steers; convert decision, CI,
+   review, and lifecycle variants to typed facts;
+5. do not guess old incorporation—restart current Open Epochs with required
+   current input outstanding;
+6. move continuation data to Launch and preserve unknown historical links as
+   absent;
+7. verify foreign keys, active-slot constraints, historical Work lookup, and
+   reconstruction on a copied dogfood database;
+8. drop live Session/body/command tables, old readers/writers, DTOs, and parsing;
+9. restart residents and let the keeper reserve current Work.
+
+Shipped migration files remain history. The live schema retains one
+implementation.
+
+## Implementation frontier
+
+**Current status.** Provider outcome, controller conformance, trace vocabulary,
+and Turn-spend store/query are implemented. Work/Epoch/Basis/Home, product Run,
+durable Steer/Send, completion fencing, Wait, reconstruction, and the old-model
+purge are not.
+
+The next coherent vertical slice is the **durable input spine**:
+
+1. add stable Work/Epoch/revision persistence;
+2. add Steer and Send rows with durable-first delivery;
+3. fix Basis on structured root Turns and opaque TUI boundaries;
+4. derive applied Basis from successful boundaries;
+5. persist decisions/approvals before notification;
+6. replace Task/Project completion and directive checks with the Basis fence;
+7. route Human and parent Run direction through the same Steer operation;
+8. delete superseded ChildCommand/ChildDirective branches.
+
+It is done when:
+
+- killing the controller after confirmed live Send still seeds the Steer;
+- live Steer racing successful completion makes completion stale;
+- ordered Steers render once and apply together at the later Basis;
+- Unknown live Send is not repeated to that Turn and still seeds later;
+- seed-only blocked decision resolves from typed persistence before prose;
+- stale parent lease and stale Epoch/Basis writes are rejected;
+- current Task/Project control has no production directive, replacement,
+  follow-up, resume-message, or command-decision path;
+- copied dogfood migration succeeds only after every writer is quiescent;
+- format, clippy, migration/race/controller tests, and DTO round trips pass.
+
+The detailed sequence and deletion ledger live in branch-local
+`scratch/implementation-plan.md` while the cutover is active.
+
+## Normative race and portability tests
+
+Use deterministic barriers, never sleeps:
+
+- Steer commit versus Turn success;
+- confirmed live Send versus crash before seed;
+- input revision versus done commit;
+- input revision versus Run advance to Wait;
+- reserve versus reserve;
+- stop versus recovery;
+- provider send begins versus disconnect;
+- typed decision versus seed-only blocked tool;
+- duplicate CI observation versus crash after reserve;
+- fifty SQLite writers versus receipt allocation.
+
+Every harness runs the same durable-outcome scenarios: live accepted, live
+rejected, ambiguous response, seed-only, persistent session, and opaque TUI.
+Credentialed smoke tests validate vendor drift; fake protocols remain normative.
+
+## Open questions and active research
+
+**Open.** These may change implementation details but must not add another core
+noun or source of truth:
+
+1. Capture one successful Codex `turn/steer` response against the dogfood
+   app-server and verify the assumed result shape.
+2. Normalize OpenCode usage end to end. Task/Project launches currently miss
+   usage because `StreamEvent::Usage` and `ConversationEvent::TurnUsage` enter
+   capture through different surfaces and disagree on accumulation versus
+   replacement.
+3. Choose the exact stable `HomeId` migration source and route-observation
+   format. Hostname remains disqualified as identity.
+4. Prove containment for each provider's native subagents and background tasks.
+   Unsupported unobservable writers must fail closed.
+5. Define the smallest explicit success/handback mechanism for opaque TUIs;
+   process exit cannot imply success.
+6. Audit Session successor history whose terminal boundary is ambiguous. The
+   migration may preserve unknown lineage but must not invent Epochs.
+7. Decide whether historical Epoch appears in public diagnostic receipts. Work
+   remains the control target either way.
+
+Questions about central orchestration, generic workflow engines, recursive
+Projects, provider-wide steer capability, writable Ack, replacement messages,
+or a separate human Interaction entity are closed by the decisions above.
+
+## Important paths
+
+**Current implementation:**
+
+- `rust/loopflow/src/child_session.rs`
+- `rust/loopflow/src/child_control.rs`
 - `rust/loopflow/src/project_session/`
 - `rust/loopflow/src/task/`
-
-## Local store
-
-SQLite coordinates Wave identity, PM snapshots, Project and Task Sessions,
-ordered Task PRs, commands, directives, event ledgers, provider credentials,
-and traces. Callers open it directly. Installed release builds share
-`~/.lf/loopflow.db`; set `LF_DB_PATH` to use another path.
-
-Builds made from a source checkout use
-`~/.lf-dev/worktrees/<source-identity>/loopflow.db`, so branches cannot migrate
-one another's development store. They refuse `~/.lf/loopflow.db` even when it
-arrives through `LF_DB_PATH`. Release packaging stamps its provenance
-explicitly; there is no development override for the release database.
-
-Session runners carry their pinned binary and store through the internal
-`LF_CONTROL_BIN`, `LF_CONTROL_HOME`, and `LF_CONTROL_DB_PATH` variables. Provider
-agents do not inherit `LF_BIN`, `LF_HOME`, or `LF_DB_PATH`.
-Before an existing on-disk database advances, SQLite writes an atomic backup
-named for the previously applied migration.
-
-A Task PR persists evidence, not a mutable state label. No publication evidence
-means Working. A publication request without a GitHub receipt means Publishing;
-the receipt makes it Open; merge and abandonment have their own terminal
-evidence. The GitHub receipt is nested under publication, so GitHub cannot exist
-without the durable request that explains `after_merge`.
-
-Important path:
-
+- `rust/loopflow/src/flowloop/wave.rs`
 - `rust/loopflow/src/store/`
 
-## Wave process
+**Foundations and target seams:**
 
-```bash
-lf wave infrastructure
-```
-
-One Wave process serves replay, live turns, and health for that Wave: a
-listener that owns the journal and local HTTP endpoint, and a resident body it
-supervises. The Mac app reads registry, Project, and Task state through its
-bundled `lf --json` and subscribes to the selected Wave's local event stream;
-it keeps no state of its own.
-
-Selecting a Task opens its worktree inspector. `lf task changes/diff/file`
-owns Git and path semantics; Swift renders those typed snapshots and keeps
-Task-scoped Ghostty/tmux terminals as presentation state. The terminal
-multiplexer never owns Task lifecycle or worktree identity.
-
-Project and Task Sessions are explicit child processes. They share the local
-store and durable control channel; they do not call a global HTTP API.
-
-## Homes and remote execution
-
-A Wave's **Home** is where its work executes — an owner plus a location,
-authored in `GOAL.md` frontmatter:
-
-```yaml
-home: jack@local              # the default
-home: ssh://jack@mini.local   # a remote machine
-```
-
-Project and Task launches inherit the Home; repo, PR, release, and PM commands
-in a remote-home Wave forward there over `lf ssh`. Reachability is
-operational evidence, not part of the address — `lf home probe <wave>` answers
-whether it responds, `lf home start <wave>` idempotently starts the Wave
-there.
-
-`lf ssh <host> -- <cmd>` resolves credentials **locally** and forwards them
-into the remote process environment for the life of that process: nothing
-lands on the remote disk, and the Doppler master token never leaves the
-originating machine. The remote host stays a stateless compute surface —
-which is the whole trust model for running work on a spare machine, a
-teammate's box, or a datacenter host.
-
-## lfd
-
-`lfd` is the one long-lived machine daemon, and it is deliberately small:
-signed webhook ingress (a durable delivery inbox for Linear events) and
-liveness probes. It hosts no sessions and serves no API. `lfd install` renders
-a launchd/systemd service whose file carries paths only — secrets resolve at
-runtime from the environment or Doppler.
-
-## PR truth
-
-Task runners and status commands reconcile pull-request state through `gh`.
-Merge correctness does not depend on webhook delivery. A merge settles one PR;
-its recorded `after_merge` disposition decides whether the runner rotates the
-same worktree or completes the Task. A completed Task remains visible until
-Linear writeback succeeds or exposes a pending reconciliation. A completing
-merge settles the PR and completes the Task in one SQLite transaction.
-
-## Wire contracts
-
-The Mac app invokes `lf --json`. Shared fixtures keep Rust and Swift
-representations aligned. Wire fields have no implicit defaults: absence is
-either a parse error or an explicit optional value.
-
-Task snapshots expose ordered `prs` plus `active_pr`. Each PR includes its
-derived phase, active-worktree emptiness when knowable, publication disposition,
-nested GitHub receipt, merge commit, and abandonment time. Rust and Swift can
-therefore answer whether the current PR exists on GitHub and whether merging it
-completes the Task.
-
-Important paths:
-
-- `swift/Loopflow/Models/`
+- `rust/loopflow/src/harness/`
+- `rust/loopflow/src/trace.rs`
+- `rust/loopflow/src/lf/commands/usage.rs`
 - `tests/fixtures/dto/`
+- `swift/Loopflow/Models/`

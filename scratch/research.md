@@ -161,7 +161,7 @@ All three providers can create their own nested agents:
 
 Their common concepts are isolated context, a parent-child edge, targeted follow-up, stop/wait, and a result returning to the parent. Their durability, direct human control, and nesting rules differ. They are informative execution substrates but do not map 1:1 to Loopflow Project or Task: they inherit one root execution's workspace and authority and have no independently authored planning identity.
 
-The architecture consequence is recorded in `scratch/architecture.md`: provider-native children remain nested Handle/Turn evidence under one Run. Durable, independently steerable delegation remains Loopflow child Work.
+The architecture consequence is recorded in `docs/architecture.md`: provider-native children remain nested Launch/Turn evidence under one Run. Durable, independently steerable delegation remains Loopflow child Work.
 
 ### Looping data flow
 

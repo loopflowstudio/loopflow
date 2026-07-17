@@ -44,7 +44,8 @@ Do not add compatibility shims. Migrate stored data once, cut every caller to th
 
 ## Current implementation review
 
-Review snapshot: `4193acb52` plus the executable architecture rewrite on 2026-07-17.
+Review snapshot: `4193acb52` plus the canonical working architecture in
+`docs/architecture.md` on 2026-07-17.
 
 Disposition: **the adapter and Turn-spend foundations are coherent; begin the
 durable input spine. Do not land them as the final architecture.**
@@ -62,7 +63,7 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 
 | Phase | Status | Evidence still missing |
 | --- | --- | --- |
-| 0. Executable spec | Complete | `architecture.md` now fixes the stored nouns, constraints, transitions, side-effect order, races, migration, and next vertical slice |
+| 0. Executable spec | Complete | `docs/architecture.md` fixes current versus target truth, stored nouns, constraints, transitions, side-effect order, races, migration, research, questions, and next vertical slice |
 | 1. Work/Epoch/Basis/Home | Not started | No target types, tables, migration, ids, or revision allocator exist |
 | 2. Run/Launch/containment | Vocabulary only | Trace ids were renamed; Session/body lease stores and duplicated runners remain authoritative |
 | 3. Steer/typed control | Adapter only | `ChildCommand`, `ChildDirective`, replacement/resume/decision variants, ambient authority, and explicit Ack remain |
@@ -84,8 +85,8 @@ That is adapter groundwork, not the core cutover. Current state against the phas
 9. **Fixed during the usage cutover:** `lf doctor`'s “agent ran but no usage was captured” check moved from `run_events` to terminal Launch/Turn evidence. It reports absent provider usage without converting it to zero, which is how the remaining OpenCode parser gap stays visible.
 
 No more behavior should be adapted around `ChildCommand`. The next coherent
-checkpoint is the durable input spine specified at the end of
-`scratch/architecture.md`: stable Epoch revision, Steer/Send, fixed boundary
+checkpoint is the durable input spine specified in
+`docs/architecture.md`: stable Epoch revision, Steer/Send, fixed boundary
 Basis, typed input, and completion fencing cut together. No intermediate state
 may accept a Steer without durable Basis fencing.
 
@@ -316,7 +317,7 @@ The first two criteria require Phases 1 and 3. Until then, keep the steering wor
 
 ### 0. Ratify the executable spec — complete 2026-07-17
 
-`scratch/architecture.md` now contains one target contract. The earlier
+`docs/architecture.md` now contains one target contract. The earlier
 required-Turn Ack, Handle graph, Block/Sleep split, Interaction entity,
 `settle`, and Session/body alternatives are gone. Epoch, Run, Launch, Turn,
 Wait, Send, completion, authority, side-effect order, and migration are stated

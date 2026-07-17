@@ -1069,6 +1069,20 @@ fn run_project_command(
     }
 }
 
+fn resolve_project_command_authority(
+    command: &ProjectCommand,
+    explicit_wave: Option<&loopflow::wave::Wave>,
+) -> anyhow::Result<loopflow::child_session::CallerAuthority> {
+    let command_wave = match command {
+        ProjectCommand::Start {
+            wave: Some(wave), ..
+        } => Some(loopflow::engine::wave_context::resolve_explicit_wave(wave)?),
+        _ => None,
+    };
+    loopflow::ops::resolve_caller_authority(command_wave.as_ref().or(explicit_wave))
+        .map_err(anyhow::Error::from)
+}
+
 fn run_task_command(
     repo: &Path,
     command: &TaskCommand,
@@ -1610,7 +1624,8 @@ fn main() -> anyhow::Result<()> {
                 Ok(())
             }),
             Some(Commands::Project { cmd }) => {
-                let authority = loopflow::ops::resolve_caller_authority(explicit_wave.as_ref())?;
+                let authority =
+                    resolve_project_command_authority(cmd, explicit_wave.as_ref())?;
                 in_repo_runtime(&args, |repo| run_project_command(repo, cmd, &authority))
             }
             Some(Commands::Reviews { cmd }) => in_repo_runtime(&args, |repo| {

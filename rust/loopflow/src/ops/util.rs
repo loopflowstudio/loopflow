@@ -1,7 +1,7 @@
 use std::process::{Command, Output};
 
 use crate::child_session::{CallerAuthority, ChildCommandSource, ChildRef};
-use crate::engine::wave_context::{resolve_managed_wave_name_sync, WAVE_ID_ENV};
+use crate::engine::wave_context::{WaveResolveError, WAVE_ID_ENV};
 use crate::id::WaveId;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::project_session::ProjectSessionId;
@@ -97,11 +97,34 @@ pub fn resolve_caller_authority(explicit_wave: Option<&Wave>) -> OpsResult<Calle
         return Ok(CallerAuthority::Project(project_id));
     }
 
-    if std::env::var_os(WAVE_ID_ENV).is_some() {
-        let name = resolve_managed_wave_name_sync(None)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        let wave = crate::engine::wave_context::resolve_explicit_wave(&name)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
+    if let Some(raw) = std::env::var_os(WAVE_ID_ENV) {
+        let raw = raw
+            .into_string()
+            .map_err(|_| OpsError::Message("ambient Wave identity is not valid UTF-8".into()))?;
+        let identity = normalize_wave_name(&raw)
+            .ok_or_else(|| OpsError::Message(WaveResolveError::NoContext.to_string()))?;
+        let lookup = identity.clone();
+        let wave = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("current-thread runtime always builds");
+            runtime.block_on(async move {
+                let store = crate::store::open_existing_store().await.ok_or_else(|| {
+                    WaveResolveError::Registry("no wave registry on this machine".to_string())
+                })?;
+                let row = if let Ok(id) = lookup.parse::<WaveId>() {
+                    store.get_wave(&id).await
+                } else {
+                    store.get_wave_by_name(&lookup).await
+                }
+                .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
+                row.ok_or_else(|| WaveResolveError::StaleIdentity(lookup))
+            })
+        })
+        .join()
+        .map_err(|_| OpsError::Message("caller authority resolver thread panicked".into()))?
+        .map_err(|error| OpsError::Message(error.to_string()))?;
         return Ok(CallerAuthority::Wave(wave.id().clone()));
     }
 

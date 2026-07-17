@@ -498,6 +498,11 @@ public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
     public let repo: String
     public let worktree: String
     public let wave: String?
+    /// Roadmap Project slug that owns this run; nil when unattributed.
+    public let project: String?
+    /// Roadmap Task's Linear issue identifier (e.g. W2-122) that owns this run;
+    /// nil when unattributed. Joins a roadmap row to its runs and trace.
+    public let task: String?
     public let flow: String?
     public let skill: String
     public let status: String
@@ -520,8 +525,8 @@ public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
     public let captureStatus: String
 
     enum CodingKeys: String, CodingKey {
-        case id, repo, worktree, wave, flow, skill, status, started, ended, turns, provider, model,
-            surface
+        case id, repo, worktree, wave, project, task, flow, skill, status, started, ended, turns,
+            provider, model, surface
         case traceId = "trace_id"
         case execId = "exec_id"
         case parentExecId = "parent_exec_id"

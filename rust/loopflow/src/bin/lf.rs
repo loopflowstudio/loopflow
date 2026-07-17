@@ -1593,11 +1593,20 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Roadmap { wave, json }) => {
                 loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json)
             }
-            Some(Commands::Runs { json, cmd }) => match cmd {
+            Some(Commands::Runs {
+                task,
+                wave,
+                json,
+                cmd,
+            }) => match cmd {
                 Some(RunsCommand::Reconcile { apply, all, json }) => {
                     loopflow::lf::commands::runs::reconcile(*apply, *all, *json)
                 }
-                None => loopflow::lf::commands::runs::list(*json),
+                None => loopflow::lf::commands::runs::list(
+                    *json,
+                    wave.as_deref(),
+                    task.as_deref(),
+                ),
             },
             Some(Commands::Execs { json }) => loopflow::lf::commands::runs::list_execs(*json),
             Some(Commands::Trace {

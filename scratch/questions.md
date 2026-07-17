@@ -17,6 +17,24 @@
   `LF_PROCESS_ID` are excluded — the journal sets them on *every* `lf` process
   including the human CLI, so they cannot distinguish a body from a shell.
 
+## Resolved in review (v1 → design revision)
+
+- **Project authority validates against the live route, not historical
+  provenance.** `CallerAuthority::Project` compares the incoming
+  `LF_PROJECT_SESSION_ID` to `resolve_task_project_route(...).current`
+  (`ops/project.rs:1254`), so a live successor Project Session (W2-243) can
+  supervise and a terminal predecessor cannot. Regression added: historical-live,
+  terminal-historical-with-successor, and terminal-no-successor.
+- **The pre-persist bar was a TOCTOU; the fix is structural.** Persistence of a
+  launch-driving `Resume` is now *contingent on* a successful generation
+  reservation, so the raced (`Working→Open`) and steady-state (`Open`) cases
+  share one authoritative gate and neither leaves an orphan. No wall-clock race
+  test; a `count(*)`-unchanged regression plus persist-then-launch sabotage.
+- **Environment's role is documented, not denied.** Authority resolves at the
+  invocation boundary; env is transport of a body's stamped identity +
+  consistency evidence. Explicit `--wave` is a distinct deliberate assertion.
+  Done-when reworded accordingly.
+
 ## Genuinely open (resolve in review or a follow-up)
 
 - **Headless review handoff with no operator present.** W2-319's persisted

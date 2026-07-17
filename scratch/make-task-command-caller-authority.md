@@ -75,12 +75,31 @@ Three moves. One typed authority model, resolved once and failing closed; a
 barred supervisor resume that refuses before it writes; and a bar message
 written for the audience that actually sees it.
 
-### Move 1 — `CallerAuthority`: one typed input, resolved once, fail-closed
+### Move 1 — `CallerAuthority`: one typed input, resolved at the invocation boundary, fail-closed
 
 Introduce `CallerAuthority`, the typed answer to "who is issuing this control
-command," resolved **once** at the ops boundary (`task_resume`,
-`project_resume`, `queue_command` callers) and threaded down as a parameter —
-never re-derived from env deeper in the stack.
+command," resolved **once at the invocation boundary** (CLI arg parse →
+`task_resume`/`project_resume` entry) and threaded down as a parameter — never
+re-derived from env deeper in the stack.
+
+**Environment still participates — as transport and consistency evidence, not
+as an authority oracle.** The change is that authority is no longer *inferred by
+absence*: a missing variable never mints a *different* authority. Precise roles:
+
+| Env / input | Role | Who sets it |
+|-------------|------|-------------|
+| `--wave <name>` (CLI arg) | **Explicit operator assertion** of Wave authority; resolved against the registry, takes precedence | a human at the CLI |
+| `LF_WAVE_ID` (inherited) | Transport of a Wave/Task body's stamped Wave identity + consistency evidence | the runtime, when it spawns the body |
+| `LF_PROJECT_SESSION_ID` (inherited) | Transport of a Project body's session identity | the runtime |
+| `LF_TASK_SESSION_ID`, `LF_CHANNEL` (inherited) | Consistency evidence only — "this process is inside a managed body" | the runtime |
+
+Explicit `--wave` is distinct from inherited context: it is a deliberate typed
+choice made *at the invocation surface*, so the CLI resolves it to
+`CallerAuthority::Wave` directly and passes it in, rather than round-tripping it
+through `LF_WAVE_ID` for the authority decision. (The env var may still be set
+for prompt/journal context assembly; authority does not read it back.) Absent an
+explicit flag, the ops funnel classifies from *inherited* managed context under
+the fail-closed rule below.
 
 ```rust
 pub enum CallerAuthority {
@@ -104,10 +123,21 @@ source of the classification matrix (Done-when #2):
 CallerAuthority::from_ambient(store, target) -> OpsResult<CallerAuthority>
 ```
 
-with these rules (evaluated top-down):
+with these rules (evaluated top-down; explicit `--wave` short-circuits to
+`Wave` before any inherited-context arm):
 
 1. `LF_PROJECT_SESSION_ID` present → `Project(id)` iff it matches the target's
-   Project Session; else "cannot control" error. (today's `ops/task.rs:388`)
+   **live routing target**, `resolve_task_project_route(store, task).current` —
+   **not** `TaskSession.project_session_id`. That field is historical
+   provenance; W2-243 deliberately routes supervision to a *live successor*
+   Project Session when the historical one is terminal. Comparing against the
+   historical id would both (a) reject a legitimate successor's command
+   (`current != historical` on the healthy successor path) and (b) accept a
+   *terminal* predecessor's command. So: resolve the route, then require the
+   incoming `LF_PROJECT_SESSION_ID == route.current`; else "cannot control"
+   naming `route.current` as the live owner. (For a Project *self*-command via
+   `project_resume`, the same rule holds with the Project's own route; the
+   healthy live case is `current == historical`, `succeeded == false`.)
 2. else `LF_WAVE_ID` present → resolve through the store; owning → `Wave`;
    foreign → "cannot control"; stale/registry → loud error. (today's
    `resolve_child_command_source`)
@@ -129,27 +159,61 @@ way to assume Wave authority — it resolves to a registered wave row, so it is 
 deliberate typed assertion, not ambient inheritance. That is the intended
 "explicit typed input from the invocation surface" for a human acting as a wave.
 
-### Move 2 — refuse the barred supervisor resume *before* persisting
+### Move 2 — a barred supervisor resume leaves no live command (structurally, not by timing)
 
-In `queue_command`, for a **Resume** whose body is not active, evaluate the
-launch bar *before* creating the durable command. Today the order is
-create → persist-event → `launch()` (which checks the bar and errors). Reorder
-to: check the restart bar for the resolved launch intent; if it refuses, return
-the bar error with **no** `create_child_command` and **no** `Persisted` event.
+The invariant: **a supervisor `Resume` that ends up barred leaves zero
+`Persisted`/`Claimed`/`Uncertain` command rows — even if the PR phase changes
+between the legality check and the launch.**
 
-- Operator resume (`ExplicitResume`) is unaffected: its bar is only
-  `abandon_intent_reason`, so an open PR still launches (that is how review is
-  answered).
-- Supervisor / Wave / Project resume (`Supervisor`) of an open-PR Task refuses
-  before any write — no `cc_…` stranded, nothing for a re-run to duplicate
-  (Done-when #3, "repeating the same command cannot self-loop").
+A naive "precheck the bar, then persist, then launch" is a TOCTOU and does not
+hold the invariant. `queue_command` today creates the row (`ops/child.rs:734`),
+appends `Persisted` (`795`), then `launch()` (`839`) re-reads
+`active_task_pr` inside `supervisor_restart_bar`. A precheck that reads
+`Working` can be followed by a launch that re-reads `Open` (the body just
+finished publishing) and refuses — recreating the very inert command. Moving the
+check earlier only *narrows* the window; it does not close it.
+
+Close it structurally: **for a launch-driving `Resume`, no durable command is
+committed unless the generation reservation succeeds.** Persistence becomes
+*contingent on* the authoritative launch, not prior to it:
+
+1. If the body is already active, behaviour is unchanged (the command persists
+   for the live body to consume; no restart, no bar).
+2. If the body is not active, the launch (`relaunch_inactive_process`, which
+   evaluates the restart bar against a *single authoritative read* and reserves
+   the generation) runs **first**. Only on a successful reservation is the
+   `Resume` command created and linked to that live generation. A barred or lost
+   reservation returns the bar error having written nothing.
+
+Because persistence follows the one authoritative bar read, there is no window
+in which a command exists without a live generation to own it — the raced
+`Working→Open` case and the steady-state already-`Open` case exercise the *same*
+path (launch bars ⇒ nothing persisted). The optional pre-`Open` fast refusal
+(check the phase up front and return early) is a courtesy that also writes
+nothing; correctness does not depend on it, so no wall-clock race needs
+injecting.
+
+A resumed generation that boots and finds its command not yet linked is not an
+orphan: `Resume { message: None }` is "run the next turn," and a `message` lands
+on the body's command poll immediately after reservation. The receipt still
+resolves — the command id is minted with the reservation, in the same critical
+section.
+
+**Deterministic regression (no timing):** stand up an open-PR Task with a
+finished body; issue a Wave (then Project) `Resume`; assert the refusal *and*
+`SELECT count(*) FROM child_commands WHERE target_id=<ts>` is unchanged.
+Sabotage proof that the contingency is load-bearing: restore the old
+persist-then-launch order and the same test goes red with a stranded `Persisted`
+row. This one regression covers the race because the fix collapses the raced and
+steady-state paths into the same authoritative gate.
 
 Scope: **Resume only.** `CiFix` deliberately persists-then-bars for incident
 attribution (`ensure_child_ci_fix_command` dedups by incident identity, and
 `relaunch_on_duplicate` keys on `Persisted`); leave that path untouched. Steer,
 follow-up, and interrupt against a *live* body still persist a directive for the
-body to consume — the pre-persist bar only guards the *restart* of a non-live
-body.
+body to consume — this contingency only guards the *restart* of a non-live body.
+Operator resume (`ExplicitResume`) is unaffected: its bar is abandon-only, so an
+open PR still reserves a generation and answers review.
 
 ### Move 3 — the open-PR bar speaks to the supervisor who sees it
 
@@ -186,6 +250,8 @@ owner, and never emit self-loop text.
 | Could a genuine operator carry `LF_CHANNEL` and get false-refused? | Possible but rare and self-inflicted (`export LF_CHANNEL=foo` with no wave binding). | Accepted, named, recoverable: the refusal names `LF_CHANNEL` and the fix (`unset LF_CHANNEL` or pass `--wave`). Fail-closed beats silent escalation. |
 | Does the persisted review directive (`cc_03a…`) need a supervisor to deliver it headlessly? | No supported supervisor delivery exists that respects W2-129; delivery past an open PR is operator-only. The directive's own words permit "refuse before persisting a duplicate inert command" as the supervisor outcome. | No new headless-delivery verb in scope. Supervisor refuses clean; operator resume delivers. A fully headless review-handoff (no operator present) is a separate boundary, noted in `questions.md`. |
 | Existing test `command_source_classifies_every_ambient_context` (`ops/util.rs:134`) — does it move? | It is the classification matrix and already covers owning/foreign/stale/absent. | Extend it into the `CallerAuthority` funnel test: add "stray marker, no wave → refuse" and "all markers absent → Operator"; keep the six existing cases. |
+| Does `LF_PROJECT_SESSION_ID` validate against the historical or the live Project Session? | `resolve_task_project_route` (`ops/project.rs:1254`) returns `historical` (provenance) and `current` (live routing target). A terminal historical routes to the latest live successor for the same Linear project (W2-243); the healthy live case is `current == historical`, `succeeded == false`. | Arm 1 validates the incoming `LF_PROJECT_SESSION_ID` against `route.current`, not `session.project_session_id`. Add a regression: (a) historical live → its command controls, successor id would be rejected as foreign; (b) historical terminal + live successor → the successor's command controls and the terminal predecessor's is rejected; (c) terminal + no successor → `resolve_task_project_route` already fails actionably. |
+| Is the pre-persist bar a TOCTOU? | Yes — `queue_command` persists (`ops/child.rs:734/795`) before `launch()` re-reads the PR phase (`839`), so a `Working` precheck can precede an `Open` launch. | Make persistence **contingent on** a successful reservation (persist-after-launch) rather than prior to it. The raced and steady-state cases then share one authoritative gate; a single `count(*)`-unchanged regression + persist-then-launch sabotage covers both. See Move 2. |
 
 ## Alternatives considered
 
@@ -207,9 +273,18 @@ owner, and never emit self-loop text.
   existing `resolve_child_command_source` already unified Task and Project on the
   wave arm; this extends that unification to include the operator arm and the
   fail-closed rule.
-- **Refuse before persist, for Resume only.** Surgical reorder in
-  `queue_command`; ci-fix's persist-first incident attribution is deliberately
-  preserved.
+- **Persistence contingent on reservation, for Resume only.** Not a reorder but
+  a dependency: no durable `Resume` command exists unless a generation was
+  reserved, so a barred/raced launch leaves zero orphan regardless of a PR
+  phase change between check and launch. ci-fix's persist-first incident
+  attribution is deliberately preserved.
+- **Project authority follows the live route.** Validate against
+  `resolve_task_project_route(...).current`, honouring W2-243's terminal→
+  successor routing; the historical `project_session_id` is provenance only.
+- **Environment is transport, not oracle.** Authority is resolved at the
+  invocation boundary; env carries a body's stamped identity and consistency
+  evidence, but no missing var can mint a different authority. Explicit `--wave`
+  is a deliberate operator assertion, kept distinct from inherited context.
 - **The bar addresses its real reader.** `open_pr_bar` only ever reaches a
   supervisor, so it names the reviewer/operator and drops the self-loop text.
 - **No new verb.** The operator resume is the sanctioned typed recovery; a
@@ -218,11 +293,14 @@ owner, and never emit self-loop text.
 
 ## Scope
 
-- In scope: `CallerAuthority` type + `from_ambient` funnel (fail-closed);
-  rewire `command_source`/`project_command_source` onto it; pre-persist Resume
-  bar in `queue_command`; audience-correct `open_pr_bar` text; regressions for
-  Wave/Project/operator resume against an open-PR Task, the `env -u LF_WAVE_ID`
-  strip case, and the ENG-19 stranded-body shape.
+- In scope: `CallerAuthority` type resolved at the invocation boundary
+  (explicit `--wave` vs inherited context) + `from_ambient` funnel
+  (fail-closed, Project validated against `route.current`); rewire
+  `command_source`/`project_command_source` onto it; reservation-contingent
+  `Resume` persistence in `queue_command` (TOCTOU-free); audience-correct
+  `open_pr_bar` text; regressions for Wave/Project/operator resume against an
+  open-PR Task, the `env -u LF_WAVE_ID` strip case, the ENG-19 stranded-body
+  shape, and the terminal-historical / live-successor Project routing case.
 - Out of scope: a new headless review-delivery verb; changing ci-fix's
   persist-then-bar ordering; the open-PR bar policy itself (W2-129 stands);
   W2-319 mutation, scratch deletion, global-binary promotion, reteam apply, or
@@ -230,22 +308,30 @@ owner, and never emit self-loop text.
 
 ## Done when
 
-- `CallerAuthority` is an explicit typed input resolved once at the ops
-  boundary, not inferred by reading `LF_WAVE_ID`/`LF_PROJECT_SESSION_ID` deep in
-  the stack.
+- `CallerAuthority` is resolved to a typed value **at the invocation boundary**
+  (explicit `--wave` distinguished from inherited managed context) and passed
+  into ops; the authority decision does not read `LF_WAVE_ID`/
+  `LF_PROJECT_SESSION_ID` back deeper in the stack. Environment participates as
+  transport and consistency evidence — never as an authority oracle that a
+  missing var can flip.
 - Wave, Project, and operator commands derive legal actions and refusals from
-  the one `from_ambient` funnel.
+  the one `from_ambient` funnel. `Project` authority validates against
+  `resolve_task_project_route(...).current`, not the historical
+  `project_session_id`.
 - A supervisor barred by the open-PR bar is told the reviewer/operator is the
   next owner; the message recommends no self-resume, and the refusal persists no
   command (verified: `child_commands` count unchanged after a barred Wave
-  resume).
+  resume, **even under a PR phase change between legality check and launch** —
+  persistence is contingent on a successful reservation).
 - `env -u LF_WAVE_ID lf task resume <open-pr-task>` from inside a managed body
   refuses loudly and is **not** reclassified Operator.
 - Tests cover Wave, Project, and operator resume against an open-PR Task,
-  including the ENG-19 stranded-body shape, each sabotaging the production
-  branch it names (remove the pre-persist bar → a stranded `Persisted` command
-  appears; revert the fail-closed arm → the strip case classifies Operator and
-  launches).
+  including the ENG-19 stranded-body shape and the terminal-historical /
+  live-successor Project routing case, each sabotaging the production branch it
+  names (restore persist-then-launch → a stranded `Persisted` command appears;
+  revert the fail-closed arm → the strip case classifies Operator and launches;
+  compare against `project_session_id` → the successor's command is wrongly
+  rejected).
 - `cargo test -p loopflow` green; `cargo clippy --all-targets -- -D warnings`
   clean.
 

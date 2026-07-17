@@ -1222,8 +1222,8 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, product_schema, validate_set, validate_sqlite,
-        Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, product_schema, validate_foreign_keys,
+        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
     use crate::task::TaskEventKind;
 

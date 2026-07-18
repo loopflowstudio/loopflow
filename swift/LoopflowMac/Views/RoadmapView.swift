@@ -318,9 +318,8 @@ struct RoadmapView: View {
         }
     }
 
-    /// Navigate to the Wave. Starting a stopped Wave is the Home control's job
-    /// now — it runs `lf home start` on the *configured Home*, not this machine,
-    /// then this fires to open the detail.
+    /// Navigate to the Wave. Starting a stopped Wave remains the Home control's
+    /// job; this only opens the detail.
     private func openWave(_ wave: WaveSnapshot) {
         onOpenWave(wave)
     }
@@ -390,13 +389,13 @@ struct RoadmapView: View {
     }
 }
 
-/// A Wave's inherited Home on its row: the address always visible, plus the
+/// A Wave's placed Home on its row: stable identity and current route, plus the
 /// probed liveness and the *one* contextual action the shared `HomeRuntimeDto`
-/// dictates. The app never does SSH — `lf home probe|start` classifies the Home
-/// and Start runs on the configured Home, not this machine. Probed once per
+/// dictates. The app never does SSH — `lf home probe` and `lf start` route by
+/// placement, including to remote Homes. Probed once per
 /// Wave card on appear (local reads are instant; a remote Home costs one routed
 /// probe), never once per row and never on the 15s roadmap poll.
-private struct WaveHomeControl: View {
+private struct HomeControl: View {
     let wave: WaveSnapshot
     let onOpen: () -> Void
     let onError: (String) -> Void
@@ -413,7 +412,7 @@ private struct WaveHomeControl: View {
                 Image(systemName: "house")
                     .font(Typography.caption(9))
                     .foregroundStyle(palette.textSecondary)
-                Text(wave.home.address)
+                Text(wave.home.route == "local" ? wave.home.id : wave.home.route)
                     .font(Typography.caption(10).weight(.medium))
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
@@ -439,8 +438,8 @@ private struct WaveHomeControl: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .help(runtime.endpoint.map { "Attach to \($0)" } ?? "Open the Wave")
-            case .start(let home):
-                Button("Start on \(home)") { Task { await start() } }
+            case .start(let homeId):
+                Button("Start on \(homeId)") { Task { await start() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             case .reason(let message):
@@ -491,8 +490,8 @@ private struct WaveHomeControl: View {
         isActing = true
         defer { isActing = false }
         do {
-            let result = try await RegistryQueryLocal.shared.homeStart(wave: wave.name, cwd: wave.repo)
-            runtime = result.runtime
+            _ = try await RegistryQueryLocal.shared.start(wave: wave.name, cwd: wave.repo)
+            runtime = try await RegistryQueryLocal.shared.homeProbe(wave: wave.name, cwd: wave.repo)
             onOpen()
         } catch {
             onError(error.localizedDescription)
@@ -534,7 +533,7 @@ private struct RoadmapWaveCard: View {
                     }
                 }
                 Spacer()
-                WaveHomeControl(wave: roadmap.wave, onOpen: onOpen, onError: onError)
+                HomeControl(wave: roadmap.wave, onOpen: onOpen, onError: onError)
             }
 
             switch roadmap.projects {

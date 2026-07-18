@@ -23,12 +23,12 @@ SSH.
 | **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
 | **Task** | Concrete work that advances a project; owns the only delivery worktree | Linear, via `lf pm` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
-| **Home** | Where a wave's work executes — an owner plus a location, local or `ssh://` | `GOAL.md` frontmatter |
+| **Home** | Stable execution authority; its route may move without changing identity | local SQLite |
 
-A wave is a named agent with a goal. Everything that defines its durable
-operating context — goal, memory, crons, Home — is authored in the repo and
-reviewed like code. Projects and Tasks live in Linear. Only a Task Session
-owns a worktree; that is where every file change happens.
+A wave is a named agent with a goal. Goal, memory, and crons are authored in
+the repo and reviewed like code. Execution placement lives in the local
+durable store. Projects and Tasks live in Linear. Only a Task Session owns a
+worktree; that is where every file change happens.
 
 ## Try it
 
@@ -44,7 +44,7 @@ CLI:
 
 ```bash
 # author wave/engbot/GOAL.md, then:
-lf home start engbot      # idempotently start the Wave on its Home
+lf start engbot           # idempotently start the Wave on its placed Home
 lf chat --steer "ship the parser fix first"
 lf status engbot          # its live Project → Task hierarchy
 lf stop engbot

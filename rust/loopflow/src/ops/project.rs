@@ -405,10 +405,6 @@ pub(crate) async fn launch_project_process(
     let control_bin = execution.lf_bin.to_string_lossy().to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
     let lf_home = execution.lf_home.to_string_lossy().to_string();
-    // Inherit the Wave's execution home so this child's routed commands target
-    // the same host — read from the owning Wave's identity, not the branch.
-    let wave_home =
-        crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name()).to_string();
     let environment = [
         (
             crate::engine::wave_context::WAVE_ID_ENV,
@@ -425,7 +421,6 @@ pub(crate) async fn launch_project_process(
         (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
         (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
         (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
-        (crate::engine::wave_home::WAVE_HOME_ENV, wave_home.as_str()),
     ];
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, Path::new(wave.repo()), &argv, &environment).await

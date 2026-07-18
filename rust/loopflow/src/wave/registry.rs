@@ -64,6 +64,39 @@ pub async fn ensure_wave_row(
     Ok(wave)
 }
 
+/// Ensure a Wave row with the identity chosen by its authoritative origin.
+/// A remote Home may observe a different repo path, but never mint a second id
+/// for the same named Work.
+pub async fn ensure_wave_row_with_id(
+    store: &SharedStore,
+    main_repo: &Path,
+    name: &str,
+    wave_id: &WaveId,
+) -> StoreResult<Wave> {
+    if let Some(existing) = store.get_wave_by_name(name).await? {
+        if existing.id() != wave_id {
+            return Err(crate::store::StoreError::InvalidData(format!(
+                "Wave '{name}' is {} on this Home, not authoritative id {wave_id}",
+                existing.id()
+            )));
+        }
+        return Ok(existing);
+    }
+    if let Some(existing) = store.get_wave(wave_id).await? {
+        return Err(crate::store::StoreError::InvalidData(format!(
+            "Wave id {wave_id} belongs to '{}', not '{name}'",
+            existing.name()
+        )));
+    }
+    let wave = Wave::new(
+        wave_id.clone(),
+        name.to_string(),
+        main_repo.display().to_string(),
+    );
+    store.create_wave(&wave).await?;
+    Ok(wave)
+}
+
 /// Whether a process with `pid` is running on this host (`kill -0` probe).
 /// Shared with the supervisor's attached-resident probe.
 pub(crate) async fn process_alive(pid: u32) -> bool {

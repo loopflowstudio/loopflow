@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::{
     AuthenticatedRequest, Basis, ControlCtx, EpochId, EpochReceipt, Feedback, InterruptReceipt,
-    LaunchId, ProjectId, Run, SteerReceipt, TaskId, UserFeedback, WorkRef, WorkStatus,
+    LaunchId, Placement, ProjectId, Run, SteerReceipt, TaskId, UserFeedback, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
@@ -28,6 +28,7 @@ struct WorkProjection {
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum WorkReceipt {
+    Placed(Placement),
     Steer(SteerReceipt),
     FeedbackContinued { status: WorkStatus },
     FeedbackEscalated { feedback: Feedback },
@@ -46,6 +47,16 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             let work = parse_work(kind, id)?;
             let projection = projection(&store, &work).await?;
             print_projection(&projection, *json)?;
+        }
+        WorkCommand::Place {
+            kind,
+            id,
+            home_id,
+            json,
+        } => {
+            let work = parse_work(kind, id)?;
+            let placement = store.place_work(&work, home_id).await?;
+            print_receipt(&WorkReceipt::Placed(placement), *json)?;
         }
         WorkCommand::Steer {
             kind,
@@ -487,6 +498,12 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(receipt)?);
     } else {
         match receipt {
+            WorkReceipt::Placed(placement) => println!(
+                "{} {}  ->  {}",
+                placement.work.kind(),
+                placement.work.id(),
+                placement.home_id
+            ),
             WorkReceipt::Steer(receipt) => println!("steered {}", receipt.steer.id),
             WorkReceipt::FeedbackContinued { status } => println!("continued Feedback: {status:?}"),
             WorkReceipt::FeedbackEscalated { feedback } => println!(

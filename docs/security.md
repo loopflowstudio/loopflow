@@ -109,6 +109,22 @@ lf --only-account claude=jack@ review
 
 ### What crosses SSH
 
+Choose the authority boundary explicitly:
+
+```bash
+lf ssh build-vm -- lf task pursue
+lf ssh <home-id> --remote-native -- lf start shipper
+```
+
+The default foreground mode borrows origin authority as described below.
+`--remote-native` forwards no provider, GitHub, PM, Doppler secret, or account
+lease. Any `HomeId` target resolves the durable Home's current SSH route and
+supplies the expected identity; the remote command refuses if the reached
+machine owns a different HomeId. Remote-native commands use authority installed
+on that Home.
+Use remote-native mode for detached Home residents; use default mode for
+foreground work that should end with the origin lease.
+
 Loopflow resolves managed Claude and Codex accounts on the origin machine. The
 remote process receives an opaque, short-lived lease handle. SSH
 reverse-forwards an owner-only Unix socket to a broker owned by the foreground

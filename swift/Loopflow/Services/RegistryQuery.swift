@@ -61,20 +61,18 @@ public struct RegistryQuery: Sendable {
 
     /// Probe one Wave's Home for liveness and the single contextual action.
     /// The app never does SSH — `lf home probe` classifies the Home (local reads
-    /// are instant, remote routes one `lf status` over the credential-forwarding
-    /// transport) and returns the shared `HomeRuntimeDto`. Probe on demand per
+    /// are instant, remote routes one `lf status` through remote-native SSH)
+    /// and returns the shared `HomeRuntimeDto`. Probe on demand per
     /// focused Wave, never once per row.
     public func homeProbe(wave: String, cwd: String?) async throws -> HomeRuntime {
         let stdout = try await run(["home", "probe", wave, "--json"], cwd)
         return try Self.decode(HomeRuntime.self, from: stdout)
     }
 
-    /// Idempotently start a Wave on its *configured Home* (not this machine) and
-    /// return the attach identity. Safe to repeat: an already-running Home comes
-    /// back with `started == false` rather than launched twice.
-    public func homeStart(wave: String, cwd: String?) async throws -> HomeStartResult {
-        let stdout = try await run(["home", "start", wave, "--json"], cwd)
-        return try Self.decode(HomeStartResult.self, from: stdout)
+    /// Idempotently start a Wave on its placed Home and return its status row.
+    public func start(wave: String, cwd: String?) async throws -> [WaveSnapshot] {
+        let stdout = try await run(["start", wave, "--json"], cwd)
+        return try Self.decode([WaveSnapshot].self, from: stdout)
     }
 
     /// Every durable plan row across the machine, joined to the same Task
@@ -305,43 +303,17 @@ private struct PmKrSnapshot: Decodable {
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
 
-/// One `lf ls` row / the `wave` field of `lf status`. Mirrors Rust
-/// `WaveHomeDto` (`engine/wave_home.rs`) — a Wave's Home: a user-owned execution
-/// address (owner plus location). `address` is the canonical string to show
-/// (`jack@local` or `ssh://jack@host[:port]`); `location` is the structured form
-/// to navigate/open. The app never parses or reimplements SSH — it reads these.
-public struct WaveHome: Decodable, Sendable, Hashable {
-    public let address: String
-    public let owner: String
-    public let location: HomeLocation
-}
-
-/// `HomeLocationDto` — where a Home's execution context lives.
-public enum HomeLocation: Decodable, Sendable, Hashable {
-    case local
-    case ssh(host: String, port: Int?)
+/// Durable execution authority and its mutable observed route.
+public struct Home: Decodable, Sendable, Hashable {
+    public let id: String
+    public let route: String
+    public let createdAt: String
+    public let observedAt: String
 
     enum CodingKeys: String, CodingKey {
-        case kind, host, port
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .kind) {
-        case "local":
-            self = .local
-        case "ssh":
-            self = .ssh(
-                host: try container.decode(String.self, forKey: .host),
-                port: try container.decodeIfPresent(Int.self, forKey: .port)
-            )
-        case let other:
-            throw DecodingError.dataCorruptedError(
-                forKey: .kind,
-                in: container,
-                debugDescription: "unknown home location kind \(other)"
-            )
-        }
+        case id, route
+        case createdAt = "created_at"
+        case observedAt = "observed_at"
     }
 }
 
@@ -355,11 +327,11 @@ public enum HomeState: String, Decodable, Sendable, Equatable {
 /// reachable-but-stopped, or the actionable reason otherwise.
 public enum HomeAction: Decodable, Sendable, Equatable {
     case attach(endpoint: String)
-    case start(home: String)
+    case start(homeId: String)
     case reason(message: String)
 
     enum CodingKeys: String, CodingKey {
-        case kind, endpoint, home, message
+        case kind, endpoint, homeId = "home_id", message
     }
 
     public init(from decoder: Decoder) throws {
@@ -368,7 +340,7 @@ public enum HomeAction: Decodable, Sendable, Equatable {
         case "attach":
             self = .attach(endpoint: try container.decode(String.self, forKey: .endpoint))
         case "start":
-            self = .start(home: try container.decode(String.self, forKey: .home))
+            self = .start(homeId: try container.decode(String.self, forKey: .homeId))
         case "reason":
             self = .reason(message: try container.decode(String.self, forKey: .message))
         case let other:
@@ -381,26 +353,16 @@ public enum HomeAction: Decodable, Sendable, Equatable {
     }
 }
 
-/// `HomeRuntimeDto` — a Wave's Home probed for liveness: the address, the state
+/// `HomeRuntimeDto` — a Wave's Home probed for liveness: authority and route, the state
 /// with its evidence, the attach endpoint when running, and the one action.
 /// This is the shared contract the conductor renders; the app never probes SSH
-/// itself — it calls `lf home probe|start --json`.
+/// itself — it calls `lf home probe --json` and `lf start --json`.
 public struct HomeRuntime: Decodable, Sendable, Equatable {
-    public let home: WaveHome
+    public let home: Home
     public let state: HomeState
     public let reason: String
     public let endpoint: String?
     public let action: HomeAction
-}
-
-/// `HomeStartResult` (`ops/home.rs`) — the receipt from an idempotent
-/// `lf home start`: whether this call launched the resident (`false` = it was
-/// already running) plus the same runtime evidence a probe returns. The
-/// `runtime.endpoint` is the attach identity to open.
-public struct HomeStartResult: Decodable, Sendable, Equatable {
-    public let wave: String
-    public let started: Bool
-    public let runtime: HomeRuntime
 }
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
@@ -417,7 +379,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let endpoint: String?
     public let createdAt: String?
     public let parentWaveId: String?
-    public let home: WaveHome
+    public let home: Home
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, goal, repo, live, endpoint, home

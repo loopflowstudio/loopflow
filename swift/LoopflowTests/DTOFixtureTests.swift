@@ -61,9 +61,8 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
 
-        #expect(detail.wave.home.address == "ssh://jack@mini-heart")
-        #expect(detail.wave.home.owner == "jack")
-        #expect(detail.wave.home.location == .ssh(host: "mini-heart", port: nil))
+        #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
+        #expect(detail.wave.home.route == "ssh://jack@mini-heart")
         // The Home runtime evidence carries the state and the one contextual action.
         #expect(detail.homeRuntime.state == .running)
         #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))

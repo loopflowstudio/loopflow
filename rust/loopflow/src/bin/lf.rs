@@ -1074,13 +1074,6 @@ fn main() -> anyhow::Result<()> {
     // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
     // loop's codex app-server pair and left a stale .wave-endpoint).
-    ctrlc::set_handler(|| {
-        loopflow::engine::agent::run_interrupt_cleanups();
-        loopflow::engine::agent::kill_child_if_running();
-        std::process::exit(130);
-    })
-    .expect("failed to set Ctrl+C handler");
-
     // Initialize tracing with RUST_LOG env filter
     // Usage: RUST_LOG=lf=debug lf debug
     let filter = EnvFilter::try_from_default_env()
@@ -1096,6 +1089,16 @@ fn main() -> anyhow::Result<()> {
     let args = reorder_args(raw_args.clone());
 
     let mut cli = Cli::parse_from(args.clone());
+    // The shared Home resident owns an async, multi-Wave shutdown sequence.
+    // Every other command retains the immediate process-wide interrupt path.
+    if !matches!(&cli.command, Some(Commands::HomeResident { .. })) {
+        ctrlc::set_handler(|| {
+            loopflow::engine::agent::run_interrupt_cleanups();
+            loopflow::engine::agent::kill_child_if_running();
+            std::process::exit(130);
+        })
+        .expect("failed to set Ctrl+C handler");
+    }
     let explicit_wave = cli
         .wave
         .as_deref()
@@ -1162,6 +1165,11 @@ fn main() -> anyhow::Result<()> {
             } => loopflow::lf::commands::install::rollback(cli_target, candidate),
         };
     }
+
+    // Every HomeId-addressed SSH hop proves it reached the intended authority
+    // before reads or mutations dispatch. Raw-host bootstrap carries no
+    // expectation and falls through.
+    loopflow::lf::commands::home::validate_expected_home_process()?;
 
     // Route repo/PR/release/PM commands to the Wave's execution home before local
     // dispatch. A remote (SSH) home forwards over `lf ssh`; a local or absent home
@@ -1259,9 +1267,21 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Wave { name, force }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::run(name, *force))
             }
-            Some(Commands::Stop { name }) => in_repo_runtime(&args, |_| loopflow::wave::stop(name)),
+            Some(Commands::Start {
+                waves,
+                wave_ids,
+                json,
+            }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::home::start(waves, wave_ids, *json, repo)
+            }),
+            Some(Commands::Stop { name }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::home::stop(name, repo)
+            }),
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
+            }
+            Some(Commands::HomeResident { home_id }) => {
+                in_repo_runtime(&args, |_| loopflow::home_resident::run(home_id))
             }
             Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
@@ -1481,12 +1501,14 @@ fn main() -> anyhow::Result<()> {
                 repo,
                 secret,
                 forward_agent,
+                remote_native,
                 cmd,
             }) => loopflow::lf::commands::ssh::run(
                 host,
                 repo.as_deref(),
                 secret,
                 *forward_agent,
+                *remote_native,
                 &account_selection,
                 cmd,
             ),
@@ -1699,6 +1721,64 @@ mod tests {
         assert!(matches!(
             body.command,
             Some(Commands::Resident { name }) if name == "goals"
+        ));
+    }
+
+    #[test]
+    fn start_and_home_resident_are_distinct_entrypoints() {
+        let start =
+            Cli::try_parse_from(["lf", "start", "product", "intelligence", "--json"]).unwrap();
+        assert!(matches!(
+            start.command,
+            Some(Commands::Start { waves, wave_ids, json })
+                if waves == ["product", "intelligence"] && wave_ids.is_empty() && json
+        ));
+
+        let remote_start = Cli::try_parse_from([
+            "lf",
+            "start",
+            "product",
+            "--wave-id",
+            "product=wave_00000000000000000000000000000001",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            remote_start.command,
+            Some(Commands::Start { waves, wave_ids, json })
+                if waves == ["product"]
+                    && wave_ids == ["product=wave_00000000000000000000000000000001"]
+                    && json
+        ));
+
+        let resident = Cli::try_parse_from([
+            "lf",
+            "__home-resident",
+            "home_00000000000000000000000000000001",
+        ])
+        .unwrap();
+        assert!(matches!(
+            resident.command,
+            Some(Commands::HomeResident { .. })
+        ));
+
+        let ssh = Cli::try_parse_from([
+            "lf",
+            "ssh",
+            "home_00000000000000000000000000000001",
+            "--remote-native",
+            "--",
+            "lf",
+            "start",
+            "product",
+        ])
+        .unwrap();
+        assert!(matches!(
+            ssh.command,
+            Some(Commands::Ssh {
+                remote_native: true,
+                ..
+            })
         ));
     }
 

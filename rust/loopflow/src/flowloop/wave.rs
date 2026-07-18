@@ -1832,17 +1832,15 @@ mod tests {
             .work_for_child(&ChildRef::Project(project.id))
             .await
             .unwrap();
-        let home = store.home("test-home").await.unwrap();
         let (_, parent_lease) = store
             .reserve_run(
                 &WorkRef::Wave(wave.id().clone()),
-                &home.id,
                 crate::durable::RunTrigger::User,
             )
             .await
             .unwrap();
         let (_, child_lease) = store
-            .reserve_run(&child_work, &home.id, crate::durable::RunTrigger::User)
+            .reserve_run(&child_work, crate::durable::RunTrigger::User)
             .await
             .unwrap();
         let launch = store

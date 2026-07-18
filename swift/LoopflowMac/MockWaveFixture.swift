@@ -135,9 +135,10 @@ enum MockWaveFixture {
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+          "id": "home_00000000000000000000000000000001",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "2026-07-01T00:00:00Z",
+          "observed_at": "2026-07-17T00:00:00Z"
         }
       },
       "loop_state": "idle",
@@ -334,9 +335,10 @@ enum MockWaveFixture {
       },
       "home_runtime": {
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+          "id": "home_00000000000000000000000000000001",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "2026-07-01T00:00:00Z",
+          "observed_at": "2026-07-17T00:00:00Z"
         },
         "state": "running",
         "reason": "resident is serving on the Home",

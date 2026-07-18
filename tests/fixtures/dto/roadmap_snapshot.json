@@ -15,11 +15,10 @@
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
         "home": {
-          "address": "jack@local",
-          "owner": "jack",
-          "location": {
-            "kind": "local"
-          }
+          "id": "home_00000000000000000000000000000001",
+          "route": "local",
+          "created_at": "1970-01-01T00:00:00Z",
+          "observed_at": "1970-01-01T00:00:00Z"
         }
       },
       "projects": {
@@ -499,13 +498,10 @@
         "created_at": null,
         "parent_wave_id": null,
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {
-            "kind": "ssh",
-            "host": "mini-heart",
-            "port": null
-          }
+          "id": "home_00000000000000000000000000000002",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "1970-01-01T00:00:00Z",
+          "observed_at": "1970-01-01T00:00:00Z"
         }
       },
       "projects": {

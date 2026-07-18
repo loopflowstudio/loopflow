@@ -1974,10 +1974,9 @@ mod tests {
                 guard.home().display().to_string(),
             );
             store.create_wave(&wave).await.unwrap();
-            let home = store.home("test-home").await.unwrap();
             let work = crate::durable::WorkRef::Wave(wave.id().clone());
             let (run, lease) = store
-                .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+                .reserve_run(&work, crate::durable::RunTrigger::User)
                 .await
                 .unwrap();
             let receipt = store

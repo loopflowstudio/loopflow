@@ -234,6 +234,14 @@ pub struct Home {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Placement {
+    pub work: WorkRef,
+    pub home_id: HomeId,
+    #[serde(with = "time::serde::rfc3339")]
+    pub placed_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WaitOn {
     Input {

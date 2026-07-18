@@ -259,7 +259,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                             parentRowId: projectRowId,
                             provider: taskRuntime.provider,
                             model: nil,
-                            home: wave.home.address,
+                            home: wave.home.route,
                             worktree: task.reference.workspace?.worktree,
                             step: nil,
                             ageSecs: task.attention.evidenceAgeSeconds,
@@ -302,7 +302,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                         parentRowId: nil,
                         provider: runtime.provider,
                         model: nil,
-                        home: wave.home.address,
+                        home: wave.home.route,
                         worktree: nil,
                         step: "iteration \(runtime.iteration)",
                         ageSecs: nil,
@@ -371,7 +371,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         return ActiveSessionWaveGroup(
             id: wave.id,
             waveName: wave.name,
-            home: wave.home.address,
+            home: wave.home.route,
             remote: isRemote(wave.home),
             tint: tint,
             evidence: evidence,
@@ -484,8 +484,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         status == .completed || status == .abandoned
     }
 
-    private static func isRemote(_ home: WaveHome) -> Bool {
-        if case .ssh = home.location { return true }
-        return false
+    private static func isRemote(_ home: Home) -> Bool {
+        home.route != "local"
     }
 }

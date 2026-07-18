@@ -10,7 +10,9 @@ title: Architecture
 > Loopflow now runs durable input through Work, Epoch, Basis, Steer, Send, and
 > the existing Turn ledger. Stored Feedback/Handoff and `ChildCommand` are gone;
 > Feedback is an interactive flow interval routed by Launch attention, and direct
-> Work controls exist. Project/Task Session runners and body leases still own
+> Work controls exist. Work placement now names a stable Home authority, and one
+> Home-local keeper serves all placed Waves. Project/Task Session runners and
+> body leases still own
 > process execution and reconstruct Run authority from legacy generations.
 > Child attention is queryable but parent loops do not yet prioritize it. Run is
 > therefore the durable authority, but not yet the only executor.
@@ -46,23 +48,24 @@ Three planning nouns remain distinct:
 **Current.** This is the system the code still runs:
 
 ```text
-User -> Wave Chat -> Wave resident
-                       |
-                       v
-                 Project Work / legacy Session runner
-                       |
-                       v
-                   Task Work / legacy Session runner -> worktree -> serial PRs
+User -> lf start -> Home resident -> placed Wave listeners/residents
+                                      |
+                                      v
+                                Project Work / legacy Session runner
+                                      |
+                                      v
+                                  Task Work / legacy Session runner -> worktree -> serial PRs
 
 Steer -> Epoch Basis -> provider boundary -> agent Turn
 Run/Launch/Turn ledger <- body generation bridge -> provider process
 interactive flow + Launch attention -> Feedback projection / Swift surface
 ```
 
-`lf` is the machine-wide CLI and JSON interface. `lf wave <name>` runs one
-resident process with that Wave's listener, journal, cadence, memory, and
-Project selection. Project and Task Sessions are local child processes sharing
-SQLite. There is no global service.
+`lf` is the machine-wide CLI and JSON interface. `lf start` routes each Wave to
+its placed Home and asks one Home-local keeper to serve it; `lf wave <name>`
+keeps the foreground development path. Each served Wave still has its own
+listener, journal, cadence, memory, and resident body. Project and Task
+Sessions are local child processes sharing SQLite. There is no central service.
 
 Current decentralized truth is deliberately split by substrate:
 
@@ -677,12 +680,29 @@ control lane. Interaction and Handoff ids disappear.
 
 ## Decentralized Home
 
-**Decision.** `HomeId` is durable execution authority. Hostname, socket, SSH
+**Current decision.** `HomeId` is durable execution authority. Hostname, socket, SSH
 route, and reachability are mutable observations. Only the owner mutates Work,
 Runs, Launches, and Turns. Remote Homes may observe but cannot seize authority
-because a probe timed out.
+because a probe timed out. A remote route may be re-observed, but the owning
+machine's `local` marker cannot be rewritten as a remote route.
 
-One Home-local keeper:
+`Placement { work: WorkRef, home_id: HomeId, placed_at }` is the sole execution
+location relation. New Wave Work starts on the local Home; Project and Task
+Work inherit their parent's current placement once. A move is explicit and is
+refused while the Work has a live Run. Run reservation resolves placement in
+the same transaction and refuses unless it names the local Home, so neither a
+caller nor a process on the wrong machine can select a different authority.
+
+One machine-local Home resident hosts the existing per-Wave listener tasks.
+`lf start` groups Waves by Home, ensures the local keeper once, and routes
+remote groups through `lf ssh <HomeId> --remote-native`. That transport forwards
+no origin authority and makes the target verify its own HomeId before mutating
+lifecycle state. The internal start hop carries the exact WaveId and refuses a
+name/id collision, so a remote Home cannot mint a second identity for the same
+Work. `lf stop` stops only the selected Wave and leaves the keeper
+and sibling Waves running.
+
+The target keeper additionally:
 
 - detects Reserved Runs that missed boot;
 - probes locally owned Runs;
@@ -947,8 +967,8 @@ noun or source of truth:
    `ConversationEvent::TurnUsage` still enter through different surfaces and
    disagree on accumulation versus replacement. Re-measure before deleting
    either parser or declaring the old missing-usage observation fixed.
-3. Choose the exact stable `HomeId` migration source and route-observation
-   format. Hostname remains disqualified as identity.
+3. Prove route reconciliation when two operators observe the same Home through
+   different SSH aliases. `HomeId` remains identity; route remains observation.
 4. Prove containment for each provider's native subagents and background tasks.
    Unsupported unobservable writers must fail closed.
 5. Define the smallest explicit success/handback mechanism for opaque TUIs;

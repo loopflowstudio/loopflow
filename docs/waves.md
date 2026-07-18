@@ -17,15 +17,15 @@ start it beside its conversation and work map. The same controls exist from
 the CLI:
 
 ```bash
-lf home start shipper                  # idempotently start the Wave on its Home
+lf start shipper                       # idempotently start the Wave on its Home
 lf chat --steer "invoices first"       # steer the live body, else queue
 lf status shipper                      # its Project → Task hierarchy
-lf stop shipper                        # stop listener and resident gracefully
+lf stop shipper                        # stop this Wave; sibling Waves keep running
 ```
 
-(`lf wave shipper` runs the resident process itself, foreground until Ctrl-C —
-that is what the app and `lf home start` launch for you; run it directly when
-developing a goal.)
+(`lf wave shipper` runs one Wave listener in the foreground until Ctrl-C. Use
+it while developing a goal; `lf start` normally asks the Home's shared keeper
+to serve the Wave.)
 
 ## The planning model
 
@@ -101,23 +101,55 @@ drop.
 
 ### Home
 
-A Wave's **Home** is where its work executes — an owner plus a location:
-
-```yaml
-home: jack@local              # canonical local (the default)
-home: ssh://jack@mini.local   # remote over SSH
-```
-
-Project and Task launches inherit the Home; repo/PR/release/PM commands in a
-remote-home Wave forward there over `lf ssh`, carrying credentials for the
-life of the process only. Probe and start with:
+A **Home** is stable execution authority. Work stores a `HomeId`; the Home
+stores its currently observed route. Changing a hostname or SSH route does not
+change Work placement.
 
 ```bash
-lf home probe <wave>   # reachable? stopped? running? — with the next action
-lf home start <wave>   # idempotently start the Wave on its Home
+lf home id                    # this machine's stable HomeId
+lf ls --json                  # Wave ids and their current Homes
+lf start shipper              # start one Wave on its placed Home
+lf start                      # start every Wave in the current repo
+lf stop shipper               # stop only this Wave
 ```
 
-See [Architecture → Homes](architecture.md#homes-and-remote-execution).
+New Project and Task Work inherits its parent's placement once. Move any Work
+only while it has no live Run:
+
+```bash
+lf work place wave <wave-id> <home-id>
+lf work place project <project-id> <home-id>
+lf work place task <task-id> <home-id>
+```
+
+One keeper process per Home serves all placed Waves. Starting or stopping one
+Wave does not create or kill a machine-wide controller and does not disturb
+sibling Waves.
+
+Register a remote Home by asking that machine for its own identity, then record
+the route locally and place Work on it:
+
+```bash
+lf ssh jack@mini.local --remote-native -- lf home id --json
+lf home observe <home-id> ssh://jack@mini.local
+lf work place wave <wave-id> <home-id>
+lf start shipper
+```
+
+After bootstrap, address the authority rather than its current hostname. Every
+HomeId-addressed hop makes the target prove its identity:
+
+```bash
+lf ssh <home-id> --remote-native -- lf status shipper --json
+lf home probe shipper
+```
+
+`--remote-native` forwards no provider, GitHub, PM, or secret authority. The
+remote Home uses credentials installed there, which lets its resident outlive
+the SSH process. Foreground one-shot work can continue to use ordinary
+credential-forwarding `lf ssh`.
+
+See [Architecture → Decentralized Home](architecture.md#decentralized-home).
 
 ## Projects and KRs
 
@@ -230,7 +262,7 @@ missed, not replayed.
 
 Draft with `lf design` or write the files by hand — see
 [Authoring → Drafting](authoring.md#drafting). Once `wave/<name>/` exists,
-the Mac app picks it up, and `lf home start <name>` starts it from the CLI.
+the Mac app picks it up, and `lf start <name>` starts it from the CLI.
 To remove a wave, stop it, then delete `wave/<name>/`.
 
 ## Worked example

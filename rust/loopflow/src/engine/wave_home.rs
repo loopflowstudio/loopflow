@@ -1,22 +1,13 @@
-//! A Wave's Home: a user-owned execution address — an *owner* plus a *location*.
+//! Parse the mutable route observed for a durable Home authority.
 //!
-//! Home is not a host alias and not a local/remote boolean. It names *whose*
-//! execution context a Wave runs in and *where* that context lives:
+//! A route is either this process's machine (`local`) or one SSH destination:
 //!
-//! - `jack@local` — the canonical local form (owner `jack`, this machine).
+//! - `local` — the stable local marker.
 //! - `ssh://jack@host[:port]` — the canonical remote form, reachable over SSH.
 //! - `jack@host` — human shorthand that normalizes to `ssh://jack@host`.
 //!
-//! The owner is required and is distinct from credentials: it says who the Home
-//! belongs to, not how to authenticate — credentials still ride the SSH and
-//! Doppler surfaces. Reachability is never enforced at parse time: a public IP,
-//! public/private DNS name, or Tailscale address all describe the same SSH
-//! location, and whether it answers is *operational evidence* (see
-//! [`HomeState`]), not a property of the address.
-//!
-//! One [`WaveHome::parse`] funnel accepts every form (Postel: liberal in); one
-//! [`WaveHome::to_string`] formatter emits the canonical form (strict out).
-//! DNS, IPv4, bracketed IPv6, and optional ports all flow through the same pair.
+//! The route is observation, never identity; `HomeId` remains stable when it
+//! changes. Reachability is operational evidence (see [`HomeState`]).
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -24,28 +15,19 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// The pinned/inherited home a launched child carries. Read before GOAL.md so a
-/// child routes to the home its Session was launched with.
-pub const WAVE_HOME_ENV: &str = "LF_WAVE_HOME";
-
 /// Set on the remote hop by the router. Its presence means "you are already the
 /// home host; run the command locally" — the single break in the forward loop.
 pub const HOME_ROUTED_ENV: &str = "LF_HOME_ROUTED";
 
-/// A Wave's Home: an owner plus the location its execution context lives at.
+/// The current transport route to one Home.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WaveHome {
-    owner: String,
-    location: HomeLocation,
-}
-
-/// Where a Home's execution context lives.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HomeLocation {
-    /// This machine.
+pub enum HomeRoute {
     Local,
-    /// One SSH location. `host` is a DNS name or IP; `port` defaults to ssh's.
-    Remote { host: HomeHost, port: Option<u16> },
+    Ssh {
+        user: String,
+        host: HomeHost,
+        port: Option<u16>,
+    },
 }
 
 /// A remote location's host: a DNS name or a numeric IP. IPv6 is stored numeric
@@ -76,83 +58,56 @@ impl HomeHost {
     }
 }
 
-impl WaveHome {
-    /// Parse any authored/shorthand form. `None` for anything unrecognized, so a
+impl HomeRoute {
+    /// Parse a durable route or SSH shorthand. `None` for anything unrecognized, so a
     /// typo fails loudly at the read site rather than silently routing wrong.
-    ///
-    /// The owner is mandatory: a bare `local` or `ssh://host` (no owner) is
-    /// rejected — there is no implicit current-user Home.
     pub fn parse(raw: &str) -> Option<Self> {
         let raw = raw.trim();
         if raw.is_empty() {
             return None;
         }
+        if raw == "local" {
+            return Some(Self::Local);
+        }
         // The `ssh://` scheme is optional on input; it is always emitted on
         // output for the remote form.
         let body = raw.strip_prefix("ssh://").unwrap_or(raw);
-        let (owner, rest) = body.split_once('@')?;
-        let owner = valid_owner(owner)?;
-        if rest.eq_ignore_ascii_case("local") {
-            return Some(Self {
-                owner,
-                location: HomeLocation::Local,
-            });
-        }
+        let (user, rest) = body.split_once('@')?;
+        let user = valid_user(user)?;
         let (host, port) = parse_host_port(rest)?;
-        Some(Self {
-            owner,
-            location: HomeLocation::Remote { host, port },
-        })
-    }
-
-    pub fn local(owner: impl Into<String>) -> Option<Self> {
-        Some(Self {
-            owner: valid_owner(&owner.into())?,
-            location: HomeLocation::Local,
-        })
-    }
-
-    pub fn owner(&self) -> &str {
-        &self.owner
-    }
-
-    pub fn location(&self) -> &HomeLocation {
-        &self.location
+        Some(Self::Ssh { user, host, port })
     }
 
     pub fn is_remote(&self) -> bool {
-        matches!(self.location, HomeLocation::Remote { .. })
+        matches!(self, Self::Ssh { .. })
     }
 
     /// The `user@host` destination for `ssh`, when remote.
     pub fn ssh_destination(&self) -> Option<String> {
-        match &self.location {
-            HomeLocation::Local => None,
-            HomeLocation::Remote { host, .. } => {
-                Some(format!("{}@{}", self.owner, host.as_ssh_host()))
-            }
+        match self {
+            Self::Local => None,
+            Self::Ssh { user, host, .. } => Some(format!("{user}@{}", host.as_ssh_host())),
         }
     }
 
     /// The SSH port, when remote and explicitly set.
     pub fn ssh_port(&self) -> Option<u16> {
-        match &self.location {
-            HomeLocation::Remote { port, .. } => *port,
-            HomeLocation::Local => None,
+        match self {
+            Self::Ssh { port, .. } => *port,
+            Self::Local => None,
         }
     }
 }
 
-/// A valid Home owner: a username-shaped token, distinct from any credential.
-fn valid_owner(owner: &str) -> Option<String> {
-    let owner = owner.trim();
-    if owner.is_empty() {
+fn valid_user(user: &str) -> Option<String> {
+    let user = user.trim();
+    if user.is_empty() {
         return None;
     }
-    let ok = owner
+    let ok = user
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
-    ok.then(|| owner.to_string())
+    ok.then(|| user.to_string())
 }
 
 /// Parse the `host[:port]` (or `[ipv6][:port]`) location tail. Bracketed IPv6 is
@@ -195,12 +150,12 @@ fn parse_host(token: &str) -> Option<HomeHost> {
     ok.then(|| HomeHost::Name(token.to_string()))
 }
 
-impl fmt::Display for WaveHome {
+impl fmt::Display for HomeRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.location {
-            HomeLocation::Local => write!(f, "{}@local", self.owner),
-            HomeLocation::Remote { host, port } => {
-                write!(f, "ssh://{}@{}", self.owner, host.as_uri_host())?;
+        match self {
+            Self::Local => f.write_str("local"),
+            Self::Ssh { user, host, port } => {
+                write!(f, "ssh://{user}@{}", host.as_uri_host())?;
                 if let Some(port) = port {
                     write!(f, ":{port}")?;
                 }
@@ -210,62 +165,11 @@ impl fmt::Display for WaveHome {
     }
 }
 
-impl FromStr for WaveHome {
+impl FromStr for HomeRoute {
     type Err = String;
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        Self::parse(raw).ok_or_else(|| format!("invalid wave home: {raw:?}"))
-    }
-}
-
-// Serde rides the canonical string so the pinned/inherited value and the
-// authored GOAL.md value are always the same bytes — no second shape to drift.
-impl Serialize for WaveHome {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for WaveHome {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = String::deserialize(deserializer)?;
-        raw.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-// -- Wire types -----------------------------------------------------------
-
-/// Wire projection of a Home address: the canonical string plus the structured
-/// owner/location a surface needs to render and navigate without reparsing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WaveHomeDto {
-    /// Canonical address, e.g. `jack@local` or `ssh://jack@host:22`.
-    pub address: String,
-    pub owner: String,
-    pub location: HomeLocationDto,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum HomeLocationDto {
-    Local,
-    Ssh { host: String, port: Option<u16> },
-}
-
-impl From<&WaveHome> for WaveHomeDto {
-    fn from(home: &WaveHome) -> Self {
-        let location = match &home.location {
-            HomeLocation::Local => HomeLocationDto::Local,
-            HomeLocation::Remote { host, port } => HomeLocationDto::Ssh {
-                host: host.as_uri_host(),
-                port: *port,
-            },
-        };
-        Self {
-            address: home.to_string(),
-            owner: home.owner.clone(),
-            location,
-        }
+        Self::parse(raw).ok_or_else(|| format!("invalid Home route: {raw:?}"))
     }
 }
 
@@ -293,19 +197,19 @@ pub enum HomeState {
 pub enum HomeActionDto {
     /// Running: open/attach to the resident at `endpoint`.
     Attach { endpoint: String },
-    /// Reachable but stopped: start the Wave on `home` (its canonical address).
-    Start { home: String },
+    /// Reachable but stopped: start the Wave on its stable Home identity.
+    Start { home_id: crate::durable::HomeId },
     /// Unreachable or unknown: show `message`, the actionable reason.
     Reason { message: String },
 }
 
 /// A Wave's Home plus the evidence of what is happening there — the shared
-/// contract a conductor surface renders. `home` is the address; `state`+`reason`
+/// contract a conductor surface renders. `home` carries authority and route; `state`+`reason`
 /// are the probe's evidence; `endpoint` is the attach identity when running; and
 /// `action` is the single button to show.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HomeRuntimeDto {
-    pub home: WaveHomeDto,
+    pub home: crate::durable::Home,
     pub state: HomeState,
     pub reason: String,
     /// Attach identity when running (the resident endpoint), else `null`.
@@ -316,7 +220,7 @@ pub struct HomeRuntimeDto {
 impl HomeRuntimeDto {
     /// Assemble the runtime evidence and derive the single contextual action.
     pub fn new(
-        home: &WaveHome,
+        home: &crate::durable::Home,
         state: HomeState,
         reason: String,
         endpoint: Option<String>,
@@ -326,7 +230,7 @@ impl HomeRuntimeDto {
                 endpoint: endpoint.clone(),
             },
             (HomeState::Stopped, _) => HomeActionDto::Start {
-                home: home.to_string(),
+                home_id: home.id.clone(),
             },
             // Running-without-endpoint is a state we could not fully read.
             (HomeState::Running, None) | (HomeState::Unknown, _) | (HomeState::Unreachable, _) => {
@@ -336,7 +240,7 @@ impl HomeRuntimeDto {
             }
         };
         Self {
-            home: WaveHomeDto::from(home),
+            home: home.clone(),
             state,
             reason,
             endpoint,
@@ -349,14 +253,14 @@ impl HomeRuntimeDto {
 mod tests {
     use super::*;
 
-    fn home(raw: &str) -> WaveHome {
-        WaveHome::parse(raw).unwrap_or_else(|| panic!("parse {raw:?}"))
+    fn home(raw: &str) -> HomeRoute {
+        HomeRoute::parse(raw).unwrap_or_else(|| panic!("parse {raw:?}"))
     }
 
     #[test]
     fn canonical_forms_round_trip() {
         for raw in [
-            "jack@local",
+            "local",
             "ssh://jack@mini-heart",
             "ssh://jack@mini.example.com:2222",
             "ssh://jack@10.0.0.5",
@@ -375,17 +279,16 @@ mod tests {
             home("jack@10.0.0.5:22").to_string(),
             "ssh://jack@10.0.0.5:22"
         );
-        // `ssh://jack@local` is accepted and canonicalizes to the local form.
-        assert_eq!(home("ssh://jack@local").to_string(), "jack@local");
+        assert_eq!(home("ssh://jack@local").to_string(), "ssh://jack@local");
     }
 
     #[test]
-    fn owner_is_required_and_no_implicit_user() {
-        assert_eq!(WaveHome::parse("local"), None);
-        assert_eq!(WaveHome::parse("ssh://mini-heart"), None);
-        assert_eq!(WaveHome::parse("mini-heart"), None);
-        assert_eq!(WaveHome::parse("@host"), None);
-        assert_eq!(WaveHome::parse(""), None);
+    fn ssh_user_is_required() {
+        assert_eq!(home("local"), HomeRoute::Local);
+        assert_eq!(HomeRoute::parse("ssh://mini-heart"), None);
+        assert_eq!(HomeRoute::parse("mini-heart"), None);
+        assert_eq!(HomeRoute::parse("@host"), None);
+        assert_eq!(HomeRoute::parse(""), None);
     }
 
     #[test]
@@ -393,10 +296,10 @@ mod tests {
         // bracketed ok
         assert!(home("ssh://jack@[fe80::1]").is_remote());
         // unbracketed ipv6 is ambiguous with a port and is rejected
-        assert_eq!(WaveHome::parse("ssh://jack@2001:db8::1"), None);
+        assert_eq!(HomeRoute::parse("ssh://jack@2001:db8::1"), None);
         // bad port
-        assert_eq!(WaveHome::parse("ssh://jack@host:notaport"), None);
-        assert_eq!(WaveHome::parse("ssh://jack@host:99999"), None);
+        assert_eq!(HomeRoute::parse("ssh://jack@host:notaport"), None);
+        assert_eq!(HomeRoute::parse("ssh://jack@host:99999"), None);
     }
 
     #[test]
@@ -412,38 +315,18 @@ mod tests {
         );
         assert_eq!(h.ssh_port(), None);
 
-        assert_eq!(home("jack@local").ssh_destination(), None);
-    }
-
-    #[test]
-    fn dto_carries_address_owner_and_structured_location() {
-        let dto = WaveHomeDto::from(&home("ssh://jack@host:22"));
-        assert_eq!(dto.address, "ssh://jack@host:22");
-        assert_eq!(dto.owner, "jack");
-        assert_eq!(
-            dto.location,
-            HomeLocationDto::Ssh {
-                host: "host".to_string(),
-                port: Some(22),
-            }
-        );
-
-        let local = WaveHomeDto::from(&home("jack@local"));
-        assert_eq!(local.address, "jack@local");
-        assert_eq!(local.location, HomeLocationDto::Local);
-    }
-
-    #[test]
-    fn serde_uses_the_canonical_string() {
-        let h = home("ssh://jack@host:22");
-        let json = serde_json::to_string(&h).unwrap();
-        assert_eq!(json, "\"ssh://jack@host:22\"");
-        assert_eq!(serde_json::from_str::<WaveHome>(&json).unwrap(), h);
+        assert_eq!(home("local").ssh_destination(), None);
     }
 
     #[test]
     fn runtime_action_follows_state() {
-        let h = home("ssh://jack@host");
+        let now = time::OffsetDateTime::UNIX_EPOCH;
+        let h = crate::durable::Home {
+            id: crate::durable::HomeId::parse("home_00000000000000000000000000000001").unwrap(),
+            route: "ssh://jack@host".into(),
+            created_at: now,
+            observed_at: now,
+        };
         let running = HomeRuntimeDto::new(
             &h,
             HomeState::Running,
@@ -466,7 +349,7 @@ mod tests {
         assert_eq!(
             stopped.action,
             HomeActionDto::Start {
-                home: "ssh://jack@host".into()
+                home_id: h.id.clone()
             }
         );
 

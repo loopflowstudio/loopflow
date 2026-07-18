@@ -1,11 +1,14 @@
-//! `lf ssh <host> -- <cmd...>` — run a command on a remote home carrying the
-//! caller's *local* credentials, resolved per invocation.
+//! `lf ssh <host|HomeId> -- <cmd...>` — run a command on a remote machine.
 //!
-//! The "bring your auth with you" model: credentials are resolved on this
-//! machine. Managed Claude/Codex accounts stay behind a foreground Unix-socket
-//! broker; the remote receives only an opaque lease handle and a provider
-//! process receives only its selected token. Detached work is rejected because
-//! it would outlive that credential lease.
+//! Foreground commands bring narrowly resolved local credentials. Managed
+//! Claude/Codex accounts stay behind a foreground Unix-socket broker; the
+//! remote receives only an opaque lease handle and a provider process receives
+//! only its selected token. Detached work is rejected because it would outlive
+//! that credential lease.
+//!
+//! A `HomeId` target resolves through the locally observed route and makes the
+//! remote process prove that it is the addressed Home before dispatch.
+//! `--remote-native` is the durable lifecycle mode: it forwards no credentials.
 //!
 //! Forwarded authority: GitHub (`gh`), Claude/Codex agent OAuth, and — the
 //! capability beyond the shell prototype — the PM/Linear token, which lives in
@@ -26,11 +29,14 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
 
+use crate::durable::HomeId;
 use crate::pm::PmProviderKind;
 use crate::provider_account::lease::{
     self, AccountLeaseBroker, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
 };
 use crate::provider_auth::{extract_claude_token, extract_codex_access_token};
+
+pub const EXPECTED_HOME_ID_ENV: &str = "LF_EXPECTED_HOME_ID";
 
 /// Default repository path (relative to `$HOME`) the remote command runs in.
 pub const DEFAULT_REPO: &str = "src/loopflow";
@@ -119,28 +125,121 @@ impl std::fmt::Debug for Credentials {
 /// the forwarded `GH_TOKEN` over HTTPS, so agent forwarding is dead weight that
 /// would hand the caller's whole SSH identity to the remote.
 pub fn run(
-    dest: &str,
+    target: &str,
     repo: Option<&str>,
     secret_names: &[String],
     forward_agent: bool,
+    remote_native: bool,
     selection: &AccountSelection,
     cmd: &[String],
 ) -> anyhow::Result<()> {
     if cmd.is_empty() {
         return Err(anyhow!(
-            "lf ssh needs a command after `--`, e.g. `lf ssh {dest} -- lf pr open`"
+            "lf ssh needs a command after `--`, e.g. `lf ssh {target} -- lf pr open`"
         ));
     }
+    if remote_native && !secret_names.is_empty() {
+        return Err(anyhow!(
+            "--remote-native cannot forward --secret values; install authority on the remote Home"
+        ));
+    }
+    let target = resolve_target(target)?;
+    let expected = target.home_id.as_ref().map(HomeId::as_str);
+    let extra_env = expected
+        .map(|home_id| vec![(EXPECTED_HOME_ID_ENV, home_id)])
+        .unwrap_or_default();
+    if remote_native {
+        return run_without_credentials(
+            &target.dest,
+            target.port,
+            repo,
+            forward_agent,
+            cmd,
+            &extra_env,
+        );
+    }
     run_with_env(
-        dest,
-        None,
+        &target.dest,
+        target.port,
         repo,
         secret_names,
         forward_agent,
         selection,
         cmd,
-        &[],
+        &extra_env,
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SshTarget {
+    dest: String,
+    port: Option<u16>,
+    home_id: Option<HomeId>,
+}
+
+fn resolve_target(target: &str) -> anyhow::Result<SshTarget> {
+    let Ok(home_id) = HomeId::parse(target) else {
+        return Ok(SshTarget {
+            dest: target.to_string(),
+            port: None,
+            home_id: None,
+        });
+    };
+    let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
+    let home = runtime
+        .block_on(async {
+            let store = crate::store::open_existing_store().await?;
+            store.home_by_id(&home_id).await.ok().flatten()
+        })
+        .ok_or_else(|| anyhow!("Home {home_id} was not found in the local store"))?;
+    let route = crate::engine::wave_home::HomeRoute::parse(&home.route).ok_or_else(|| {
+        anyhow!(
+            "Home {home_id} route {:?} is not a remote SSH route",
+            home.route
+        )
+    })?;
+    Ok(SshTarget {
+        dest: route
+            .ssh_destination()
+            .ok_or_else(|| anyhow!("Home {home_id} is local; lf ssh needs a remote Home"))?,
+        port: route.ssh_port(),
+        home_id: Some(home_id),
+    })
+}
+
+fn run_without_credentials(
+    dest: &str,
+    port: Option<u16>,
+    repo: Option<&str>,
+    forward_agent: bool,
+    cmd: &[String],
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
+    let repo = repo.unwrap_or(DEFAULT_REPO);
+    let preamble = build_preamble(&Credentials::default(), None, dest, repo, cmd, extra_env);
+    match run_ssh(dest, port, forward_agent, None, &preamble)? {
+        SshOutcome::Success => Ok(()),
+        SshOutcome::CommandFailure(code) => std::process::exit(code),
+        SshOutcome::ConnectionFailure => unreachable!("transport failures return errors"),
+    }
+}
+
+pub fn capture_remote_native(
+    home_id: &HomeId,
+    repo: &str,
+    cmd: &[String],
+) -> Result<String, SshCaptureError> {
+    let target = resolve_target(home_id.as_str())
+        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
+    let preamble = build_preamble(
+        &Credentials::default(),
+        None,
+        &target.dest,
+        repo,
+        cmd,
+        &[(EXPECTED_HOME_ID_ENV, home_id.as_str())],
+    );
+    run_ssh_capture(&target.dest, target.port, None, &preamble)
 }
 
 /// Run a Wave-home-routed `lf` command on `dest` (an `owner@host` destination)
@@ -149,6 +248,7 @@ pub fn run(
 /// break in the forward loop. Reuses the same credential-forwarding preamble as
 /// `lf ssh`; no new transport or secret path.
 pub fn run_routed(
+    home_id: &HomeId,
     dest: &str,
     port: Option<u16>,
     repo: Option<&str>,
@@ -163,48 +263,11 @@ pub fn run_routed(
         false,
         selection,
         cmd,
-        &[(crate::engine::wave_home::HOME_ROUTED_ENV, "1")],
+        &[
+            (crate::engine::wave_home::HOME_ROUTED_ENV, "1"),
+            (EXPECTED_HOME_ID_ENV, home_id.as_str()),
+        ],
     )
-}
-
-/// Run a routed `lf` command on `dest`/`port` and capture its stdout, used by
-/// the Home probe to read a remote `lf status --json` over the same SSH and
-/// credential machinery. On a transport failure returns [`SshCaptureError`] so
-/// the caller can classify unreachable distinctly from a command that ran but
-/// answered unexpectedly.
-pub fn capture_routed(
-    dest: &str,
-    port: Option<u16>,
-    cmd: &[String],
-) -> Result<String, SshCaptureError> {
-    if lease::account_lease_active() {
-        return Err(SshCaptureError::Local(
-            "an inherited account lease cannot be re-forwarded over SSH".to_string(),
-        ));
-    }
-    let repo = DEFAULT_REPO;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    let mut credentials = runtime
-        .block_on(resolve_credentials(&[], &AccountSelection::default()))
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    let account_lease = credentials.take_account_lease();
-    reject_detached_account_forwarding(account_lease.is_some(), cmd)
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    let broker = account_lease
-        .map(AccountLeaseBroker::start)
-        .transpose()
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
-    let preamble = build_preamble(
-        &credentials,
-        remote_handle.as_ref(),
-        dest,
-        repo,
-        cmd,
-        &[(crate::engine::wave_home::HOME_ROUTED_ENV, "1")],
-    );
-    run_ssh_capture(dest, port, broker.as_ref(), &preamble)
 }
 
 /// Why a captured SSH command did not yield usable stdout.
@@ -217,6 +280,25 @@ pub enum SshCaptureError {
     /// A local failure before ssh (runtime, credential resolution).
     Local(String),
 }
+
+impl std::fmt::Display for SshCaptureError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreachable(reason) | Self::Local(reason) => formatter.write_str(reason),
+            Self::Command { code, stderr } if stderr.is_empty() => {
+                write!(formatter, "remote command exited with status {code}")
+            }
+            Self::Command { code, stderr } => {
+                write!(
+                    formatter,
+                    "remote command exited with status {code}: {stderr}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for SshCaptureError {}
 
 #[allow(clippy::too_many_arguments)]
 fn run_with_env(
@@ -759,6 +841,7 @@ mod tests {
             None,
             &[],
             false,
+            false,
             &AccountSelection::default(),
             &["true".to_string()],
         );
@@ -848,6 +931,36 @@ mod tests {
     }
 
     #[test]
+    fn remote_native_preamble_carries_identity_and_no_local_authority() {
+        let cmd = vec!["lf".to_string(), "start".to_string(), "product".to_string()];
+        let preamble = build_preamble(
+            &Credentials::default(),
+            None,
+            "jack@buildbox",
+            "src/loopflow",
+            &cmd,
+            &[(
+                EXPECTED_HOME_ID_ENV,
+                "home_00000000000000000000000000000001",
+            )],
+        );
+
+        assert!(
+            preamble.contains("export LF_EXPECTED_HOME_ID='home_00000000000000000000000000000001'")
+        );
+        for secret in [
+            "GH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CODEX_ACCESS_TOKEN",
+            "LF_FORWARDED_PM_TOKEN",
+            lease::ACCOUNT_LEASE_ENV,
+        ] {
+            assert!(!preamble.contains(secret));
+        }
+        assert!(preamble.trim_end().ends_with("exec 'lf' 'start' 'product'"));
+    }
+
+    #[test]
     fn preamble_never_leaks_a_secret_to_argv_form() {
         // A secret containing shell metacharacters stays inside single quotes,
         // so it can neither break the assignment nor reach a command position.
@@ -891,6 +1004,10 @@ mod tests {
         // Still targets the destination and runs the piped preamble.
         assert!(args.iter().any(|a| a == "jack@mini-heart"));
         assert_eq!(args.last().unwrap(), "bash -s");
+        assert_eq!(
+            args.iter().filter(|arg| arg.as_str() == "bash -s").count(),
+            1
+        );
         // Agent forwarding stays opt-out; no -p without an explicit port.
         assert!(!args.iter().any(|a| a == "-A"));
         assert!(!args.iter().any(|a| a == "-p"));

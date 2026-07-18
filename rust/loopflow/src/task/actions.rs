@@ -240,6 +240,17 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
 
 /// Open PR: action depends on CI state.
 fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
+    // A head red only on land-time preconditions (`scratch-clear`) is reviewable,
+    // not resumable: no repair turn can green it, and `lf pr land` clears
+    // `scratch/` itself. Route it to Review exactly as a passing head — the
+    // reviewer, not a doomed ci-fix body, owns it. Every Task PR is red this way
+    // pre-land by construction.
+    if evidence
+        .ci
+        .is_some_and(|ci| ci.only_land_time_preconditions())
+    {
+        return open_pr_reviewable("checks passed except scratch-clear; awaiting review");
+    }
     match evidence.ci.map(|ci| ci.state) {
         Some(CiState::Pending) => one_action(
             TaskAction::NoAction,
@@ -265,20 +276,7 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                 TaskAction::NoAction => "action available: fix failing required checks".into(),
             },
         ),
-        Some(CiState::Passing) => one_action(
-            TaskAction::Review,
-            "checks passed; awaiting review",
-            |a| match a {
-                TaskAction::Review => unreachable!(),
-                TaskAction::Resume => {
-                    "awaiting review; resume after review to address feedback".into()
-                }
-                TaskAction::Complete => "PR is open, not merged".into(),
-                TaskAction::StartNextPr => "PR is open, not merged".into(),
-                TaskAction::Recover => "body is not dead; PR is open for review".into(),
-                TaskAction::NoAction => "action available: review the PR".into(),
-            },
-        ),
+        Some(CiState::Passing) => open_pr_reviewable("checks passed; awaiting review"),
         None => one_action(
             TaskAction::NoAction,
             "required checks have not been observed",
@@ -292,6 +290,19 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
             },
         ),
     }
+}
+
+/// An open PR whose checks admit review: recommend Review, block the rest. Shared
+/// by a passing head and a head red only on land-time preconditions.
+fn open_pr_reviewable(reason: &str) -> TaskActionModel {
+    one_action(TaskAction::Review, reason, |a| match a {
+        TaskAction::Review => unreachable!(),
+        TaskAction::Resume => "awaiting review; resume after review to address feedback".into(),
+        TaskAction::Complete => "PR is open, not merged".into(),
+        TaskAction::StartNextPr => "PR is open, not merged".into(),
+        TaskAction::Recover => "body is not dead; PR is open for review".into(),
+        TaskAction::NoAction => "action available: review the PR".into(),
+    })
 }
 
 /// Merged PR: action depends on the after-merge disposition and review gate.
@@ -756,6 +767,61 @@ mod tests {
                 "CI {state:?} should recommend {expected:?}"
             );
         }
+    }
+
+    /// A failing observation whose failing checks are exactly `names`.
+    fn ci_failing(names: &[&str]) -> CiObservation {
+        CiObservation {
+            head_sha: "head".into(),
+            state: CiState::Failing,
+            failing_checks: names
+                .iter()
+                .map(|name| CiCheck {
+                    name: (*name).into(),
+                    url: None,
+                })
+                .collect(),
+            observed_at: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    /// The ENG-33 fix: a design-carrying PR red only on `scratch-clear` is
+    /// reviewable. `lf pr land` greens that check itself, so a woken body could
+    /// only delete the doc under review — recommend Review, never Resume, and do
+    /// not block Review behind the red.
+    ///
+    /// Sabotage: revert the `only_land_time_preconditions` branch in
+    /// `open_pr_model` and this recommends Resume again, going red here.
+    #[test]
+    fn open_pr_red_only_on_scratch_clear_is_reviewable_not_resumable() {
+        let observation = ci_failing(&["scratch-clear"]);
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.latest_pr_phase = Some(PrPhase::Open);
+        ev.ci = Some(&observation);
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::Review));
+        assert!(!model.status(TaskAction::Resume).unwrap().available);
+        assert_eq!(
+            model.status(TaskAction::Review).unwrap().reason,
+            "checks passed except scratch-clear; awaiting review"
+        );
+    }
+
+    /// The other half, which must survive the fix: a real leaf still recommends
+    /// Resume and still blocks Review, even alongside a land-time precondition.
+    /// This test passes with the ENG-33 bug fully present — that is why the class
+    /// went undetected.
+    #[test]
+    fn open_pr_with_a_real_leaf_still_resumes_even_beside_scratch_clear() {
+        let observation = ci_failing(&["scratch-clear", "rust-test"]);
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.latest_pr_phase = Some(PrPhase::Open);
+        ev.ci = Some(&observation);
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert!(!model.status(TaskAction::Review).unwrap().available);
     }
 
     #[test]

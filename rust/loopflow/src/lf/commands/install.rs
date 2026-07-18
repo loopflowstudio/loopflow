@@ -226,47 +226,64 @@ fn read_live_bodies(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<LiveBod
     Ok(live)
 }
 
-/// Assemble the read-only preview for `store_path`. A store that does not exist,
-/// cannot be opened, or whose live-body set cannot be read all resolve to
-/// `Unreadable` — the decision then fails closed, never on an assumed-empty
-/// liveness set.
-pub fn build_preview(store_path: &Path) -> PromotionPreview {
-    let candidate = CandidateIdentity::current();
-    let database_path = store_path.display().to_string();
-
-    let unreadable = |reason: String| PromotionPreview {
-        candidate: candidate.clone(),
-        database_path: database_path.clone(),
-        compatibility: Compatibility::Unreadable {
-            reason: reason.clone(),
-        },
-        live_bodies: Vec::new(),
-        verdict: decide(
-            candidate.authority,
-            &Compatibility::Unreadable { reason },
-            &[],
-        ),
-    };
-
+/// Read the shared store's promotion evidence: how the candidate's registry
+/// relates to the store, and which bodies are live.
+///
+/// An **absent** store, read under the exclusive promotion lock, is positive
+/// proof of zero persisted live leases — no body can have reserved against a
+/// store that does not exist — and an uninitialized frontier the authorized
+/// boundary may create. It classifies as `AheadPending` with no live bodies, so
+/// a published candidate reaches `PromoteAndMigrate` and first initialization
+/// happens through the authorized open during activation.
+///
+/// An **existing** store that cannot be opened, or whose live-body set cannot be
+/// read, resolves to `Unreadable` and fails closed — an empty or corrupt file is
+/// not the fresh-initialization case and never promotes.
+fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<LiveBody>) {
     if !store_path.exists() {
-        return unreadable(format!("shared store {} does not exist", database_path));
+        return (
+            Compatibility::AheadPending {
+                applied_frontier: "(uninitialized)".to_string(),
+                latest_known: migrations::latest_known_version(),
+            },
+            Vec::new(),
+        );
     }
     let conn = match rusqlite::Connection::open_with_flags(
         store_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     ) {
         Ok(conn) => conn,
-        Err(error) => return unreadable(error.to_string()),
+        Err(error) => {
+            return (
+                Compatibility::Unreadable {
+                    reason: error.to_string(),
+                },
+                Vec::new(),
+            )
+        }
     };
 
     let compatibility = classify_compatibility(&conn);
     // Cannot prove zero live bodies if the read fails: fail closed rather than
     // pass an empty set that would read as "no bodies".
-    let live_bodies = match read_live_bodies(&conn) {
-        Ok(live_bodies) => live_bodies,
-        Err(error) => return unreadable(format!("cannot read live bodies: {error}")),
-    };
+    match read_live_bodies(&conn) {
+        Ok(live_bodies) => (compatibility, live_bodies),
+        Err(error) => (
+            Compatibility::Unreadable {
+                reason: format!("cannot read live bodies: {error}"),
+            },
+            Vec::new(),
+        ),
+    }
+}
 
+/// Assemble the read-only promotion preview for `store_path`, pairing the store
+/// evidence with this candidate's identity and the resulting verdict.
+pub fn build_preview(store_path: &Path) -> PromotionPreview {
+    let candidate = CandidateIdentity::current();
+    let database_path = store_path.display().to_string();
+    let (compatibility, live_bodies) = read_store_evidence(store_path);
     let verdict = decide(candidate.authority, &compatibility, &live_bodies);
     PromotionPreview {
         candidate,
@@ -351,7 +368,7 @@ pub fn preflight(json: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_preview, decide, read_live_bodies, Compatibility, LiveBody, Verdict};
+    use super::{decide, read_live_bodies, read_store_evidence, Compatibility, LiveBody, Verdict};
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
     use crate::store::migrations::latest_known_version;
 
@@ -453,15 +470,56 @@ mod tests {
         ));
     }
 
+    /// Under the exclusive promotion lock an absent store is a promotable
+    /// uninitialized frontier with zero live bodies: a published candidate may
+    /// initialize it, a validation-only one still may not. This is what lets
+    /// `lf install promote` reach the authorized open on a machine that has no
+    /// shared store yet.
     #[test]
-    fn a_missing_store_previews_as_unreadable_and_refuses() {
+    fn an_absent_store_is_a_promotable_uninitialized_frontier() {
         let dir = tempfile::tempdir().unwrap();
-        let preview = build_preview(&dir.path().join("absent.db"));
+        let (compatibility, live_bodies) = read_store_evidence(&dir.path().join("absent.db"));
+        assert!(
+            matches!(compatibility, Compatibility::AheadPending { .. }),
+            "an absent store is an uninitialized frontier, not unreadable"
+        );
+        assert!(
+            live_bodies.is_empty(),
+            "an absent store proves zero persisted live leases under the lock"
+        );
+        assert_eq!(
+            decide(Published, &compatibility, &live_bodies),
+            Verdict::PromoteAndMigrate,
+            "a published candidate initializes the shared store"
+        );
+        assert!(
+            matches!(
+                decide(ValidationOnly, &compatibility, &live_bodies),
+                Verdict::Reject { .. }
+            ),
+            "a validation-only build still may not initialize the shared store"
+        );
+    }
+
+    /// An existing-but-empty (or corrupt) file is not the fresh-initialization
+    /// case and must keep failing closed rather than promote.
+    #[test]
+    fn an_existing_empty_store_still_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = dir.path().join("loopflow.db");
+        std::fs::write(&empty, b"").unwrap();
+        let (compatibility, _bodies) = read_store_evidence(&empty);
+        assert!(
+            matches!(
+                compatibility,
+                Compatibility::Incompatible { .. } | Compatibility::Unreadable { .. }
+            ),
+            "an existing empty file is not a clean uninitialized frontier: {compatibility:?}"
+        );
         assert!(matches!(
-            preview.compatibility,
-            Compatibility::Unreadable { .. }
+            decide(Published, &compatibility, &[]),
+            Verdict::Reject { .. }
         ));
-        assert!(matches!(preview.verdict, Verdict::Reject { .. }));
     }
 
     #[test]
@@ -991,7 +1049,7 @@ pub fn promote(
         },
         app.as_ref(),
         || {
-            crate::store::sqlite::SqliteStore::new(&store_path)
+            crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store_path)
                 .map(|_| ())
                 .map_err(|error| {
                     anyhow!("apply pending migration after activating compatible CLI: {error}")

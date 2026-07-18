@@ -302,8 +302,62 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
 }
 
 impl SqliteStore {
+    /// Open the store for ordinary use. This never advances the shared release
+    /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
+    /// the migration frontier where the installed `lf` left it. Advancing the
+    /// shared frontier is the promotion boundary's job — see
+    /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Forbidden)
+    }
+
+    /// Open the shared store as `lf install promote` — the single authorized
+    /// owner of the migration frontier. Applies any pending migration under the
+    /// caller's exclusive promotion lock and drained live-body fence.
+    pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Authorized)
+    }
+
+    fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+        Self::open_with(
+            path,
+            crate::build_info::migration_authority(),
+            &super::machine_home_dir(),
+            advance,
+        )
+    }
+
+    /// Open resolving the migration decision against an explicit authority and
+    /// machine home rather than this build's compiled-in values. Production opens
+    /// pass the real ones through [`Self::open`]; the same-module shared-frontier
+    /// regressions pass a temp home and a chosen authority so they drive the
+    /// published and promotion-boundary branches a validation-only test build
+    /// cannot reach through the compiled-in authority.
+    fn open_with(
+        path: &Path,
+        authority: crate::build_info::MigrationAuthority,
+        home: &Path,
+        advance: super::FrontierAdvance,
+    ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
+
+        // Resolve the frontier authority before touching the filesystem. An
+        // ordinary open of a shared store it may not initialize refuses here,
+        // before create_dir_all/Connection::open would leave an empty
+        // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
+        // bootstrap check could misread as "the shared store is initialized".
+        let may_apply_migrations = super::may_apply_migrations(path, authority, home, advance)
+            .map_err(|error| {
+                StoreError::InvalidData(format!("resolve migration authority: {error}"))
+            })?;
+        if !may_apply_migrations && !existing_database {
+            return Err(StoreError::InvalidData(format!(
+                "shared store {} is not initialized and an ordinary lf may not create it; \
+                 only `lf install promote` from an authorized build initializes the shared store",
+                path.display()
+            )));
+        }
+
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
                 StoreError::InvalidData(format!("failed to create db dir: {err}"))
@@ -315,17 +369,21 @@ impl SqliteStore {
             "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
         )?;
 
-        let may_apply_migrations = super::may_apply_migrations(
-            path,
-            crate::build_info::migration_authority(),
-            &super::machine_home_dir(),
-        )
-        .map_err(|error| {
-            StoreError::InvalidData(format!("resolve migration authority: {error}"))
-        })?;
-
         if !may_apply_migrations {
+            // Validate the applied history first (preserving divergent/incompatible
+            // and store-ahead errors), then refuse if this binary knows a migration
+            // the store has not applied. An ordinary open must not hand back a store
+            // whose schema is older than this binary's code, which may query the
+            // columns that pending migration adds.
             super::migrations::validate_sqlite(&conn)?;
+            if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
+                return Err(StoreError::InvalidData(format!(
+                    "shared store {} is at an older frontier than this lf (pending {pending}); \
+                     an ordinary lf must not advance it — run `lf install promote` from an \
+                     authorized build to advance the shared store",
+                    path.display()
+                )));
+            }
         } else if existing_database {
             super::migrations::apply_sqlite_with_backup(&conn, path)?;
         } else {
@@ -2025,4 +2083,177 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         first_event_seq: row.get(27)?,
         last_event_seq: row.get(28)?,
     })
+}
+
+#[cfg(test)]
+mod frontier_tests {
+    use super::SqliteStore;
+    use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
+    use crate::store::migrations::{
+        apply_all_but_head, latest_applied_version_sqlite, latest_known_version,
+    };
+    use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
+    use std::path::{Path, PathBuf};
+
+    /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
+    /// the shared release store. The regressions inject it so they never touch a
+    /// developer's real `~/.lf`.
+    struct SharedHome {
+        _dir: tempfile::TempDir,
+        home: PathBuf,
+    }
+
+    impl SharedHome {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let home = dir.path().to_path_buf();
+            Self { _dir: dir, home }
+        }
+
+        fn shared_db(&self) -> PathBuf {
+            self.home.join(".lf/loopflow.db")
+        }
+    }
+
+    fn open(
+        path: &Path,
+        authority: MigrationAuthority,
+        home: &Path,
+        advance: FrontierAdvance,
+    ) -> crate::store::StoreResult<SqliteStore> {
+        SqliteStore::open_with(path, authority, home, advance)
+    }
+
+    fn frontier(path: &Path) -> Option<String> {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        latest_applied_version_sqlite(&conn).unwrap()
+    }
+
+    fn seed_shared_store_at_prior_head(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_all_but_head(&conn).unwrap();
+    }
+
+    /// (a) An ordinary open of an absent shared store must refuse actionably and
+    /// leave no file behind. Sabotage guard: an `open_with` that creates the
+    /// SQLite file before deciding authority (or that lets Forbidden bootstrap)
+    /// would create the path and this fails.
+    #[test]
+    fn an_ordinary_open_never_creates_or_initializes_an_absent_shared_store() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+
+        let error = open(&path, Published, &shared.home, Forbidden)
+            .expect_err("an ordinary open must not initialize the shared store");
+        assert!(
+            error.to_string().contains("only `lf install promote`"),
+            "the refusal must name the authorized boundary: {error}"
+        );
+        assert!(
+            !path.exists(),
+            "an ordinary open must not create the shared store file"
+        );
+    }
+
+    /// (b) An ordinary open of an existing shared store the binary is ahead of
+    /// must refuse actionably without advancing — it must not hand N+1 code a
+    /// store still at the N schema — while the old N reader keeps recognizing it.
+    /// Sabotage guards: a Forbidden open that applied the pending head, or that
+    /// returned a usable store instead of erroring, fails this test.
+    #[test]
+    fn an_ordinary_open_ahead_of_the_shared_frontier_refuses_without_advancing() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        seed_shared_store_at_prior_head(&path);
+        let installed_frontier = frontier(&path).unwrap();
+        assert_eq!(installed_frontier, "0.11.027_accounts_first");
+        assert_ne!(installed_frontier, latest_known_version());
+
+        // The candidate is one migration ahead; its ordinary open refuses rather
+        // than reuse a schema older than its own code.
+        let error = open(&path, Published, &shared.home, Forbidden)
+            .expect_err("an ordinary open ahead of the frontier must refuse");
+        assert!(
+            error.to_string().contains("lf install promote"),
+            "the refusal must name the authorized boundary: {error}"
+        );
+        assert!(
+            error.to_string().contains(&installed_frontier)
+                || error.to_string().contains(&latest_known_version()),
+            "the refusal names the pending frontier: {error}"
+        );
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(installed_frontier.as_str()),
+            "a refused open must not advance the shared frontier"
+        );
+
+        // The old reader — a build whose head is the store's frontier — still
+        // recognizes the untouched store as exactly its own frontier.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        assert!(
+            crate::store::migrations::old_reader_recognizes(&conn),
+            "the old installed reader must still recognize the untouched store"
+        );
+    }
+
+    /// (c) The promotion boundary owns both first initialization and advancement.
+    #[test]
+    fn the_promotion_boundary_initializes_and_advances_the_shared_store() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+
+        // Initialization from absent.
+        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+
+        // Once the boundary has initialized it, an ordinary open validates the
+        // now-existing store read-only and leaves the frontier at the head.
+        open(&path, Published, &shared.home, Forbidden)
+            .expect("an ordinary open validates the initialized store");
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+
+        // Advancement from a prior-head store.
+        let advanced = SharedHome::new();
+        let advanced_path = advanced.shared_db();
+        seed_shared_store_at_prior_head(&advanced_path);
+        assert_eq!(
+            frontier(&advanced_path).as_deref(),
+            Some("0.11.027_accounts_first")
+        );
+        open(&advanced_path, Published, &advanced.home, Authorized).expect("boundary advances");
+        assert_eq!(
+            frontier(&advanced_path).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+    }
+
+    /// A validation-only build never advances the shared store even at the
+    /// nominal boundary, and a private/isolated DB stays freely initializable —
+    /// the isolated dev escape the directive preserves.
+    #[test]
+    fn validation_only_is_walled_from_the_shared_store_but_not_private_ones() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        open(&path, ValidationOnly, &shared.home, Authorized)
+            .expect_err("a validation-only build must never initialize the shared store");
+        assert!(!path.exists());
+
+        // A private path (not ~/.lf/loopflow.db) initializes regardless of
+        // authority or boundary.
+        let private = shared.home.join(".lf-dev/branch/loopflow.db");
+        open(&private, ValidationOnly, &shared.home, Forbidden).expect("private DB initializes");
+        assert_eq!(
+            frontier(&private).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+    }
 }

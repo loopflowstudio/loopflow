@@ -118,6 +118,14 @@ pub struct TaskActionEvidence<'a> {
     /// directive that was never applied is a post-land steer that still needs a
     /// body, so it keeps `StartNextPr` rather than `Reconcile`.
     pub directive_applied: bool,
+    /// True when the settled PR set permits out-of-band reconciliation: no
+    /// non-abandoned PR still in flight and the latest non-abandoned PR merged in
+    /// any disposition (`Review` or `CompleteTask`). A whole-set property, so it
+    /// is computed once (`reconcilable_pr_set`) rather than read off the newest
+    /// PR — a merged `Review` ahead of an older `CompleteTask`, or a trailing
+    /// abandoned successor, is reconcilable even though `latest_pr_after_merge`
+    /// is not `CompleteTask`.
+    pub reconcilable: bool,
     pub ci: Option<&'a CiObservation>,
     /// Some(true)=live, Some(false)=dead, None=process not expected for status.
     pub process_alive: Option<bool>,
@@ -196,6 +204,18 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
             | ReviewGateState::ChangesRequested => {}
             ReviewGateState::Approved => {}
         }
+    }
+
+    // Reconciliation is a property of the whole settled PR set, not the newest
+    // row. A merged, complete Task whose applied final directive was never
+    // incorporated settles by an out-of-band Wave/Operator attestation even when
+    // its newest PR is a merged `Review` or a trailing abandoned successor — cases
+    // the per-latest-PR model below would misroute to `StartNextPr`. Evaluate it
+    // here (after the review gate, which keeps precedence) so the recommendation
+    // matches the reconcile command guard. `reconcilable` is false whenever any
+    // non-abandoned PR is still in flight, so this never fires over live work.
+    if evidence.pending_directive && evidence.directive_applied && evidence.reconcilable {
+        return apply_predecessor_overlay(reconcile_model(evidence), evidence);
     }
 
     let model = match evidence.latest_pr_phase {
@@ -329,39 +349,39 @@ fn open_pr_reviewable(reason: &str) -> TaskActionModel {
     })
 }
 
+/// The reconcilable shape: a merged, complete Task whose applied final directive
+/// was never incorporated. The work shipped in the merged head, only the
+/// acknowledgement turn was interrupted, so it settles by an out-of-band
+/// Wave/Operator attestation, never another provider turn.
+fn reconcile_model(evidence: &TaskActionEvidence) -> TaskActionModel {
+    let reason = evidence
+        .completion_refusal
+        .unwrap_or("merged and complete; attest and reconcile the applied directive");
+    one_action(TaskAction::Reconcile, reason, |a| match a {
+        TaskAction::Reconcile => unreachable!(),
+        TaskAction::Complete => reason.into(),
+        TaskAction::StartNextPr => {
+            "directive already delivered; reconcile it, do not start another PR".into()
+        }
+        TaskAction::Resume => {
+            "PR is merged and the directive shipped; reconcile it, not resume".into()
+        }
+        TaskAction::Review => "merged and complete; nothing to review".into(),
+        TaskAction::Recover => "body is not dead; reconcile the applied directive".into(),
+        TaskAction::NoAction => {
+            "action available: attest and reconcile the applied directive".into()
+        }
+    })
+}
+
 /// Merged PR: action depends on the after-merge disposition and review gate.
 fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
     if let Some(refusal) = evidence.completion_refusal {
-        // A pending directive that was already delivered to a body but never
-        // incorporated is reconcilable: the work shipped in the merged head, only
-        // the acknowledgement turn was interrupted. It settles by an out-of-band
-        // Wave/Operator attestation, never another provider turn — so recommend
-        // Reconcile and bar the provider actions. A *not-applied* pending
+        // The reconcilable shape (pending applied directive + reconcilable settled
+        // PR set) is recommended earlier, in `derive_task_actions`, before this
+        // per-latest-PR model runs — a merged `Review` ahead of an older
+        // `CompleteTask` reaches Reconcile there, not here. A *not-applied* pending
         // directive falls through to `StartNextPr`, which still needs a body.
-        //
-        // Only a merged `CompleteTask` publication is reconcilable: a merged
-        // `Review`/next-PR disposition with a pending applied directive is a serial
-        // successor, not a Task settling — it must keep `StartNextPr`.
-        if evidence.pending_directive
-            && evidence.directive_applied
-            && evidence.latest_pr_after_merge == Some(AfterMerge::CompleteTask)
-        {
-            return one_action(TaskAction::Reconcile, refusal, |a| match a {
-                TaskAction::Reconcile => unreachable!(),
-                TaskAction::Complete => refusal.into(),
-                TaskAction::StartNextPr => {
-                    "directive already delivered; reconcile it, do not start another PR".into()
-                }
-                TaskAction::Resume => {
-                    "PR is merged and the directive shipped; reconcile it, not resume".into()
-                }
-                TaskAction::Review => "merged and complete; nothing to review".into(),
-                TaskAction::Recover => "body is not dead; reconcile the applied directive".into(),
-                TaskAction::NoAction => {
-                    "action available: attest and reconcile the applied directive".into()
-                }
-            });
-        }
         if evidence.pending_directive
             || evidence.review_gate == Some(ReviewGateState::ChangesRequested)
         {
@@ -703,6 +723,7 @@ mod tests {
             resume_refusal: None,
             pending_directive: false,
             directive_applied: false,
+            reconcilable: false,
             ci: None,
             process_alive: None,
             predecessor_phase: None,
@@ -1045,6 +1066,7 @@ mod tests {
             Some("Task W2-308 has no active PR to resume; pull request #1064 merged");
         ev.pending_directive = true;
         ev.directive_applied = true;
+        ev.reconcilable = true;
 
         let model = derive_task_actions(&ev);
 
@@ -1067,32 +1089,58 @@ mod tests {
         );
     }
 
-    /// Sabotage guard: a merged *non-`CompleteTask`* publication (a serial next-PR
-    /// disposition) with a pending applied directive must never become
-    /// reconcilable — it stays `StartNextPr`. Dropping the `CompleteTask` guard in
-    /// `merged_pr_model` flips this to `Reconcile` and fails here.
+    /// Reconciliation is a whole-PR-set property, not the newest disposition: a
+    /// merged `Review` (or an abandoned successor over an older `CompleteTask`)
+    /// with a pending applied directive reconciles when the settled set is
+    /// reconcilable — a latest row that is not `CompleteTask` no longer bars it.
     #[test]
-    fn a_merged_review_disposition_never_reconciles_even_when_applied() {
-        for disposition in [Some(AfterMerge::Review), None] {
+    fn a_reconcilable_set_reconciles_regardless_of_the_newest_disposition() {
+        for (phase, disposition) in [
+            (PrPhase::Merged, Some(AfterMerge::Review)),
+            (PrPhase::Abandoned, None),
+        ] {
             let mut ev = evidence(TaskSessionStatus::Waiting);
-            ev.latest_pr_phase = Some(PrPhase::Merged);
+            ev.latest_pr_phase = Some(phase);
             ev.latest_pr_after_merge = disposition;
             ev.completion_refusal = Some(
-                "Task W2-9 cannot complete until its gates close: directive v3 is not yet incorporated; acknowledge it or re-steer before completing",
+                "Task ENG-29 cannot complete until its gates close: directive v6 is not yet incorporated; acknowledge it or re-steer before completing",
             );
             ev.resume_refusal =
-                Some("Task W2-9 has no active PR to resume; pull request #9 merged");
+                Some("Task ENG-29 has no active PR to resume; pull request #9 merged");
             ev.pending_directive = true;
             ev.directive_applied = true;
+            ev.reconcilable = true;
 
             let model = derive_task_actions(&ev);
             assert_eq!(
                 model.recommended,
-                Some(TaskAction::StartNextPr),
-                "disposition {disposition:?} must not be reconcilable"
+                Some(TaskAction::Reconcile),
+                "a reconcilable set with newest {phase:?}/{disposition:?} reconciles"
             );
-            assert!(!model.status(TaskAction::Reconcile).unwrap().available);
+            assert!(!model.status(TaskAction::StartNextPr).unwrap().available);
         }
+    }
+
+    /// Sabotage guard: a pending applied directive whose settled set is *not*
+    /// reconcilable (a non-abandoned PR still in flight, so `reconcilable` is
+    /// false) must never become `Reconcile` — it stays `StartNextPr`. Hoisting the
+    /// Reconcile branch without the `reconcilable` guard flips this and fails here.
+    #[test]
+    fn an_unreconcilable_set_never_reconciles_even_when_applied() {
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::Review);
+        ev.completion_refusal = Some(
+            "Task W2-9 cannot complete until its gates close: directive v3 is not yet incorporated; acknowledge it or re-steer before completing",
+        );
+        ev.resume_refusal = Some("Task W2-9 has no active PR to resume; pull request #9 merged");
+        ev.pending_directive = true;
+        ev.directive_applied = true;
+        ev.reconcilable = false;
+
+        let model = derive_task_actions(&ev);
+        assert_eq!(model.recommended, Some(TaskAction::StartNextPr));
+        assert!(!model.status(TaskAction::Reconcile).unwrap().available);
     }
 
     #[test]

@@ -1795,9 +1795,20 @@ fn next_move_for_task(
             };
         }
         if let Some(ci) = ci {
+            // A head red only on land-time preconditions (`scratch-clear`) holds
+            // nothing a body can repair — `lf pr land` greens it. It is
+            // reviewable, not owned by CI, and a live body sitting on it is the
+            // reviewer's turn, not "fixing CI". Every Task PR is red this way
+            // pre-land, so this is the common case, not the exception.
+            if ci.only_land_time_preconditions() {
+                return NextMove {
+                    owner: NextMoveOwner::Review,
+                    reason: "checks passed except scratch-clear; awaiting review".to_string(),
+                };
+            }
             // A live ci-fix generation (Running/Starting) owns the next move:
-            // the Task is actively repairing the branch, not waiting for an
-            // external CI fix. Failing + idle → Ci (the wake will fire);
+            // the Task is actively repairing a real failing check, not waiting
+            // for an external CI fix. Failing + idle → Ci (the wake will fire);
             // Passing → Review regardless of process state.
             let fixing = matches!(
                 status,
@@ -2401,6 +2412,60 @@ mod tests {
             "PR #900 is open; waiting for review",
         );
         assert_eq!(green.owner, NextMoveOwner::Review);
+    }
+
+    /// The ENG-33 fix for the supervision surface: a head red only on
+    /// `scratch-clear` is the reviewer's, not CI's. It must not route owner=Ci
+    /// and must not label a live body "fixing CI" — the body cannot repair a
+    /// land-time precondition, and every Task PR is red this way pre-land.
+    ///
+    /// Sabotage: revert the `only_land_time_preconditions` branch in
+    /// `next_move_for_task` and both assertions go red (idle → Ci, live → Task).
+    #[test]
+    fn open_pr_red_only_on_scratch_clear_routes_review_not_ci() {
+        // Idle body: owner=Review, not Ci.
+        let idle = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["scratch-clear"])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(idle.owner, NextMoveOwner::Review);
+        assert!(!idle.reason.contains("fixing"));
+
+        // Live body: still the reviewer's turn, not "fixing CI".
+        let live = next_move_for_task(
+            TaskSessionStatus::Running,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["scratch-clear"])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(live.owner, NextMoveOwner::Review);
+        assert_ne!(live.reason, "fixing CI");
+    }
+
+    /// The surviving half: a real leaf (with or without a precondition beside it)
+    /// still routes owner=Ci when idle and "fixing CI" when live. Passes with the
+    /// ENG-33 bug fully present.
+    #[test]
+    fn open_pr_with_a_real_leaf_still_routes_ci_even_beside_scratch_clear() {
+        let idle = next_move_for_task(
+            TaskSessionStatus::Waiting,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["scratch-clear", "rust-test"])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(idle.owner, NextMoveOwner::Ci);
+        assert!(idle.reason.contains("rust-test"));
+
+        let live = next_move_for_task(
+            TaskSessionStatus::Running,
+            Some(PrPhase::Open),
+            Some(&ci(CiState::Failing, &["scratch-clear", "rust-test"])),
+            "pull request #900 is open for review",
+        );
+        assert_eq!(live.owner, NextMoveOwner::Task);
+        assert_eq!(live.reason, "fixing CI");
     }
 
     #[test]

@@ -372,6 +372,28 @@ impl CiObservation {
                 .iter()
                 .any(|check| !check.land_time_precondition())
     }
+
+    /// Whether this head is red *only* on land-time preconditions — failing, with
+    /// at least one named failure, and every named failure one that
+    /// [`CiCheck::land_time_precondition`] resolves at land.
+    ///
+    /// This is the dual of [`CiObservation::wake_legal`] within the failing
+    /// state: such a head holds nothing a Task body could repair (`lf pr land`
+    /// greens it by clearing `scratch/`), so it is *reviewable* rather than owned
+    /// by CI. The action model and Waves supervision read it to stop recommending
+    /// a doomed Resume and to stop labelling the reviewer's turn as "fixing CI".
+    ///
+    /// False for a passing or pending head, and false the moment any failure is a
+    /// real leaf or an unclassified one — the same anti-mute-button rule as
+    /// `wake_legal`: an unnamed failure keeps the head owned by CI.
+    pub fn only_land_time_preconditions(&self) -> bool {
+        self.state == CiState::Failing
+            && !self.failing_checks.is_empty()
+            && self
+                .failing_checks
+                .iter()
+                .all(|check| check.land_time_precondition())
+    }
 }
 
 /// One failed CI head carried forward after the PR's current observation moves
@@ -1665,6 +1687,39 @@ mod tests {
         let obs = failing("h1", &["scratch-clear"]);
         assert_eq!(obs.state, super::CiState::Failing);
         assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);
+    }
+
+    /// The reviewable-despite-red predicate the action model and Waves
+    /// supervision adopt: it is the exact dual of `wake_legal` within the failing
+    /// state, so the two must never both refuse the same head.
+    #[test]
+    fn only_land_time_preconditions_is_the_dual_of_wake_legal() {
+        // Red only on scratch-clear: reviewable, and no wake.
+        let scratch = failing("h1", &["scratch-clear"]);
+        assert!(scratch.only_land_time_preconditions());
+        assert!(!scratch.wake_legal());
+
+        // A real leaf beside it (or alone): not reviewable, wake arms.
+        for obs in [
+            failing("h1", &["scratch-clear", "rust-test"]),
+            failing("h1", &["rust-test"]),
+        ] {
+            assert!(!obs.only_land_time_preconditions());
+            assert!(obs.wake_legal());
+        }
+
+        // Unclassified (empty) failure: not "only preconditions", still wakes.
+        let empty = failing("h1", &[]);
+        assert!(!empty.only_land_time_preconditions());
+        assert!(empty.wake_legal());
+
+        // Passing/pending is never "only preconditions".
+        let mut green = scratch.clone();
+        green.state = super::CiState::Passing;
+        assert!(!green.only_land_time_preconditions());
+        let mut pending = scratch.clone();
+        pending.state = super::CiState::Pending;
+        assert!(!pending.only_land_time_preconditions());
     }
 
     /// The one literal, pinned against the workflow that defines it. A rename of

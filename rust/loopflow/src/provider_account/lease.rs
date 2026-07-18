@@ -19,7 +19,9 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::provider_account::{match_account, AccountMatch, ProviderAccountError, RateLimitSignal};
+use crate::provider_account::{
+    account_login, match_account, AccountMatch, ProviderAccountError, RateLimitSignal,
+};
 use crate::provider_auth::Provider;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
 
@@ -249,7 +251,11 @@ fn resolve_selectors(
                         selector.account,
                         matches
                             .iter()
-                            .map(|account| format!("{}/{}", account.provider, account.account_id))
+                            .map(|account| format!(
+                                "{}/{}",
+                                account.provider,
+                                account_login(account)
+                            ))
                             .collect::<Vec<_>>()
                             .join(", ")
                     )));

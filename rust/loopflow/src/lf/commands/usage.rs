@@ -129,7 +129,8 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
             Some(Err(SubscriptionError::NeedsLogin(_))) => {
                 status.note = Some(format!(
                     "needs re-login: lf auth connect {} {}",
-                    account.provider, account.account_id
+                    account.provider,
+                    crate::provider_account::account_login(account)
                 ));
             }
             Some(Err(SubscriptionError::Unavailable(reason))) => {
@@ -169,10 +170,7 @@ fn windows_for<'a>(
 }
 
 fn account_label(account: &ProviderAccount) -> String {
-    match &account.login_email {
-        Some(login) => format!("{} ({login})", account.account_id),
-        None => account.account_id.to_string(),
-    }
+    crate::provider_account::account_login(account).to_string()
 }
 
 fn print_accounts(statuses: &[AccountStatus]) {
@@ -435,14 +433,40 @@ fn short_repo(repo: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        account_statuses, aggregate_spend, format_share, format_window, short_repo, Totals,
-        UsageRow,
+        account_label, account_statuses, aggregate_spend, format_share, format_window, short_repo,
+        Totals, UsageRow,
     };
-    use crate::store::{sqlite::SqliteStore, AccountLimitWindow, TurnSpendRow};
+    use crate::profile::EmailAddress;
+    use crate::store::{
+        sqlite::SqliteStore, AccountLimitWindow, CredentialState, ProviderAccount,
+        ProviderAccountId, RoutingState, TurnSpendRow,
+    };
     use crate::trace::{AgentLaunchRow, AgentTurnRow};
 
     const TURN_SPEND_FIXTURE: &str =
         include_str!("../../../../../tests/fixtures/dto/turn_spend.json");
+
+    #[test]
+    fn account_label_uses_login_email_without_internal_id() {
+        let account = ProviderAccount {
+            provider: "codex".to_string(),
+            account_id: ProviderAccountId::parse("engineering").unwrap(),
+            home: None,
+            login_email: Some(EmailAddress::parse("loopflow-eng@loopflow.studio").unwrap()),
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+
+        assert_eq!(account_label(&account), "loopflow-eng@loopflow.studio");
+    }
 
     #[test]
     fn turn_spend_fixture_round_trips_the_public_wire() {

@@ -76,35 +76,35 @@ the GitHub merge button is not a separate lifecycle authority.
 Prefer an account without removing the normal provider route:
 
 ```bash
-lf --account reserve ssh mini -- lf task pursue
+lf --account loopflow-eng@ ssh mini -- lf task pursue
 
-lf --account claude=personal \
-  --account codex=reserve \
+lf --account claude=jack@ \
+  --account codex=loopflow-eng@ \
   ssh mini \
   -- lf task pursue
 ```
 
-`--account` tries each matching managed account once before that provider's
-normal local route. An unqualified selector matches account IDs or login emails
-independently for Claude and Codex. Providers with no match keep their normal
-routes.
+`--account` tries each matching managed login once before that provider's normal
+local route. An unqualified selector matches a full login email or an
+unambiguous email prefix independently for Claude and Codex. Providers with no
+match keep their normal routes.
 
 Restrict the process tree to exact accounts:
 
 ```bash
-lf --only-account claude=personal \
-  --only-account codex=reserve \
+lf --only-account claude=jack@ \
+  --only-account codex=loopflow-eng@ \
   ssh mini \
   -- lf task pursue
 ```
 
-`--only-account` removes every unselected account. A provider without a
-selected account is unavailable. The two flags cannot be combined. The same
+`--only-account` removes every unselected login. A provider without a selected
+login is unavailable. The two flags cannot be combined. The same
 flags apply to local invocations:
 
 ```bash
-lf --account codex=reserve implement
-lf --only-account claude=personal review
+lf --account codex=loopflow-eng@ implement
+lf --only-account claude=jack@ review
 ```
 
 ### What crosses SSH

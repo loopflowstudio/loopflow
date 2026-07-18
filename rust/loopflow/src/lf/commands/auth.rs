@@ -19,8 +19,8 @@ use crate::engine::platform::open_url;
 use crate::lf::{AuthAccessCommand, AuthCommand};
 use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
 use crate::provider_account::{
-    account_home_path, ensure_account_home, new_account, open_account_store, parse_account_id,
-    remove_account_home,
+    account_home_path, account_id_for_login, account_login, ensure_account_home, new_account,
+    open_account_store, remove_account_home,
 };
 use crate::provider_auth::{
     capture_claude_authorization_code_from_chrome, capture_claude_profile_credentials,
@@ -76,29 +76,29 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
     }
     match cmd {
         AuthCommand::Status { provider } => status(provider.as_deref()).await,
-        AuthCommand::Disconnect { provider, account } => match account {
-            Some(account) => disconnect_account(provider, account).await,
+        AuthCommand::Disconnect { provider, email } => match email {
+            Some(email) => disconnect_account(provider, email).await,
             None => disconnect(provider).await,
         },
         AuthCommand::Configure { provider } => configure(provider).await,
         AuthCommand::Connect {
             provider,
-            account,
+            email,
             chrome_profile,
-        } => match account.as_deref() {
-            Some(account) => connect_account(provider, account, chrome_profile.as_deref()).await,
+        } => match email.as_deref() {
+            Some(email) => connect_account(provider, email, chrome_profile.as_deref()).await,
             None => connect(provider).await,
         },
         AuthCommand::Import {
             provider,
-            account,
+            email,
             chrome_profile,
-        } => import_account(provider, account, chrome_profile.as_deref()).await,
+        } => import_account(provider, email, chrome_profile.as_deref()).await,
         AuthCommand::Access { cmd } => access(cmd).await,
         AuthCommand::Accounts { provider } => accounts(provider.as_deref()).await,
         AuthCommand::Set {
             provider,
-            account,
+            email,
             login_email,
             routing,
             plan,
@@ -108,7 +108,7 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
         } => {
             set_account_lifecycle(
                 provider,
-                account,
+                email,
                 AccountLifecycleUpdate {
                     login_email: login_email.as_deref(),
                     routing: routing.as_deref(),
@@ -120,7 +120,7 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             )
             .await
         }
-        AuthCommand::Reset { provider, account } => reset_account(provider, account).await,
+        AuthCommand::Reset { provider, email } => reset_account(provider, email).await,
         AuthCommand::External(args) => {
             let provider = args
                 .first()
@@ -199,12 +199,12 @@ async fn connect(raw_provider: &str) -> Result<()> {
 
 async fn connect_account(
     raw_provider: &str,
-    raw_account: &str,
+    raw_email: &str,
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;
-    let account = super::profile::find_provider_account(&store, provider, raw_account).await?;
+    let account = super::profile::find_provider_account(&store, provider, raw_email).await?;
     let candidates = if let Some(raw_chrome_profile) = raw_chrome_profile {
         vec![bootstrap_access_profile(&store, raw_chrome_profile).await?]
     } else {
@@ -230,8 +230,8 @@ async fn connect_account(
     if candidates.is_empty() {
         return Err(anyhow!(
             "No access profile can log in {provider}/{}. Add a venue: lf auth access add {provider} {} --profile <profile>",
-            account.account_id,
-            account.account_id
+            account_login(&account),
+            account_login(&account)
         ));
     }
 
@@ -308,9 +308,9 @@ async fn connect_managed_account(
         .clone()
         .unwrap_or_else(|| flow.verification_uri.clone());
     println!(
-        "Connecting {} account '{}' through profile '{}'...",
+        "Connecting {} login '{}' through profile '{}'...",
         provider.display_name(),
-        account_id,
+        account_login(account),
         profile.id
     );
     if handle.requires_authorization_code() {
@@ -340,7 +340,7 @@ async fn connect_managed_account(
             anyhow!(
                 "timed out waiting for {} account '{}' browser confirmation",
                 provider.display_name(),
-                account_id
+                account_login(account)
             )
         })??;
 
@@ -378,9 +378,9 @@ async fn connect_managed_account(
     }
     register_managed_account(store, provider, account_id, account_home, Some(login)).await?;
     println!(
-        "Connected {} account '{}' through profile '{}'",
+        "Connected {} login '{}' through profile '{}'",
         provider.display_name(),
-        account_id,
+        account_login(account),
         profile.id
     );
     Ok(())
@@ -448,14 +448,14 @@ fn exhausted_access_profiles_error(
 ) -> anyhow::Error {
     anyhow!(
         "No access profile could log in {provider}/{}. {} Sign a venue in as {}, or add a venue: lf auth access add {provider} {} --profile <profile>",
-        account.account_id,
+        account_login(account),
         failures.join("; "),
         account
             .login_email
             .as_ref()
             .map(EmailAddress::as_str)
             .unwrap_or("the account login"),
-        account.account_id
+        account_login(account)
     )
 }
 
@@ -465,11 +465,14 @@ fn verify_provider_login(
     expected_login: Option<&EmailAddress>,
     reported_login: Option<&str>,
 ) -> Result<()> {
+    let account = expected_login
+        .map(EmailAddress::as_str)
+        .unwrap_or_else(|| account_id.as_str());
     let reported_login = reported_login.ok_or_else(|| {
         anyhow!(
             "{} did not report a login email; account '{}' is unchanged.",
             provider.display_name(),
-            account_id
+            account
         )
     })?;
     let Some(expected_login) = expected_login else {
@@ -479,12 +482,11 @@ fn verify_provider_login(
         return Ok(());
     }
     Err(anyhow!(
-        "{} reports {}; account '{}' is {}. Refused: the login was discarded, '{}' is unchanged.",
+        "{} reports {}; expected {}. Refused: the login was discarded and '{}' is unchanged.",
         provider.display_name(),
         reported_login,
-        account_id,
         expected_login,
-        account_id
+        account
     ))
 }
 
@@ -575,15 +577,26 @@ async fn register_managed_account(
 
 async fn import_account(
     raw_provider: &str,
-    raw_account: &str,
+    raw_email: &str,
     raw_chrome_profile: Option<&str>,
 ) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
-    let account_id = parse_account_id(raw_account)?;
+    let expected_login = EmailAddress::parse(raw_email).map_err(anyhow::Error::msg)?;
     let store = open_account_store().await?;
     let existing = store
-        .get_provider_account(provider.as_str(), &account_id)
-        .await?;
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?
+        .into_iter()
+        .find(|account| {
+            account
+                .login_email
+                .as_ref()
+                .is_some_and(|login| login.as_str().eq_ignore_ascii_case(expected_login.as_str()))
+        });
+    let account_id = existing
+        .as_ref()
+        .map(|account| account.account_id.clone())
+        .unwrap_or_else(|| account_id_for_login(&expected_login));
     let access_profile = match raw_chrome_profile {
         Some(profile) => Some(bootstrap_access_profile(&store, profile).await?),
         None => None,
@@ -654,14 +667,7 @@ async fn import_account(
         .map(|home| home.path())
         .unwrap_or(account_home.as_path());
     require_managed_access_token(provider, &account_id, credential_home).await?;
-    verify_provider_login(
-        provider,
-        &account_id,
-        existing
-            .as_ref()
-            .and_then(|account| account.login_email.as_ref()),
-        Some(&login),
-    )?;
+    verify_provider_login(provider, &account_id, Some(&expected_login), Some(&login))?;
     let account_home = ensure_account_home(provider, &account_id)?;
     if let Some(staged_home) = staged_home {
         install_claude_login(staged_home.path(), &account_home)?;
@@ -683,9 +689,9 @@ async fn import_account(
             .await?;
     }
     println!(
-        "Imported {} account '{}'",
+        "Imported {} login '{}'",
         provider.display_name(),
-        account_id
+        expected_login
     );
     Ok(())
 }
@@ -775,14 +781,11 @@ async fn disconnect(raw_provider: &str) -> Result<()> {
     Ok(())
 }
 
-async fn disconnect_account(raw_provider: &str, raw_account: &str) -> Result<()> {
+async fn disconnect_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
-    let account_id = parse_account_id(raw_account)?;
     let store = open_account_store().await?;
-    let mut account = store
-        .get_provider_account(provider.as_str(), &account_id)
-        .await?
-        .ok_or_else(|| anyhow!("unknown {} account '{}'", provider, account_id))?;
+    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+    let account_id = account.account_id.clone();
     if let Some(home) = account.home.as_deref() {
         let expected_home = account_home_path(provider, &account_id)?;
         if home != expected_home {
@@ -802,9 +805,9 @@ async fn disconnect_account(raw_provider: &str, raw_account: &str) -> Result<()>
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
     println!(
-        "Disconnected {} account '{}'",
+        "Disconnected {} login '{}'",
         provider.display_name(),
-        account_id
+        account_login(&account)
     );
     Ok(())
 }
@@ -814,18 +817,18 @@ async fn access(cmd: &AuthAccessCommand) -> Result<()> {
     match cmd {
         AuthAccessCommand::Set {
             provider,
-            account,
+            email,
             profiles,
         } => {
             let provider = parse_managed_provider(provider)?;
-            let account = super::profile::find_provider_account(&store, provider, account).await?;
+            let account = super::profile::find_provider_account(&store, provider, email).await?;
             let profile_ids = parse_existing_profiles(&store, profiles).await?;
             store
                 .set_account_access_profiles(provider, &account.account_id, &profile_ids)
                 .await?;
             println!(
                 "{} access profiles: {}",
-                account.account_id,
+                account_login(&account),
                 profile_ids
                     .iter()
                     .map(ProfileId::as_str)
@@ -836,11 +839,11 @@ async fn access(cmd: &AuthAccessCommand) -> Result<()> {
         }
         AuthAccessCommand::Add {
             provider,
-            account,
+            email,
             profile,
         } => {
             let provider = parse_managed_provider(provider)?;
-            let account = super::profile::find_provider_account(&store, provider, account).await?;
+            let account = super::profile::find_provider_account(&store, provider, email).await?;
             let profile_id = parse_existing_profile(&store, profile).await?;
             let mut profile_ids = store
                 .list_account_access_profiles(Some(provider), Some(&account.account_id))
@@ -854,16 +857,19 @@ async fn access(cmd: &AuthAccessCommand) -> Result<()> {
             store
                 .set_account_access_profiles(provider, &account.account_id, &profile_ids)
                 .await?;
-            println!("Updated {provider}/{} access profiles", account.account_id);
+            println!(
+                "Updated {provider}/{} access profiles",
+                account_login(&account)
+            );
             Ok(())
         }
         AuthAccessCommand::Rm {
             provider,
-            account,
+            email,
             profile,
         } => {
             let provider = parse_managed_provider(provider)?;
-            let account = super::profile::find_provider_account(&store, provider, account).await?;
+            let account = super::profile::find_provider_account(&store, provider, email).await?;
             let profile_id = ProfileId::parse(profile).map_err(anyhow::Error::msg)?;
             let profile_ids = store
                 .list_account_access_profiles(Some(provider), Some(&account.account_id))
@@ -875,7 +881,10 @@ async fn access(cmd: &AuthAccessCommand) -> Result<()> {
             store
                 .set_account_access_profiles(provider, &account.account_id, &profile_ids)
                 .await?;
-            println!("Updated {provider}/{} access profiles", account.account_id);
+            println!(
+                "Updated {provider}/{} access profiles",
+                account_login(&account)
+            );
             Ok(())
         }
     }
@@ -945,7 +954,7 @@ async fn accounts(raw_provider: Option<&str>) -> Result<()> {
 
 async fn set_account_lifecycle(
     raw_provider: &str,
-    raw_account: &str,
+    raw_email: &str,
     update: AccountLifecycleUpdate<'_>,
 ) -> Result<()> {
     if update.login_email.is_none()
@@ -960,7 +969,6 @@ async fn set_account_lifecycle(
         ));
     }
     let provider = parse_managed_provider(raw_provider)?;
-    let account_id = parse_account_id(raw_account)?;
     let login_email = update
         .login_email
         .map(EmailAddress::parse)
@@ -970,10 +978,7 @@ async fn set_account_lifecycle(
     let plan = update.plan.map(parse_plan).transpose()?;
     let paid_through = update.paid_through.map(parse_paid_through).transpose()?;
     let store = open_account_store().await?;
-    let mut account = store
-        .get_provider_account(provider.as_str(), &account_id)
-        .await?
-        .ok_or_else(|| anyhow!("unknown {} account '{}'", provider, account_id))?;
+    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
     if let Some(login_email) = login_email {
         account.login_email = Some(login_email);
     }
@@ -994,7 +999,7 @@ async fn set_account_lifecycle(
     store
         .update_provider_account_lifecycle(&account)
         .await
-        .map_err(|error| account_store_error(provider, &account_id.to_string(), error))?;
+        .map_err(|error| account_store_error(provider, account_login(&account), error))?;
     println!("Updated {}", format_account(&account));
     Ok(())
 }
@@ -1024,18 +1029,18 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
         .map_err(|_| anyhow!("invalid paid-through date '{value}': expected YYYY-MM-DD"))
 }
 
-async fn reset_account(raw_provider: &str, raw_account: &str) -> Result<()> {
+async fn reset_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
-    let account_id = parse_account_id(raw_account)?;
     let store = open_account_store().await?;
+    let account = super::profile::find_provider_account(&store, provider, raw_email).await?;
     store
-        .reset_provider_account_health(provider.as_str(), &account_id)
+        .reset_provider_account_health(provider.as_str(), &account.account_id)
         .await
-        .map_err(|error| account_store_error(provider, &account_id.to_string(), error))?;
+        .map_err(|error| account_store_error(provider, account_login(&account), error))?;
     println!(
-        "Reset {} account '{}' usage state",
+        "Reset {} login '{}' usage state",
         provider.display_name(),
-        account_id
+        account_login(&account)
     );
     Ok(())
 }
@@ -1083,16 +1088,13 @@ fn format_account(account: &ProviderAccount) -> String {
             format_relative_delta(cooldown_until - now)
         ));
     }
-    if let Some(login) = &account.login_email {
-        details.push(login.to_string());
-    }
     if details.is_empty() {
         details.push("ready".to_string());
     }
     format!(
-        "{:<12} {:<16} {}",
+        "{:<12} {:<32} {}",
         account.provider,
-        account.account_id,
+        account_login(account),
         details.join(" · ")
     )
 }
@@ -1312,7 +1314,7 @@ mod tests {
         });
 
         assert!(rendered.contains("claude"));
-        assert!(rendered.contains("primary"));
+        assert!(!rendered.contains("primary"));
         assert!(!rendered.contains("preferred"));
         assert!(rendered.contains("max"));
         assert!(rendered.contains("72% used"));
@@ -1403,7 +1405,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let previous = std::env::var_os("LF_HOME");
         std::env::set_var("LF_HOME", home.path());
-        let result = import_account("codex", "engineering", None).await;
+        let result = import_account("codex", "engineering@example.com", None).await;
         match previous {
             Some(value) => std::env::set_var("LF_HOME", value),
             None => std::env::remove_var("LF_HOME"),
@@ -1521,7 +1523,7 @@ mod account_first_tests {
 
         let error = run(&AuthCommand::Reset {
             provider: "codex".to_string(),
-            account: "reserve".to_string(),
+            email: "reserve@example.com".to_string(),
         })
         .unwrap_err();
 
@@ -1684,7 +1686,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             .await
             .unwrap();
 
-        connect_account("codex", "primary", None).await.unwrap();
+        connect_account("codex", "operator@", None).await.unwrap();
 
         assert_eq!(
             *TEST_OPENED_CHROME_PROFILES.lock().unwrap(),
@@ -1743,7 +1745,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             .await
             .unwrap();
 
-        connect_account("codex", "primary", None).await.unwrap();
+        connect_account("codex", "operator@", None).await.unwrap();
 
         assert_eq!(
             *TEST_OPENED_CHROME_PROFILES.lock().unwrap(),
@@ -1799,10 +1801,12 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             .await
             .unwrap();
 
-        let error = connect_account("codex", "primary", None).await.unwrap_err();
+        let error = connect_account("codex", "operator@", None)
+            .await
+            .unwrap_err();
 
         assert!(error.to_string().contains(
-            "Profile 3: Codex reports other@example.com; account 'primary' is operator@example.com. Refused: the login was discarded, 'primary' is unchanged."
+            "Profile 3: Codex reports other@example.com; expected operator@example.com. Refused: the login was discarded and 'operator@example.com' is unchanged."
         ));
         assert_eq!(
             store
@@ -1866,7 +1870,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
 
         assert_eq!(
             error.to_string(),
-            "No access profile could log in claude/primary. Profile 3: signed in as someone else; Profile 8: no signed-in account Sign a venue in as jackstah@gmail.com, or add a venue: lf auth access add claude primary --profile <profile>"
+            "No access profile could log in claude/jackstah@gmail.com. Profile 3: signed in as someone else; Profile 8: no signed-in account Sign a venue in as jackstah@gmail.com, or add a venue: lf auth access add claude jackstah@gmail.com --profile <profile>"
         );
     }
 }

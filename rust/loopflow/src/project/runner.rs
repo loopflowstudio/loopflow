@@ -594,7 +594,7 @@ async fn run_project_inner(
                         }
                         return Ok(());
                     }
-                    ConversationEvent::Error { code, message } => {
+                    ConversationEvent::Error { code, message, .. } => {
                         let reason = format!("{code}: {message}");
                         finish_capture(capture.as_ref(), "failed");
                         return fail_and_maybe_relaunch(

@@ -442,6 +442,7 @@ pub(super) fn process_notification(
                 let _ = events.send(ConversationEvent::Error {
                     code: "codex_error".to_string(),
                     message,
+                    evidence: None,
                 });
             }
         }
@@ -505,6 +506,7 @@ pub(super) fn process_rpc_error(error: &Value, events: &mpsc::UnboundedSender<Co
             .and_then(Value::as_str)
             .unwrap_or("codex rpc error")
             .to_string(),
+        evidence: None,
     });
 }
 
@@ -1124,6 +1126,7 @@ impl CodexHarness {
                             let _ = event_tx.send(ConversationEvent::Error {
                                 code: "provider_rate_limited".to_string(),
                                 message: signal.reason,
+                                evidence: None,
                             });
                             continue;
                         }
@@ -1167,6 +1170,7 @@ impl CodexHarness {
                 let _ = event_tx.send(ConversationEvent::Error {
                     code: "codex_disconnected".to_string(),
                     message: "codex app-server disconnected".to_string(),
+                    evidence: None,
                 });
             }
         });

@@ -163,7 +163,7 @@ pub(crate) fn drain_turn_failure_reason(
     let mut reason = fallback.to_string();
     while let Ok(event) = event_rx.try_recv() {
         match event {
-            ConversationEvent::Error { code, message } => {
+            ConversationEvent::Error { code, message, .. } => {
                 reason = format!("{code}: {message}");
                 break;
             }

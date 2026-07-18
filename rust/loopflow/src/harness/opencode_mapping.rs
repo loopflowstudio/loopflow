@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage};
+use crate::chat::types::{
+    ConversationEvent, ConversationItem, FailureEvidence, FileEdit, Lifecycle, TurnUsage,
+};
 
 #[derive(Debug, Default)]
 pub(super) struct ReaderState {
@@ -15,6 +17,19 @@ pub(super) struct ReaderState {
     /// having produced any is a hollow body — see [`Self::mark_substantive`]
     /// and the hollow-close branch in [`map_status`].
     turn_substantive: bool,
+    /// The configured agent model (e.g. `opencode/glm-5.2`), from `AgentConfig`.
+    /// Carried so disconnect evidence can name the model without re-reading
+    /// config at the failure site.
+    model: Option<String>,
+    /// The harness/provider name (e.g. `opencode`). Static for the harness.
+    provider: &'static str,
+    /// Last successfully parsed SSE event type (e.g. `session.status`).
+    last_event_type: Option<String>,
+    /// 0-based count of accepted SSE events so far. `None` until the first
+    /// accepted event, so a pre-content disconnect is distinguishable.
+    last_event_seq: Option<u64>,
+    /// When the current turn started, ms since epoch. Reset each turn.
+    turn_started_at: Option<i64>,
 }
 
 /// Error codes for turns that close without usable work. Distinct from
@@ -25,18 +40,48 @@ pub(crate) const HOLLOW_BODY_CODE: &str = "opencode_hollow_body";
 pub(crate) const DECODE_GAP_CODE: &str = "opencode_decode_gap";
 
 impl ReaderState {
-    pub(super) fn new(session_id: String) -> Self {
+    pub(super) fn new(session_id: String, model: Option<String>, provider: &'static str) -> Self {
         Self {
             session_id,
             status: SessionState::Unknown,
             current_turn_id: None,
             tools: HashMap::new(),
             turn_substantive: false,
+            model,
+            provider,
+            last_event_type: None,
+            last_event_seq: None,
+            turn_started_at: None,
         }
     }
 
     fn current_turn_id(&self) -> Option<&str> {
         self.current_turn_id.as_deref()
+    }
+
+    /// The configured agent model, for disconnect evidence.
+    pub(super) fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    /// The harness/provider name, for disconnect evidence.
+    pub(super) fn provider(&self) -> &'static str {
+        self.provider
+    }
+
+    /// Last successfully parsed SSE event type, for disconnect evidence.
+    pub(super) fn last_event_type(&self) -> Option<&str> {
+        self.last_event_type.as_deref()
+    }
+
+    /// 0-based count of accepted SSE events, for disconnect evidence.
+    pub(super) fn last_event_seq(&self) -> Option<u64> {
+        self.last_event_seq
+    }
+
+    /// When the current turn started, ms since epoch, for disconnect evidence.
+    pub(super) fn turn_started_at(&self) -> Option<i64> {
+        self.turn_started_at
     }
 
     /// Record that the current turn produced usable assistant work. Called at
@@ -122,6 +167,11 @@ pub(super) fn map_event(raw: &Value, state: &mut ReaderState) -> MappedEvent {
         return mapped;
     }
 
+    // Track the last accepted event for disconnect evidence. The seq is
+    // 0-based: the first accepted event is seq 0.
+    state.last_event_seq = Some(state.last_event_seq.map_or(0, |n| n + 1));
+    state.last_event_type = Some(event_type.to_string());
+
     match event_type {
         "session.status" => map_status(properties, state, &mut mapped),
         "message.part.updated" => map_part_updated(properties, state, &mut mapped),
@@ -149,6 +199,7 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
             state.current_turn_id = Some(turn_id.clone());
             state.tools.clear();
             state.turn_substantive = false;
+            state.turn_started_at = Some(chrono::Utc::now().timestamp_millis());
             mapped
                 .events
                 .push(ConversationEvent::TurnStarted { turn_id });
@@ -217,23 +268,44 @@ fn complete_hollow_turn(
     mapped: &mut MappedEvent,
 ) {
     let produced_tokens = usage.as_ref().is_some_and(|usage| usage.output_tokens > 0);
-    let (code, message) = if produced_tokens {
+    let (code, message, terminal_class) = if produced_tokens {
         (
             DECODE_GAP_CODE,
             "OpenCode turn reported output tokens but no assistant content reached the harness"
                 .to_string(),
+            "decode_gap",
         )
     } else {
         (
             HOLLOW_BODY_CODE,
             "OpenCode turn completed with no assistant output (hollow body after stream truncation)"
                 .to_string(),
+            "hollow_idle",
         )
+    };
+    let provider_output_tokens = usage
+        .as_ref()
+        .map(|u| u.output_tokens as i64)
+        .filter(|&t| t > 0);
+    let stream_ended_at = chrono::Utc::now().timestamp_millis();
+    let evidence = FailureEvidence {
+        model: state.model().map(ToString::to_string),
+        provider: Some(state.provider().to_string()),
+        endpoint_class: Some("upstream_provider".to_string()),
+        stream_started_at: state.turn_started_at(),
+        stream_ended_at: Some(stream_ended_at),
+        duration_ms: state.turn_started_at().map(|s| stream_ended_at - s),
+        last_event_type: state.last_event_type().map(ToString::to_string),
+        last_event_seq: state.last_event_seq(),
+        terminal_error_class: Some(terminal_class.to_string()),
+        terminal_error_message: Some(message.clone()),
+        provider_output_tokens,
     };
     complete_turn(state, Lifecycle::Failed, usage, mapped);
     mapped.events.push(ConversationEvent::Error {
         code: code.to_string(),
         message,
+        evidence: Some(evidence),
     });
 }
 
@@ -394,9 +466,25 @@ fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEve
         complete_turn(state, Lifecycle::Failed, None, mapped);
     }
 
-    mapped
-        .events
-        .push(ConversationEvent::Error { code, message });
+    let stream_ended_at = chrono::Utc::now().timestamp_millis();
+    let evidence = FailureEvidence {
+        model: state.model().map(ToString::to_string),
+        provider: Some(state.provider().to_string()),
+        endpoint_class: Some("upstream_provider".to_string()),
+        stream_started_at: state.turn_started_at(),
+        stream_ended_at: Some(stream_ended_at),
+        duration_ms: state.turn_started_at().map(|s| stream_ended_at - s),
+        last_event_type: state.last_event_type().map(ToString::to_string),
+        last_event_seq: state.last_event_seq(),
+        terminal_error_class: Some("session_error".to_string()),
+        terminal_error_message: Some(crate::harness::opencode::sanitize_error_message(&message)),
+        provider_output_tokens: None,
+    };
+    mapped.events.push(ConversationEvent::Error {
+        code,
+        message,
+        evidence: Some(evidence),
+    });
 }
 
 fn value_by_keys<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
@@ -575,7 +663,7 @@ mod tests {
 
     #[test]
     fn session_status_transitions_emit_turn_boundaries() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
 
         let started = map_event(
             &json!({
@@ -622,7 +710,7 @@ mod tests {
 
     #[test]
     fn session_status_idle_with_usage_emits_turn_usage() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
 
         let started = map_event(
             &json!({
@@ -682,7 +770,7 @@ mod tests {
 
     #[test]
     fn text_part_maps_to_text_delta() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         let _ = map_event(
             &json!({
                 "type": "session.status",
@@ -711,7 +799,7 @@ mod tests {
 
     #[test]
     fn tool_part_deduplicates_lifecycle_events() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         let _ = map_event(
             &json!({
                 "type": "session.status",
@@ -808,7 +896,7 @@ mod tests {
 
     #[test]
     fn permission_event_collects_request_id() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         let mapped = map_event(
             &json!({
                 "type": "permission.asked",
@@ -822,7 +910,7 @@ mod tests {
 
     #[test]
     fn ignores_events_for_other_sessions() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         let mapped = map_event(
             &json!({
                 "type": "session.status",
@@ -835,7 +923,7 @@ mod tests {
 
     #[test]
     fn session_error_while_active_completes_turn_as_failed() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         let _ = map_event(
             &json!({
                 "type": "session.status",
@@ -865,7 +953,24 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(mapped.events[1], ConversationEvent::Error { .. }));
+        match &mapped.events[1] {
+            ConversationEvent::Error { evidence, .. } => {
+                let evidence = evidence
+                    .as_ref()
+                    .expect("session.error must carry durable evidence");
+                assert_eq!(
+                    evidence.terminal_error_class.as_deref(),
+                    Some("session_error"),
+                    "session.error evidence must name its root-cause class: {evidence:?}"
+                );
+                assert_eq!(
+                    evidence.endpoint_class.as_deref(),
+                    Some("upstream_provider"),
+                    "session.error is an upstream report: {evidence:?}"
+                );
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
     }
 
     fn activate(state: &mut ReaderState) {
@@ -893,7 +998,7 @@ mod tests {
     fn hollow_idle_close_fails_instead_of_completing() {
         // opencode said the turn finished (idle), but nothing was ever emitted.
         // This is the SSE-truncation hollow body: it must fail, never complete.
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         activate(&mut state);
 
         let closed = go_idle(&mut state, None);
@@ -907,7 +1012,27 @@ mod tests {
             }
         ));
         match &closed.events[1] {
-            ConversationEvent::Error { code, .. } => assert_eq!(code, HOLLOW_BODY_CODE),
+            ConversationEvent::Error { code, evidence, .. } => {
+                assert_eq!(code, HOLLOW_BODY_CODE);
+                let evidence = evidence
+                    .as_ref()
+                    .expect("hollow-idle Error must carry durable evidence");
+                assert_eq!(
+                    evidence.endpoint_class.as_deref(),
+                    Some("upstream_provider"),
+                    "hollow-idle is an upstream truncation, not a harness stream drop: {evidence:?}"
+                );
+                assert_eq!(
+                    evidence.terminal_error_class.as_deref(),
+                    Some("hollow_idle"),
+                    "hollow-idle must name its root-cause class: {evidence:?}"
+                );
+                assert_eq!(
+                    evidence.provider.as_deref(),
+                    Some("opencode"),
+                    "evidence must name the provider: {evidence:?}"
+                );
+            }
             other => panic!("expected hollow-body Error, got {other:?}"),
         }
     }
@@ -916,13 +1041,39 @@ mod tests {
     fn hollow_idle_close_with_output_tokens_is_a_decode_gap() {
         // Usage claims the model produced output, but no content reached us —
         // a harness decode gap, reported distinctly from a truly empty turn.
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         activate(&mut state);
 
         let closed = go_idle(&mut state, Some(json!({ "output_tokens": 42 })));
 
         match closed.events.last() {
-            Some(ConversationEvent::Error { code, .. }) => assert_eq!(code, DECODE_GAP_CODE),
+            Some(ConversationEvent::Error { code, evidence, .. }) => {
+                assert_eq!(code, DECODE_GAP_CODE);
+                let evidence = evidence
+                    .as_ref()
+                    .expect("decode-gap Error must carry durable evidence");
+                assert_eq!(
+                    evidence.terminal_error_class.as_deref(),
+                    Some("decode_gap"),
+                    "decode-gap must name its root-cause class: {evidence:?}"
+                );
+                assert_eq!(
+                    evidence.endpoint_class.as_deref(),
+                    Some("upstream_provider"),
+                    "decode-gap is an upstream truncation: {evidence:?}"
+                );
+                let tokens = evidence
+                    .provider_output_tokens
+                    .expect("decode-gap evidence must carry provider_output_tokens");
+                assert!(
+                    tokens > 0,
+                    "decode-gap must prove the model produced tokens: {evidence:?}"
+                );
+                assert_eq!(
+                    tokens, 42,
+                    "provider_output_tokens must match the usage reading: {evidence:?}"
+                );
+            }
             other => panic!("expected decode-gap Error, got {other:?}"),
         }
         assert!(matches!(
@@ -937,7 +1088,7 @@ mod tests {
     #[test]
     fn tool_only_turn_is_substantive_and_completes() {
         // A turn that only ran a tool (no prose) still did usable work.
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         activate(&mut state);
         let _ = map_event(
             &json!({
@@ -977,7 +1128,7 @@ mod tests {
     #[test]
     fn second_turn_hollowness_is_tracked_independently() {
         // A substantive turn must not leave the next turn marked substantive.
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         activate(&mut state);
         let _ = map_event(
             &json!({
@@ -1012,7 +1163,7 @@ mod tests {
         // Pre-content disconnect: turn is open but produced nothing.
         // close_orphaned_turn gives it a terminal Failed close so the
         // journal never carries an open turn past a disconnect.
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         activate(&mut state);
         assert!(state.turn_is_open());
         assert!(!state.turn_has_content());
@@ -1036,7 +1187,7 @@ mod tests {
         // Mid-stream disconnect: turn produced some content, then the
         // stream died. The partial output does not make the turn
         // successful — it still closes Failed.
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         activate(&mut state);
         let _ = map_event(
             &json!({
@@ -1064,7 +1215,7 @@ mod tests {
 
     #[test]
     fn ignores_noncanonical_session_id_shape() {
-        let mut state = ReaderState::new("session_1".to_string());
+        let mut state = ReaderState::new("session_1".to_string(), None, "opencode");
         let mapped = map_event(
             &json!({
                 "type": "session.status",

@@ -1124,7 +1124,7 @@ impl WaveLoop {
                                 Instant::now() + Duration::from_millis(100)
                             );
                         }
-                        ConversationEvent::Error { code, message } => {
+                        ConversationEvent::Error { code, message, .. } => {
                             let _ = harness.stop().await;
                             self.finish_failed_pass(
                                 &body_id,

@@ -90,6 +90,18 @@ durable_id!(SendId, "send_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(DoneProposalId, "done_");
 
+impl ProjectId {
+    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl TaskId {
+    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum WorkRef {

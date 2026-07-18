@@ -9,11 +9,11 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::child::{ChildBodyHandoff, ChildRef};
 use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, input_is_current,
     send_outstanding_steers, CommandStop, PendingInput,
 };
-use crate::child_session::{ChildBodyHandoff, ChildRef};
 use crate::durable::{AttentionRoute, Basis, BoundarySeed, FlowPosition, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::engine::InteractionPolicy;
@@ -23,8 +23,8 @@ use crate::harness::{
 };
 use crate::store::{open_existing_store, SharedStore};
 use crate::task::{
-    CiCheck, Observation, PrPhase, TaskEventKind, TaskGateProposal, TaskLifecyclePhase,
-    TaskSession, TaskSessionId, TaskSessionStatus,
+    CiCheck, Observation, PrPhase, Task, TaskEventKind, TaskGateProposal, TaskId,
+    TaskLifecyclePhase, TaskStatus,
 };
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
@@ -46,14 +46,14 @@ struct StartedTaskStep {
     basis: Option<Basis>,
 }
 
-pub async fn run_task_session(session_id: TaskSessionId) -> Result<()> {
+pub async fn run_task(session_id: TaskId) -> Result<()> {
     let store: SharedStore = Arc::new(
         open_existing_store()
             .await
             .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
     );
     let lease = crate::ops::required_run_lease(&store).await?;
-    let result = run_task_session_with(
+    let result = run_task_with(
         store,
         session_id.clone(),
         &lease,
@@ -66,18 +66,14 @@ pub async fn run_task_session(session_id: TaskSessionId) -> Result<()> {
     result
 }
 
-async fn owning_wave(store: &SharedStore, session: &TaskSession) -> Result<Wave> {
+async fn owning_wave(store: &SharedStore, session: &Task) -> Result<Wave> {
     store
         .get_wave(&session.wave_id)
         .await?
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
 }
 
-async fn spawn_failover(
-    store: &SharedStore,
-    session: &TaskSession,
-    lease: &RunLease,
-) -> Result<()> {
+async fn spawn_failover(store: &SharedStore, session: &Task, lease: &RunLease) -> Result<()> {
     let tmux_name = format!(
         "lf-task-{}-{}",
         &session.id.as_str()[3..11],
@@ -88,7 +84,7 @@ async fn spawn_failover(
         lease,
         crate::ops::RunLaunch {
             kind: "task",
-            legacy_id: session.id.to_string(),
+            work_id: session.id.to_string(),
             wave_id: session.wave_id.clone(),
             cwd: session.worktree.clone(),
             tmux_name,
@@ -101,19 +97,19 @@ async fn spawn_failover(
     .map_err(|error| anyhow!(error.to_string()))
 }
 
-async fn run_task_session_with(
+async fn run_task_with(
     store: SharedStore,
-    session_id: TaskSessionId,
+    session_id: TaskId,
     lease: &RunLease,
     create_harness: crate::harness::CreateHarness,
 ) -> Result<()> {
     let mut session = store
-        .get_task_session(&session_id)
+        .get_task(&session_id)
         .await?
-        .ok_or_else(|| anyhow!("Task Session {session_id} not found"))?;
+        .ok_or_else(|| anyhow!("Task {session_id} not found"))?;
     let wave = owning_wave(&store, &session).await?;
     let from = session.status;
-    session.set_status(TaskSessionStatus::Running, "provider turn is active");
+    session.set_status(TaskStatus::Running, "provider turn is active");
     store.activate_task_process_for_run(&session, lease).await?;
     store
         .append_task_event_for_run(
@@ -121,7 +117,7 @@ async fn run_task_session_with(
             lease,
             &TaskEventKind::StatusChanged {
                 from,
-                to: TaskSessionStatus::Running,
+                to: TaskStatus::Running,
                 reason: session.status_reason.clone(),
             },
         )
@@ -189,7 +185,7 @@ async fn run_task_session_with(
     store
         .observe_launch_provider(lease, &launch.id, session.provider_session_id.clone())
         .await?;
-    if let Err(error) = store.update_task_session_for_run(&session, lease).await {
+    if let Err(error) = store.update_task_for_run(&session, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
     }
@@ -204,7 +200,7 @@ async fn run_task_session_with(
     let mut pending = VecDeque::new();
     let mut feedback_open = prepared.attention.is_some();
     // Record this body's turns the way `flowloop/wave.rs` does. Without it a
-    // Task Session's spend reaches no store at all: the provider runs in this
+    // Task's spend reaches no store at all: the provider runs in this
     // process, so no child `lf` records on its behalf.
     let capture = flow.current().and_then(|step| {
         let context = crate::journal::trace_capture_context(
@@ -399,7 +395,7 @@ async fn run_task_session_with(
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != session.provider_session_id {
                     session.provider_session_id = provider_session_id;
-                    store.update_task_session_for_run(&session, lease).await?;
+                    store.update_task_for_run(&session, lease).await?;
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
@@ -500,18 +496,18 @@ async fn run_task_session_with(
                         };
                         if flow_turn_active || feedback_body_completed {
                             let latest = store
-                                .get_task_session(&session.id)
+                                .get_task(&session.id)
                                 .await?
                                 .ok_or_else(|| {
-                                    anyhow!("Task Session {} disappeared", session.id)
+                                    anyhow!("Task {} disappeared", session.id)
                                 })?;
                             sync_terminal_task_state(&mut session, &latest);
                             if ci_fix_wake.is_none() {
                                 record_task_flow_position(&mut session, &flow)?;
                             }
-                            store.update_task_session_for_run(&session, lease).await?;
+                            store.update_task_for_run(&session, lease).await?;
                         }
-                        if session.status == TaskSessionStatus::Abandoned {
+                        if session.status == TaskStatus::Abandoned {
                             let _ = harness.stop().await;
                             store
                                 .finish_task_run(
@@ -566,8 +562,8 @@ async fn run_task_session_with(
                                 let reason =
                                     "Task kickoff closed; autonomous iteration is starting";
                                 session.enter_iterate()?;
-                                session.set_status(TaskSessionStatus::Running, reason);
-                                store.update_task_session_for_run(&session, lease).await?;
+                                session.set_status(TaskStatus::Running, reason);
+                                store.update_task_for_run(&session, lease).await?;
                                 flow = resume_task_phase(&session)?;
                                 flow_iteration_completed = false;
                                 state_fingerprint = task_state_fingerprint(&session)?;
@@ -605,10 +601,10 @@ async fn run_task_session_with(
                                     gate_fingerprint = None;
                                     session.enter_iterate()?;
                                     session.set_status(
-                                        TaskSessionStatus::Running,
+                                        TaskStatus::Running,
                                         "Task gate requested changes; returning to iteration",
                                     );
-                                    store.update_task_session_for_run(&session, lease).await?;
+                                    store.update_task_for_run(&session, lease).await?;
                                     let started = start_resumed_task_phase(
                                         &store,
                                         &mut session,
@@ -662,9 +658,9 @@ async fn run_task_session_with(
                             }
                             let summary = progress_summary(&last_text);
                             let latest = store
-                                .get_task_session(&session.id)
+                                .get_task(&session.id)
                                 .await?
-                                .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
+                                .ok_or_else(|| anyhow!("Task {} disappeared", session.id))?;
                             sync_terminal_task_state(&mut session, &latest);
                             let observed_pr = crate::ops::task::reconcile_task_pr_for_run(
                                 &store,
@@ -717,14 +713,14 @@ async fn run_task_session_with(
                             };
                             let (stopped_status, stopped_reason) = if let Some(proposal) = approved_gate {
                                 (proposal.status, proposal.reason)
-                            } else if session.status == TaskSessionStatus::Completed {
+                            } else if session.status == TaskStatus::Completed {
                                 (
-                                    TaskSessionStatus::Completed,
+                                    TaskStatus::Completed,
                                     session.status_reason.clone(),
                                 )
                             } else if status == Lifecycle::Interrupted {
                                 (
-                                    TaskSessionStatus::Waiting,
+                                    TaskStatus::Waiting,
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
                             } else if merged_completing_pr {
@@ -742,7 +738,7 @@ async fn run_task_session_with(
                                     None => "pull request merged; awaiting required review before completion"
                                         .to_string(),
                                 };
-                                (TaskSessionStatus::Waiting, reason)
+                                (TaskStatus::Waiting, reason)
                             } else if needs_rotation {
                                 crate::ops::task::ensure_working_pr_for_run(
                                     &store,
@@ -753,7 +749,7 @@ async fn run_task_session_with(
                                 .map_err(|error| anyhow!(error.to_string()))?;
                                 session.status_reason =
                                     "Task PR settled; starting the next PR".to_string();
-                                store.update_task_session_for_run(&session, lease).await?;
+                                store.update_task_for_run(&session, lease).await?;
                                 let prepared = prepare_task_flow_step(
                                     &store,
                                     &mut session,
@@ -809,7 +805,7 @@ async fn run_task_session_with(
                                     session.status_reason =
                                         "Task flow changed the worktree; starting another iteration"
                                             .to_string();
-                                    store.update_task_session_for_run(&session, lease).await?;
+                                    store.update_task_for_run(&session, lease).await?;
                                     let prepared = prepare_task_flow_step(
                                         &store,
                                         &mut session,
@@ -839,7 +835,7 @@ async fn run_task_session_with(
                                     continue 'runner;
                                 }
                                 (
-                                    TaskSessionStatus::Blocked,
+                                    TaskStatus::Blocked,
                                     "Task flow completed without a PR or any worktree change; another automatic iteration would spin".to_string(),
                                 )
                             };
@@ -869,7 +865,7 @@ async fn run_task_session_with(
                                         &store,
                                         &mut session,
                                         lease,
-                                        TaskSessionStatus::Waiting,
+                                        TaskStatus::Waiting,
                                         reason,
                                     )
                                     .await?;
@@ -884,14 +880,14 @@ async fn run_task_session_with(
                                     .await;
                                 }
                                 session.set_status(
-                                    TaskSessionStatus::Running,
+                                    TaskStatus::Running,
                                     format!(
                                         "Task outcome is awaiting gate cycle {}",
                                         session.gate_cycle
                                     ),
                                 );
                                 gate_fingerprint = Some(task_gate_fingerprint(&session)?);
-                                store.update_task_session_for_run(&session, lease).await?;
+                                store.update_task_for_run(&session, lease).await?;
                                 let started = start_resumed_task_phase(
                                     &store,
                                     &mut session,
@@ -912,8 +908,8 @@ async fn run_task_session_with(
                                 continue 'runner;
                             }
                             // Persist non-status fields while the Run still owns authority.
-                            store.update_task_session_for_run(&session, lease).await?;
-                            if stopped_status == TaskSessionStatus::Completed {
+                            store.update_task_for_run(&session, lease).await?;
+                            if stopped_status == TaskStatus::Completed {
                                 let work = store
                                     .work_for_child(&ChildRef::Task(session.id.clone()))
                                     .await?;
@@ -939,7 +935,7 @@ async fn run_task_session_with(
                                     },
                                 ).await?;
                             }
-                            if session.status == TaskSessionStatus::Completed {
+                            if session.status == TaskStatus::Completed {
                                 store.append_task_event_for_run(
                                     &session.id,
                                     lease,
@@ -955,7 +951,7 @@ async fn run_task_session_with(
                                     reason: session.status_reason.clone(),
                                 },
                             ).await?;
-                            let outcome = if session.status == TaskSessionStatus::Completed {
+                            let outcome = if session.status == TaskStatus::Completed {
                                 crate::durable::BoundaryState::Succeeded
                             } else {
                                 crate::durable::BoundaryState::Interrupted
@@ -992,7 +988,7 @@ async fn run_task_session_with(
 
 async fn prepare_task_flow_step(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     wave_name: &str,
     flow: &Playhead,
@@ -1021,11 +1017,11 @@ async fn prepare_task_flow_step(
         step.total,
         step.step
     );
-    store.update_task_session_for_run(session, lease).await?;
+    store.update_task_for_run(session, lease).await?;
     let pr = store
         .active_task_pr(&session.id)
         .await?
-        .ok_or_else(|| anyhow!("Task Session {} has no active PR", session.id))?;
+        .ok_or_else(|| anyhow!("Task {} has no active PR", session.id))?;
     // The `ci-fix` step gets the failure seed from the typed incident claimed by
     // this Run; every other Task-flow step gets the standard task seed. The flow
     // and incident are chosen together, so a `ci-fix` step without one is invalid.
@@ -1037,7 +1033,7 @@ async fn prepare_task_flow_step(
         ),
         ("ci-fix", None) => {
             anyhow::bail!(
-                "Task Session {} is running the ci-fix flow with no claimed ci-fix wake",
+                "Task {} is running the ci-fix flow with no claimed ci-fix wake",
                 session.id
             )
         }
@@ -1052,7 +1048,7 @@ async fn prepare_task_flow_step(
             InteractionPolicy::Require => AttentionRoute::User,
             InteractionPolicy::Defer => AttentionRoute::Parent(
                 store
-                    .work_for_child(&ChildRef::Project(session.project_session_id.clone()))
+                    .work_for_child(&ChildRef::Project(session.project_id.clone()))
                     .await?,
             ),
         };
@@ -1076,7 +1072,7 @@ async fn prepare_task_flow_step(
                 AttentionRoute::Parent(parent) => format!("parent {}", parent.id()),
             }
         );
-        store.update_task_session_for_run(session, lease).await?;
+        store.update_task_for_run(session, lease).await?;
         Some(route)
     } else {
         None
@@ -1119,7 +1115,7 @@ findings are ordinary Steers.\n\n{instructions}",
     )
 }
 
-fn open_task_flow_body(flow: &mut Playhead, session: &TaskSession) -> Result<()> {
+fn open_task_flow_body(flow: &mut Playhead, session: &Task) -> Result<()> {
     let step = flow
         .current()
         .ok_or_else(|| anyhow!("Task flow has no current step"))?;
@@ -1132,7 +1128,7 @@ fn open_task_flow_body(flow: &mut Playhead, session: &TaskSession) -> Result<()>
 
 async fn start_task_flow_turn(
     _store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
@@ -1146,7 +1142,7 @@ async fn start_task_flow_turn(
 #[allow(clippy::too_many_arguments)]
 async fn start_prepared_task_step(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
@@ -1177,7 +1173,7 @@ async fn start_prepared_task_step(
 #[allow(clippy::too_many_arguments)]
 async fn start_resumed_task_phase(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
@@ -1221,7 +1217,7 @@ fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) 
 
 async fn finish_parked(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: Option<&mut dyn Harness>,
     outcome: crate::durable::BoundaryState,
@@ -1235,14 +1231,14 @@ async fn finish_parked(
     Ok(())
 }
 
-fn record_task_flow_position(session: &mut TaskSession, flow: &Playhead) -> Result<()> {
+fn record_task_flow_position(session: &mut Task, flow: &Playhead) -> Result<()> {
     let root = flow
         .stack
         .first()
         .ok_or_else(|| anyhow!("Task flow has no root invocation"))?;
     if root.flow != session.phase_plan().flow {
         anyhow::bail!(
-            "Task Session {} {} flow is {:?}, but its playhead is {:?}",
+            "Task {} {} flow is {:?}, but its playhead is {:?}",
             session.id,
             session.lifecycle_phase.as_str(),
             session.phase_plan().flow,
@@ -1255,7 +1251,7 @@ fn record_task_flow_position(session: &mut TaskSession, flow: &Playhead) -> Resu
     Ok(())
 }
 
-fn resume_task_phase(session: &TaskSession) -> Result<Playhead> {
+fn resume_task_phase(session: &Task) -> Result<Playhead> {
     let (flow, _) = Playhead::resume_root(
         QueuedInvocation::load(&session.worktree, &session.phase_plan().flow)?,
         session.phase_cursor,
@@ -1264,7 +1260,7 @@ fn resume_task_phase(session: &TaskSession) -> Result<Playhead> {
     Ok(flow)
 }
 
-fn sync_terminal_task_state(session: &mut TaskSession, latest: &TaskSession) {
+fn sync_terminal_task_state(session: &mut Task, latest: &Task) {
     if latest.status.is_terminal() {
         session.status = latest.status;
         session.status_reason = latest.status_reason.clone();
@@ -1273,7 +1269,7 @@ fn sync_terminal_task_state(session: &mut TaskSession, latest: &TaskSession) {
     }
 }
 
-fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
+fn task_state_fingerprint(session: &Task) -> Result<String> {
     let state = crate::engine::git::worktree_state(Path::new(&session.worktree))?;
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
 }
@@ -1282,7 +1278,7 @@ fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
 /// Captured at iteration boundaries as a GitHub-side progress baseline so the
 /// runner can tell a no-change ci-fix (head unchanged) from a push (head
 /// advanced) without relying on worktree churn.
-async fn pr_head_for_session(store: &SharedStore, session: &TaskSession) -> Result<Option<String>> {
+async fn pr_head_for_session(store: &SharedStore, session: &Task) -> Result<Option<String>> {
     Ok(store
         .active_task_pr(&session.id)
         .await?
@@ -1290,14 +1286,14 @@ async fn pr_head_for_session(store: &SharedStore, session: &TaskSession) -> Resu
         .flatten())
 }
 
-fn task_gate_fingerprint(session: &TaskSession) -> Result<String> {
+fn task_gate_fingerprint(session: &Task) -> Result<String> {
     let state = crate::engine::git::material_worktree_state(Path::new(&session.worktree))?;
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
 }
 
 async fn pending_input_is_current(
     _store: &SharedStore,
-    _session: &TaskSession,
+    _session: &Task,
     _lease: &RunLease,
     input: &PendingInput,
 ) -> Result<bool> {
@@ -1306,7 +1302,7 @@ async fn pending_input_is_current(
 
 async fn apply_next_pending(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     pending: &mut VecDeque<PendingInput>,
@@ -1323,7 +1319,7 @@ async fn apply_next_pending(
 
 async fn handle_attachment(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
     lease: &RunLease,
     line: String,
 ) -> Result<()> {
@@ -1371,7 +1367,7 @@ async fn handle_attachment(
 
 async fn start_ci_fix_flow(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
@@ -1390,15 +1386,11 @@ async fn start_ci_fix_flow(
     Ok(basis)
 }
 
-async fn record_unhandled_failure(
-    session_id: &TaskSessionId,
-    lease: &RunLease,
-    error: &anyhow::Error,
-) {
+async fn record_unhandled_failure(session_id: &TaskId, lease: &RunLease, error: &anyhow::Error) {
     let Some(store) = open_existing_store().await.map(Arc::new) else {
         return;
     };
-    let Ok(Some(mut session)) = store.get_task_session(session_id).await else {
+    let Ok(Some(mut session)) = store.get_task(session_id).await else {
         return;
     };
     let Ok(work) = store
@@ -1412,12 +1404,8 @@ async fn record_unhandled_failure(
     }
     let from = session.status;
     let message = format!("task process failed: {error}");
-    session.set_status(TaskSessionStatus::Failed, &message);
-    if store
-        .update_task_session_for_run(&session, lease)
-        .await
-        .is_err()
-    {
+    session.set_status(TaskStatus::Failed, &message);
+    if store.update_task_for_run(&session, lease).await.is_err() {
         return;
     }
     let _ = store
@@ -1426,7 +1414,7 @@ async fn record_unhandled_failure(
             lease,
             &TaskEventKind::StatusChanged {
                 from,
-                to: TaskSessionStatus::Failed,
+                to: TaskStatus::Failed,
                 reason: message.clone(),
             },
         )
@@ -1448,7 +1436,7 @@ async fn record_unhandled_failure(
 
 async fn apply_input(
     store: &SharedStore,
-    _session: &TaskSession,
+    _session: &Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     text: &str,
@@ -1466,13 +1454,13 @@ async fn apply_input(
 /// still records. Every arm is a Wait; the old enum only distinguished whether
 /// a human was needed. This translation lives here, at the boundary, because it
 /// dies with the runner -- the disposition itself is the durable vocabulary.
-fn session_status_for(disposition: crate::ops::task::OpenPrDisposition) -> TaskSessionStatus {
+fn session_status_for(disposition: crate::ops::task::OpenPrDisposition) -> TaskStatus {
     use crate::ops::task::OpenPrDisposition;
     match disposition {
         OpenPrDisposition::ObservationDegraded | OpenPrDisposition::NeedsDirection => {
-            TaskSessionStatus::Blocked
+            TaskStatus::Blocked
         }
-        OpenPrDisposition::AwaitingReview => TaskSessionStatus::Waiting,
+        OpenPrDisposition::AwaitingReview => TaskStatus::Waiting,
     }
 }
 
@@ -1480,14 +1468,14 @@ fn session_status_for(disposition: crate::ops::task::OpenPrDisposition) -> TaskS
 /// append the paired `StatusChanged` event.
 async fn set_and_record_status(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
-    status: TaskSessionStatus,
+    status: TaskStatus,
     reason: impl Into<String>,
 ) -> Result<()> {
     let from = session.status;
     session.set_status(status, reason);
-    store.update_task_session_for_run(session, lease).await?;
+    store.update_task_for_run(session, lease).await?;
     store
         .append_task_event_for_run(
             &session.id,
@@ -1499,7 +1487,7 @@ async fn set_and_record_status(
             },
         )
         .await?;
-    if status == TaskSessionStatus::Blocked {
+    if status == TaskStatus::Blocked {
         if let Some(pr) = store.active_task_pr(&session.id).await? {
             store
                 .mark_ci_incidents_blocked(
@@ -1515,7 +1503,7 @@ async fn set_and_record_status(
 
 async fn finish_failed(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     error: &str,
@@ -1523,7 +1511,7 @@ async fn finish_failed(
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    set_and_record_status(store, session, lease, TaskSessionStatus::Failed, error).await?;
+    set_and_record_status(store, session, lease, TaskStatus::Failed, error).await?;
     store
         .append_task_event_for_run(
             &session.id,
@@ -1557,7 +1545,7 @@ fn infra_blocked_reason(capability: &str, detail: &str, pr_number: Option<u32>) 
 /// record an unhandled failure.
 async fn finish_infra_blocked(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     capability: &str,
@@ -1569,7 +1557,7 @@ async fn finish_infra_blocked(
         .await?
         .and_then(|pr| pr.github().map(|g| g.number));
     let reason = infra_blocked_reason(capability, detail, pr_number);
-    set_and_record_status(store, session, lease, TaskSessionStatus::Blocked, &reason).await?;
+    set_and_record_status(store, session, lease, TaskStatus::Blocked, &reason).await?;
     store
         .finish_task_run(session, lease, crate::durable::BoundaryState::Failed)
         .await?;
@@ -1583,7 +1571,7 @@ async fn finish_infra_blocked(
 #[allow(clippy::too_many_arguments)] // capture is a terminal-path output, not a knob
 async fn handle_body_failure(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     wave: &Wave,
@@ -1604,7 +1592,7 @@ async fn handle_body_failure(
     match decision {
         RecoveryDecision::HandoffToBackup { agent, provider } => {
             let _ = harness.stop().await;
-            set_and_record_status(store, session, lease, TaskSessionStatus::Failed, reason).await?;
+            set_and_record_status(store, session, lease, TaskStatus::Failed, reason).await?;
             store
                 .append_task_event_for_run(
                     &session.id,
@@ -1615,7 +1603,7 @@ async fn handle_body_failure(
                     },
                 )
                 .await?;
-            store.update_task_session_for_run(session, lease).await?;
+            store.update_task_for_run(session, lease).await?;
             let launch = store
                 .current_launch(lease)
                 .await?
@@ -1644,7 +1632,7 @@ async fn handle_body_failure(
             }
             session.agent = agent;
             session.provider = provider;
-            store.update_task_session_for_run(session, lease).await?;
+            store.update_task_for_run(session, lease).await?;
             store
                 .append_task_event_for_run(
                     &session.id,
@@ -1653,7 +1641,7 @@ async fn handle_body_failure(
                 )
                 .await?;
             let rotated = store.rotate_run_lease(lease).await?;
-            store.update_task_session_for_run(session, &rotated).await?;
+            store.update_task_for_run(session, &rotated).await?;
             Ok(Some(rotated))
         }
         RecoveryDecision::Stop => {
@@ -1688,7 +1676,7 @@ async fn handle_body_failure(
 #[allow(clippy::too_many_arguments)]
 async fn fail_and_maybe_relaunch(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     wave: &Wave,
@@ -1715,7 +1703,7 @@ async fn fail_and_maybe_relaunch(
 
 async fn finish_abandoned(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     reason: String,
@@ -1726,8 +1714,8 @@ async fn finish_abandoned(
         store,
         session,
         lease,
-        TaskSessionStatus::Abandoned,
-        format!("Task Session explicitly abandoned: {reason}"),
+        TaskStatus::Abandoned,
+        format!("Task explicitly abandoned: {reason}"),
     )
     .await?;
     store
@@ -1738,7 +1726,7 @@ async fn finish_abandoned(
 
 async fn finish_command_stop(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     harness: &mut dyn Harness,
     stop: CommandStop,
@@ -1758,7 +1746,7 @@ async fn finish_command_stop(
                 store,
                 session,
                 lease,
-                TaskSessionStatus::Waiting,
+                TaskStatus::Waiting,
                 "Task turn interrupted; waiting for resume or another instruction",
             )
             .await?;
@@ -1786,7 +1774,7 @@ pub(crate) struct CiFixWake {
 /// warranted: green, moved on, gone, or not `wake_legal`.
 async fn current_ci_incident_identity(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
 ) -> Result<Option<String>> {
     Ok(store
         .active_task_pr(&session.id)
@@ -1798,7 +1786,7 @@ async fn current_ci_incident_identity(
 
 async fn arm_ci_fix_wake(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
     lease: &crate::durable::RunLease,
 ) -> Result<Option<CiFixWake>> {
     let Some(pr) = store.active_task_pr(&session.id).await? else {
@@ -1833,7 +1821,7 @@ async fn arm_ci_fix_wake(
 #[allow(clippy::too_many_arguments)] // capture is a terminal-path output, not a knob
 async fn settle_ci_fix_turn(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     lease: &RunLease,
     wake: &CiFixWake,
     observed_pr: Option<&crate::task::TaskPr>,
@@ -1869,14 +1857,14 @@ async fn settle_ci_fix_turn(
             (session_status_for(disposition), reason)
         }
         Some(_) => (
-            TaskSessionStatus::Waiting,
+            TaskStatus::Waiting,
             format!(
                 "ci-fix turn on pull request #{} was interrupted; the repair resumes on resume",
                 wake.pr_number
             ),
         ),
         None => (
-            TaskSessionStatus::Waiting,
+            TaskStatus::Waiting,
             format!(
                 "pull request #{} settled or is no longer attached; the ci-fix wake no longer applies",
                 wake.pr_number
@@ -1915,7 +1903,7 @@ async fn settle_ci_fix_turn(
 /// The selected incident is immutable even after the PR's current observation
 /// moves on, so the seed and settlement name the same failed head.
 fn ci_fix_seed(
-    session: &TaskSession,
+    session: &Task,
     pr: &crate::task::TaskPr,
     wake: &CiFixWake,
     wave_name: &str,
@@ -1936,7 +1924,7 @@ fn ci_fix_seed(
         "Fix the failing required CI checks on Linear task {identifier}'s open pull request.\n\n\
          Run the ci-fix skill: reproduce the latest failure on the current head, make the smallest correct fix, run targeted then proportional checks, and push the same branch. Report an infrastructure or credential blocker rather than weakening tests.\n\n\
          PR #{number}: {url}\nBranch: {branch}\nHead commit: {head}\nFailing required checks:\n{failing}\n\n\
-         Wave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\n\n\
+         Wave: {wave}\nTask: {session_id}\nWorktree: {worktree}\n\n\
          Push fixes to the same branch; do not open a new PR or rotate the serial branch. When the push lands, the Task returns to waiting on the new head.",
         identifier = session.launch.issue.identifier,
         number = number,
@@ -1951,7 +1939,7 @@ fn ci_fix_seed(
 }
 
 fn task_seed(
-    session: &TaskSession,
+    session: &Task,
     pr: &crate::task::TaskPr,
     wave_name: &str,
     boundary: &BoundarySeed,
@@ -1973,7 +1961,7 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` proposes completing the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. Gate approves settlement or returns the same Task to iteration. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` proposes completing the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. Gate approves settlement or returns the same Task to iteration. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,
@@ -2019,18 +2007,18 @@ mod tests {
 
     use super::{
         ci_fix_seed, handle_body_failure, infra_blocked_reason, prepare_task_flow_step,
-        progress_summary, resume_task_phase, run_task_session_with, settle_ci_fix_turn, CiFixWake,
+        progress_summary, resume_task_phase, run_task_with, settle_ci_fix_turn, CiFixWake,
         PreparedTaskStep,
     };
     use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
-    use crate::child_session::ChildRef;
+    use crate::child::ChildRef;
     use crate::durable::{
         AdvanceReceipt, Containment, LaunchRoute, RunAdvance, RunLease, RunTrigger,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::WaveId;
-    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::project::{Project, ProjectId, ProjectStatus};
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         ProjectLaunchReceipt, TaskLaunchReceipt,
@@ -2038,8 +2026,8 @@ mod tests {
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
         AfterMerge, CiIncident, CiObservation, CiState, GithubPr, PmWritebackState, PrPublication,
-        TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
-        TaskSession, TaskSessionId, TaskSessionStatus,
+        Task, TaskEventKind, TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan,
+        TaskPr, TaskPrId, TaskStatus,
     };
     use crate::wave::playhead::Playhead;
     use crate::wave::Wave;
@@ -2059,24 +2047,6 @@ mod tests {
     struct RunnerUsageHarness {
         events: tokio::sync::mpsc::UnboundedSender<ConversationEvent>,
         inputs: usize,
-    }
-
-    fn install_work_placements(path: &std::path::Path) {
-        let connection = rusqlite::Connection::open(path).unwrap();
-        let installed: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='work_placements')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if !installed {
-            connection
-                .execute_batch(include_str!(
-                    "../store/migrations/drafts/work_placements__be058cd06c7176605dec099930569221.sql"
-                ))
-                .unwrap();
-        }
     }
 
     #[async_trait]
@@ -2204,7 +2174,7 @@ mod tests {
         provider: &str,
         worktree: PathBuf,
         directive_text: Option<&str>,
-    ) -> (TaskSession, RunLease) {
+    ) -> (Task, RunLease) {
         let wave = Wave::new(
             WaveId::new(),
             format!("wave-{provider}"),
@@ -2219,14 +2189,14 @@ mod tests {
             name: "Control".to_string(),
             prompt_context: "Provider-neutral control".to_string(),
         };
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
+        let project = Project {
+            id: ProjectId::new(),
             launch: ProjectLaunchReceipt {
                 project: project_snapshot.clone(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            status: ProjectSessionStatus::Created,
+            status: ProjectStatus::Created,
             status_reason: "reserved".to_string(),
             status_at: now,
             iteration: 0,
@@ -2239,9 +2209,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.create_project_session(&project).await.unwrap();
-        let session = TaskSession {
-            id: TaskSessionId::new(),
+        store.create_project(&project).await.unwrap();
+        let session = Task {
+            id: TaskId::new(),
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
                     id: LinearIssueId::new(format!("issue-{provider}")).unwrap(),
@@ -2254,8 +2224,8 @@ mod tests {
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            project_session_id: project.id,
-            status: TaskSessionStatus::Waiting,
+            project_id: project.id,
+            status: TaskStatus::Waiting,
             status_reason: "ready for provider".to_string(),
             status_at: now,
             worktree,
@@ -2277,7 +2247,7 @@ mod tests {
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
+            task_id: session.id.clone(),
             sequence: 1,
             slug: session.workspace_slug.clone(),
             branch: format!("test/{provider}"),
@@ -2294,7 +2264,7 @@ mod tests {
             linear_comment_id: None,
             linear_link_error: None,
         };
-        store.create_task_session(&session, &pr).await.unwrap();
+        store.create_task(&session, &pr).await.unwrap();
         if let Some(text) = directive_text {
             let work = store
                 .work_for_child(&ChildRef::Task(session.id.clone()))
@@ -2345,7 +2315,7 @@ mod tests {
         (session, lease)
     }
 
-    async fn conformance_session(provider: &str) -> (SharedStore, TaskSession, RunLease) {
+    async fn conformance_session(provider: &str) -> (SharedStore, Task, RunLease) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("registry.db");
         let store = Arc::new(
@@ -2353,7 +2323,6 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        install_work_placements(&path);
         let (mut session, lease) = seed_conformance_session(
             store.clone(),
             provider,
@@ -2361,7 +2330,7 @@ mod tests {
             None,
         )
         .await;
-        session.set_status(TaskSessionStatus::Running, "provider active");
+        session.set_status(TaskStatus::Running, "provider active");
         store
             .activate_task_process_for_run(&session, &lease)
             .await
@@ -2379,7 +2348,6 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        install_work_placements(&store_path);
         let (session, lease) = seed_conformance_session(
             store.clone(),
             "codex",
@@ -2394,7 +2362,7 @@ mod tests {
             crate::journal::LfEventFields::default(),
         );
 
-        run_task_session_with(
+        run_task_with(
             store,
             session.id,
             &lease,
@@ -2457,7 +2425,7 @@ mod tests {
         });
         let incident = CiIncident {
             identity: "github:ci:owner/repo:42:cached-failed-head:test".to_string(),
-            task_session_id: session.id.clone(),
+            task_id: session.id.clone(),
             pr_id: observed_pr.id.clone(),
             repo: "owner/repo".to_string(),
             pr_number: 42,
@@ -2519,7 +2487,7 @@ mod tests {
     ) -> (
         tempfile::TempDir,
         SharedStore,
-        TaskSession,
+        Task,
         RunLease,
         Playhead,
         PreparedTaskStep,
@@ -2571,13 +2539,10 @@ mod tests {
         session.phase_epoch = 3;
         session.gate_cycle = 1;
         session.gate_proposal = Some(TaskGateProposal {
-            status: TaskSessionStatus::Waiting,
+            status: TaskStatus::Waiting,
             reason: "prove the delivered behavior".to_string(),
         });
-        store
-            .update_task_session_for_run(&session, &lease)
-            .await
-            .unwrap();
+        store.update_task_for_run(&session, &lease).await.unwrap();
         let flow = resume_task_phase(&session).unwrap();
         let prepared =
             prepare_task_flow_step(&store, &mut session, &lease, "test-wave", &flow, None)
@@ -2626,7 +2591,7 @@ mod tests {
         let (_repo, store, session, _lease, _flow, prepared) =
             prepared_gate_review(TaskLifecyclePlan::headless("task")).await;
         let parent = store
-            .work_for_child(&ChildRef::Project(session.project_session_id.clone()))
+            .work_for_child(&ChildRef::Project(session.project_id.clone()))
             .await
             .unwrap();
 
@@ -2662,7 +2627,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
+            task_id: session.id.clone(),
             sequence: 1,
             slug: "ship".to_string(),
             branch: "jack/ship".to_string(),
@@ -2749,7 +2714,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "ship".to_string(),
             branch: "jack/ship".to_string(),
@@ -2846,26 +2811,23 @@ mod tests {
     async fn finish_parked_settles_the_body_without_a_terminal_status() {
         let (store, mut session, lease) = conformance_session("codex").await;
         session.set_status(
-            TaskSessionStatus::Waiting,
+            TaskStatus::Waiting,
             "interactive handoff open; waiting for a human",
         );
-        store
-            .update_task_session_for_run(&session, &lease)
-            .await
-            .unwrap();
+        store.update_task_for_run(&session, &lease).await.unwrap();
 
         let outcome = crate::durable::BoundaryState::Interrupted;
         super::finish_parked(&store, &mut session, &lease, None, outcome, None)
             .await
             .unwrap();
 
-        assert_eq!(session.status, TaskSessionStatus::Waiting);
+        assert_eq!(session.status, TaskStatus::Waiting);
         assert!(!session.status.is_terminal());
         assert!(store.current_run(&lease.work).await.unwrap().is_none());
         // The parked body leaves the Session durably non-terminal, so a later
         // resume can reconcile the handoff outcome.
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+        let persisted = store.get_task(&session.id).await.unwrap().unwrap();
+        assert_eq!(persisted.status, TaskStatus::Waiting);
     }
 
     /// A disconnect-class failure with `backup_agent` configured hands the
@@ -2890,7 +2852,6 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        install_work_placements(&store_path);
         let wave = Wave::new(
             WaveId::new(),
             wave_name.to_string(),
@@ -2906,14 +2867,14 @@ mod tests {
             name: "Control".to_string(),
             prompt_context: "test".to_string(),
         };
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
+        let project = Project {
+            id: ProjectId::new(),
             launch: ProjectLaunchReceipt {
                 project: project_snapshot.clone(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            status: ProjectSessionStatus::Created,
+            status: ProjectStatus::Created,
             status_reason: "reserved".to_string(),
             status_at: now,
             iteration: 0,
@@ -2926,10 +2887,10 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.create_project_session(&project).await.unwrap();
+        store.create_project(&project).await.unwrap();
 
-        let mut session = TaskSession {
-            id: TaskSessionId::new(),
+        let mut session = Task {
+            id: TaskId::new(),
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
                     id: LinearIssueId::new("issue-opencode").unwrap(),
@@ -2942,8 +2903,8 @@ mod tests {
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            project_session_id: project.id,
-            status: TaskSessionStatus::Waiting,
+            project_id: project.id,
+            status: TaskStatus::Waiting,
             status_reason: "ready".to_string(),
             status_at: now,
             worktree: PathBuf::from(repo.path().join("worktree").display().to_string()),
@@ -2965,7 +2926,7 @@ mod tests {
         };
         let pr = crate::task::TaskPr {
             id: crate::task::TaskPrId::new(),
-            task_session_id: session.id.clone(),
+            task_id: session.id.clone(),
             sequence: 1,
             slug: session.workspace_slug.clone(),
             branch: "test/opencode".to_string(),
@@ -2982,7 +2943,7 @@ mod tests {
             linear_comment_id: None,
             linear_link_error: None,
         };
-        store.create_task_session(&session, &pr).await.unwrap();
+        store.create_task(&session, &pr).await.unwrap();
         let work = store
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
@@ -3020,7 +2981,7 @@ mod tests {
             )
             .await
             .unwrap();
-        session.set_status(TaskSessionStatus::Running, "provider active");
+        session.set_status(TaskStatus::Running, "provider active");
         store
             .activate_task_process_for_run(&session, &lease)
             .await
@@ -3077,11 +3038,9 @@ mod tests {
 
         // Fencing: a late write from the dead opencode body is rejected.
         // Run authority rotated, so the old lease can no longer update.
-        let mut late_session = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let mut late_session = store.get_task(&session.id).await.unwrap().unwrap();
         late_session.status_reason = "late write from dead body".to_string();
-        let write_result = store
-            .update_task_session_for_run(&late_session, &lease)
-            .await;
+        let write_result = store.update_task_for_run(&late_session, &lease).await;
         assert!(
             write_result.is_err(),
             "a late write from the dead generation must be fenced out"

@@ -898,11 +898,11 @@ pub struct SkillRunEntry {
     pub worktree: String,
     pub wave: Option<String>,
     /// Roadmap Project slug that owns this run, when it launched inside a
-    /// Project/Task Session. `None` for runs with no plan attribution — the join
+    /// Project/Task. `None` for runs with no plan attribution — the join
     /// is never inferred.
     pub project: Option<String>,
     /// Roadmap Task's Linear issue identifier (e.g. `W2-122`) that owns this run,
-    /// when it launched inside a Task Session. `None` when unattributed. This is
+    /// when it launched inside a Task. `None` when unattributed. This is
     /// the key that drills a roadmap row to its runs and complete trace.
     pub task: Option<String>,
     pub flow: Option<String>,

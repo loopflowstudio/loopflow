@@ -742,7 +742,7 @@ private struct WorkChannelChips: View {
         .clipShape(Capsule())
     }
 
-    private func sessionColor(_ status: TaskSessionStatus) -> Color {
+    private func sessionColor(_ status: TaskStatus) -> Color {
         switch status {
         case .running, .starting: .statusSuccess
         case .failed: .statusError

@@ -74,7 +74,7 @@ impl TaskActionModel {
                 .map(|action| TaskActionStatus {
                     action,
                     available: false,
-                    reason: "no Task Session; start one with `lf task run`".to_string(),
+                    reason: "no Task; start one with `lf task run`".to_string(),
                 })
                 .to_vec(),
         }
@@ -1186,7 +1186,7 @@ mod tests {
         assert!(model.actions.iter().all(|s| !s.available));
         assert_eq!(
             model.status(TaskAction::Recover).unwrap().reason,
-            "no Task Session; start one with `lf task run`"
+            "no Task; start one with `lf task run`"
         );
     }
 }

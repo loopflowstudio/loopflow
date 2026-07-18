@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::child_session::ChildRef;
+use crate::child::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, ChildFeedback,
     Containment, ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId,
@@ -12,10 +12,10 @@ use crate::durable::{
     ToolResponseWrite, Turn, TurnId, UserFeedback, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
-use crate::project_session::ProjectSession;
+use crate::project::Project;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::task::TaskSession;
+use crate::task::Task;
 
 use super::SqliteStore;
 
@@ -1193,22 +1193,18 @@ impl SqliteStore {
     pub(crate) fn boundary_seed_for_child(&self, target: &ChildRef) -> StoreResult<BoundarySeed> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let work = work_for_child_in(&conn, target)?;
-        let (epoch_id, revision) = match target {
-            ChildRef::Project(session_id) => conn.query_row(
-                "SELECT epoch_id, e.current_rev
-                 FROM project_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )?,
-            ChildRef::Task(session_id) => conn.query_row(
-                "SELECT epoch_id, e.current_rev
-                 FROM task_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )?,
+        let (column, id) = match &work {
+            WorkRef::Project(id) => ("project_id", id.as_str()),
+            WorkRef::Task(id) => ("task_id", id.as_str()),
+            WorkRef::Wave(_) => unreachable!("a child is Project or Task Work"),
         };
+        let (epoch_id, revision) = conn.query_row(
+            &format!(
+                "SELECT id, current_rev FROM epochs WHERE {column}=?1 ORDER BY number DESC LIMIT 1"
+            ),
+            [id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )?;
         let epoch_id = EpochId::parse(&epoch_id).map_err(|error| {
             StoreError::InvalidData(format!("invalid stored Epoch id: {error}"))
         })?;
@@ -2648,10 +2644,7 @@ pub(crate) fn create_wave_spine(
     )
 }
 
-pub(crate) fn create_project_spine(
-    tx: &Transaction<'_>,
-    session: &ProjectSession,
-) -> StoreResult<()> {
+pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> StoreResult<()> {
     let project_id = tx
         .query_row(
             "SELECT id FROM projects WHERE external_project_id=?1",
@@ -2696,7 +2689,7 @@ pub(crate) fn create_project_spine(
             number,
             project_id,
             state.as_str(),
-            session.created_at.unix_timestamp(),
+            session.updated_at.unix_timestamp(),
             terminal_at,
         ],
     )?;
@@ -2710,16 +2703,12 @@ pub(crate) fn create_project_spine(
             "prompt_context": session.launch.project.prompt_context,
             "pm_snapshot_synced_at": session.launch.pm_snapshot_synced_at,
         }),
-        session.created_at,
-    )?;
-    tx.execute(
-        "UPDATE project_sessions SET epoch_id=?2 WHERE id=?1",
-        params![session.id.as_str(), epoch_id.as_str()],
+        session.updated_at,
     )?;
     Ok(())
 }
 
-pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> StoreResult<()> {
+pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreResult<()> {
     let project_id: String = tx.query_row(
         "SELECT id FROM projects WHERE external_project_id=?1",
         [session.launch.project.id.as_str()],
@@ -2770,7 +2759,7 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> 
             number,
             task_id,
             state.as_str(),
-            session.created_at.unix_timestamp(),
+            session.updated_at.unix_timestamp(),
             terminal_at,
         ],
     )?;
@@ -2784,11 +2773,7 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> 
             "description": session.launch.issue.description,
             "pm_snapshot_synced_at": session.launch.pm_snapshot_synced_at,
         }),
-        session.created_at,
-    )?;
-    tx.execute(
-        "UPDATE task_sessions SET epoch_id=?2 WHERE id=?1",
-        params![session.id.as_str(), epoch_id.as_str()],
+        session.updated_at,
     )?;
     Ok(())
 }
@@ -2894,13 +2879,11 @@ fn insert_truth(
     Ok(())
 }
 
-fn epoch_state_for_project(session: &ProjectSession) -> (EpochState, Option<i64>) {
-    use crate::project_session::ProjectSessionStatus;
+fn epoch_state_for_project(session: &Project) -> (EpochState, Option<i64>) {
+    use crate::project::ProjectStatus;
     match session.status {
-        ProjectSessionStatus::Completed => {
-            (EpochState::Done, Some(session.updated_at.unix_timestamp()))
-        }
-        ProjectSessionStatus::Abandoned => (
+        ProjectStatus::Completed => (EpochState::Done, Some(session.updated_at.unix_timestamp())),
+        ProjectStatus::Abandoned => (
             EpochState::Abandoned,
             Some(session.updated_at.unix_timestamp()),
         ),
@@ -2908,13 +2891,11 @@ fn epoch_state_for_project(session: &ProjectSession) -> (EpochState, Option<i64>
     }
 }
 
-fn epoch_state_for_task(session: &TaskSession) -> (EpochState, Option<i64>) {
-    use crate::task::TaskSessionStatus;
+fn epoch_state_for_task(session: &Task) -> (EpochState, Option<i64>) {
+    use crate::task::TaskStatus;
     match session.status {
-        TaskSessionStatus::Completed => {
-            (EpochState::Done, Some(session.updated_at.unix_timestamp()))
-        }
-        TaskSessionStatus::Abandoned => (
+        TaskStatus::Completed => (EpochState::Done, Some(session.updated_at.unix_timestamp())),
+        TaskStatus::Abandoned => (
             EpochState::Abandoned,
             Some(session.updated_at.unix_timestamp()),
         ),
@@ -2984,29 +2965,21 @@ fn validate_author(tx: &Transaction<'_>, target: &WorkRef, author: &Author) -> S
 
 pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreResult<WorkRef> {
     match target {
-        ChildRef::Project(session_id) => {
-            let id: String = conn.query_row(
-                "SELECT e.project_id
-                 FROM project_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| row.get(0),
+        ChildRef::Project(project_id) => {
+            conn.query_row(
+                "SELECT 1 FROM projects WHERE id=?1",
+                [project_id.as_str()],
+                |_| Ok(()),
             )?;
-            Ok(WorkRef::Project(ProjectId::parse(&id).map_err(
-                |error| StoreError::InvalidData(format!("invalid stored Project id: {error}")),
-            )?))
+            Ok(WorkRef::Project(project_id.clone()))
         }
-        ChildRef::Task(session_id) => {
-            let id: String = conn.query_row(
-                "SELECT e.task_id
-                 FROM task_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| row.get(0),
+        ChildRef::Task(task_id) => {
+            conn.query_row(
+                "SELECT 1 FROM tasks WHERE id=?1",
+                [task_id.as_str()],
+                |_| Ok(()),
             )?;
-            Ok(WorkRef::Task(TaskId::parse(&id).map_err(|error| {
-                StoreError::InvalidData(format!("invalid stored Task id: {error}"))
-            })?))
+            Ok(WorkRef::Task(task_id.clone()))
         }
     }
 }

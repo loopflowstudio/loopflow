@@ -1,4 +1,4 @@
-//! Linear context captured when a Project or Task Session starts.
+//! Linear context captured when a Project or Task starts.
 //!
 //! These snapshots make a child resumable without another provider read. They
 //! are launch facts, not a second mutable PM model; current Project/KR/Task
@@ -61,7 +61,7 @@ pub struct LinearProjectSnapshot {
     pub prompt_context: String,
 }
 
-/// Immutable Linear evidence captured when a Project Session starts.
+/// Immutable Linear evidence captured when a Project starts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectLaunchReceipt {
     pub project: LinearProjectSnapshot,

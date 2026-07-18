@@ -15,8 +15,6 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_WAVE_ID")
-        .env_remove("LF_PROJECT_SESSION_ID")
-        .env_remove("LF_TASK_SESSION_ID")
         .output()
         .unwrap();
     assert!(

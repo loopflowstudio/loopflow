@@ -7,7 +7,7 @@
 //!
 //! The ingress path is a durable delivery inbox: each signed Linear delivery is
 //! persisted to `provider_deliveries` *before* it is acknowledged, deduplicated
-//! by `(delivery_id, provider)`, and routed to the owning Task Session through
+//! by `(delivery_id, provider)`, and routed to the owning Task through
 //! the existing domain ops (`webhook::ingest_event`). The inbox deduplicates
 //! *deliveries*; the domain tables deduplicate *events*. Both gates are needed
 //! — a redelivered webhook is dropped at the inbox; an out-of-order or
@@ -129,7 +129,7 @@ async fn status_handler(State(state): State<LfdState>) -> Json<StatusBody> {
 }
 
 /// Receive a signed Linear delivery, persist it to the durable inbox, and route
-/// it to the owning Task Session. Idempotent across retries and restarts: a
+/// it to the owning Task. Idempotent across retries and restarts: a
 /// duplicate delivery in a terminal state is dropped; one left `pending` by a
 /// crash is re-processed (the domain gate makes re-processing a no-op).
 async fn webhook_handler(
@@ -324,14 +324,14 @@ async fn github_webhook_handler(
 
 /// Map a processing outcome onto the delivery row's terminal status and the
 /// target kind it routed to. `Ignored` and `NoTarget` carry no target; a
-/// self-authored or applied edit/comment resolved a Task Session.
+/// self-authored or applied edit/comment resolved a Task.
 fn map_outcome(outcome: &WebhookOutcome) -> (DeliveryStatus, Option<&'static str>) {
     match outcome {
         WebhookOutcome::Ignored => (DeliveryStatus::Ignored, None),
         WebhookOutcome::NoTarget => (DeliveryStatus::NoTarget, None),
-        WebhookOutcome::SelfAuthored => (DeliveryStatus::Processed, Some("task_session")),
-        WebhookOutcome::Edit { .. } => (DeliveryStatus::Processed, Some("task_session")),
-        WebhookOutcome::Comment { .. } => (DeliveryStatus::Processed, Some("task_session")),
+        WebhookOutcome::SelfAuthored => (DeliveryStatus::Processed, Some("task")),
+        WebhookOutcome::Edit { .. } => (DeliveryStatus::Processed, Some("task")),
+        WebhookOutcome::Comment { .. } => (DeliveryStatus::Processed, Some("task")),
     }
 }
 
@@ -433,7 +433,7 @@ fn scan_wave_endpoints(repo_root: &Path) -> Vec<String> {
 
 async fn managed_repo_roots(state: &LfdState) -> Vec<PathBuf> {
     let mut candidates = vec![state.repo_root.clone()];
-    if let Ok(sessions) = state.store.list_task_sessions(None).await {
+    if let Ok(sessions) = state.store.list_tasks(None).await {
         candidates.extend(
             sessions
                 .into_iter()
@@ -457,7 +457,7 @@ async fn protected_worktree_paths(state: &LfdState) -> anyhow::Result<HashSet<Pa
     protected.extend(
         state
             .store
-            .list_task_sessions(None)
+            .list_tasks(None)
             .await?
             .into_iter()
             .filter(|session| !session.status.is_terminal())
@@ -560,7 +560,7 @@ async fn maintenance_sweep(state: &LfdState) {
     }
 
     let now = OffsetDateTime::now_utc();
-    if let Ok(sessions) = state.store.list_task_sessions(None).await {
+    if let Ok(sessions) = state.store.list_tasks(None).await {
         let active = sessions
             .iter()
             .filter(|session| !session.status.is_terminal())
@@ -1014,17 +1014,17 @@ mod tests {
         );
         assert_eq!(
             map_outcome(&WebhookOutcome::SelfAuthored),
-            (DeliveryStatus::Processed, Some("task_session"))
+            (DeliveryStatus::Processed, Some("task"))
         );
         assert_eq!(
             map_outcome(&WebhookOutcome::Edit {
                 steer_applied: false
             }),
-            (DeliveryStatus::Processed, Some("task_session"))
+            (DeliveryStatus::Processed, Some("task"))
         );
         assert_eq!(
             map_outcome(&WebhookOutcome::Comment { delivered: true }),
-            (DeliveryStatus::Processed, Some("task_session"))
+            (DeliveryStatus::Processed, Some("task"))
         );
     }
 

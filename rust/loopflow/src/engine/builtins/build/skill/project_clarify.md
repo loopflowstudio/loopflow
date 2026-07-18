@@ -2,7 +2,7 @@
 description: Keep one Linear Project's definition and KRs computable.
 action_style: procedural
 ---
-Clarify the exact Linear Project named by `LF_PROJECT_SESSION_ID`.
+Clarify the exact Linear Project owned by the current Run.
 
 Read its current durable direction, the authoritative cache-only PM snapshot, its
 definition and KRs, filed Tasks, linked Task observations, and the owning

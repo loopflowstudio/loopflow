@@ -2,14 +2,14 @@
 
 use std::time::Duration;
 
-use crate::child_session::{ChildBodyHandoffRequest, ChildRef};
+use crate::child::{ChildBodyHandoffRequest, ChildRef};
 use crate::durable::{
     AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt, Run, RunLease, RunLeaseToken,
     SteerReceipt, RUN_CONTEXT_ENV, RUN_LEASE_ENV,
 };
-use crate::project_session::ProjectSession;
+use crate::project::Project;
 use crate::store::{SharedStore, Store};
-use crate::task::TaskSession;
+use crate::task::Task;
 
 use super::{OpsError, OpsResult};
 
@@ -45,12 +45,12 @@ impl WorkControlReceipt {
 }
 
 #[derive(Debug)]
-pub(crate) enum ChildSession {
-    Project(Box<ProjectSession>),
-    Task(Box<TaskSession>),
+pub(crate) enum Child {
+    Project(Box<Project>),
+    Task(Box<Task>),
 }
 
-impl ChildSession {
+impl Child {
     fn target(&self) -> ChildRef {
         match self {
             Self::Project(session) => ChildRef::Project(session.id.clone()),
@@ -126,35 +126,30 @@ impl ChildSession {
     }
 }
 
-pub(crate) async fn resume_session(
+pub(crate) async fn resume_child(
     store: &SharedStore,
-    mut session: ChildSession,
+    mut child: Child,
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<Run> {
     if let Some(model) = model {
         let request = handoff_request(&model, reason.as_deref())?;
-        if session.agent() != request.agent {
-            session.handoff(store, &request).await?;
+        if child.agent() != request.agent {
+            child.handoff(store, &request).await?;
         }
     }
-    if !session.is_process_active() {
-        session.launch(store).await?;
+    if !child.is_process_active() {
+        child.launch(store).await?;
     }
     let work = store
-        .work_for_child(&session.target())
+        .work_for_child(&child.target())
         .await
         .map_err(child_error)?;
     store
         .current_run(&work)
         .await
         .map_err(child_error)?
-        .ok_or_else(|| {
-            child_error(format!(
-                "{} has no active Run after resume",
-                session.label()
-            ))
-        })
+        .ok_or_else(|| child_error(format!("{} has no active Run after resume", child.label())))
 }
 
 pub(crate) async fn append_steer(

@@ -12,7 +12,7 @@
 //! - **output**: ordered wire deltas through the token-gated resident door.
 //!
 //! The resident runs from a clean canonical main checkout. Wave turns read and
-//! coordinate there; file-writing work must first become a Task Session with
+//! coordinate there; file-writing work must first become a Task with
 //! its own worktree.
 //!
 //! # Lifecycle

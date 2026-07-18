@@ -12,7 +12,7 @@ use super::{OpsError, OpsResult};
 #[derive(Debug)]
 pub(crate) struct RunLaunch {
     pub kind: &'static str,
-    pub legacy_id: String,
+    pub work_id: String,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
     pub tmux_name: String,
@@ -55,23 +55,17 @@ pub(crate) async fn launch_in_run(
     let argv = vec![
         execution.lf_bin.to_string_lossy().to_string(),
         format!("__{}", request.kind),
-        request.legacy_id.clone(),
+        request.work_id.clone(),
     ];
     let run_lease = lease.env_value().to_string();
     let control_bin = execution.lf_bin.to_string_lossy().to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
     let lf_home = execution.lf_home.to_string_lossy().to_string();
-    let legacy_env = match request.kind {
-        "project" => "LF_PROJECT_SESSION_ID",
-        "task" => "LF_TASK_SESSION_ID",
-        kind => return Err(OpsError::Message(format!("unsupported Run body {kind}"))),
-    };
     let environment = [
         (
             crate::engine::wave_context::WAVE_ID_ENV,
             request.wave_id.as_str(),
         ),
-        (legacy_env, request.legacy_id.as_str()),
         (crate::durable::RUN_CONTEXT_ENV, "agent"),
         (crate::durable::RUN_LEASE_ENV, run_lease.as_str()),
         (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),

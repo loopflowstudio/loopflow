@@ -476,11 +476,11 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
     /// A live session is one whose body could still be running. Completed and
     /// abandoned sessions are done; a `failed` session still surfaces as a
     /// stopped body rather than vanishing.
-    private static func isTerminal(_ status: ProjectSessionStatus) -> Bool {
+    private static func isTerminal(_ status: ProjectStatus) -> Bool {
         status == .completed || status == .abandoned
     }
 
-    private static func isTerminal(_ status: TaskSessionStatus) -> Bool {
+    private static func isTerminal(_ status: TaskStatus) -> Bool {
         status == .completed || status == .abandoned
     }
 

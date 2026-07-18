@@ -1,6 +1,6 @@
 //! Durable execution of one Linear Task.
 //!
-//! A Task Session owns one durable worktree and provider transcript. Ordered PRs
+//! A Task owns one durable worktree and provider transcript. Ordered PRs
 //! own the serial branches that advance the Task. Publication intent is recorded
 //! before GitHub is called, then the GitHub receipt is attached to that intent.
 
@@ -10,11 +10,12 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child_session::{prefixed_uuid_id, AbandonIntent};
+use crate::child::{prefixed_uuid_id, AbandonIntent};
 use crate::durable::RunId;
+pub use crate::durable::TaskId;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
-use crate::project_session::ProjectSessionId;
+use crate::project::ProjectId;
 use crate::session_context::TaskLaunchReceipt;
 
 pub mod actions;
@@ -30,19 +31,12 @@ pub enum TaskDataError {
     InvalidInvariant(String),
 }
 
-prefixed_uuid_id!(
-    TaskSessionId,
-    "ts_",
-    TaskDataError,
-    TaskDataError::InvalidId
-);
-
 prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TaskSessionStatus {
+pub enum TaskStatus {
     Created,
     Starting,
     Running,
@@ -168,13 +162,13 @@ impl TaskLifecyclePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGateProposal {
-    pub status: TaskSessionStatus,
+    pub status: TaskStatus,
     pub reason: String,
 }
 
 impl TaskGateProposal {
     fn validate(&self) -> Result<(), TaskDataError> {
-        if self.status.is_process_active() || self.status == TaskSessionStatus::Created {
+        if self.status.is_process_active() || self.status == TaskStatus::Created {
             return Err(TaskDataError::InvalidInvariant(format!(
                 "{} is not a gate-settle outcome",
                 self.status.as_str()
@@ -189,7 +183,7 @@ impl TaskGateProposal {
     }
 }
 
-impl TaskSessionStatus {
+impl TaskStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Created => "created",
@@ -212,9 +206,9 @@ impl TaskSessionStatus {
     }
 
     /// Coarsen durable intent to the shared shape the body projection reads, so
-    /// one `observe` serves Project and Task Sessions alike.
-    pub fn body_intent(self) -> crate::child_session::BodyIntent {
-        use crate::child_session::BodyIntent;
+    /// one `observe` serves Project and Tasks alike.
+    pub fn body_intent(self) -> crate::child::BodyIntent {
+        use crate::child::BodyIntent;
         match self {
             Self::Created | Self::Starting | Self::Running => BodyIntent::Active,
             Self::Waiting => BodyIntent::Waiting,
@@ -225,7 +219,7 @@ impl TaskSessionStatus {
     }
 }
 
-impl FromStr for TaskSessionStatus {
+impl FromStr for TaskStatus {
     type Err = TaskDataError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -393,7 +387,7 @@ impl CiObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CiIncident {
     pub identity: String,
-    pub task_session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub pr_id: TaskPrId,
     pub repo: String,
     pub pr_number: u32,
@@ -507,7 +501,7 @@ pub struct PrPublication {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPr {
     pub id: TaskPrId,
-    pub task_session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub sequence: u32,
     pub slug: String,
     pub branch: String,
@@ -720,8 +714,8 @@ pub enum Observation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskSession {
-    pub id: TaskSessionId,
+pub struct Task {
+    pub id: TaskId,
     /// Immutable PM evidence captured before placement.
     pub launch: TaskLaunchReceipt,
     pub pm_writeback: PmWritebackState,
@@ -729,8 +723,8 @@ pub struct TaskSession {
     pub wave_id: WaveId,
     /// Required runtime parent. Every Task reports through one durable Project
     /// Session; its Wave retains root inspection and override authority.
-    pub project_session_id: ProjectSessionId,
-    pub status: TaskSessionStatus,
+    pub project_id: ProjectId,
+    pub status: TaskStatus,
     pub status_reason: String,
     pub status_at: OffsetDateTime,
     pub worktree: PathBuf,
@@ -748,7 +742,7 @@ pub struct TaskSession {
     /// Outcome proposed by Iterate and awaiting Gate approval.
     pub gate_proposal: Option<TaskGateProposal>,
     /// Provider/model selection for the next body generation. This is mutable
-    /// lease state, not Task Session identity.
+    /// lease state, not Task identity.
     pub agent: String,
     /// Harness family for the next/current body generation.
     pub provider: String,
@@ -764,7 +758,7 @@ pub struct TaskSession {
     pub observation: Observation,
 }
 
-impl TaskSession {
+impl Task {
     /// Why a supervisor must not start another process generation, if it must not.
     ///
     /// Three intents are terminal for *automatic* restart, and only the first is
@@ -832,7 +826,7 @@ impl TaskSession {
     pub(crate) fn terminal_or_abandon_bar(&self) -> Option<String> {
         if self.status.is_terminal() {
             return Some(format!(
-                "Task {} is {}; terminal Task Sessions do not restart",
+                "Task {} is {}; terminal Tasks do not restart",
                 self.launch.issue.identifier,
                 self.status.as_str()
             ));
@@ -875,7 +869,7 @@ impl TaskSession {
     pub fn validate(&self) -> Result<(), TaskDataError> {
         if self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
-                "Task Session {} requires a workspace slug",
+                "Task {} requires a workspace slug",
                 self.id
             )));
         }
@@ -901,7 +895,7 @@ impl TaskSession {
         if let PmWritebackState::Pending { operation, .. } = &self.pm_writeback {
             match operation {
                 PmWritebackOperation::CompleteTask => {
-                    if self.status != TaskSessionStatus::Completed && self.gate_cycle == 0 {
+                    if self.status != TaskStatus::Completed && self.gate_cycle == 0 {
                         return Err(TaskDataError::InvalidInvariant(
                             "pending PM completion requires a completed Task or an active gate cycle"
                                 .to_string(),
@@ -909,7 +903,7 @@ impl TaskSession {
                     }
                 }
                 PmWritebackOperation::ReopenTask => {
-                    if self.status == TaskSessionStatus::Completed {
+                    if self.status == TaskStatus::Completed {
                         return Err(TaskDataError::InvalidInvariant(
                             "pending PM reopen requires the Task to no longer be completed"
                                 .to_string(),
@@ -921,7 +915,7 @@ impl TaskSession {
         Ok(())
     }
 
-    pub fn set_status(&mut self, status: TaskSessionStatus, reason: impl Into<String>) {
+    pub fn set_status(&mut self, status: TaskStatus, reason: impl Into<String>) {
         let now = OffsetDateTime::now_utc();
         self.status = status;
         self.status_reason = reason.into();
@@ -992,11 +986,11 @@ impl TaskSession {
 pub enum TaskEventKind {
     Started,
     BodyHandedOff {
-        handoff: crate::child_session::ChildBodyHandoff,
+        handoff: crate::child::ChildBodyHandoff,
     },
     StatusChanged {
-        from: TaskSessionStatus,
-        to: TaskSessionStatus,
+        from: TaskStatus,
+        to: TaskStatus,
         reason: String,
     },
     Progress {
@@ -1047,14 +1041,14 @@ impl TaskEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskEvent {
     pub id: i64,
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub kind: TaskEventKind,
     pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskObservation {
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub issue_identifier: String,
     pub event_id: i64,
     pub event: TaskEventKind,
@@ -1062,26 +1056,26 @@ pub struct TaskObservation {
 
 impl TaskObservation {
     pub fn inbox_id(&self) -> String {
-        format!("task-{}-{}", self.session_id, self.event_id)
+        format!("task-{}-{}", self.task_id, self.event_id)
     }
 
     pub fn prompt(&self) -> String {
         let payload = serde_json::to_string(&self.event)
             .expect("Task observation always serializes to structured JSON");
         format!(
-            "<task_observation session_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
-            self.session_id, self.issue_identifier, self.event_id, payload
+            "<task_observation task_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
+            self.task_id, self.issue_identifier, self.event_id, payload
         )
     }
 }
 
-/// The durable cursor for streaming human Linear edits into one Task Session.
+/// The durable cursor for streaming human Linear edits into one Task.
 /// It is the exactly-once ledger — what issue revision and comments have already
 /// become Task direction — plus the health of the last observation, so
 /// `lf task status` can show stale reads and their degraded reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLinearObservation {
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     /// Linear issue `updatedAt` last folded in. Monotonic: a read whose revision
     /// is older is dropped as a stale/out-of-order response.
     pub last_revision: String,
@@ -1101,7 +1095,7 @@ pub struct TaskLinearObservation {
 /// responses never duplicate direction.
 #[derive(Debug, Clone)]
 pub struct LinearObservationApply {
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub revision: String,
     pub title: String,
     pub description: String,
@@ -1129,36 +1123,22 @@ pub struct LinearObservationOutcome {
     pub follow_ups_created: Vec<crate::durable::SteerId>,
 }
 
-/// The result of carrying a terminal Task Session's direction onto a successor.
-///
-/// `created` is `true` when this call inserted the successor and re-keyed the
-/// Linear observation cursor and ingested-comment ledger onto it; `false` when a
-/// non-terminal successor already existed (a concurrent or retried run), in
-/// which case the carry transaction was a no-op and the existing Session is
-/// returned. Historical authored Steers stay on the predecessor for attribution
-/// in both cases.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskSessionSuccession {
-    pub session: TaskSession,
-    pub created: bool,
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
-        TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr, TaskPrId,
-        TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
+        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
+        TaskPrId, TaskStatus,
     };
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         TaskLaunchReceipt,
     };
 
-    fn task_session() -> TaskSession {
+    fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
-        TaskSession {
-            id: TaskSessionId::new(),
+        Task {
+            id: TaskId::new(),
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
                     id: LinearIssueId::new("issue-1").unwrap(),
@@ -1176,8 +1156,8 @@ mod tests {
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
-            project_session_id: crate::project_session::ProjectSessionId::new(),
-            status: TaskSessionStatus::Created,
+            project_id: crate::project::ProjectId::new(),
+            status: TaskStatus::Created,
             status_reason: "created".to_string(),
             status_at: now,
             worktree: "/tmp/task".into(),
@@ -1201,8 +1181,8 @@ mod tests {
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
-        let session = TaskSessionId::new();
-        assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
+        let session = TaskId::new();
+        assert_eq!(TaskId::parse(session.as_str()).unwrap(), session);
         let pr = TaskPrId::new();
         assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
     }
@@ -1210,7 +1190,7 @@ mod tests {
     #[test]
     fn task_observation_has_a_stable_structured_inbox_identity() {
         let observation = TaskObservation {
-            session_id: TaskSessionId::from_raw("ts_example"),
+            task_id: TaskId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
             event: super::TaskEventKind::Failed {
@@ -1226,10 +1206,10 @@ mod tests {
 
     #[test]
     fn only_completed_and_abandoned_tasks_are_terminal() {
-        assert!(TaskSessionStatus::Completed.is_terminal());
-        assert!(TaskSessionStatus::Abandoned.is_terminal());
-        assert!(!TaskSessionStatus::Waiting.is_terminal());
-        assert!(!TaskSessionStatus::Failed.is_terminal());
+        assert!(TaskStatus::Completed.is_terminal());
+        assert!(TaskStatus::Abandoned.is_terminal());
+        assert!(!TaskStatus::Waiting.is_terminal());
+        assert!(!TaskStatus::Failed.is_terminal());
     }
 
     #[test]
@@ -1254,7 +1234,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -1302,7 +1282,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -1367,7 +1347,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -1572,7 +1552,7 @@ mod tests {
 
     #[test]
     fn ci_fix_restart_bar_permits_only_a_failing_open_pr_wake() {
-        let session = task_session(); // status Waiting, no abandon intent
+        let session = task(); // status Waiting, no abandon intent
 
         // Open PR, fresh failing head: the ci-fix wake is permitted where the plain
         // supervisor restart stays barred.
@@ -1599,8 +1579,8 @@ mod tests {
         assert!(session.ci_fix_restart_bar(Some(&mixed)).is_none());
 
         // Terminal intent dominates even a legal wake.
-        let mut terminal = task_session();
-        terminal.status = TaskSessionStatus::Completed;
+        let mut terminal = task();
+        terminal.status = TaskStatus::Completed;
         assert!(terminal.ci_fix_restart_bar(Some(&legal)).is_some());
 
         // The bar does not deduplicate. A head that already woke a body still reads
@@ -1610,19 +1590,19 @@ mod tests {
     }
 
     #[test]
-    fn task_session_rejects_impossible_process_and_writeback_state() {
-        let mut session = task_session();
-        session.status = TaskSessionStatus::Running;
+    fn task_rejects_impossible_process_and_writeback_state() {
+        let mut session = task();
+        session.status = TaskStatus::Running;
         assert!(session.validate().is_err());
 
-        session.status = TaskSessionStatus::Waiting;
+        session.status = TaskStatus::Waiting;
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };
         assert!(session.validate().is_err());
 
-        session.status = TaskSessionStatus::Completed;
+        session.status = TaskStatus::Completed;
         assert!(session.validate().is_ok());
 
         session.lifecycle.iterate.flow.clear();
@@ -1631,15 +1611,15 @@ mod tests {
 
     #[test]
     fn pending_reopen_writeback_requires_an_uncompleted_task() {
-        let mut session = task_session();
-        session.status = TaskSessionStatus::Completed;
+        let mut session = task();
+        session.status = TaskStatus::Completed;
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::ReopenTask,
             error: "premature completion".to_string(),
         };
         assert!(session.validate().is_err());
 
-        session.status = TaskSessionStatus::Waiting;
+        session.status = TaskStatus::Waiting;
         assert!(session.validate().is_ok());
     }
 
@@ -1662,7 +1642,7 @@ mod tests {
 
     #[test]
     fn task_lifecycle_repeats_iterate_and_gate_until_approval() {
-        let mut session = task_session();
+        let mut session = task();
         session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
 
         assert_eq!(session.lifecycle_cycle(), 0);
@@ -1672,7 +1652,7 @@ mod tests {
         assert_eq!(session.phase_epoch, 2);
 
         let proposal = TaskGateProposal {
-            status: TaskSessionStatus::Waiting,
+            status: TaskStatus::Waiting,
             reason: "pull request is ready for review".to_string(),
         };
         session.phase_cursor = 2;

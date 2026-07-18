@@ -68,20 +68,3 @@ fn a_malformed_lease_fails_closed_instead_of_falling_through_to_user() {
         "a malformed lease must not degrade to User authority"
     );
 }
-
-/// The deleted Session vars must not be able to re-arm the sentinel. If this
-/// ever passes by refusing, someone has keyed authority back onto Session
-/// identity and the escalation guard has moved rather than been removed.
-#[test]
-fn legacy_session_env_alone_no_longer_marks_a_process_as_in_run() {
-    let output = steer_with(
-        &[("LF_TASK_SESSION_ID", "ts_stale")],
-        &["LF_RUN_CONTEXT", "LF_RUN_LEASE"],
-    );
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("refusing User authority"),
-        "authority must key on LF_RUN_CONTEXT, not on a legacy Session var: {stderr}"
-    );
-}

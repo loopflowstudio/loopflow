@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
+use crate::durable::{RunLeaseToken, WorkRef, RUN_LEASE_ENV};
 use crate::engine::worktrees::main_repo_root;
 use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
@@ -367,27 +368,34 @@ pub fn trace_capture_context(
 }
 
 fn child_work_attribution() -> (Option<String>, Option<String>) {
+    let Some(value) = std::env::var_os(RUN_LEASE_ENV) else {
+        return (None, None);
+    };
+    let Ok(token) = RunLeaseToken::parse(&value.to_string_lossy()) else {
+        return (None, None);
+    };
     let Ok(store) = open_ledger() else {
         return (None, None);
     };
-    if let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") {
-        if let Ok(id) = crate::task::TaskSessionId::parse(&value.to_string_lossy()) {
-            if let Ok(Some(session)) = store.task_session(&id) {
-                return (
-                    Some(session.launch.project.slug),
-                    Some(session.launch.issue.identifier),
-                );
-            }
-        }
+    let Ok(lease) = store.resolve_run_lease(&token) else {
+        return (None, None);
+    };
+    match lease.work {
+        WorkRef::Project(id) => store
+            .project(&id)
+            .ok()
+            .flatten()
+            .map_or((None, None), |project| {
+                (Some(project.launch.project.slug), None)
+            }),
+        WorkRef::Task(id) => store.task(&id).ok().flatten().map_or((None, None), |task| {
+            (
+                Some(task.launch.project.slug),
+                Some(task.launch.issue.identifier),
+            )
+        }),
+        WorkRef::Wave(_) => (None, None),
     }
-    if let Some(value) = std::env::var_os("LF_PROJECT_SESSION_ID") {
-        if let Ok(id) = crate::project_session::ProjectSessionId::parse(&value.to_string_lossy()) {
-            if let Ok(Some(session)) = store.project_session(&id) {
-                return (Some(session.launch.project.slug), None);
-            }
-        }
-    }
-    (None, None)
 }
 
 #[cfg(not(test))]

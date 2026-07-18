@@ -106,7 +106,7 @@ public struct BodyObservation: Decodable, Sendable, Hashable {
 
 public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let sessionId: String
-    public let status: ProjectSessionStatus
+    public let status: ProjectStatus
     public let reason: String
     public let statusAt: String
     public let iteration: UInt32
@@ -130,7 +130,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     /// The live Project Session this Task routes to (a successor when the
     /// historical owner is terminal). Nil when the chain is broken.
     public let routingProjectSessionId: String?
-    public let status: TaskSessionStatus
+    public let status: TaskStatus
     public let reason: String
     public let statusAt: String
     public let provider: String
@@ -206,11 +206,11 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-public enum ProjectSessionStatus: String, Decodable, Sendable, Hashable {
+public enum ProjectStatus: String, Decodable, Sendable, Hashable {
     case created, starting, running, waiting, blocked, failed, completed, abandoned
 }
 
-public enum TaskSessionStatus: String, Decodable, Sendable, Hashable {
+public enum TaskStatus: String, Decodable, Sendable, Hashable {
     case created, starting, running, waiting, blocked, failed, completed, abandoned
 }
 
@@ -326,7 +326,7 @@ public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
     public let nextOwner: WorkNextMoveOwner
     public let actions: TaskActionModel
     public let pmCompleted: Bool
-    public let sessionStatus: TaskSessionStatus?
+    public let sessionStatus: TaskStatus?
     public let process: TaskProcessEvidence
     public let localProgress: LocalProgressEvidence
     public let activePrPhase: PrPhase?

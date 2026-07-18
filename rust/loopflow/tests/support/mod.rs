@@ -4,32 +4,20 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::id::WaveId;
-use loopflow::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+use loopflow::project::{Project, ProjectId, ProjectStatus};
 use loopflow::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
     ProjectLaunchReceipt, TaskLaunchReceipt,
 };
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
-use loopflow::task::{
-    PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
-};
+use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId, TaskStatus};
 use loopflow::wave::Wave;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
 /// Ambient authority a live agent process exports. Tests must never inherit the
-/// real Run or legacy Session that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 9] = [
-    "LF_RUN_CONTEXT",
-    "LF_RUN_LEASE",
-    "LF_TASK_SESSION_ID",
-    "LF_TASK_GENERATION",
-    "LF_TASK_LEASE_TOKEN",
-    "LF_WAVE_ID",
-    "LF_PROJECT_SESSION_ID",
-    "LF_PROJECT_GENERATION",
-    "LF_PROJECT_LEASE_TOKEN",
-];
+/// real Run that invoked the suite.
+const AMBIENT_AGENT_ENV: [&str; 3] = ["LF_RUN_CONTEXT", "LF_RUN_LEASE", "LF_WAVE_ID"];
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -228,7 +216,7 @@ impl Drop for EnvGuard {
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
     pub store: Store,
-    pub session: TaskSession,
+    pub session: Task,
     pub pr: TaskPr,
 }
 
@@ -269,8 +257,8 @@ fn register_task_with_process(
         "task-pr-tests".to_string(),
         worktree.display().to_string(),
     );
-    let project = ProjectSession {
-        id: ProjectSessionId::new(),
+    let project = Project {
+        id: ProjectId::new(),
         launch: ProjectLaunchReceipt {
             project: LinearProjectSnapshot {
                 id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
@@ -281,7 +269,7 @@ fn register_task_with_process(
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        status: ProjectSessionStatus::Running,
+        status: ProjectStatus::Running,
         status_reason: "test project is running".to_string(),
         status_at: now,
         iteration: 1,
@@ -294,8 +282,8 @@ fn register_task_with_process(
         created_at: now,
         updated_at: now,
     };
-    let session = TaskSession {
-        id: TaskSessionId::new(),
+    let session = Task {
+        id: TaskId::new(),
         launch: TaskLaunchReceipt {
             issue: LinearIssueSnapshot {
                 id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
@@ -308,11 +296,11 @@ fn register_task_with_process(
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
-        project_session_id: project.id.clone(),
+        project_id: project.id.clone(),
         status: if active {
-            TaskSessionStatus::Running
+            TaskStatus::Running
         } else {
-            TaskSessionStatus::Waiting
+            TaskStatus::Waiting
         },
         status_reason: if active {
             "test Task is running".to_string()
@@ -339,7 +327,7 @@ fn register_task_with_process(
     };
     let pr = TaskPr {
         id: TaskPrId::new(),
-        task_session_id: session.id.clone(),
+        task_id: session.id.clone(),
         sequence: 1,
         slug: session.workspace_slug.clone(),
         branch: branch.to_string(),
@@ -359,11 +347,11 @@ fn register_task_with_process(
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");
         store
-            .create_project_session(&project)
+            .create_project(&project)
             .await
             .expect("create test project");
         store
-            .create_task_session(&session, &pr)
+            .create_task(&session, &pr)
             .await
             .expect("create test Task");
     });

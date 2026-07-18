@@ -9,22 +9,20 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::child::{ChildBodyHandoff, ChildRef};
 use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, send_outstanding_steers,
     take_current_input as take_child_input, CommandStop, PendingInput,
 };
-use crate::child_session::{ChildBodyHandoff, ChildRef};
 use crate::durable::{Basis, BoundarySeed, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
     ApprovalPolicy, Harness, RecoveryDecision, SendCurrentOutcome,
 };
-use crate::project_session::{
-    ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
-};
+use crate::project::{ChildEventPayload, Project, ProjectEventKind, ProjectId, ProjectStatus};
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::TaskSessionStatus;
+use crate::task::TaskStatus;
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
@@ -38,19 +36,19 @@ struct PreparedProjectStep {
     basis: Basis,
 }
 
-pub async fn run_project_session(session_id: ProjectSessionId) -> Result<()> {
+pub async fn run_project(session_id: ProjectId) -> Result<()> {
     let store = open_existing_store()
         .await
         .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?;
     let lease = crate::ops::required_run_lease(&store).await?;
-    let result = run_project_session_inner(session_id.clone(), &lease).await;
+    let result = run_project_inner(session_id.clone(), &lease).await;
     if let Err(error) = &result {
         record_unhandled_failure(&session_id, &lease, error).await;
     }
     result
 }
 
-async fn owning_wave(store: &SharedStore, session: &ProjectSession) -> Result<Wave> {
+async fn owning_wave(store: &SharedStore, session: &Project) -> Result<Wave> {
     store
         .get_wave(&session.wave_id)
         .await?
@@ -59,7 +57,7 @@ async fn owning_wave(store: &SharedStore, session: &ProjectSession) -> Result<Wa
 
 async fn spawn_failover(
     store: &SharedStore,
-    session: &ProjectSession,
+    session: &Project,
     lease: &RunLease,
     wave: &Wave,
 ) -> Result<()> {
@@ -73,7 +71,7 @@ async fn spawn_failover(
         lease,
         crate::ops::RunLaunch {
             kind: "project",
-            legacy_id: session.id.to_string(),
+            work_id: session.id.to_string(),
             wave_id: session.wave_id.clone(),
             cwd: Path::new(wave.repo()).to_path_buf(),
             tmux_name,
@@ -86,22 +84,19 @@ async fn spawn_failover(
     .map_err(|error| anyhow!(error.to_string()))
 }
 
-async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLease) -> Result<()> {
+async fn run_project_inner(session_id: ProjectId, lease: &RunLease) -> Result<()> {
     let store: SharedStore = Arc::new(
         open_existing_store()
             .await
             .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
     );
     let mut session = store
-        .get_project_session(&session_id)
+        .get_project(&session_id)
         .await?
-        .ok_or_else(|| anyhow!("Project Session {session_id} not found"))?;
+        .ok_or_else(|| anyhow!("Project {session_id} not found"))?;
     let wave = owning_wave(&store, &session).await?;
     let from = session.status;
-    session.set_status(
-        ProjectSessionStatus::Running,
-        "project pursuit turn is active",
-    );
+    session.set_status(ProjectStatus::Running, "project pursuit turn is active");
     store
         .activate_project_process_for_run(&session, lease)
         .await?;
@@ -111,7 +106,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
             lease,
             &ProjectEventKind::StatusChanged {
                 from,
-                to: ProjectSessionStatus::Running,
+                to: ProjectStatus::Running,
                 reason: session.status_reason.clone(),
             },
         )
@@ -191,7 +186,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
     store
         .observe_launch_provider(lease, &launch.id, session.provider_session_id.clone())
         .await?;
-    if let Err(error) = store.update_project_session_for_run(&session, lease).await {
+    if let Err(error) = store.update_project_for_run(&session, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
     }
@@ -355,7 +350,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                     &session,
                 ).await {
                     tracing::warn!(
-                        project_session = %session.id,
+                        project = %session.id,
                         error = %error,
                         "could not supervise Task progress leases"
                     );
@@ -379,7 +374,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != session.provider_session_id {
                     session.provider_session_id = provider_session_id;
-                    store.update_project_session_for_run(&session, lease).await?;
+                    store.update_project_for_run(&session, lease).await?;
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
@@ -536,13 +531,13 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                         }
                         let mut outcome = inspect_outcome(&store, &session, &wave).await?;
                         if status == Lifecycle::Interrupted {
-                            outcome.status = ProjectSessionStatus::Waiting;
+                            outcome.status = ProjectStatus::Waiting;
                             outcome.reason = "Project flow step interrupted; waiting for resume or another instruction".to_string();
                         }
-                        if outcome.status == ProjectSessionStatus::Running {
+                        if outcome.status == ProjectStatus::Running {
                             session.last_state_fingerprint = Some(outcome.fingerprint);
                             session.updated_at = time::OffsetDateTime::now_utc();
-                            store.update_project_session_for_run(&session, lease).await?;
+                            store.update_project_for_run(&session, lease).await?;
                             last_text.clear();
                             let prepared = prepare_project_flow_step(
                                 &store,
@@ -569,8 +564,8 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                             continue;
                         }
                         session.last_state_fingerprint = Some(outcome.fingerprint);
-                        store.update_project_session_for_run(&session, lease).await?;
-                        if outcome.status == ProjectSessionStatus::Completed {
+                        store.update_project_for_run(&session, lease).await?;
+                        if outcome.status == ProjectStatus::Completed {
                             let work = store
                                 .work_for_child(&ChildRef::Project(session.id.clone()))
                                 .await?;
@@ -598,7 +593,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                                 },
                             )
                             .await?;
-                        if session.status == ProjectSessionStatus::Completed {
+                        if session.status == ProjectStatus::Completed {
                             store
                                 .append_project_event_for_run(
                                     &session.id,
@@ -608,7 +603,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                                 .await?;
                         }
                         finish_capture(capture.as_ref(), "completed");
-                        let outcome = if session.status == ProjectSessionStatus::Completed {
+                        let outcome = if session.status == ProjectStatus::Completed {
                             crate::durable::BoundaryState::Succeeded
                         } else {
                             crate::durable::BoundaryState::Interrupted
@@ -645,7 +640,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
 
 async fn prepare_project_flow_step(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
     wave: &Wave,
     flow: &Playhead,
@@ -672,7 +667,7 @@ async fn prepare_project_flow_step(
         step.total,
         step.step
     );
-    store.update_project_session_for_run(session, lease).await?;
+    store.update_project_for_run(session, lease).await?;
     let seed = project_seed(session, wave.name(), &boundary, observations);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
@@ -696,7 +691,7 @@ fn open_project_flow_body(flow: &mut Playhead, control_repo: &str) -> Result<()>
 
 async fn start_project_flow_turn(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
@@ -738,7 +733,7 @@ fn finish_project_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bo
 
 async fn handle_attachment(
     store: &SharedStore,
-    session: &ProjectSession,
+    session: &Project,
     lease: &RunLease,
     line: String,
 ) -> Result<()> {
@@ -786,7 +781,7 @@ async fn handle_attachment(
 
 async fn take_current_input(
     _store: &SharedStore,
-    _session: &ProjectSession,
+    _session: &Project,
     _lease: &RunLease,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<PendingInput>> {
@@ -794,14 +789,14 @@ async fn take_current_input(
 }
 
 struct ProjectOutcome {
-    status: ProjectSessionStatus,
+    status: ProjectStatus,
     reason: String,
     fingerprint: String,
 }
 
 async fn inspect_outcome(
     store: &SharedStore,
-    session: &ProjectSession,
+    session: &Project,
     wave: &Wave,
 ) -> Result<ProjectOutcome> {
     let repo = wave.repo().to_string();
@@ -832,7 +827,7 @@ async fn inspect_outcome(
     let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&fingerprint_payload)?));
     if !resolved.project.krs.is_empty() && resolved.project.krs.iter().all(|kr| kr.holds) {
         return Ok(ProjectOutcome {
-            status: ProjectSessionStatus::Completed,
+            status: ProjectStatus::Completed,
             reason: "every current Project KR holds".to_string(),
             fingerprint,
         });
@@ -848,28 +843,26 @@ async fn inspect_outcome(
         || tasks.iter().any(|task| {
             matches!(
                 task.status,
-                TaskSessionStatus::Created
-                    | TaskSessionStatus::Starting
-                    | TaskSessionStatus::Running
+                TaskStatus::Created | TaskStatus::Starting | TaskStatus::Running
             )
         })
     {
         return Ok(ProjectOutcome {
-            status: ProjectSessionStatus::Waiting,
+            status: ProjectStatus::Waiting,
             reason: "supervised Tasks are active; waiting for typed Task observations".to_string(),
             fingerprint,
         });
     }
     if session.last_state_fingerprint.as_deref() == Some(&fingerprint) {
         return Ok(ProjectOutcome {
-            status: ProjectSessionStatus::Blocked,
+            status: ProjectStatus::Blocked,
             reason: "open KRs remain but a complete iteration changed no PM or Task state"
                 .to_string(),
             fingerprint,
         });
     }
     Ok(ProjectOutcome {
-        status: ProjectSessionStatus::Running,
+        status: ProjectStatus::Running,
         reason: "Project state changed; another iteration is actionable".to_string(),
         fingerprint,
     })
@@ -878,23 +871,19 @@ async fn inspect_outcome(
 fn verify_control_plane_checkout(repo: &Path) -> Result<()> {
     crate::ops::project::ensure_clean_main(repo, "Project turn")
         .map(|_| ())
-        .map_err(|error| {
-            anyhow!("Project Session violated its read-only control-plane boundary: {error}")
-        })
+        .map_err(|error| anyhow!("Project violated its read-only control-plane boundary: {error}"))
 }
 
 async fn consume_task_observations(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
 ) -> Result<Vec<String>> {
     // The successor consumes the whole project chain: observations addressed to
     // a terminal predecessor the Task was born under are routed here, not
     // stranded on the dead session. The outbox recipient stays the historical
     // owner; this read is the live routing key.
-    let observations = store
-        .pending_project_observations_for_chain(session.launch.project.id.as_str())
-        .await?;
+    let observations = store.pending_project_observations(&session.id).await?;
     let mut prompts = Vec::new();
     for observation in observations {
         let event = match &observation.payload {
@@ -909,13 +898,13 @@ async fn consume_task_observations(
         }
         session.observation_cursor = session.observation_cursor.max(observation.id);
     }
-    store.update_project_session_for_run(session, lease).await?;
+    store.update_project_for_run(session, lease).await?;
     Ok(prompts)
 }
 
 async fn apply_input(
     store: &SharedStore,
-    _session: &ProjectSession,
+    _session: &Project,
     _lease: &RunLease,
     harness: &mut dyn Harness,
     input: PendingInput,
@@ -926,14 +915,14 @@ async fn apply_input(
 
 async fn set_and_record_status(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
-    status: ProjectSessionStatus,
+    status: ProjectStatus,
     reason: impl Into<String>,
 ) -> Result<()> {
     let from = session.status;
     session.set_status(status, reason);
-    store.update_project_session_for_run(session, lease).await?;
+    store.update_project_for_run(session, lease).await?;
     store
         .append_project_event_for_run(
             &session.id,
@@ -957,7 +946,7 @@ fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) 
 
 async fn finish_failed(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
     harness: &mut dyn Harness,
     error: &str,
@@ -965,7 +954,7 @@ async fn finish_failed(
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    set_and_record_status(store, session, lease, ProjectSessionStatus::Failed, error).await?;
+    set_and_record_status(store, session, lease, ProjectStatus::Failed, error).await?;
     store
         .append_project_event_for_run(
             &session.id,
@@ -988,7 +977,7 @@ async fn finish_failed(
 /// the supervisor to respawn the same flaky provider.
 async fn handle_body_failure(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
     harness: &mut dyn Harness,
     wave: &Wave,
@@ -1007,8 +996,7 @@ async fn handle_body_failure(
     match decision {
         RecoveryDecision::HandoffToBackup { agent, provider } => {
             let _ = harness.stop().await;
-            set_and_record_status(store, session, lease, ProjectSessionStatus::Failed, reason)
-                .await?;
+            set_and_record_status(store, session, lease, ProjectStatus::Failed, reason).await?;
             store
                 .append_project_event_for_run(
                     &session.id,
@@ -1019,7 +1007,7 @@ async fn handle_body_failure(
                     },
                 )
                 .await?;
-            store.update_project_session_for_run(session, lease).await?;
+            store.update_project_for_run(session, lease).await?;
             let launch = store.current_launch(lease).await?.ok_or_else(|| {
                 anyhow!("Project Run {} has no Launch to hand back", lease.run_id)
             })?;
@@ -1047,7 +1035,7 @@ async fn handle_body_failure(
             }
             session.agent = agent;
             session.provider = provider;
-            store.update_project_session_for_run(session, lease).await?;
+            store.update_project_for_run(session, lease).await?;
             store
                 .append_project_event_for_run(
                     &session.id,
@@ -1056,9 +1044,7 @@ async fn handle_body_failure(
                 )
                 .await?;
             let rotated = store.rotate_run_lease(lease).await?;
-            store
-                .update_project_session_for_run(session, &rotated)
-                .await?;
+            store.update_project_for_run(session, &rotated).await?;
             Ok(Some(rotated))
         }
         RecoveryDecision::Stop => {
@@ -1077,7 +1063,7 @@ async fn handle_body_failure(
 
 async fn fail_and_maybe_relaunch(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
     harness: &mut dyn Harness,
     wave: &Wave,
@@ -1102,7 +1088,7 @@ async fn fail_and_maybe_relaunch(
 
 async fn finish_abandoned(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
     harness: &mut dyn Harness,
     reason: String,
@@ -1115,8 +1101,8 @@ async fn finish_abandoned(
         store,
         session,
         lease,
-        ProjectSessionStatus::Abandoned,
-        format!("Project Session explicitly abandoned: {reason}"),
+        ProjectStatus::Abandoned,
+        format!("Project explicitly abandoned: {reason}"),
     )
     .await?;
     store
@@ -1127,7 +1113,7 @@ async fn finish_abandoned(
 
 async fn finish_command_stop(
     store: &SharedStore,
-    session: &mut ProjectSession,
+    session: &mut Project,
     lease: &RunLease,
     harness: &mut dyn Harness,
     stop: CommandStop,
@@ -1141,7 +1127,7 @@ async fn finish_command_stop(
                 store,
                 session,
                 lease,
-                ProjectSessionStatus::Waiting,
+                ProjectStatus::Waiting,
                 "Project turn interrupted; waiting for resume or another instruction",
             )
             .await?;
@@ -1156,15 +1142,11 @@ async fn finish_command_stop(
     }
 }
 
-async fn record_unhandled_failure(
-    session_id: &ProjectSessionId,
-    lease: &RunLease,
-    error: &anyhow::Error,
-) {
+async fn record_unhandled_failure(session_id: &ProjectId, lease: &RunLease, error: &anyhow::Error) {
     let Some(store) = open_existing_store().await.map(Arc::new) else {
         return;
     };
-    let Ok(Some(mut session)) = store.get_project_session(session_id).await else {
+    let Ok(Some(mut session)) = store.get_project(session_id).await else {
         return;
     };
     let Ok(work) = store
@@ -1178,12 +1160,8 @@ async fn record_unhandled_failure(
     }
     let message = format!("project runner failed: {error}");
     let from = session.status;
-    session.set_status(ProjectSessionStatus::Failed, &message);
-    if store
-        .update_project_session_for_run(&session, lease)
-        .await
-        .is_err()
-    {
+    session.set_status(ProjectStatus::Failed, &message);
+    if store.update_project_for_run(&session, lease).await.is_err() {
         return;
     }
     let _ = store
@@ -1192,7 +1170,7 @@ async fn record_unhandled_failure(
             lease,
             &ProjectEventKind::StatusChanged {
                 from,
-                to: ProjectSessionStatus::Failed,
+                to: ProjectStatus::Failed,
                 reason: message.clone(),
             },
         )
@@ -1213,7 +1191,7 @@ async fn record_unhandled_failure(
 }
 
 fn project_seed(
-    session: &ProjectSession,
+    session: &Project,
     wave_name: &str,
     boundary: &BoundarySeed,
     observations: &[String],
@@ -1225,7 +1203,7 @@ fn project_seed(
     };
     let direction = boundary.render();
     format!(
-        "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{direction}\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
+        "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{direction}\n\nProject: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Tasks. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
         name = session.launch.project.name,
         project_id = session.launch.project.id.as_str(),
         wave = wave_name,

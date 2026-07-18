@@ -1687,11 +1687,9 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
         Ok(store) => {
-            let sessions = runtime
-                .block_on(store.list_task_sessions(None))
-                .map_err(|error| {
-                    anyhow!("cannot verify Task worktree ownership before pruning: {error}")
-                })?;
+            let sessions = runtime.block_on(store.list_tasks(None)).map_err(|error| {
+                anyhow!("cannot verify Task worktree ownership before pruning: {error}")
+            })?;
             protected.extend(
                 sessions
                     .into_iter()

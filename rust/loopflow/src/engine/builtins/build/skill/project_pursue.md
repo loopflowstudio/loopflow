@@ -6,11 +6,11 @@ Pursue the open KRs.
 
 ## Orientation
 
-Read the exact Linear Project named by `LF_PROJECT_SESSION_ID` and the wave's
+Read the exact Linear Project owned by the current Run and the wave's
 GOAL/MEMORY. The
 project loop owns the KR set, not a product PR. KRs are proof-shaped end
 states; tasks are the concrete work that advances them. Filed tasks live in
-Linear; running work lives in Task Sessions; merged PRs are closure evidence.
+Linear; running work lives in Tasks; merged PRs are closure evidence.
 Resolve the exact wave and Project from the session prompt; never guess them. If the PM
 reader fails, report that once and continue from the KR set instead of repairing
 PM or auth.
@@ -55,14 +55,14 @@ its available status/next owner.
   after the independent Tasks have exposed their own strengths and failures.
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
-  same Task Session through review and merge.
+  same Task through review and merge.
 - When a separate Task depends on an open parent PR and should begin now, start
   it with `lf task run <child> --stack-on <parent> --directive "..."`. The child
   keeps its own worktree and worker; never create a second simultaneously open
   PR inside the parent Task.
-- The Project Session owns no worktree or PR branch. Never edit, commit,
+- The Project owns no worktree or PR branch. Never edit, commit,
   test, or open a PR from the canonical main checkout; delegate every
-  repository mutation to a Task Session.
+  repository mutation to a Task.
 - Use `lf task steer`, `interrupt`, `wait`, and `resume`. Do not create another
   worktree or session for review feedback or CI repair.
 - Service a pending child Feedback before background KR work. Reply with the

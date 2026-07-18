@@ -4,7 +4,7 @@ use std::fs;
 use std::process::Command;
 
 use loopflow::ops::task::{task_interrupt, task_status, task_steer};
-use loopflow::task::{AfterMerge, GithubPr, Observation, PrPublication, TaskSessionStatus};
+use loopflow::task::{AfterMerge, GithubPr, Observation, PrPublication, TaskStatus};
 use loopflow_test_support::TestRepo;
 use support::{register_active_task, EnvGuard, RegisteredTask};
 use time::{Duration, OffsetDateTime};
@@ -120,7 +120,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
 
     let first = task_status("INF-123").expect("REST status succeeds despite GraphQL exhaustion");
     assert!(matches!(first.observation, Observation::Fresh { .. }));
-    assert_eq!(first.status, TaskSessionStatus::Running, "{first:?}");
+    assert_eq!(first.status, TaskStatus::Running, "{first:?}");
 
     let steer =
         task_steer("INF-123", "keep going".to_string()).expect("Steer remains local and durable");
@@ -155,7 +155,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
     );
 
     let first = task_status("INF-123").expect("REST failure degrades instead of failing");
-    assert_eq!(first.status, TaskSessionStatus::Running, "{first:?}");
+    assert_eq!(first.status, TaskStatus::Running, "{first:?}");
     let (reason, first_retry_at) = match first.observation {
         Observation::Degraded {
             reason,
@@ -186,7 +186,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
             other => panic!("expected cached degradation, got {other:?}"),
         }
     }
-    assert_ne!(first.status, TaskSessionStatus::Failed);
+    assert_ne!(first.status, TaskStatus::Failed);
     assert_eq!(
         github_reads(log.to_string_lossy().as_ref()).len(),
         1,

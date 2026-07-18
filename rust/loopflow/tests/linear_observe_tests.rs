@@ -1,6 +1,6 @@
 mod support;
 
-use loopflow::child_session::ChildRef;
+use loopflow::child::ChildRef;
 use loopflow::ops::linear_observe::reconcile_linear_observation;
 use loopflow::pm::IssueObservation;
 use loopflow_test_support::TestRepo;
@@ -64,7 +64,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(outcome.content_steer_applied);
 
     let session = rt
-        .block_on(task.store.get_task_session(&task.session.id))
+        .block_on(task.store.get_task(&task.session.id))
         .expect("read session")
         .expect("session");
     let work = rt

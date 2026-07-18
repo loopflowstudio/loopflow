@@ -779,12 +779,12 @@ mod tests {
     }
 
     fn github_pr(number: u32, merge: Option<&str>, head: Option<&str>) -> TaskPr {
-        use crate::task::{AfterMerge, GithubPr, PrPublication, TaskPrId, TaskSessionId};
+        use crate::task::{AfterMerge, GithubPr, PrPublication, TaskId, TaskPrId};
         use time::OffsetDateTime;
         let now = OffsetDateTime::from_unix_timestamp(1000).expect("timestamp");
         TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "receipts".to_string(),
             branch: "jack/receipts".to_string(),

@@ -59,7 +59,7 @@ pub fn run() -> Result<()> {
 /// Best-effort snapshot of directories currently owned by a live process.
 ///
 /// Worktree cleanup uses this as a second ownership signal alongside durable
-/// Task Sessions. An empty set is returned when `lsof` is unavailable so the
+/// Tasks. An empty set is returned when `lsof` is unavailable so the
 /// daemon can still rely on its registry on minimal hosts.
 pub fn running_workspace_paths() -> HashSet<PathBuf> {
     let output = Command::new("lsof").args(["-d", "cwd", "-Fn"]).output();

@@ -105,7 +105,7 @@ const MIGRATIONS: &[Migration] = &[
             minor: 11,
             ordinal: 2,
         },
-        name: "project_session_successors",
+        name: "project_successors",
         sql: include_str!("migrations/0.11.002_project_session_successors.sql"),
     },
     Migration {
@@ -285,7 +285,7 @@ const MIGRATIONS: &[Migration] = &[
             minor: 11,
             ordinal: 22,
         },
-        name: "task_session_successors",
+        name: "task_successors",
         sql: include_str!("migrations/0.11.022_task_session_successors.sql"),
     },
     Migration {
@@ -395,6 +395,15 @@ const MIGRATIONS: &[Migration] = &[
         },
         name: "drop_child_commands",
         sql: include_str!("migrations/0.11.035_drop_child_commands.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 36,
+        },
+        name: "delete_sessions",
+        sql: include_str!("migrations/0.11.036_delete_sessions.sql"),
     },
 ];
 
@@ -1563,8 +1572,8 @@ mod tests {
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
-            .any(|object| object.object_type == "table" && object.name == "task_sessions"));
-        for table in ["project_sessions", "task_sessions"] {
+            .any(|object| object.object_type == "table" && object.name == "tasks"));
+        for table in ["projects", "tasks"] {
             let names = columns(&conn, table);
             assert!(!names.iter().any(|name| name == "current_directive_version"));
             assert!(!names
@@ -2139,7 +2148,7 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('w1', 'infrastructure', '/repo', 1);
-             INSERT INTO project_sessions (
+             INSERT INTO projects (
                  id, project_id, project_slug, project_name,
                  project_prompt_context, wave_id, pm_snapshot_synced_at,
                  status, status_reason, status_at, iteration,
@@ -2168,7 +2177,7 @@ mod tests {
             1
         );
         conn.execute_batch(
-            "INSERT INTO project_sessions (
+            "INSERT INTO projects (
                  id, project_id, project_slug, project_name,
                  project_prompt_context, wave_id, pm_snapshot_synced_at,
                  status, status_reason, status_at, iteration,
@@ -2183,7 +2192,7 @@ mod tests {
         .unwrap();
         assert!(conn
             .execute_batch(
-                "INSERT INTO project_sessions (
+                "INSERT INTO projects (
                      id, project_id, project_slug, project_name,
                      project_prompt_context, wave_id, pm_snapshot_synced_at,
                      status, status_reason, status_at, iteration,
@@ -2256,7 +2265,7 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO project_sessions (
+            "INSERT INTO projects (
                 id, project_id, project_slug, project_name, project_prompt_context,
                 wave_id, pm_snapshot_synced_at, status, status_reason, status_at,
                 iteration, observation_cursor, agent, provider,
@@ -2272,13 +2281,13 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task_sessions (
+            "INSERT INTO tasks (
                 id, issue_id, issue_identifier, issue_title, issue_description,
                 project_id, project_slug, project_name, project_prompt_context, wave_id,
                 status, status_reason, status_at, worktree, branch, base_commit,
                 agent, provider, process_generation, process_pid,
                 process_tmux_name, process_started_at, pr_number, pr_url, created_at, updated_at,
-                pm_snapshot_synced_at, pm_writeback_json, project_session_id,
+                pm_snapshot_synced_at, pm_writeback_json, project_id,
                 current_directive_version, incorporated_directive_version
              ) VALUES (
                 'ts_legacy', 'issue-1', 'INF-123', 'Ship it', '',
@@ -2306,7 +2315,7 @@ mod tests {
 
         let session: (String, String) = conn
             .query_row(
-                "SELECT status, workspace_slug FROM task_sessions WHERE id='ts_legacy'",
+                "SELECT status, workspace_slug FROM tasks WHERE id='ts_legacy'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -2315,7 +2324,7 @@ mod tests {
         let project_lease: (String, String, Option<String>) = conn
             .query_row(
                 "SELECT process_lease_token, process_lease_state, process_outcome_json
-                 FROM project_sessions WHERE id='ps_legacy'",
+                 FROM projects WHERE id='ps_legacy'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -2346,7 +2355,7 @@ mod tests {
         let task_lease: (String, String, String) = conn
             .query_row(
                 "SELECT process_lease_token, process_lease_state, process_outcome_json
-                 FROM task_sessions WHERE id='ts_legacy'",
+                 FROM tasks WHERE id='ts_legacy'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -2358,7 +2367,7 @@ mod tests {
             .query_row(
                 "SELECT sequence, branch, publication_requested_at, after_merge,
                         github_number, github_url, merge_commit, abandoned_at
-                 FROM task_prs WHERE task_session_id='ts_legacy'",
+                 FROM task_prs WHERE task_id='ts_legacy'",
                 [],
                 |row| {
                     Ok((
@@ -2499,7 +2508,7 @@ mod tests {
     fn a_stale_edit_of_a_shipped_migration_tells_the_user_to_recreate() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
-        conn.execute_batch("ALTER TABLE task_sessions DROP COLUMN project_prompt_context")
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN project_prompt_context")
             .unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
@@ -2657,7 +2666,7 @@ mod tests {
             latest_applied_version_sqlite(&backup).unwrap().as_deref(),
             Some("0.10.001_initial")
         );
-        assert!(!columns(&backup, "task_sessions").contains(&"lf_bin".to_string()));
+        assert!(!columns(&backup, "tasks").contains(&"lf_bin".to_string()));
     }
 
     #[test]

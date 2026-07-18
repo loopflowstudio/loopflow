@@ -104,10 +104,10 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 /// This is NOT the launch resolver. Use [`current_home_execution_context`] to
 /// launch or relaunch a Session: launching through the control context would
 /// perpetuate the historical binary a legacy body was created with.
-pub(crate) fn pinned_execution_context() -> Result<crate::child_session::ChildExecutionContext> {
+pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
         .map_err(|error| anyhow!("cannot resolve the Session's database path: {error}"))?;
-    Ok(crate::child_session::ChildExecutionContext {
+    Ok(crate::child::ChildExecutionContext {
         lf_bin: resolve_pinned_lf_binary()?,
         db_path,
         lf_home: crate::store::lf_home_dir(),
@@ -181,11 +181,10 @@ fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
 /// binary and resumed under another launches through the current Home — its
 /// worktree, provider history, and directives are unaffected by which binary
 /// first created it.
-pub(crate) fn current_home_execution_context() -> Result<crate::child_session::ChildExecutionContext>
-{
+pub(crate) fn current_home_execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::current_home_database_path()
         .map_err(|error| anyhow!("cannot resolve the current Home database path: {error}"))?;
-    Ok(crate::child_session::ChildExecutionContext {
+    Ok(crate::child::ChildExecutionContext {
         lf_bin: resolve_current_home_lf_binary_checked()?,
         db_path,
         lf_home: crate::store::current_home_lf_home_dir(),
@@ -297,7 +296,7 @@ fn reject_detached_forwarded_account(forwarded: bool) -> Result<()> {
 
 fn extend_session_control_context(
     child_env: &mut Vec<(String, String)>,
-    context: &crate::child_session::ChildExecutionContext,
+    context: &crate::child::ChildExecutionContext,
     provenance: crate::build_info::BuildProvenance,
 ) {
     let pinned = [
@@ -349,7 +348,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
+    let clear_context = "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -410,7 +409,7 @@ mod tests {
         tmux_installed,
     };
     use crate::build_info::BuildProvenance;
-    use crate::child_session::ChildExecutionContext;
+    use crate::child::ChildExecutionContext;
 
     #[test]
     fn development_ignores_stale_control_binary_override() {
@@ -504,12 +503,12 @@ mod tests {
         let argv = vec!["lf".to_string(), "__task".to_string()];
         let command = lf_session_shell_command(
             &argv,
-            &[("LF_TASK_SESSION_ID", "task-1"), ("LF_WAVE_ID", "infra")],
+            &[("LF_RUN_CONTEXT", "agent"), ("LF_WAVE_ID", "infra")],
         );
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__task'"
         );
     }
 
@@ -521,7 +520,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
         );
     }
 
@@ -540,7 +539,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
         );
     }
 

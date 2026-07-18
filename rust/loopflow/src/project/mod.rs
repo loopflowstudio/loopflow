@@ -1,6 +1,6 @@
 //! Durable pursuit of one Linear Project's KRs.
 //!
-//! A Project Session coordinates Task Sessions from the owning Wave's clean
+//! A Project coordinates Tasks from the owning Wave's clean
 //! control checkout. It owns no worktree, shipping branch, PR, permanent
 //! memory, cadence, or human chat. Waiting persists without a process; child
 //! observations wake the same provider transcript when judgment is useful.
@@ -10,10 +10,11 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child_session::{prefixed_uuid_id, AbandonIntent, ChildRef, ObservationRecipient};
+use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
+pub use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::session_context::ProjectLaunchReceipt;
-use crate::task::{TaskEventKind, TaskSessionId};
+use crate::task::{TaskEventKind, TaskId};
 
 pub mod runner;
 
@@ -27,17 +28,10 @@ pub enum ProjectDataError {
     InvalidInvariant(String),
 }
 
-prefixed_uuid_id!(
-    ProjectSessionId,
-    "ps_",
-    ProjectDataError,
-    ProjectDataError::InvalidId
-);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum ProjectSessionStatus {
+pub enum ProjectStatus {
     Created,
     Starting,
     Running,
@@ -48,7 +42,7 @@ pub enum ProjectSessionStatus {
     Abandoned,
 }
 
-impl ProjectSessionStatus {
+impl ProjectStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Created => "created",
@@ -71,9 +65,9 @@ impl ProjectSessionStatus {
     }
 
     /// Coarsen durable intent to the shared shape the body projection reads, so
-    /// one `observe` serves Project and Task Sessions alike.
-    pub fn body_intent(self) -> crate::child_session::BodyIntent {
-        use crate::child_session::BodyIntent;
+    /// one `observe` serves Project and Tasks alike.
+    pub fn body_intent(self) -> crate::child::BodyIntent {
+        use crate::child::BodyIntent;
         match self {
             Self::Created | Self::Starting | Self::Running => BodyIntent::Active,
             Self::Waiting => BodyIntent::Waiting,
@@ -84,7 +78,7 @@ impl ProjectSessionStatus {
     }
 }
 
-impl FromStr for ProjectSessionStatus {
+impl FromStr for ProjectStatus {
     type Err = ProjectDataError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -103,20 +97,20 @@ impl FromStr for ProjectSessionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectSession {
-    pub id: ProjectSessionId,
+pub struct Project {
+    pub id: ProjectId,
     /// Immutable PM evidence from before the first Project turn.
     pub launch: ProjectLaunchReceipt,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    pub status: ProjectSessionStatus,
+    pub status: ProjectStatus,
     pub status_reason: String,
     pub status_at: OffsetDateTime,
     pub iteration: u32,
     pub observation_cursor: i64,
     pub last_state_fingerprint: Option<String>,
     /// Provider/model selection for the next body generation. This is mutable
-    /// lease state, not Project Session identity.
+    /// lease state, not Project identity.
     pub agent: String,
     /// Harness family for the next/current body generation.
     pub provider: String,
@@ -129,14 +123,14 @@ pub struct ProjectSession {
     pub updated_at: OffsetDateTime,
 }
 
-impl ProjectSession {
+impl Project {
     /// Why a supervisor must not start another process generation, if it must not.
     /// A Project has no PR, so PR review does not apply — see
-    /// [`crate::task::TaskSession::supervisor_restart_bar`].
+    /// [`crate::task::Task::supervisor_restart_bar`].
     pub fn supervisor_restart_bar(&self) -> Option<String> {
         if self.status.is_terminal() {
             return Some(format!(
-                "Project {} is {}; terminal Project Sessions do not restart",
+                "Project {} is {}; terminal Projects do not restart",
                 self.launch.project.slug,
                 self.status.as_str()
             ));
@@ -153,7 +147,7 @@ impl ProjectSession {
         Ok(())
     }
 
-    pub fn set_status(&mut self, status: ProjectSessionStatus, reason: impl Into<String>) {
+    pub fn set_status(&mut self, status: ProjectStatus, reason: impl Into<String>) {
         let now = OffsetDateTime::now_utc();
         self.status = status;
         self.status_reason = reason.into();
@@ -167,15 +161,15 @@ impl ProjectSession {
 pub enum ProjectEventKind {
     Started,
     BodyHandedOff {
-        handoff: crate::child_session::ChildBodyHandoff,
+        handoff: crate::child::ChildBodyHandoff,
     },
     StatusChanged {
-        from: ProjectSessionStatus,
-        to: ProjectSessionStatus,
+        from: ProjectStatus,
+        to: ProjectStatus,
         reason: String,
     },
     TaskObserved {
-        task_session_id: TaskSessionId,
+        task_id: TaskId,
         task_event_id: i64,
         event: Box<TaskEventKind>,
     },
@@ -201,14 +195,14 @@ impl ProjectEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectEvent {
     pub id: i64,
-    pub session_id: ProjectSessionId,
+    pub project_id: ProjectId,
     pub kind: ProjectEventKind,
     pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectObservation {
-    pub session_id: ProjectSessionId,
+    pub project_id: ProjectId,
     pub project: String,
     pub event_id: i64,
     pub event: ProjectEventKind,
@@ -216,15 +210,15 @@ pub struct ProjectObservation {
 
 impl ProjectObservation {
     pub fn inbox_id(&self) -> String {
-        format!("project-{}-{}", self.session_id, self.event_id)
+        format!("project-{}-{}", self.project_id, self.event_id)
     }
 
     pub fn prompt(&self) -> String {
         let payload = serde_json::to_string(&self.event)
             .expect("Project observation always serializes to structured JSON");
         format!(
-            "<project_observation session_id=\"{}\" project=\"{}\" event_id=\"{}\">\n{}\n</project_observation>",
-            self.session_id, self.project, self.event_id, payload
+            "<project_observation project_id=\"{}\" project=\"{}\" event_id=\"{}\">\n{}\n</project_observation>",
+            self.project_id, self.project, self.event_id, payload
         )
     }
 }
@@ -248,13 +242,13 @@ pub struct ObservationOutboxRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use super::{Project, ProjectId, ProjectStatus};
     use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
 
-    fn project_session() -> ProjectSession {
+    fn project() -> Project {
         let now = time::OffsetDateTime::now_utc();
-        ProjectSession {
-            id: ProjectSessionId::new(),
+        Project {
+            id: ProjectId::new(),
             launch: ProjectLaunchReceipt {
                 project: LinearProjectSnapshot {
                     id: LinearProjectId::new("project-1").unwrap(),
@@ -265,7 +259,7 @@ mod tests {
                 pm_snapshot_synced_at: 1,
             },
             wave_id: crate::id::WaveId::new(),
-            status: ProjectSessionStatus::Created,
+            status: ProjectStatus::Created,
             status_reason: "created".to_string(),
             status_at: now,
             iteration: 0,
@@ -282,21 +276,21 @@ mod tests {
 
     #[test]
     fn project_ids_are_prefixed_and_round_trip() {
-        let session = ProjectSessionId::new();
-        assert_eq!(ProjectSessionId::parse(session.as_str()).unwrap(), session);
+        let session = ProjectId::new();
+        assert_eq!(ProjectId::parse(session.as_str()).unwrap(), session);
     }
 
     #[test]
     fn completed_and_abandoned_are_terminal() {
-        assert!(ProjectSessionStatus::Completed.is_terminal());
-        assert!(ProjectSessionStatus::Abandoned.is_terminal());
-        assert!(!ProjectSessionStatus::Waiting.is_terminal());
+        assert!(ProjectStatus::Completed.is_terminal());
+        assert!(ProjectStatus::Abandoned.is_terminal());
+        assert!(!ProjectStatus::Waiting.is_terminal());
     }
 
     #[test]
-    fn project_session_rejects_impossible_process_state() {
-        let mut session = project_session();
-        session.status = ProjectSessionStatus::Running;
+    fn project_rejects_impossible_process_state() {
+        let mut session = project();
+        session.status = ProjectStatus::Running;
         assert!(session.validate().is_err());
     }
 }

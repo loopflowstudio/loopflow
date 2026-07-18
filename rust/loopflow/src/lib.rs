@@ -1,7 +1,7 @@
 pub mod build_info;
 pub mod chat;
+pub mod child;
 pub(crate) mod child_control;
-pub mod child_session;
 pub mod durable;
 pub mod engine;
 pub mod flowloop;
@@ -14,7 +14,7 @@ pub mod lfd;
 pub mod ops;
 pub mod pm;
 pub mod profile;
-pub mod project_session;
+pub mod project;
 pub(crate) mod promotion_lock;
 pub mod provider_account;
 pub mod provider_auth;

@@ -2,7 +2,7 @@
 description: Turn one Linear Task directive into a computable change design.
 action_style: procedural
 ---
-Clarify the exact Task named by `LF_TASK_SESSION_ID`.
+Clarify the exact Task owned by the current Run.
 
 Read the Task seed, current durable direction, Project definition/KRs, repository
 instructions, current worktree, and any existing design note in `scratch/`.
@@ -10,7 +10,7 @@ instructions, current worktree, and any existing design note in `scratch/`.
 - Honor every Steer included in the seed. The boundary Basis is fixed; do not
   invent an acknowledgement mutation or treat provider delivery as application.
 - Keep the design to this Task's one worktree and ordered serial PRs.
-  Do not select backlog work, start another Task Session, or create a second
+  Do not select backlog work, start another Task, or create a second
   worktree. The Task may require several PRs.
 - Write or tighten the single Task design note only when the change is not yet
   computable. Preserve a clear existing design.

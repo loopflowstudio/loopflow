@@ -151,7 +151,7 @@ impl StoreObserver {
     }
 
     async fn poll_child_observations(&self) {
-        let recipient = crate::child_session::ObservationRecipient::Wave {
+        let recipient = crate::child::ObservationRecipient::Wave {
             wave_id: self.wave_id.clone(),
         };
         let observations = match self.store.pending_observations(&recipient).await {
@@ -164,12 +164,12 @@ impl StoreObserver {
         for observation in observations {
             let should_ack = match (observation.source, observation.payload) {
                 (
-                    crate::child_session::ChildRef::Task(session_id),
-                    crate::project_session::ChildEventPayload::Task { event },
-                ) => match self.store.get_task_session(&session_id).await {
+                    crate::child::ChildRef::Task(session_id),
+                    crate::project::ChildEventPayload::Task { event },
+                ) => match self.store.get_task(&session_id).await {
                     Ok(Some(session)) => {
                         self.runtime.deliver_task_observation(TaskObservation {
-                            session_id,
+                            task_id: session_id,
                             issue_identifier: session.launch.issue.identifier,
                             event_id: observation.event_id,
                             event,
@@ -183,13 +183,13 @@ impl StoreObserver {
                     }
                 },
                 (
-                    crate::child_session::ChildRef::Project(session_id),
-                    crate::project_session::ChildEventPayload::Project { event },
-                ) => match self.store.get_project_session(&session_id).await {
+                    crate::child::ChildRef::Project(session_id),
+                    crate::project::ChildEventPayload::Project { event },
+                ) => match self.store.get_project(&session_id).await {
                     Ok(Some(session)) => {
                         self.runtime.deliver_project_observation(
-                            crate::project_session::ProjectObservation {
-                                session_id,
+                            crate::project::ProjectObservation {
+                                project_id: session_id,
                                 project: session.launch.project.slug,
                                 event_id: observation.event_id,
                                 event,

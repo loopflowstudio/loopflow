@@ -22,7 +22,7 @@ Task observations, and the bus subscription. The resident owns the pass
 scheduler and provider process. It reads the listener's inbox and returns
 ordered deltas; it never writes the journal directly.
 
-Repository mutations belong to Task Sessions in their own sibling worktrees.
+Repository mutations belong to Tasks in their own sibling worktrees.
 The Wave coordinates Projects and Tasks from the canonical checkout.
 
 ## Persistence and discovery

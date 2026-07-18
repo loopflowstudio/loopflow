@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
-use crate::project_session::ProjectSessionId;
-use crate::task::TaskSessionId;
+use crate::project::ProjectId;
+use crate::task::TaskId;
 
 macro_rules! prefixed_uuid_id {
     ($name:ident, $prefix:literal, $error:ty, $invalid:path) => {
@@ -63,7 +63,7 @@ macro_rules! prefixed_uuid_id {
 pub(crate) use prefixed_uuid_id;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ChildSessionDataError {
+pub enum ChildDataError {
     #[error("invalid child-session id: {0}")]
     InvalidId(String),
 }
@@ -72,11 +72,11 @@ pub enum ChildSessionDataError {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ObservationRecipient {
     Wave { wave_id: WaveId },
-    Project { session_id: ProjectSessionId },
+    Project { project_id: ProjectId },
 }
 
 /// Requested replacement of the agent/provider body acting for a durable
-/// Project or Task Session.
+/// Project or Task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildBodyHandoffRequest {
     pub agent: String,
@@ -122,8 +122,8 @@ pub struct AbandonIntent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum ChildRef {
-    Project(ProjectSessionId),
-    Task(TaskSessionId),
+    Project(ProjectId),
+    Task(TaskId),
 }
 
 impl ChildRef {
@@ -227,8 +227,8 @@ pub struct BodyObservation {
 }
 
 /// Durable intent, coarsened to what the body projection needs. Both
-/// `TaskSessionStatus` and `ProjectSessionStatus` map onto this shared shape so
-/// one projection serves Wave, Project, and Task Sessions.
+/// `TaskStatus` and `ProjectStatus` map onto this shared shape so
+/// one projection serves Wave, Project, and Tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyIntent {
     /// Created / Starting / Running — a body should be advancing.

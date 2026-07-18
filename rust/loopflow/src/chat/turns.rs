@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::project_session::{ProjectEventKind, ProjectObservation};
+use crate::project::{ProjectEventKind, ProjectObservation};
 use crate::task::{TaskEventKind, TaskObservation};
 use crate::wave::playhead::{now_rfc3339, BodyProvenance};
 
@@ -60,7 +60,7 @@ impl ChildControlActivity {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Task,
             subject_id: observation.issue_identifier.clone(),
-            session_id: observation.session_id.to_string(),
+            session_id: observation.task_id.to_string(),
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,
@@ -73,7 +73,7 @@ impl ChildControlActivity {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Project,
             subject_id: observation.project.clone(),
-            session_id: observation.session_id.to_string(),
+            session_id: observation.project_id.to_string(),
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,

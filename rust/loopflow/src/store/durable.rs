@@ -1,4 +1,4 @@
-use crate::child_session::ChildRef;
+use crate::child::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ChildFeedback,
     ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, Feedback, FlowPosition, Home,
@@ -494,7 +494,7 @@ mod tests {
         StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
-    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::project::{Project, ProjectId, ProjectStatus};
     use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
@@ -505,21 +505,6 @@ mod tests {
         let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
-        let connection = rusqlite::Connection::open(database).unwrap();
-        let installed: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='work_placements')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if !installed {
-            connection
-                .execute_batch(include_str!(
-                    "migrations/drafts/work_placements__be058cd06c7176605dec099930569221.sql"
-                ))
-                .unwrap();
-        }
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),
@@ -529,10 +514,10 @@ mod tests {
         (store, WorkRef::Wave(wave.id().clone()))
     }
 
-    fn project_session(wave_id: WaveId) -> ProjectSession {
+    fn project(wave_id: WaveId) -> Project {
         let now = OffsetDateTime::now_utc();
-        ProjectSession {
-            id: ProjectSessionId::new(),
+        Project {
+            id: ProjectId::new(),
             launch: ProjectLaunchReceipt {
                 project: LinearProjectSnapshot {
                     id: LinearProjectId::new("project-feedback").unwrap(),
@@ -543,7 +528,7 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id,
-            status: ProjectSessionStatus::Created,
+            status: ProjectStatus::Created,
             status_reason: "created".to_string(),
             status_at: now,
             iteration: 0,
@@ -780,13 +765,13 @@ mod tests {
     #[tokio::test]
     async fn active_parent_run_can_escalate_only_its_current_child_feedback() {
         let (store, parent) = wave_work().await;
-        let project = project_session(match &parent {
+        let project = project(match &parent {
             WorkRef::Wave(id) => id.clone(),
             _ => unreachable!(),
         });
-        store.create_project_session(&project).await.unwrap();
+        store.create_project(&project).await.unwrap();
         let child = store
-            .work_for_child(&crate::child_session::ChildRef::Project(project.id))
+            .work_for_child(&crate::child::ChildRef::Project(project.id))
             .await
             .unwrap();
         let (parent_lease, _) = start_launch(&store, &parent, false).await;

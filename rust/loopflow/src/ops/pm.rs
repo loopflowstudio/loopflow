@@ -26,7 +26,7 @@ use crate::provider_auth::{
 };
 use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store, TaskWriterState};
 #[cfg(test)]
-use crate::task::{TaskSession, TaskSessionStatus};
+use crate::task::{Task, TaskStatus};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -2646,14 +2646,14 @@ mod tests {
     use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
-    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::project::{Project, ProjectId, ProjectStatus};
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::task::{
-        Observation, PmWritebackState, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
-        TaskSessionId,
+        Observation, PmWritebackState, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
+        TaskPrId,
     };
     use crate::wave::Wave;
     use axum::http::StatusCode;
@@ -2799,11 +2799,7 @@ mod tests {
         (directory, store)
     }
 
-    async fn seed_reteam_task_session(
-        store: &Store,
-        issue_id: &str,
-        identifier: &str,
-    ) -> TaskSessionId {
+    async fn seed_reteam_task(store: &Store, issue_id: &str, identifier: &str) -> TaskId {
         let now = OffsetDateTime::now_utc();
         let wave = Wave::new(
             WaveId::new(),
@@ -2817,14 +2813,14 @@ mod tests {
             name: "Developer Efficiency".to_string(),
             prompt_context: "Keep development fast.".to_string(),
         };
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
+        let project = Project {
+            id: ProjectId::new(),
             launch: ProjectLaunchReceipt {
                 project: project_snapshot.clone(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            status: ProjectSessionStatus::Waiting,
+            status: ProjectStatus::Waiting,
             status_reason: "waiting".to_string(),
             status_at: now,
             iteration: 1,
@@ -2838,12 +2834,12 @@ mod tests {
             updated_at: now,
         };
         store
-            .create_project_session(&project)
+            .create_project(&project)
             .await
             .expect("create project session");
 
-        let session_id = TaskSessionId::new();
-        let session = TaskSession {
+        let session_id = TaskId::new();
+        let session = Task {
             id: session_id.clone(),
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
@@ -2857,8 +2853,8 @@ mod tests {
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            project_session_id: project.id,
-            status: TaskSessionStatus::Waiting,
+            project_id: project.id,
+            status: TaskStatus::Waiting,
             status_reason: "awaiting review".to_string(),
             status_at: now,
             worktree: PathBuf::from(format!("/repo.{identifier}")),
@@ -2880,7 +2876,7 @@ mod tests {
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
+            task_id: session.id.clone(),
             sequence: 1,
             slug: session.workspace_slug.clone(),
             branch: format!("jack/{}", session.workspace_slug),
@@ -2898,7 +2894,7 @@ mod tests {
             updated_at: now,
         };
         store
-            .create_task_session(&session, &pr)
+            .create_task(&session, &pr)
             .await
             .expect("create task session");
         session_id
@@ -3375,14 +3371,14 @@ mod tests {
     #[tokio::test]
     async fn reteam_apply_refuses_completed_issue_with_an_active_run() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task_session(&store, "issue-live", "W2-42").await;
+        let session_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
         let session = store
-            .get_task_session(&session_id)
+            .get_task(&session_id)
             .await
             .expect("read session")
             .expect("session exists");
         let work = store
-            .work_for_child(&crate::child_session::ChildRef::Task(session.id.clone()))
+            .work_for_child(&crate::child::ChildRef::Task(session.id.clone()))
             .await
             .expect("resolve Task Work");
         store
@@ -3427,7 +3423,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_retry_reuses_pre_move_comment_then_moves_and_rebinds() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task_session(&store, "issue-legacy", "W2-9").await;
+        let session_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
         let initial_project = || {
             reteam_project_node(
                 "project-1",
@@ -3464,7 +3460,7 @@ mod tests {
         assert!(error.to_string().contains("issue move failed"));
         assert_eq!(
             store
-                .get_task_session(&session_id)
+                .get_task(&session_id)
                 .await
                 .expect("read session")
                 .expect("session exists")
@@ -3506,7 +3502,7 @@ mod tests {
         assert_eq!(result.task_updates, 1);
         assert_eq!(
             store
-                .get_task_session(&session_id)
+                .get_task(&session_id)
                 .await
                 .expect("read session")
                 .expect("session exists")
@@ -3537,7 +3533,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_already_moved_issue_only_rebinds_a_stale_session() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task_session(&store, "issue-moved", "W2-10").await;
+        let session_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([reteam_project_node(
                 "project-1",
@@ -3579,7 +3575,7 @@ mod tests {
         assert!(result.moves.is_empty());
         assert_eq!(
             store
-                .get_task_session(&session_id)
+                .get_task(&session_id)
                 .await
                 .expect("read session")
                 .expect("session exists")

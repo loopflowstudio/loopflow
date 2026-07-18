@@ -2,7 +2,7 @@ mod support;
 
 use std::process::{Command, Output};
 
-use loopflow::child_session::ChildRef;
+use loopflow::child::ChildRef;
 use loopflow::durable::{
     AdvanceReceipt, AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance, RunTrigger,
 };
@@ -23,9 +23,9 @@ struct LifecycleConfig {
 fn lifecycle_config(task: &RegisteredTask) -> LifecycleConfig {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let session = runtime
-        .block_on(task.store.get_task_session(&task.session.id))
-        .expect("read Task Session")
-        .expect("Task Session");
+        .block_on(task.store.get_task(&task.session.id))
+        .expect("read Task")
+        .expect("Task");
     LifecycleConfig {
         kickoff_flow: session.lifecycle.kickoff.flow,
         kickoff_policy: session.lifecycle.kickoff.interaction_policy,
@@ -44,10 +44,6 @@ fn run_headless(repo: &TestRepo, home: &std::path::Path) -> Output {
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_TASK_SESSION_ID")
-        .env_remove("LF_TASK_GENERATION")
-        .env_remove("LF_TASK_LEASE_TOKEN")
-        .env_remove("LF_PROJECT_SESSION_ID")
         .env_remove("LF_WAVE_ID")
         .output()
         .expect("run lf task run --headless")
